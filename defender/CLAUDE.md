@@ -158,8 +158,11 @@ Removed (#1471): `tenant.py check <tenant-id>`, `tenant.py update` and `tenant.p
 repo as a pull request, and any other connect output is left in the handoff folder for a person to commit. A merged
 `main` is published by the next launch-time publish (a run or a drain start). `cli/learning/revert_lesson.py` stays.
 
-Upgrade from before #1471: after migrating, run `python -m defender.lifecycle make-runs-folders` once, so that each
-tenant's runs folder exists as the host-request channel expects it.
+A tenant's `<data root>/<T>/runs` is now made by the lifecycle's `prepare` step, and the job lane no longer makes it (a
+missing one fails the worker's claim `worker_error`). Once, with `DEFENDER_DATABASE_DSN` and `DEFENDER_DATA_ROOT` set, make
+it for the tenants created before: `python -m defender.lifecycle make-runs-folders`. It covers each `active` tenant, is
+idempotent, and prints the ids it made. A tenant whose `<T>` folder is missing or whose `runs` is a link is refused: the
+sweep finishes the others, then exits non-zero naming every refused tenant. Fix those and run it again.
 
 ## Upgrade from before #1083
 
