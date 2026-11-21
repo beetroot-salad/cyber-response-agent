@@ -282,7 +282,8 @@ describe.each(Object.entries(FAILING))(
       });
       const mark = probe.sent.length;
       await pressed(other);
-      expect(probe.sent.slice(mark).filter((read) => read.cursor !== null && read.what !== "malicious")).toEqual([]);
+      // what an outdated press reads of its own params is open (#1604); nothing of the failed read is sent
+      expect(probe.sent.slice(mark).filter((read) => read.what !== "malicious")).toEqual([]);
       expect(probe.now().later).toBe("failed");
     });
 
