@@ -63,7 +63,7 @@ ENTRY_POINT_MODULES = (
     "run.py",
     "learning/branch/cli.py",
     "cli/policy_cli.py",
-    "cli/tenant.py",
+    # #1471 B3: `cli/tenant.py` left this set: `check --folder`, its one command, reads no tenant
     "learning/core/cli.py",
     "cli/learning/revert_lesson.py",
     "cli/learning/lessons_page.py",
@@ -75,16 +75,20 @@ ENTRY_POINT_MODULES = (
     "cli/learning/trace_lesson.py",
     "cli/retire_legacy_runs.py",
     # #1170 (H7, P-C, A6): the per-job host helper admits each job's tenant; the post-step (#1344) runs in its job
-    # container under the helper's hold and opens no acceptance of its own.
-    "job_host/_investigation.py",
+    # container under the helper's hold and opens no acceptance of its own. #1471 (P-1 "same code"): the investigation's
+    # admission moved into the shared launch steps (`_common.tenant_launch_steps`), which readiness runs too; adoption
+    # admits its own tenant, its container (`defender.adoption`) taking it by the folder rules only.
+    "job_host/_common.py",
     "job_host/_learning.py",
+    "job_host/_adoption.py",
 )
 
 #: #1170 (H7, P-C): the per-job host helper's host half, which enters the acceptance on the hold its run owns until the
 #: job ends (its return closes nothing): the command scope of the helper's modules, beside `COMMAND_FUNCTIONS`.
 HELPER_HOST_HALVES: dict[str, frozenset[str]] = {
-    "job_host/_investigation.py": frozenset({"prepare"}),
+    "job_host/_common.py": frozenset({"tenant_launch_steps"}),  # #1471: the investigation's and readiness's shared steps
     "job_host/_learning.py": frozenset({"_admit_tenant"}),
+    "job_host/_adoption.py": frozenset({"_admit_adoption_tenant"}),  # #1471
 }
 
 #: #1170 (P-C, "In-box entries", C19): the entries that run inside a job container, covered by the helper's hold as the
@@ -96,6 +100,7 @@ IN_BOX_ENTRIES = frozenset({
     ("run.py", "_sibling_set_up"),               # learning's `run.py --episode` sibling
     ("learning/branch/cli.py", "_admitted"),     # the learning job's launch, its in-container branch
     ("learning/branch/post_step.py", "main"),    # the post-step
+    ("adoption/__main__.py", "_deliver"),        # #1471: the adoption job's entry (`-m defender.adoption`)
 })
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import re
+from pathlib import Path
 
 import pytest
 
@@ -90,7 +91,11 @@ def test_a_fresh_offer_is_one_commit_off_the_fetched_main_pushed_and_opened_once
     tip = git(repo[1], "rev-parse", f"refs/heads/{BRANCH}")
     assert commits_between(repo[1], before, tip) == [tip], "not exactly one commit off the fetched main"
     assert git(repo[1], "rev-parse", f"{tip}^") == before
-    assert tree_diff(repo[1], before, tip) == sorted(("A", "100644", p) for p in RENDERING)
+    # a path the fixture's main already holds (its per-system skill) is modified, every other one added (repair 5)
+    held = set(git(repo[1], "ls-tree", "-r", "--name-only", before).split())
+    assert held & set(RENDERING), "premise: main holds one rendered path already, so a modified path is covered"
+    assert set(RENDERING) - held, "premise: and lacks another, so an added path is covered"
+    assert tree_diff(repo[1], before, tip) == sorted(("M" if p in held else "A", "100644", p) for p in RENDERING)
     assert blobs_at(repo[1], tip, RENDERING) == RENDERING
     _quiet(forge, repo, before)
 
@@ -135,8 +140,12 @@ def test_step1_the_lowest_number_is_answered(repo, forge):
                          ids=["prefix-sibling", "other-system", "no-digest", "not-an-adoption"])
 def test_step1_only_this_systems_adoption_branches_count(repo, forge, head):
     """An open PR on another system's, a prefix-sibling's or a non-adoption branch is not this system's: the offer goes ahead. (A3.1)"""
-    git(repo[1], "update-ref", f"refs/heads/{head}", main_tip(repo[1]))
-    forge.plant(head)
+    # `adopt/elastic` as a ref would make `adopt/elastic/<digest>` unpushable (a directory/file conflict), so that PR's
+    # branch is gone and only its `head.label` names it (G-A11; repair 5)
+    gone = head == "adopt/elastic"
+    if not gone:
+        git(repo[1], "update-ref", f"refs/heads/{head}", main_tip(repo[1]))
+    forge.plant(head, deleted=gone)
     assert _outcome(_adopt(repo, forge))[0] == "opened"
 
 
@@ -352,3 +361,47 @@ def test_the_branch_name_is_the_systems_and_the_digests_first_16_hex(repo, forge
     pushed = [ref for ref in remote_refs(repo[1]) if "adopt/" in ref]
     assert [p.split()[0] for p in pushed] == [f"refs/heads/adopt/{SYSTEM}/abcdef0123456789"]
     assert re.fullmatch(r"adopt/elastic/[0-9a-f]{16}", forge.creates[0]["head"])
+
+
+# --- A3, surface §7: both of adopt()'s fetches tell a ref-lock collision from any other fault (repair 5) -----------------------
+
+def _clone_git_dir(repo):
+    from defender.tests.support.shared._locations_1210 import location_path
+
+    return Path(location_path(repo[0].knowledge)) / ".git"
+
+
+def _lock_ref(repo, ref):
+    """A ref lock held on the clone (another writer of the shared clone mid-update): `<ref>.lock` planted."""
+    lock = _clone_git_dir(repo) / f"{ref}.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("", encoding="utf-8")
+
+
+def _no_fetching(repo):
+    """Any other fetch fault: the remote serves no fetch over HTTP (`http.uploadpack false`), pushes still land."""
+    git(repo[1], "config", "http.uploadpack", "false")
+
+
+@pytest.mark.parametrize(("fault", "reason"), [("ref-lock", "repository_busy"), ("other", "delivery_failed")])
+@pytest.mark.parametrize("fetch", ["first", "after-a-refused-push"])
+def test_each_fetch_reads_a_ref_lock_as_repository_busy_and_any_other_fault_as_delivery_failed(repo, forge, tmp_path, fetch, fault, reason):
+    """The first fetch of `origin/main`, and the fetch of the branch after a racer refused our push: a ref lock held on
+    the clone's ref it updates is `repository_busy`, any other fetch fault `delivery_failed`; nothing is opened. (A3,
+    surface §7)"""
+    step = importlib.import_module("defender.learning.author.version_control.adoption")
+    repository = delivery(repo, forge).repository
+    seen = {}
+    if fetch == "first":
+        _land(repo, tmp_path, {"agent/lessons/merged-since.md": b"landed after the clone fetched\n"})
+        _lock_ref(repo, "refs/remotes/origin/main") if fault == "ref-lock" else _no_fetching(repo)
+    else:
+        def racer():
+            seen["racer"] = racer_push(repo[1], tmp_path, BRANCH, RENDERING, message="the racer's own commit")
+            _lock_ref(repo, f"refs/remotes/origin/{BRANCH}") if fault == "ref-lock" else _no_fetching(repo)
+        forge.after_listing = racer
+    record = step.adopt(repository, system=SYSTEM, rendering=RENDERING, digest=DIGEST)
+    if fetch != "first":
+        assert seen, "premise: the racer pushed between the listing and our push"
+    assert (record.outcome, getattr(record, "reason", None)) == ("failed", reason)
+    assert forge.creates == []

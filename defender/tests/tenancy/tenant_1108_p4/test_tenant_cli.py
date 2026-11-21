@@ -145,22 +145,33 @@ def test_1470_o11_the_commands_help_text_names_no_removed_command(argv, capsys):
 
 
 _DEFENDER = __import__("pathlib").Path(__file__).resolve().parents[3]
-_SHIPPED_SUFFIXES = {".py", ".md", ".yaml", ".yml", ".txt", ".sh", ".toml", ".json"}
 _UPGRADE_NOTES = "## Upgrade from before"
 
 
+def _tracked() -> list[str]:
+    """Every git-tracked path under `defender/`, relative to it (#1471 B3: all shipped text, whatever its suffix)."""
+    import subprocess
+
+    out = subprocess.run(["git", "-C", str(_DEFENDER), "ls-files", "-z", "--", "."],  # noqa: S603, S607
+                         capture_output=True, check=True).stdout
+    return sorted(p.decode("utf-8") for p in out.split(b"\0") if p)
+
+
 def _shipped_lines() -> list[tuple[str, int, str]]:
-    """Every line of shipped text under `defender/` (all but the tests, `docs/archive` and dependencies), less the sections an
-    `## Upgrade from before` heading opens (to the next `## `): the one place a removed command may be named."""
+    """Every line of shipped text under `defender/`: each git-tracked file that reads as UTF-8 (all but the tests and
+    `docs/archive`), less the sections an `## Upgrade from before` heading opens (to the next `## `): the one place a
+    removed command may be named."""
     found = []
-    for path in sorted(_DEFENDER.rglob("*")):
-        rel = path.relative_to(_DEFENDER).as_posix()
-        if (not path.is_file() or path.is_symlink() or path.suffix not in _SHIPPED_SUFFIXES or rel.startswith("tests/")
-                or rel.startswith("docs/archive/")
-                or any(part in {".venv", "__pycache__", "node_modules"} for part in path.parts)):
+    for rel in _tracked():
+        path = _DEFENDER / rel
+        if not path.is_file() or path.is_symlink() or rel.startswith("tests/") or rel.startswith("docs/archive/"):
             continue
+        try:
+            text = path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            continue  # not text
         in_upgrade_notes = False
-        for number, line in enumerate(path.read_text("utf-8", errors="replace").splitlines(), 1):
+        for number, line in enumerate(text.splitlines(), 1):
             if line.startswith("## "):
                 in_upgrade_notes = line.startswith(_UPGRADE_NOTES)
             if not in_upgrade_notes:
@@ -172,8 +183,11 @@ def test_1470_o11_no_shipped_text_outside_the_upgrade_notes_names_a_removed_comm
     """No refusal, skill, doc, help or code text under `defender/` names a removed subcommand, except in an
     `## Upgrade from before` section. (O11)"""
     lines = _shipped_lines()
-    assert len({rel for rel, _, _ in lines}) > 200, "premise: the scan reads the shipped tree"  # noqa: PLR2004
-    assert {"skills", "docs", "cli", "systems"} <= {rel.split("/")[0] for rel, _, _ in lines}, "premise: skills and docs too"
+    files = {rel for rel, _, _ in lines}
+    assert len(files) > 200, "premise: the scan reads the shipped tree"  # noqa: PLR2004
+    assert {"skills", "docs", "cli", "systems"} <= {rel.split("/")[0] for rel in files}, "premise: skills and docs too"
+    # #1471 B3: every suffix and none (the frontend's sources, its page, `bin/` scripts), not a list of suffixes
+    assert {".ts", ".tsx", ".html", ""} <= {__import__("posixpath").splitext(rel)[1] for rel in files}, "premise: all text"
     naming = [f"{rel}:{n}: {line.strip()[:120]}" for rel, n, line in lines if _NAMES_A_REMOVED_COMMAND.search(line)]
     assert naming == []
 

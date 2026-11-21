@@ -50,9 +50,10 @@ def test_c8_the_four_tenant_and_four_admin_routes_are_served_with_these_methods_
 @pytest.mark.parametrize("route", sorted(DECLARED))
 def test_c8_p_h_each_route_declares_exactly_its_permission_or_the_platform_category(route: tuple[str, str]) -> None:
     """Tenant routes declare `config.write` (starts) and `config.read` (polls); admin routes declare `platform`. (C8, P-H)"""
-    wanted = {r for r in _served(_app().routes) if (min(r.methods - {"HEAD", "OPTIONS"}, default=""), normal(r.path)) == route}
+    # a list: an effective route context is not hashable (repair 5)
+    wanted = [r for r in _served(_app().routes) if (min(r.methods - {"HEAD", "OPTIONS"}, default=""), normal(r.path)) == route]
     assert len(wanted) == 1, f"{route} is served {len(wanted)} times"
-    assert _declarations(next(iter(wanted)).dependant) == {DECLARED[route]}
+    assert _declarations(wanted[0].dependant) == {DECLARED[route]}
 
 
 def test_c8_the_app_with_the_new_routes_has_none_undeclared_and_none_unauthenticated() -> None:
@@ -109,9 +110,11 @@ def test_r3_the_documents_readiness_result_is_a_union_on_outcome_and_adoptions_n
     """`result` is `refused | ready` for readiness (the knowledge field on `refused`, none on `ready`'s `commit`) and an
     `outcome` of the four adoption words with `pr_number` and a `pr_url` on the served adoption. (R3, A3)"""
     schemas = _document()["components"]["schemas"]
+    # `ReadinessReady.warnings` reaches the warning kinds by `$ref` to `ReadinessWarning` (surface §2; repair 5)
     text = json.dumps({k: v for k, v in schemas.items() if k in {"Readiness", "SavedReadiness", "ReadinessRefused",
-                                                                  "ReadinessReady", "Adoption", "AdoptionResult"}})
-    for name in ("Readiness", "ReadinessRefused", "ReadinessReady", "Adoption", "AdoptionResult"):
+                                                                  "ReadinessReady", "ReadinessWarning", "Adoption",
+                                                                  "AdoptionResult"}})
+    for name in ("Readiness", "ReadinessRefused", "ReadinessReady", "ReadinessWarning", "Adoption", "AdoptionResult"):
         assert name in schemas, name
     assert "systems_without_credentials" in schemas["Readiness"]["properties"]
     assert "pr_url" in schemas["Adoption"]["properties"]

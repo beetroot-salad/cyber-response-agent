@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from defender.tests.support.api._config1470 import TICKET, TOKEN, ScriptedOpenBao, problem_text, served_config
-from defender.tests.support.api._server1083 import A, B, person
+from defender.tests.support.api._server1083 import ORIGIN, A, B, person
 from defender.tests.support.jobs._host_requests1471 import (
     ADOPTION,
     FRESH,
@@ -116,8 +116,10 @@ async def test_r1_a_config_writer_starts_a_readiness_check_201_with_a_location_t
 
 async def test_r1_a_start_while_one_is_queued_answers_200_with_that_one_no_location_no_row_no_event(scripted, caplog):
     """Two requests while queued give one id; the replay is 200 with no `Location` and announces nothing. (R1)"""
-    first = await start_readiness(scripted)
     audit = JobsAudit(caplog)
+    first = await start_readiness(scripted)
+    assert [e.action for e in audit.events()] == ["readiness.start"], "control: the first start is announced"
+    caplog.clear()  # repair 5: the replay's events alone
     second = await start_readiness(scripted)
     assert (first.status_code, second.status_code) == (201, 200)
     assert second.json()["readiness_id"] == first.json()["readiness_id"]
@@ -144,7 +146,8 @@ async def test_r1_c8_permissions_membership_comes_first_and_a_refusal_makes_no_r
     audit = JobsAudit(caplog)
     assert (await scripted.client.post(path, headers=scripted.program())).status_code == 403
     assert (await scripted.client.post(path, headers=scripted.bob())).status_code == 404
-    assert (await scripted.client.post(path)).status_code == 401
+    # from the frontend, so the origin guard (a 403 before authentication) lets it reach the session check (repair 5)
+    assert (await scripted.client.post(path, headers={"Origin": ORIGIN})).status_code == 401
     assert (await scripted.client.post(path, headers=ops(scripted))).status_code == 404, "a platform admin is no member"
     assert host_rows(scripted.dsn) == []
     assert audit.events() == []
@@ -417,7 +420,9 @@ async def test_the_result_a_worker_stores_is_what_the_poll_serves_for_both_kinds
     assert got_r["status"] == "completed"
     assert got_r["result"] == {"outcome": "refused", "step": "systems", "sentence": "no usable system",
                                "knowledge": {"status": "current", "commit": "c" * 40, "stale_kind": None}}
-    assert got_r["systems_without_credentials"] == [TICKET]
+    # the adoption's system is planted as a version with no credential, so it is listed too (repair 5): the presence is
+    # served on a `refused` result as on `ready` (R13-2)
+    assert got_r["systems_without_credentials"] == sorted([TICKET, system])
     got_a = (await poll(scripted, "adoption", a)).json()
     assert (got_a["status"], got_a["result"], got_a["pr_url"]) == (
         "completed", {"outcome": "opened", "pr_number": 12}, f"{origin}/pulls/12")

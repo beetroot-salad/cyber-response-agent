@@ -206,9 +206,11 @@ def plant(dsn: str,  # noqa: PLR0913 — a row's columns
     done = stage in ("completed", "failed")
     execute(dsn, "INSERT INTO jobs.host_requests (id, tenant_id, kind, dedupe_key, system_id, requester, created_at, "
                  "started_at, finished_at, stage, lease_expires_at, result, failure_reason, failure_message) "
-                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
+                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                 "CASE WHEN %s THEN now() + interval '5 minutes' END, %s::jsonb, %s, %s)",
+            # the lease is the database's clock's, as the store's is: a lease from the fixed `NOW` lapses by the calendar
             (request_id, tenant, kind, key, system, requester, created, NOW if live or done else None,
-             NOW if done else None, stage, NOW + dt.timedelta(minutes=5) if live else None,
+             NOW if done else None, stage, live,
              None if result is None else json.dumps(result), reason, message))
     return request_id
 

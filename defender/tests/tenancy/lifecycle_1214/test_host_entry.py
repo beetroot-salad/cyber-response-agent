@@ -539,10 +539,17 @@ def test_the_forge_credential_has_only_the_delivery_and_publish_callers():
     """P3 census (RC-9): `forge_credential` is reached only from the delivery opener and the publish child's module."""
     allowed = {"learning/author/version_control/delivery.py", "learning/author/version_control/publish.py",
                # #1170 (C23, A6): the per-job host helper's drain half mints the post-step's forge credential
-               "job_host/_learning.py"}
+               "job_host/_learning.py",
+               # #1471 (r11): the adoption helper's host half mints the adoption's (`forge.token`)
+               "job_host/_adoption.py"}
     callers = _referencing("forge_credential")
     assert callers, "control: the provider exists and is referenced"
     assert "job_host/_learning.py" in callers, "control: the helper's drain half reaches the provider"
+    assert "job_host/_adoption.py" in callers, "control: the adoption helper's host half reaches the provider"
+    # #1471: the adoption container asks its helper as the drain does, never the provider
+    assert _spells_only_a_method(_production()["adoption/__main__.py"], "forge_credential",
+                                 not_on=("vc", "version_control"))
+    callers -= {"adoption/__main__.py"}
     # #1170: the drain inside its job container asks its helper (`JobContainer.forge_credential`, a method of the same
     # name), never the provider: there it may spell the name only as a method on an object that is not the provider's
     # package, and must not import it.

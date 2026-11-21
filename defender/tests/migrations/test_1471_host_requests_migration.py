@@ -1,5 +1,5 @@
-"""#1471 slice A: the revision after `0023_findings_at_job_end` makes `jobs.host_requests` and touches nothing else
-(`test-surface.md` §4: `0024_host_requests`, columns, stage check, running-has-a-lease, one queued row per kind and key)."""
+"""#1471 slice A: the revision after `0025_alert_outcome` makes `jobs.host_requests` and touches nothing else
+(`test-surface.md` §4: the host-requests revision on the head before it, columns, stage check, running-has-a-lease, one queued row per kind and key)."""
 from __future__ import annotations
 
 import pytest
@@ -8,7 +8,7 @@ from defender.tests.migrations.test_1214_migrations import _upgrade_to
 from defender.tests.support.shared import _revisions1485 as revisions
 from defender.tests.support.shared._postgres1339 import execute
 
-PRIOR = "0023_findings_at_job_end"
+PRIOR = "0025_alert_outcome"  # repair 5: main's head when #1471 lands (#1581); the revision is `0026_host_requests`
 COLUMNS = {"id", "tenant_id", "kind", "dedupe_key", "system_id", "requester", "created_at", "started_at", "finished_at",
            "stage", "lease_expires_at", "result", "failure_reason", "failure_message"}
 
@@ -17,8 +17,8 @@ def _revision() -> str:
     return revisions.by_suffix("_host_requests")
 
 
-def test_the_history_has_one_head_and_the_host_requests_revision_sits_on_the_findings_revision():
-    """One line of history; `*_host_requests` is built on `0023_findings_at_job_end` and the head is not behind it. (§4)"""
+def test_the_history_has_one_head_and_the_host_requests_revision_sits_on_the_alert_outcome_revision():
+    """One line of history; `*_host_requests` is built on `0025_alert_outcome` and the head is not behind it. (§4)"""
     from defender.migrations import head, heads
 
     assert heads() == (head(),)

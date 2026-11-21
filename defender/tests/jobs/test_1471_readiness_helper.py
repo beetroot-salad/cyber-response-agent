@@ -5,6 +5,7 @@ the readiness record (red until built). The container half is `test_1471_readine
 from __future__ import annotations
 
 import dataclasses
+import shutil
 import sys
 import uuid
 from collections.abc import Callable
@@ -27,6 +28,7 @@ from defender.tests.support.jobs._readiness1471 import (
     requests_other_than,
     readiness_scene,
     RestatingDirectory,
+    SECOND_TENANT,
 )
 
 process_state = J.process_state
@@ -388,6 +390,92 @@ def test_r13_1_2_a_knowledge_record_that_cannot_be_written_is_a_crash_with_no_re
         assert ran.ran.raised is not None or ran.ran.rc not in (0, None), f"a clean exit reads as no_record: {ran.said()}"
 
 
+#: The faults refused at a step after the publish (the knowledge record is written before the refusal's own record).
+AFTER_PUBLISH_FAULTS = [name for name, fault in FAULTS.items() if fault.step in AFTER_PUBLISH]
+
+
+@pytest.mark.parametrize("name", AFTER_PUBLISH_FAULTS)
+def test_r13_1_2_a_knowledge_record_that_cannot_be_written_at_a_refusal_after_the_publish_is_a_crash_with_no_record(
+        tmp_path, monkeypatch, migrated_database, name):
+    """At every refusing step after the publish, a knowledge record that cannot be written (one already there) is the
+    helper's crash: no refusal record is written before it, no container, a non-zero exit (the worker's `worker_error`).
+    The same fault with the way clear reads `refused` at its step (the P-1 case). (R13-1.2; repair 5)"""
+    fault = FAULTS[name]
+    with _scene([fault], tmp_path, monkeypatch, migrated_database) as scene:
+        if fault.prepare is not None:
+            fault.prepare(scene, monkeypatch, tmp_path)
+        rid = str(uuid.uuid4())
+        planted = '{"kind": "pinned", "commit": "' + "0" * 40 + '", "stale_kind": null, "reason": null}\n'
+        (scene.runs / f"{rid}.knowledge-source.json").write_text(planted, encoding="utf-8")
+        ran = readiness(scene, rid=rid, signer=_signer(fault.sealed), container=lambda c: 0)
+
+        assert (scene.runs / f"{rid}.knowledge-source.json").read_text(encoding="utf-8") == planted, ran.said()
+        assert ran.record is None, f"a record was written though the knowledge record could not be: {ran.said()}"
+        assert ran.docker.boxes == []
+        assert ran.ran.raised is not None or ran.ran.rc not in (0, None), f"a clean exit reads as no_record: {ran.said()}"
+
+
+def _left_behind(scene: Any, rid: str) -> list[str]:
+    """What under the tenant's folder, outside its runs folder (where the records are), is named for this check: its run
+    copy, if it was not removed."""
+    folder = scene.root / scene.tenant
+    return sorted(str(p.relative_to(folder)) for p in folder.rglob(f"*{rid}*") if scene.runs not in p.parents)
+
+
+def _wedged_knowledge(scene: Any, rid: str) -> None:
+    (scene.runs / f"{rid}.knowledge-source.json").write_text('{"kind": "pinned"}\n', encoding="utf-8")
+
+
+#: Every ending after the run copy was made: (faults, docker, container, rid planter).
+COPY_MADE_ENDINGS: dict[str, tuple[list[str], Any, Any, Any]] = {
+    **{f"refused-{name}": ([name], None, None, None) for name in AFTER_PUBLISH_FAULTS},
+    "start-failed": ([], lambda: ContainerStandIn(run_fault=(125, "docker: refused\n")), None, None),
+    "crash-writing-the-knowledge-record": ([], None, None, _wedged_knowledge),
+    "crash-starting-the-container": ([], ExplodingDocker, None, None),
+    "container-ended-with-no-record": ([], None, lambda c: 3, None),
+    "ready": ([], None, "entry", None),
+}
+
+
+@pytest.mark.parametrize("ending", list(COPY_MADE_ENDINGS))
+def test_r13_1_the_run_copy_is_gone_once_the_helper_has_ended_whatever_the_ending(
+        tmp_path, monkeypatch, migrated_database, ending):
+    """After every ending reached past the copy step (each later refusal, a start failure, a crash after the shared
+    steps, a container ending of its own, `ready`), nothing named for the check is left under `<T>` but its records:
+    the run copy is removed (the shared steps' cleanup; §8 run-less sidecars). Control: the copy existed while the
+    container ran. (R13-1; repair 5)"""
+    names, docker, container, plant = COPY_MADE_ENDINGS[ending]
+    faults = [FAULTS[n] for n in names]
+    with _scene(faults, tmp_path, monkeypatch, migrated_database) as scene:
+        for f in faults:
+            if f.prepare is not None:
+                f.prepare(scene, monkeypatch, tmp_path)
+        rid = str(uuid.uuid4())
+        if plant is not None:
+            plant(scene, rid)
+        seen: dict[str, Any] = {}
+
+        def watching(c: Any) -> int:
+            facts = c.request("launch")
+            seen["copy"] = Path(facts["run_copy"])
+            seen["there"] = seen["copy"].is_dir()
+            return 0 if container is None else (container(c) if callable(container) else 0)
+
+        ran = readiness(scene, rid=rid, signer=_signer(any(f.sealed for f in faults)),
+                        docker=None if docker is None else docker(),
+                        container=None if container == "entry" else watching)
+
+        assert _left_behind(scene, rid) == [], f"the check's run copy was left behind: {ran.said()}"
+        if container == "entry":
+            assert ran.result()["outcome"] == "ready", ran.said()
+            assert ran.facts is not None
+            assert not Path(ran.facts["run_copy"]).exists()
+        if seen:
+            assert seen["there"], "control: the run copy was there while the container ran"
+            assert rid in str(seen["copy"]), f"premise: the copy is named for the check: {seen['copy']}"
+            assert not seen["copy"].exists()
+
+
 def test_r13_1_2_an_unexpected_crash_in_the_helpers_setup_ends_the_check_failed_worker_error_with_no_container(
         tmp_path, monkeypatch, migrated_database):
     """An exception the helper does not expect, raised by its docker seam when the container is started, is the helper's
@@ -421,7 +509,7 @@ def test_r12_1_a_sealed_signer_refuses_a_check_with_a_grant_at_the_first_pass_an
         assert_refused_shape(ran.result(), "first_pass")
         assert sealed.asked >= 1
         assert ran.docker.boxes == []
-    with readiness_scene(tmp_path / "empty", monkeypatch, migrated_database, proxied=()) as empty:
+    with readiness_scene(tmp_path / "empty", monkeypatch, migrated_database, proxied=(), tenant_id=SECOND_TENANT) as empty:
         sealed = A.RaisingSigner(RuntimeError("openbao is sealed"))
         ran = readiness(empty, signer=sealed, container=lambda c: 0)
         assert ran.docker.job_ran, f"a check with nothing to sign was refused by a sealed signer: {ran.said()}"
@@ -532,6 +620,48 @@ def test_r13_1_2_a_container_that_cannot_start_ends_the_check_failed_start_faile
         assert ran.ran.rc == 0, "the helper served the check to its end"
 
 
+def _docker_did_not_run() -> list[int]:
+    from defender.job_host._session import DOCKER_DID_NOT_RUN
+
+    return sorted(DOCKER_DID_NOT_RUN)
+
+
+@pytest.mark.parametrize("rc", _docker_did_not_run())
+def test_r13_1_2_every_docker_exit_that_means_the_container_never_ran_is_start_failed(
+        tmp_path, monkeypatch, migrated_database, rc):
+    """Each `docker run` exit of the class that never ran the entry (refused, not invokable, not found), with no record:
+    the helper's `{failed, start_failed}`. (R13-1.2; repair 5: the class, not 125 alone)"""
+    with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
+        ran = readiness(scene, docker=ContainerStandIn(run_fault=(rc, "docker: the container did not start\n")),
+                        container=lambda c: 0)
+
+        assert ran.result() == {"outcome": "failed", "reason": "start_failed"}, ran.said()
+        assert ran.ran.rc == 0, "the helper served the check to its end"
+
+
+def test_r13_5_a_helper_told_to_stop_before_its_container_starts_writes_no_record(tmp_path, monkeypatch, migrated_database):
+    """SIGTERM while the host half runs (here, during the launch-time publish): no container, and no record of the
+    helper's own, so the stopping worker's `worker_stopped` stands; control: unstopped, the container starts. (R13-5;
+    repair 5)"""
+    import os
+    import signal
+
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
+        control = readiness(scene, container=lambda c: 0)
+        assert control.docker.job_ran, f"control: the container starts: {control.said()}"
+
+        def stopped_while_publishing(*_a: Any, **_k: Any) -> str:
+            os.kill(os.getpid(), signal.SIGTERM)
+            return B.fresh(scene.t.commit)
+
+        ran = readiness(scene, publish=stopped_while_publishing, container=lambda c: 0)
+
+        assert ran.docker.boxes == [], f"a container was started after the stop: {ran.said()}"
+        assert ran.record is None, f"a stopped helper wrote a record of its own: {ran.said()}"
+
+
 def test_r13_1_2_a_job_socket_that_cannot_be_opened_ends_the_check_failed_start_failed(
         tmp_path, monkeypatch, migrated_database):
     """A data root so deep the job socket's path cannot fit: `failed`/`start_failed`, no container. (R13-1.2)"""
@@ -549,7 +679,7 @@ def test_r13_1_1_a_missing_runs_folder_is_damage_the_helper_does_not_make_and_it
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
         control = readiness(scene, container=lambda c: 0)
         assert control.docker.job_ran, f"control: with its runs folder the helper starts its container: {control.said()}"
-        scene.runs.rmdir()
+        shutil.rmtree(scene.runs)  # it holds the control's records (its knowledge record, its result)
         ran = readiness(scene, container=lambda c: 0)
 
         assert not scene.runs.exists(), "the helper made the tenant's runs folder"
