@@ -207,7 +207,7 @@ class SystemsRepository(Protocol):
         not active, which is asked before the secret store, so it never reaches it (R13-2)."""
         ...
 
-    def ships_base_files(self, system_id: str) -> bool:
+    async def ships_base_files(self, system_id: str) -> bool:
         """Whether the catalog entry of the system's adapter (its id, P4) names base files to adopt (#1471 A1)."""
         ...
 

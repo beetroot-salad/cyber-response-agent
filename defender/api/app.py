@@ -882,7 +882,7 @@ async def _adoption_started(  # noqa: PLR0913 — who asks, for which system, an
         recorded = True
     if not recorded:
         raise _not_found("system", system_id)
-    if not deps.systems.ships_base_files(system_id):
+    if not await deps.systems.ships_base_files(system_id):
         raise Conflict(f"no_base_files: the adapter of system {system_id!r} ships no base files to adopt")
     saved, created = await deps.host_requests.create_adoption(
         tenant_id, system_id, actor=actor, credential_id=credential_id)

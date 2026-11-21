@@ -116,7 +116,7 @@ class ConfigRecords:
         held = await asyncio.gather(*(has_credentials(self._secrets, tenant_id, current[s]) for s in sorted(current)))
         return [s for s, has in zip(sorted(current), held, strict=True) if not has]
 
-    def ships_base_files(self, system_id: str) -> bool:
+    async def ships_base_files(self, system_id: str) -> bool:
         """A system's adapter is its id (P4); an id the catalog lacks ships none."""
         return system_id in self._catalog and self._catalog.entry(system_id).base_files is not None
 
