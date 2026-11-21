@@ -17,7 +17,7 @@ pytest.importorskip("httpx")
 from defender.tests.support.shared._postgres1339 import empty_database  # noqa: E402,F401 — fixture
 from defender.tests.support.tenancy._active1214 import DSN_ENV  # noqa: E402
 from defender.tests.support.tenancy._host1214 import LIFECYCLE_MARK  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config, people_settings  # noqa: E402
 
 TENANT = "7f3c1a52-9d4e-4b8a-a1c6-2e5d8b9f0c13"
 
@@ -84,7 +84,7 @@ def test_serve_gives_the_host_the_credentialless_clients_and_the_service_the_cre
                         (settings.OPENBAO_LOGIN_FILE_ENV, str(tmp_path / "bao-login")),
                         (settings.INTEGRATION_ENV, expected.integration_command),
                         (settings.SECRETS_DIR_ENV, str(expected.secrets_dir)), (settings.DATA_ROOT_ENV, str(data_root)),
-                        (settings.POLL_ENV, "0.05"), *_people_settings(settings, sessions_dsn)):
+                        (settings.POLL_ENV, "0.05"), *people_settings(settings, sessions_dsn)):
         monkeypatch.setenv(name, value)
 
     constructors = {HostActor.__init__.__code__: "host", ManagementService.__init__.__code__: "service"}
@@ -127,12 +127,6 @@ def test_serve_gives_the_host_the_credentialless_clients_and_the_service_the_cre
 
 # --- #1592: the people worker beside the actors (S2-40) --------------------------------------------------------
 
-def _people_settings(settings: Any, sessions_dsn: str) -> list[tuple[str, str]]:
-    """The two settings #1592 makes required (r15: `keycloak_source_id`, `forge_sessions_dsn`). The names of their
-    environment variables are `KEYCLOAK_SOURCE_ID_ENV` and `FORGE_SESSIONS_DSN_ENV` (design, Settings)."""
-    return [(settings.KEYCLOAK_SOURCE_ID_ENV, "7"), (settings.FORGE_SESSIONS_DSN_ENV, sessions_dsn)]
-
-
 @pytest.fixture
 def sessions_dsn():
     from defender.tests.tenancy.people_1592._sessions1592 import shipped_sessions_database
@@ -162,7 +156,7 @@ def test_serve_starts_the_people_worker_beside_the_actors(  # noqa: F811
                         (settings.OPENBAO_LOGIN_FILE_ENV, str(tmp_path / "bao-login")),
                         (settings.INTEGRATION_ENV, expected.integration_command),
                         (settings.SECRETS_DIR_ENV, str(expected.secrets_dir)), (settings.DATA_ROOT_ENV, str(data_root)),
-                        (settings.POLL_ENV, "0.05"), *_people_settings(settings, sessions_dsn)):
+                        (settings.POLL_ENV, "0.05"), *people_settings(settings, sessions_dsn)):
         monkeypatch.setenv(name, value)
 
     built: dict[str, Any] = {}

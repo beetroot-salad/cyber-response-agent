@@ -953,8 +953,11 @@ async def test_the_wanted_rule_is_an_active_membership_of_an_active_tenant_and_n
                                   ended_at=NOW if status == "ended" else None)
     newcomer = await _user(seeded, "new@x.org", status="invited")  # the user's own status is not an input
     await seed_membership(seeded, newcomer.id, T2, status="active", invited_by=None, created_at=NOW, accepted_at=NOW)
-    admin = await _user(seeded, "adm@x.org", is_platform_admin=True)  # nor is the admin flag
-    await seed_membership(seeded, admin.id, T1, status="ended", invited_by=None, created_at=NOW, ended_at=NOW)
+    # nor is the admin flag: an admin with no membership of T1 is wanted nowhere, and one with an active membership of
+    # T1 is wanted exactly like a non-admin (an ended membership would hide the flag behind the ended rule)
+    admin = await _user(seeded, "adm@x.org", is_platform_admin=True)
+    member_admin = await _user(seeded, "madm@x.org", is_platform_admin=True)
+    await seed_membership(seeded, member_admin.id, T1, status="active", invited_by=None, created_at=NOW, accepted_at=NOW)
 
     async def tenants_of(user):
         return {str(t) for t in await seeded.wanted_tenants(user.id)}
@@ -967,7 +970,8 @@ async def test_the_wanted_rule_is_an_active_membership_of_an_active_tenant_and_n
         assert await tenants_of(users[status]) == set(), status
     assert await tenants_of(newcomer) == {str(T2)}
     assert await tenants_of(admin) == set()
-    assert await users_of(T1) == {str(users["active"].id)}
+    assert await tenants_of(member_admin) == {str(T1)}
+    assert await users_of(T1) == {str(users["active"].id), str(member_admin.id)}
     assert await users_of(T2) == {str(newcomer.id)}
     assert await users_of(creating) == set()
     assert await users_of(offboarding) == set()

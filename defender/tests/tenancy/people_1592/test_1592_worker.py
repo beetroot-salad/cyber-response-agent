@@ -13,7 +13,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy._twin1496 import offboard_twin
 from defender.tests.tenancy.people_1592._sessions1592 import sessions  # noqa: F401 — overrides the package fixture
 from defender.tests.tenancy.people_1592._spec1592 import KEYCLOAK_SOURCE_ID, login_of, org_of, signed_in_data
-from defender.tests.tenancy.people_1592._worker1592 import errors, member, settled, until, use
+from defender.tests.tenancy.people_1592._worker1592 import accept, errors, invite, member, settled, until, use
 from defender.tests.tenancy.people_1592._world1592 import NOW, T, U2, People
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
@@ -112,6 +112,7 @@ async def test_a_wanted_person_without_an_account_gets_one_restricted_then_limit
     assert post.body["login_name"] == "sub-alice@x.org"
     assert post.body["source_id"] == KEYCLOAK_SOURCE_ID
     assert post.body["restricted"] is True
+    assert post.body["must_change_password"] is False  # r15.2: an external account forced to change a password the edge refuses
     assert post.body["email"] == f"{login}@people.invalid"
     assert post.body["full_name"] == "Alice A"
     assert not post.body.get("password")
@@ -140,7 +141,8 @@ async def test_a_wanted_person_with_no_sub_is_kept_and_logged_never_created_blan
 
 
 async def test_a_login_held_by_a_stray_account_stays_logged_and_does_not_block_the_queue(people: People, caplog):
-    """S2-6: Gil's creation conflicts (422) on every step and is logged each time; Bob's later removal still runs."""
+    """S2-6: Gil's creation conflicts (422) and is logged on each attempt; Bob's later removal runs ahead of him (OD-9:
+    never-attempted users go first, so with one slot Gil is not attempted at poll 2)."""
     await people.tenant(T)
     bob = await people.person("bob@x.org", T)
     await settled(people)
@@ -158,7 +160,8 @@ async def test_a_login_held_by_a_stray_account_stays_logged_and_does_not_block_t
     seen.append(len([m for m in errors(caplog) if str(gil.id) in m]))
 
     assert seen[0] >= 1
-    assert seen[0] < seen[1] < seen[2]
+    assert seen[1] == seen[0], "Gil was attempted at poll 2, ahead of never-attempted Bob (OD-9)"
+    assert seen[2] > seen[1]
     assert (str(gil.id), T) in await people.open_requests()
 
 
@@ -340,11 +343,12 @@ async def test_removals_come_before_grants(people: People):
     """S2-25: moving T to U2 deletes from T's team before adding to U2's; a suspended one is unsuspended between."""
     await people.tenant(T)
     await people.tenant(U2)
-    mover = await people.person("mover@x.org", T, U2)
+    mover = await people.person("mover@x.org", T)
+    invitation = await invite(people, mover, U2)
     await settled(people)
     login = login_of(str(mover.id))
-    people.forge.team_members[(org_of(U2), "members")].discard(login)
-    people.forge.prohibit_login.add(login)
+    people.forge.prohibit_login.add(login)  # step 5 reads the account whatever the requests name
+    await accept(people, invitation)  # the request that names U2: the run is per named tenant (OD-2)
     await people.end(mover, T)
 
     await people.step()

@@ -64,8 +64,16 @@ def _environment(service: dict) -> dict[str, str]:
     from_files: dict[str, str] = {}
     files = service.get("env_file") or []
     for name in [files] if isinstance(files, str) else files:  # #1592: Forgejo's settings live in an `env_file`
-        from_files |= _env_file(COMPOSE_DIR / (name["path"] if isinstance(name, dict) else name))
+        path = COMPOSE_DIR / (name["path"] if isinstance(name, dict) else name)
+        if _gitignored(path):  # host-local (`../.env`): absent in CI's checkout, secrets on a developer's machine (C12)
+            continue
+        from_files |= _env_file(path)
     return from_files | {str(k): "" if v is None else str(v) for k, v in env.items()}
+
+
+def _gitignored(path: Path) -> bool:
+    """Whether git ignores `path`: a host-local file the repository does not ship, which a test must never read."""
+    return bool(_ignored([str(path)]))
 
 
 def _env_file(path: Path) -> dict[str, str]:
@@ -503,6 +511,12 @@ def test_s4_0_the_forgejo_live_job_runs_the_module_and_the_guard_fails_under_ci(
     assert "SESSIONS_SCRIPT" not in text, "the job builds the sessions database through setup.sh, not its own script path"
     assert "INGRESS_FORGE_UPSTREAM_INPUT" not in text
     assert "defender_product" in text, "S4-11's non-superuser login"
+    # r15.2 "setup.sh" (awaiting owner ruling: the interface is the author's choice): `COMPOSE` from the environment,
+    # the lifecycle's login named as the script makes it, the source id read from `forgejo admin auth list`.
+    assert re.search(r'COMPOSE="\$COMPOSE"\s+\.devcontainer/forgejo/setup\.sh', text), "setup.sh takes COMPOSE from the environment"
+    assert "fs_lifecycle_dev" in text
+    assert "pg_auth_members" not in text
+    assert "admin auth list" in text
     with pytest.raises(pytest.fail.Exception):
         require_environment({"CI": "true"})
     with pytest.raises(pytest.skip.Exception):
@@ -591,7 +605,7 @@ def test_the_settings_the_compose_file_had_survive_in_the_file_S3_14():
 
 
 # ---------------------------------------------------------------------------------------------
-# #1592 S3-14: the sessions SQL is mounted outside initdb; no SSH, fork or mirror key before its probe (V6)
+# #1592 S3-14: the sessions SQL is mounted outside initdb; SSH, forks and mirrors off by V6's keys
 # ---------------------------------------------------------------------------------------------
 
 def test_the_postgres_service_mounts_the_sessions_sql_outside_initdb_S3_14():
@@ -604,9 +618,57 @@ def test_the_postgres_service_mounts_the_sessions_sql_outside_initdb_S3_14():
     assert not [v for v in initdb if "forgejo-sessions" in v], initdb
 
 
-def test_no_ssh_fork_or_mirror_key_is_set_until_its_probe_V6():
-    """S3-14 / V6: the settings file and the `forgejo` service name no SSH, fork or mirror key, and compose's SSH_DOMAIN
-    and SSH_PORT are dropped, not moved."""
-    env = _environment(_services()["forgejo"])
-    named = [k for k in env if k.startswith("FORGEJO__") and any(w in k.upper() for w in ("SSH", "FORK", "MIRROR"))]
-    assert named == [], named
+def test_ssh_forks_and_mirrors_are_off_by_the_keys_V6_confirmed_and_sshd_is_kept_down():
+    """S3-14 / V6 (r15.2, P36): `DISABLE_SSH`, `DISABLE_FORKS`, `[mirror] ENABLED=false` are the only SSH, fork or mirror
+    keys; an empty file is mounted at `/etc/s6/openssh/down`; `SSH_DOMAIN` and `SSH_PORT` are dropped, no SSH port published."""
+    forgejo = _services()["forgejo"]
+    env = _environment(forgejo)
+    named = {k: v for k, v in env.items() if k.startswith("FORGEJO__") and any(w in k.upper() for w in ("SSH", "FORK", "MIRROR"))}
+    assert named == {"FORGEJO__server__DISABLE_SSH": "true", "FORGEJO__repository__DISABLE_FORKS": "true",
+                     "FORGEJO__mirror__ENABLED": "false"}, named
+    [down] = [m for m in _mounts(forgejo) if m[2] == "/etc/s6/openssh/down"]
+    assert down[0] == "bind", down
+    source = (COMPOSE_DIR / down[1]).resolve()
+    assert source.is_file(), f"{source} must be a shipped file (the s6 down file)"
+    assert source.stat().st_size == 0, "the s6 down file is empty"
+    assert not _gitignored(source), "the down file is shipped, not host-local"
+    published = [str(p) for p in forgejo.get("ports") or []]
+    assert not [p for p in published if re.search(r":22(/tcp)?$", p)], published
+    assert not [k for k in env if "SSH_DOMAIN" in k or "SSH_PORT" in k], "SSH_DOMAIN and SSH_PORT are dropped, not moved"
+
+
+# ---------------------------------------------------------------------------------------------
+# #1592 G5 (r15.2 "Names in dev and CI", P36): the split topology the live rig runs
+# ---------------------------------------------------------------------------------------------
+
+def test_keycloak_keeps_its_localhost_issuer_and_serves_backchannel_endpoints_by_request_host_G5():
+    """P36: `KC_HOSTNAME` stays `http://localhost:<port>` (the issuer) and `KC_HOSTNAME_BACKCHANNEL_DYNAMIC` is true, so
+    Forgejo's container can reach token, userinfo and JWKS at `keycloak:8080`."""
+    env = _environment(_services()["keycloak"])
+    assert _default(env["KC_HOSTNAME"]) == "http://localhost:8080", env["KC_HOSTNAME"]
+    assert env["KC_HOSTNAME_BACKCHANNEL_DYNAMIC"] == "true"
+
+
+def test_the_forgejo_login_source_discovers_over_the_compose_network_and_its_client_allows_the_sites_callback_G5():
+    """P36: `setup.sh` adds the source with `--auto-discover-url` at `http://keycloak:8080/realms/defender/...`, and the
+    realm's `forgejo` client allows `ROOT_URL/user/oauth2/product/callback` (the site's host and port)."""
+    import json
+
+    script = (COMPOSE_DIR / "forgejo" / "setup.sh").read_text(encoding="utf-8")
+    assert "http://keycloak:8080/realms/defender/.well-known/openid-configuration" in script
+    assert "add-oauth" in script
+    assert "--name product" in script
+    root = _env_file(FORGEJO_SETTINGS)["FORGEJO__server__ROOT_URL"].rstrip("/")
+    realm = json.loads((COMPOSE_DIR / "keycloak" / "realm-defender.json").read_text(encoding="utf-8"))
+    [client] = [c for c in realm["clients"] if c["clientId"] == "forgejo"]
+    assert f"{root}/user/oauth2/product/callback" in client["redirectUris"], client["redirectUris"]
+    assert urlsplit(root).hostname.endswith(".localhost"), root  # resolves to loopback for Chromium, curl and httpx
+
+
+def test_a_gitignored_env_file_is_never_read_by_the_environment_reader_C12():
+    """C12: a service whose `env_file` is git-ignored contributes nothing, present or absent."""
+    ignored = COMPOSE_DIR.parent / ".env"
+    assert _gitignored(ignored), "control: `../.env` is git-ignored"
+    assert not _gitignored(FORGEJO_SETTINGS), "control: the shipped settings file is not"
+    assert _environment({"env_file": ["../.env"], "environment": {"A": "1"}}) == {"A": "1"}
+    assert "FORGEJO__server__DOMAIN" in _environment({"env_file": ["forgejo/settings.env"]})

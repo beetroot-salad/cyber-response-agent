@@ -10,7 +10,7 @@ import pytest
 
 from defender.tests.tenancy.people_1592._sessions1592 import MINUTE, sessions  # noqa: F401 — overrides the fixture
 from defender.tests.tenancy.people_1592._spec1592 import UNREACHABLE_DSN, login_of, org_of, sessions_port, signed_in_data
-from defender.tests.tenancy.people_1592._worker1592 import FaultingIdentity, errors, member, settled, use
+from defender.tests.tenancy.people_1592._worker1592 import FaultingIdentity, accept, errors, invite, member, settled, use
 from defender.tests.tenancy.people_1592._world1592 import T, U2, People
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
@@ -19,15 +19,18 @@ ALL = {"removed", "unsuspended", "added", "session"}
 
 
 async def _move(people: People):
-    """U leaves T, stays in U2 but is out of U2's team and suspended, and signs out: every step has work."""
+    """U leaves T, joins U2 (invited before, accepted after the seeding drained) but is suspended, and signs out: every
+    step has work. The run is per named tenant (OD-2, "Carrying out the requests"), so U2 is named by U's accepted
+    invitation, a recorded request; nothing edits Forgejo's U2 team by hand, because the worker watches no hand edit."""
     await people.tenant(T)
     await people.tenant(U2)
-    user = await people.person("u@x.org", T, U2, session=False)
+    user = await people.person("u@x.org", T, session=False)
+    invitation = await invite(people, user, U2)
     await settled(people)
     login = login_of(str(user.id))
-    people.forge.team_members[(org_of(U2), "members")].discard(login)
-    people.forge.prohibit_login.add(login)
+    people.forge.prohibit_login.add(login)  # step 5 reads the account whatever the requests name
     people.sessions.plant("old", signed_in_data(people.forge.uid(login)), signed_in_at=dt.datetime.now(dt.UTC) - 10 * MINUTE)
+    await accept(people, invitation)
     await people.end(user, T)
     await people.sign_out(user)
     return user, login

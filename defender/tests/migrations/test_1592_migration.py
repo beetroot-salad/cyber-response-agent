@@ -67,15 +67,20 @@ def test_the_revision_sits_directly_on_the_host_requests_revision_and_is_the_hea
 
 @pytest.mark.postgres
 def test_a_pending_action_stops_the_upgrade_naming_every_tenant_and_changes_nothing(empty_database):
-    """S1-20 (OD-5, 0019 pattern): a tenant with a pending create, rotate, offboard or delete_repo is named, each of
-    them, and a quiet one is not; the revision, the tables and the constraints stay as they were."""
+    """S1-20 (OD-5, 0019 pattern; Upgrade 1): a tenant with a pending create, rotate, offboard or delete_repo, failed or
+    not, is named, each of them, and a quiet one is not; the revision, the tables and the constraints stay as they were."""
     from defender.migrations import upgrade
 
     _upgrade_to(empty_database, PRIOR)
     busy = {name: fixture_uuid(f"tenant:1592-mig-{name}") for name in PENDING}
+    failed = fixture_uuid("tenant:1592-mig-failed")  # a failed create is still the tenant's one pending action
+    busy["failed create"] = failed
     quiet = fixture_uuid("tenant:1592-mig-quiet")
     for name, tenant in busy.items():
-        _tenant(empty_database, tenant, STATE[name], PENDING[name], _canonical(tenant))
+        if tenant != failed:
+            _tenant(empty_database, tenant, STATE[name], PENDING[name], _canonical(tenant))
+    _tenant(empty_database, failed, "creating", PENDING["creating"], _canonical(failed))
+    execute(empty_database, "UPDATE tenancy.tenants SET failure = 'the forge refused the repository' WHERE id = %s", (failed,))
     _tenant(empty_database, quiet, "active", repo=_canonical(quiet))
 
     with pytest.raises(RuntimeError) as stopped:

@@ -4,12 +4,14 @@ the lifecycle's request worker run in-process.
 
 Inputs (all of them must be set, or the cases skip locally and FAIL under `CI`):
 
-    DEFENDER_LIVE_FORGEJO_URL                the edge's Forgejo site, as the Forgejo domain spells it (the `ROOT_URL` origin)
-    DEFENDER_LIVE_FORGEJO_PRIVATE_URL        Forgejo on the private network, as the lifecycle and the bots reach it
+    DEFENDER_LIVE_FORGEJO_URL                the edge's Forgejo site, as the Forgejo domain spells it (the `ROOT_URL` origin,
+                                             `forge.localhost:<edge port>`: a `*.localhost` name, loopback for Chromium, curl and httpx)
+    DEFENDER_LIVE_FORGEJO_PRIVATE_URL        Forgejo on the private network, as the lifecycle and the bots reach it (`localhost:3000`)
     DEFENDER_LIVE_FORGEJO_ADMIN_TOKEN        an administrator's token (the lifecycle's)
     DEFENDER_LIVE_FORGEJO_BOT_TOKEN          a non-administrator's token (a tenant bot's stand-in)
     DEFENDER_LIVE_FORGEJO_SOURCE_ID          the Keycloak login source `product`'s id
-    DEFENDER_LIVE_KEYCLOAK_URL               the dev Keycloak with the shipped realm
+    DEFENDER_LIVE_KEYCLOAK_URL               the dev Keycloak with the shipped realm, by its issuer name (`localhost:8080`: the
+                                             browser-facing endpoints; Forgejo's container reaches `keycloak:8080` by the backchannel)
     DEFENDER_LIVE_SESSIONS_DSN               `forgejo_sessions`, as a superuser (plants and reads rows)
     DEFENDER_LIVE_SESSIONS_LIFECYCLE_DSN     `forgejo_sessions`, as the lifecycle's login (`fs_lifecycle`)
     DEFENDER_LIVE_SESSIONS_PRODUCT_DSN       `forgejo_sessions`, as a non-superuser product login (must be refused)
@@ -23,6 +25,7 @@ import datetime as dt
 import html
 import http.client
 import re
+import socket
 import urllib.parse
 import uuid
 from collections.abc import Mapping
@@ -56,12 +59,17 @@ def require_environment(env: Mapping[str, str]) -> dict[str, str]:
 
 def raw_get(url: str, path: str, *, cookie: str | None = None) -> http.client.HTTPResponse:
     """GET `path` exactly as written (no dot-segment or slash normalisation, which httpx does), no redirects."""
+    return raw_request(url, "GET", path, cookie=cookie)
+
+
+def raw_request(url: str, method: str, path: str, *, cookie: str | None = None) -> http.client.HTTPResponse:
+    """`method` `path` exactly as written, with no body, no redirects."""
     parts = urllib.parse.urlsplit(url)
     connection = http.client.HTTPConnection(parts.hostname or "", parts.port or 80, timeout=15)
-    headers = {"Host": parts.netloc}
+    headers = {"Host": parts.netloc, "Content-Length": "0"}
     if cookie:
         headers["Cookie"] = cookie
-    connection.request("GET", path, headers=headers)
+    connection.request(method, path, headers=headers)
     response = connection.getresponse()
     response.read()
     connection.close()
@@ -95,6 +103,12 @@ class Live1592:
     def __init__(self, env: dict[str, str]) -> None:
         self.env = env
         self.edge = env["DEFENDER_LIVE_FORGEJO_URL"]
+        host = str(urllib.parse.urlsplit(self.edge).hostname)
+        try:  # r15.2 "Names in dev and CI": the site's name must resolve to loopback for this process (httpx and http.client)
+            resolved = {a[4][0] for a in socket.getaddrinfo(host, None)}
+        except OSError as failed:
+            raise AssertionError(f"the Forgejo site's name {host} does not resolve on this machine: {failed}") from failed
+        assert resolved & {"127.0.0.1", "::1"}, f"{host} resolves to {resolved}, not loopback"
         self.private = env["DEFENDER_LIVE_FORGEJO_PRIVATE_URL"]
         self.source_id = int(env["DEFENDER_LIVE_FORGEJO_SOURCE_ID"])
         self.admin = httpx.Client(base_url=f"{self.private}/api/v1", timeout=30,

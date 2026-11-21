@@ -26,8 +26,9 @@ from defender.tests.identity.test_live_keycloak_1161 import PASSWORD  # noqa: F4
 from defender.tests.support.identity._seed1496 import seed_membership, seed_user
 from defender.tests.support.tenancy._active1214 import offboard_on_database
 from defender.tests.support.shared._postgres1339 import database, execute
+from defender.tests.support.frontend import _allowlist1592 as allowlist
 from defender.tests.tenancy.people_1592 import _gob1592 as oracle
-from defender.tests.tenancy.people_1592._live1592 import CALL_TIMEOUT, Live1592, NOW, new_tenant_id, raw_get, require_environment
+from defender.tests.tenancy.people_1592._live1592 import CALL_TIMEOUT, Live1592, NOW, new_tenant_id, raw_get, raw_request, require_environment
 from defender.tests.tenancy.people_1592._spec1592 import Clock, PeopleForge, login_of, people_config
 from defender.tests.tenancy.people_1592._world1592 import People
 
@@ -144,62 +145,84 @@ def repo(tenant: str) -> str:
 
 # --- S4-1, S4-15: the edge -----------------------------------------------------------------------------------
 
-#: Off the allowlist; `{R}` is the repository's path. `reachable` paths answer a signed-in member at Forgejo itself, so a
-#: 404 at the edge is the edge's refusal, not Forgejo's.
-OFF_LIST = [
-    ("{R}.git/info/refs?service=git-upload-pack", False), ("{R}/info/refs?service=git-upload-pack", False),
-    ("{R}.git", False), ("{R}/../../user/settings", True), ("/%2e%2e/user/settings", True), ("/user/./settings", True),
-    ("/t-x//knowledge", False), ("{R}%2fsettings", False), ("{R}//settings", False), ("/User/Settings", True),
-    ("/USER/SETTINGS", True), ("/API/v1/version", True), ("/api/v1/version", True), ("/api/swagger", True),
-    ("/user/settings", True), ("/user/settings/applications", True), ("/user/link_account", True),
-    ("/user/link_account_signup", True), ("/-/admin", True), ("/explore/repos", True), ("/explore/users", True),
-    ("{R}/settings", False), ("{R}/settings/hooks", False), ("{R}/hooks", False), ("{R}/settings/collaboration", False),
-    ("/user/login", True), ("/user/sign_up", True), ("/user/forgot_password", True), ("/notifications", True),
-    ("/repo/create", True), ("/repo/migrate", True), ("/org/create", True), ("/user/oauth2/product/../../settings", True),
-]
+def holds(data: bytes, uid: int) -> bool:
+    """Whether a session row's data holds the signed-in `uid` entry for exactly this user (the test's gob oracle)."""
+    at = data.find(oracle.UID_ENTRY)
+    return at >= 0 and data[at + len(oracle.UID_ENTRY):].startswith(oracle.uid_value(uid))
+
+
+def session_keys(rig: Rig, visit: Any) -> set[str]:
+    """The keys of the session rows the visit's cookie jar names (a Forgejo cookie's value is its row's key)."""
+    forge_host = visit.host()
+    values = {c.value for c in visit.client.cookies.jar if c.domain.split(":")[0] == forge_host}
+    return values & set(rig.session_rows())
 
 
 async def test_s4_1_paths_off_the_allowlist_are_refused_at_the_edge(rig: Rig, live: Live1592):
-    """S4-1: generated off-list paths, signed in and not, answer 404 at the edge where Forgejo itself would answer."""
+    """S4-1: every off-list path, with its method, signed in and not, is 404 at the edge, while Forgejo itself serves some of them."""
     tenant = await rig.tenant()
     person = await rig.person(tenant)
-    visit = live.sign_in(person.username)
-    cookie = visit.cookie_header()
-    refused, reachable_behind = [], []
-    for template, reachable in OFF_LIST:
-        path = template.replace("{R}", repo(tenant))
-        for who in (cookie, None):
-            status = raw_get(live.edge, path, cookie=who).status
-            if status != 404:
-                refused.append((path, bool(who), status))
-        if reachable:
-            behind = raw_get(live.private, path.replace("/../", "/").replace("%2e%2e/", ""), cookie=cookie).status
-            reachable_behind.append((path, behind))
-    assert not refused
-    # The control: some of these really are served by Forgejo to this member, so the 404s above are the edge's doing.
-    assert any(status != 404 for path, status in reachable_behind if path in ("/user/settings", "/explore/repos"))
+    cookie = live.sign_in(person.username).cookie_header()
+    assert raw_request(live.edge, "GET", repo(tenant), cookie=cookie).status == 200, "control: an allowlisted path reaches this member"
+    answered = [(path, raw_request(live.private, "GET", path, cookie=cookie).status) for path in allowlist.FORGEJO_SERVES]
+    # The control, per path: Forgejo itself answers this member (so the 404 below is the edge's refusal, not Forgejo's).
+    assert [path for path, status in answered if status == 404 or status >= 500] == [], answered
+    not_refused = []
+    for _why, cases in allowlist.off_list(repo(tenant)).items():
+        for method, path in cases:
+            for who in (cookie, None):
+                status = raw_request(live.edge, method, path, cookie=who).status
+                if status != 404:
+                    not_refused.append((method, path, bool(who), status))
+    assert not_refused == []
+    for path in allowlist.FORGEJO_SERVES:
+        assert raw_request(live.edge, "GET", path, cookie=cookie).status == 404, path
 
 
-ALLOWLISTED = ["/", "/repo/search", "/avatars/{hex}", "{R}", "{R}/raw/branch/main/README.md", "{R}/media/branch/main/README.md",
-               "{R}/src/branch/main/README.md", "{R}/pulls", "{R}/issues", "/user/oauth2/product", "/assets/css/index.css"]
+def _seed_content(live: Live1592, tenant: str, marker: str) -> None:
+    """The files the allowlist's instances name, each holding `marker`, and a branch to compare."""
+    path = f"t-{tenant}/knowledge"
+    sha = live.admin.get(f"/repos/{path}/contents/README.md").json()["sha"]
+    live.ok(live.admin.put(f"/repos/{path}/contents/README.md", json={
+        "content": base64.b64encode(marker.encode()).decode(), "message": "marker", "branch": "main", "sha": sha}))
+    for name in ("a.md", "a.png", "agent/skills/a.md"):
+        live.put_file(path, name, marker.encode())
+    live.put_file(path, "b.md", marker.encode(), new_branch="feature")
 
 
-async def test_s4_15_allowlisted_paths_asked_with_no_session_never_show_tenant_content(rig: Rig, live: Live1592):
-    """S4-15 / OD-1a: no session on any allowlisted path gets a sign-in redirect, a public asset or 404, never content."""
+SIGN_IN_PAGES = ("/user/login",)  # the sign-in page itself is a page a person with no session is meant to get
+#: Design line "a callback without the OAuth state answers 500" (Sessions): not one of F10's three outcomes (design gap, reported).
+CALLBACK = "/user/oauth2/product/callback"
+
+
+async def test_s4_15_every_allowlisted_path_asked_with_no_session_never_shows_tenant_content(rig: Rig, live: Live1592):
+    """S4-15 / OD-1a: each entry of the allowlist, anonymously, answers a sign-in redirect, a public asset or 404, with no tenant content."""
     tenant = await rig.tenant()
+    person = await rig.person(tenant)
     marker = f"TENANT-CONTENT-{uuid.uuid4().hex}"
-    live.ok(live.admin.put(f"/repos/t-{tenant}/knowledge/contents/README.md", json={
-        "content": base64.b64encode(marker.encode()).decode(), "message": "marker", "branch": "main",
-        "sha": live.admin.get(f"/repos/t-{tenant}/knowledge/contents/README.md").json()["sha"]}))
+    _seed_content(live, tenant, marker)
+    member = httpx.Client(base_url=live.edge, follow_redirects=False, timeout=30, headers={"Cookie": live.sign_in(person.username).cookie_header()})
+    seen = member.get(f"{repo(tenant)}/raw/branch/main/agent/skills/a.md")
+    assert seen.status_code == 200 and marker in seen.text, "control: a member reads the marker through the edge"
     anonymous = httpx.Client(base_url=live.edge, follow_redirects=False, timeout=30)
-    for template in ALLOWLISTED:
-        path = template.replace("{R}", repo(tenant)).replace("{hex}", uuid.uuid4().hex)
-        response = anonymous.get(path)
-        assert marker not in response.text, path
-        assert response.status_code in (301, 302, 303, 307, 404) or (response.status_code == 200 and path.startswith(("/assets", "/avatars"))), (path, response.status_code)
-        if response.is_redirect:
-            assert "/user/login" in response.headers["location"] or "/user/oauth2/" in response.headers["location"] \
-                or "/keycloak" in response.headers["location"] or "/realms/" in response.headers["location"], (path, response.headers["location"])
+    wrong = []
+    for method, path in allowlist.allowed(repo(tenant)):
+        response = anonymous.request(method, path)
+        status, where = response.status_code, response.headers.get("location", "")
+        assert marker not in response.text, (method, path)
+        if method == "POST":  # an anonymous POST carries no CSRF token: refused, never a success (design gap: F10 names GET's outcomes)
+            ok = status >= 300
+        elif path == CALLBACK:
+            ok = status in (302, 303, 307, 404, 500)
+        elif path in SIGN_IN_PAGES:
+            ok = status == 200 or (status in (302, 303, 307) and ("/user/oauth2/" in where or "/realms/" in where))
+        elif path.startswith(("/assets/", "/avatars/", "/favicon.ico")):
+            ok = status in (200, 301, 302, 303, 307, 404)  # a public asset, its default, or no such file
+        else:
+            ok = status == 404 or (status in (301, 302, 303, 307) and any(k in where for k in ("/user/login", "/user/oauth2/", "/realms/")))
+        if not ok:
+            wrong.append((method, path, status, where))
+    assert wrong == []
 
 
 # --- S4-2, S4-3: sign-in by the wrong person -----------------------------------------------------------------
@@ -208,23 +231,46 @@ LINK_PATHS = ["/user/oauth2/product", "/user/oauth2/product/", "/User/OAuth2/pro
               "/user/oauth2/product?redirect_to=%2F", "/user/oauth2/product/../product", "/user/oauth2/%70roduct"]
 
 
-async def test_s4_2_the_cookie_drop_defeats_the_signed_in_link(rig: Rig, live: Live1592):
-    """S4-2 / P25, P26: Alice signed in, Keycloak holding Mallory, a start on any path variant never reaches the link page."""
+@pytest.mark.parametrize("mallory_has_account", [False, True], ids=["unknown-sub", "has-account"])
+@pytest.mark.parametrize("path", LINK_PATHS)
+async def test_s4_2_the_cookie_drop_defeats_the_signed_in_link(rig: Rig, live: Live1592, path: str, mallory_has_account: bool):
+    """S4-2 / P25, P26: Alice signed in, Keycloak holding Mallory: no start variant touches Alice's session row, links Mallory, or reaches the link page."""
     tenant = await rig.tenant()
-    alice, mallory = await rig.person(tenant), await rig.person(tenant)
-    before = live.account(alice.login)["login_name"]
-    for path in LINK_PATHS:
-        mallory_visit = live.sign_in(mallory.username)  # Keycloak now holds Mallory's session in this client's jar
-        for cookie in list(mallory_visit.client.cookies.jar):
-            if cookie.domain.split(":")[0] == mallory_visit.host():
-                mallory_visit.client.cookies.jar.clear(cookie.domain, cookie.path, cookie.name)
-        alice_visit = live.sign_in(alice.username)  # a fresh client: Alice's Forgejo session, Keycloak holds Alice
-        for kc_cookie in mallory_visit.client.cookies.jar:  # Keycloak's session cookies are Mallory's
-            alice_visit.client.cookies.jar.set_cookie(kc_cookie)
-        visit = live.browse(path, client=alice_visit.client)
-        assert not reached_link_page(visit), (path, visit.trail)
-        assert live.ok(live.admin.get(f"/users/{alice.login}")).json()["login_name"] == before
-        assert live.account(mallory.login)["login_name"] == mallory.sub
+    alice = await rig.person(tenant)
+    if mallory_has_account:
+        mallory = await rig.person(tenant)
+        mallory_sub, mallory_name, mallory_uid = mallory.sub, mallory.username, live.account(mallory.login)["id"]
+    else:
+        mallory_sub, mallory_name = live.keycloak_person()
+        rig.subs.append(mallory_sub)
+        mallory_uid = None
+    alice_uid = live.account(alice.login)["id"]
+    login_before, accounts_before = live.account(alice.login)["login_name"], live.accounts()
+    visit_a = live.sign_in(alice.username)  # Alice's Forgejo session; Keycloak holds Alice
+    alice_keys = session_keys(rig, visit_a)
+    assert alice_keys and all(holds(rig.session_rows()[k][0], alice_uid) for k in alice_keys), "control: Alice's cookie names her signed-in row"
+    visit_m = live.browse("/user/oauth2/product", username=mallory_name)  # Keycloak now holds Mallory (in another browser)
+    for cookie in list(visit_a.client.cookies.jar):  # Alice's browser keeps her Forgejo cookie and gets Mallory's Keycloak session
+        if cookie.domain.split(":")[0] != visit_a.host():
+            visit_a.client.cookies.jar.clear(cookie.domain, cookie.path, cookie.name)
+    for cookie in visit_m.client.cookies.jar:
+        if cookie.domain.split(":")[0] != visit_m.host():
+            visit_a.client.cookies.jar.set_cookie(cookie)
+    holding_alice = {k for k, (d, _a) in rig.session_rows().items() if holds(d, alice_uid)}
+    attack = live.browse(path, client=visit_a.client)
+    assert not reached_link_page(attack), (path, attack.trail)
+    rows = rig.session_rows()
+    # Alice's session was never part of the start: her row is where it was, and nothing new signed in as her.
+    assert {k for k, (d, _a) in rows.items() if holds(d, alice_uid)} == holding_alice, (path, attack.trail)
+    assert alice_keys <= set(rows)
+    assert live.account(alice.login)["login_name"] == login_before and live.accounts() == accounts_before
+    if mallory_uid is not None and path == LINK_PATHS[0]:  # the attack visit's own session is Mallory's, never Alice's
+        final = session_keys(rig, attack) - alice_keys
+        assert final and all(holds(rows[k][0], mallory_uid) and not holds(rows[k][0], alice_uid) for k in final), attack.trail
+    if mallory_uid is None and path == LINK_PATHS[0]:  # the unknown identity arrived with no session of Alice's: the link page, refused
+        assert any(urllib.parse.urlsplit(u).path.startswith("/user/link_account") and s == 404 for _m, u, s in attack.trail), attack.trail
+    fresh = live.browse("/user/oauth2/product", username=mallory_name)  # Mallory alone, later: she is not Alice
+    assert not {k for k in session_keys(rig, fresh) if holds(rig.session_rows()[k][0], alice_uid)}, fresh.trail
     assert raw_get(live.edge, "/user/link_account").status == 404
 
 
@@ -234,6 +280,8 @@ async def test_s4_3_an_unknown_sub_gets_no_account(rig: Rig, live: Live1592):
     sub, username = live.keycloak_person()
     rig.subs.append(sub)
     visit = live.browse("/user/oauth2/product", username=username)
+    assert any(urllib.parse.urlsplit(u).path.startswith("/user/link_account") and s == 404 for _m, u, s in visit.trail), \
+        f"control: the unknown sub reached Forgejo's link step, which the edge refused: {visit.trail}"
     assert live.accounts() == before
     assert not reached_link_page(visit), visit.trail
     assert visit.final is not None and visit.final.status_code in (302, 303, 404)
@@ -268,7 +316,13 @@ async def test_s4_5_each_cause_reaches_forgejo_through_a_request(rig: Rig, live:
     """S4-5: a membership end, an offboarding and a sign-out each cut access within the worker's polls."""
     tenant = await rig.tenant()
     person = await rig.person(tenant)
-    cookie = live.sign_in(person.username).cookie_header()
+    visit = live.sign_in(person.username)
+    cookie = visit.cookie_header()
+    uid = live.account(person.login)["id"]
+    keys = session_keys(rig, visit)
+    before = rig.session_rows()
+    assert keys and all(before[k][1] is not None and holds(before[k][0], uid) for k in keys), \
+        "control: the cookie names a stamped row of this person"
     assert _logged_in(live, cookie) and person.login in live.team_members(tenant)
     if cause == "membership_end":
         await rig.world.end(person.user, tenant)
@@ -280,7 +334,11 @@ async def test_s4_5_each_cause_reaches_forgejo_through_a_request(rig: Rig, live:
     if cause != "sign_out":
         assert person.login not in live.team_members(tenant)
         assert live.account(person.login)["prohibit_login"]
-    assert not rig.session_rows() or all(rig.world.sessions.keys() != {k} for k in [cookie])
+    # The rows are gone from the table itself, read before any request reuses the cookie (Forgejo may revive a row it is
+    # asked about); a suspension alone would also end the login, so only the table shows the session step ran.
+    after = rig.session_rows()
+    assert not keys & set(after), "the person's session rows were not deleted"
+    assert not [k for k, (d, _a) in after.items() if holds(d, uid)]
     assert not _logged_in(live, cookie)
 
 
@@ -293,6 +351,7 @@ async def test_s4_7_a_sign_out_deletes_older_sessions_and_keeps_a_newer_one(rig:
     await rig.world.sign_out(person.user)
     time.sleep(1.2)
     newer = live.sign_in(person.username)
+    assert _logged_in(live, older.cookie_header()) and _logged_in(live, newer.cookie_header()), "control: both sessions work"
     await rig.until_quiet()
     assert not _logged_in(live, older.cookie_header())
     assert _logged_in(live, newer.cookie_header())
@@ -310,6 +369,7 @@ async def test_s4_6_the_cap_ends_a_session_that_is_in_use(rig: Rig, live: Live15
     worker = rig.make_worker(forge_session_cap=CAP, forge_cap_every=1.0)
     rig.worker = worker
     visit = live.sign_in(person.username)
+    assert _logged_in(live, visit.cookie_header()), "control: the session works before the cap"
     deadline = time.monotonic() + 40
     while _logged_in(live, visit.cookie_header()) and time.monotonic() < deadline:
         await rig.step()
@@ -339,11 +399,19 @@ async def test_s4_8_a_row_revived_by_requests_in_flight_is_gone_by_the_next_cap_
     stop.set()
     for t in threads:
         t.join()
-    rig.worker = rig.make_worker(forge_session_cap=CAP, forge_cap_every=1.0)
-    time.sleep(CAP + 1)
-    await rig.step(2)
-    revived = [d for d, _at in rig.session_rows().values() if oracle.UID_ENTRY in d]
-    assert revived == []
+    # Whatever the hammer did, make the revival certain: an unstamped row holding this person's uid (Forgejo re-inserts a
+    # deleted row's data without the stamp). The cap is long, so only the job's second rule can delete it.
+    uid = live.account(person.login)["id"]
+    revived_key = uuid.uuid4().hex[:16]
+    live.sessions.plant(revived_key, oracle.signed_in_data(uid), signed_in_at=None)
+    anonymous_key = uuid.uuid4().hex[:16]
+    live.sessions.plant(anonymous_key, oracle.ANONYMOUS_P31, signed_in_at=None)
+    assert revived_key in rig.session_rows(), "control: the revived row exists before the cap run"
+    rig.worker = rig.make_worker(forge_session_cap=3600.0)
+    assert await rig.worker.cap() is not None, "the cap job failed"
+    rows = rig.session_rows()
+    assert revived_key not in rows, "the cap run left a revived (unstamped) row holding a uid"
+    assert anonymous_key in rows, "control: an anonymous row (no uid) is left to Forgejo's own expiry"
 
 
 # --- S4-9: the stages ----------------------------------------------------------------------------------------
@@ -359,38 +427,51 @@ async def test_s4_9_every_stage_row_is_stamped_selected_and_read_with_a_uid_abov
     person = await rig.person(tenant)
     uid = live.account(person.login)["id"]
     assert uid > 255
-    stages: dict[str, dict[str, tuple[bytes, Any]]] = {}
+    from defender.lifecycle import PostgresForgeSessions
 
-    def snap(name: str) -> None:
-        stages[name] = rig.session_rows()
+    port = PostgresForgeSessions(live.env["DEFENDER_LIVE_SESSIONS_LIFECYCLE_DSN"], statement_timeout=CALL_TIMEOUT)
+    stages: dict[str, tuple[dict[str, tuple[bytes, Any]], set[str]]] = {}
+    suspended_uid: list[int] = []
 
-    snap("empty")
+    async def snap(name: str) -> None:
+        """The table, and what the worker's own prefilter (`signed_in_rows()`) selects, at this stage."""
+        rows = rig.session_rows()
+        selected = {row.key.strip() for row in await port.signed_in_rows()}
+        stages[name] = (rows, selected)
+        stamped_with_uid = {k for k, (d, at) in rows.items() if at is not None and oracle.UID_ENTRY in d}
+        assert selected == stamped_with_uid, f"{name}: the prefilter selects {selected ^ stamped_with_uid} wrongly"
+        for key, (data, at) in rows.items():
+            if oracle.UID_ENTRY in data:  # every row holding a uid is stamped and reads as one of the two people's
+                assert at is not None, f"{name}: row {key} holds a uid and has no signed_in_at"
+                assert session_uid(data) in {uid, *suspended_uid}, (name, key)
+                assert data[data.index(oracle.UID_ENTRY) + len(oracle.UID_ENTRY):].startswith(oracle.uid_value(session_uid(data))), (name, key)
+
+    await snap("empty")
     anon = live.browse("/user/oauth2/product")                                   # sign-in start
-    snap("start")
+    await snap("start")
     visit = live.browse("/user/oauth2/product", username=person.username)        # callback
-    snap("callback")
+    await snap("callback")
+    cookie_rows = {"callback": session_keys(rig, visit)}
     live.browse("/", client=visit.client)                                        # page load
-    snap("page-load")
+    await snap("page-load")
+    cookie_rows["page-load"] = session_keys(rig, visit)
+    for stage, mine in cookie_rows.items():  # the signed-in stages: the visit's own row is selected, stamped, and this person's
+        rows, selected = stages[stage]
+        assert mine and mine <= selected, f"{stage}: the person's cookie row is not selected by the prefilter"
+        assert all(rows[k][1] is not None and holds(rows[k][0], uid) and session_uid(rows[k][0]) == uid for k in mine), stage
     ghost, ghost_name = live.keycloak_person()
     rig.subs.append(ghost)
     live.browse("/user/oauth2/product", username=ghost_name)                     # unknown-sub callback
-    snap("unknown-sub")
+    await snap("unknown-sub")
     suspended = await rig.person(tenant)
+    suspended_uid.append(live.account(suspended.login)["id"])
     live.ok(live.admin.patch(f"/admin/users/{suspended.login}", json={"login_name": suspended.sub, "source_id": live.source_id, "prohibit_login": True}))
     live.browse("/user/oauth2/product", username=suspended.username)             # suspended callback
-    snap("suspended")
+    await snap("suspended")
     live.browse("/user/oauth2/product", client=visit.client)                     # cookie-dropped start
-    snap("dropped-start")
+    await snap("dropped-start")
     assert anon.trail
-    mine = {k: v for k, v in rig.session_rows().items() if oracle.UID_ENTRY in v[0]}
-    assert mine, "no session row holds the uid entry"
-    for key, (data, stamped) in mine.items():
-        assert stamped is not None, f"stage row {key} holds a uid and has no signed_in_at"
-        at = data.index(oracle.UID_ENTRY) + len(oracle.UID_ENTRY)
-        assert data[at:].startswith(oracle.uid_value(session_uid(data))), key
-        assert session_uid(data) in (uid, live.account(suspended.login)["id"])
-        if session_uid(data) == uid:
-            assert data[at:].startswith(oracle.uid_value(uid))
+    assert any(oracle.UID_ENTRY in d for d, _a in stages["dropped-start"][0].values()), "control: some row holds the uid entry"
     await rig.world.sign_out(person.user)
     await rig.until_quiet()
     left = [k for k, (d, _a) in rig.session_rows().items() if oracle.UID_ENTRY in d and session_uid(d) == uid]
@@ -423,8 +504,9 @@ async def test_s4_10_model_written_files_run_no_script(rig: Rig, live: Live1592)
     cookies = [{"name": c.name, "value": c.value, "url": live.edge} for c in live.sign_in(person.username).client.cookies.jar
                if c.domain.split(":")[0] == urllib.parse.urlsplit(live.edge).hostname]
 
-    def browse() -> list[str]:
+    def browse() -> tuple[list[str], dict[str, int]]:
         ran: list[str] = []
+        loaded: dict[str, int] = {}
         with sync_playwright() as pw:
             chromium = pw.chromium.launch()
             context = chromium.new_context()
@@ -434,7 +516,10 @@ async def test_s4_10_model_written_files_run_no_script(rig: Rig, live: Live1592)
                     page = context.new_page()
                     page.on("console", lambda m, n=f"{kind}/{name}": ran.append(n) if "RAN" in m.text else None)
                     page.on("dialog", lambda d, n=f"{kind}/{name}": (ran.append(n), d.dismiss()))
-                    page.goto(f"{live.edge}{repo(tenant)}/{kind}/branch/main/{name}")
+                    try:
+                        loaded[f"{kind}/{name}"] = page.goto(f"{live.edge}{repo(tenant)}/{kind}/branch/main/{name}").status
+                    except Exception:  # noqa: BLE001 — a download (a PDF) starts instead of a navigation: no script runs in it
+                        loaded[f"{kind}/{name}"] = -1
                     page.wait_for_timeout(700)
                     try:
                         if page.evaluate("window.__ran"):
@@ -443,11 +528,14 @@ async def test_s4_10_model_written_files_run_no_script(rig: Rig, live: Live1592)
                         pass
                     page.close()
             chromium.close()
-        return ran
+        return ran, loaded
 
     import anyio
 
-    assert await anyio.to_thread.run_sync(browse) == []
+    ran, loaded = await anyio.to_thread.run_sync(browse)
+    # The control: the pages were served (a 404 runs nothing either), so "no script ran" is about the files' bytes.
+    assert [k for k in ("raw/a.html", "src/a.html", "raw/noext", "raw/a.svg") if loaded.get(k) != 200] == [], loaded
+    assert ran == []
 
 
 # --- S4-11, S4-12: the sessions database ---------------------------------------------------------------------
@@ -456,7 +544,8 @@ async def test_s4_11_a_non_superuser_product_login_cannot_connect(live: Live1592
     """S4-11: the product's own login is refused by the sessions database."""
     import psycopg
 
-    with pytest.raises(psycopg.OperationalError):
+    psycopg.connect(live.sessions.dsn, connect_timeout=5).close()  # control: the server is up and answers the superuser
+    with pytest.raises(psycopg.OperationalError, match=r"(?i)denied|authentication|not allowed|no pg_hba"):
         psycopg.connect(live.env["DEFENDER_LIVE_SESSIONS_PRODUCT_DSN"], connect_timeout=5)
 
 
@@ -476,10 +565,9 @@ async def test_s4_12_ten_thousand_anonymous_rows_stay_within_the_call_timeout(ri
         took.append(time.monotonic() - began)
     assert 429 not in statuses and 503 not in statuses
     assert max(took) < CALL_TIMEOUT, took
-    rig.worker = rig.make_worker(forge_cap_every=1.0)
-    time.sleep(1.1)
+    rig.worker = rig.make_worker()
     began = time.monotonic()
-    await rig.step()
+    assert await rig.worker.cap() is not None, "the cap job failed or timed out"
     assert time.monotonic() - began < CALL_TIMEOUT
     await rig.world.sign_out(person.user)
     await rig.until_quiet()
@@ -499,6 +587,7 @@ async def test_s4_13_resync_restores_a_hand_edited_team_and_a_hand_suspension(ri
     a, b = await rig.person(tenant), await rig.person(tenant)
     live.ok(live.admin.delete(f"/teams/{live.team_id(tenant)}/members/{a.login}"))
     live.ok(live.admin.patch(f"/admin/users/{b.login}", json={"login_name": b.sub, "source_id": live.source_id, "prohibit_login": True}))
+    assert a.login not in live.team_members(tenant) and live.account(b.login)["prohibit_login"], "control: the hand edits are in place"
     run = subprocess.run([sys.executable, "-m", "defender.lifecycle", "resync-people"], capture_output=True, text=True, timeout=120,
                          env={**os.environ, "DEFENDER_DATABASE_DSN": rig.world.dsn,
                               "DEFENDER_LIFECYCLE_FORGE_URL": live.private,

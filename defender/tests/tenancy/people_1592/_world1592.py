@@ -5,6 +5,12 @@ database) and `sessions` (a real Forgejo sessions database), via conftest.
 `step()` is one poll then `settle()`; `steps(n)` repeats it a bounded number of times. Nothing here loops until the
 requests are gone, so a retry case sees each attempt. A case that gates a run calls `worker.poll()` itself and must
 not settle until it opens the gate.
+
+One worker stands for one process (#1592 fidelity review 1, C3-C6): `settled()` drains the seeding requests with a
+setup worker over a repository of its own and closes it, so the PostgreSQL lock it took is released; the case's worker
+is built at its first `step()` from the seams then current (`sessions_port`, `config`) and rebuilt when they change;
+`build()` makes a second process, over a repository of its own on PostgreSQL. `errors(caplog)` reads the log after the
+last `settled()`, so the setup worker's lock-gain error (OD-12: a first take is a change) is not a case's.
 """
 from __future__ import annotations
 
@@ -58,6 +64,12 @@ class People:
     #: the sessions port the worker gets; `None` builds the product's port over `sessions.dsn`.
     sessions_port: Any = None
     worker: Any = None
+    #: the `caplog` of the case (the fixtures set it), for the log baseline `settled()` takes
+    caplog: Any = None
+    #: repositories `build()` opened for second processes, closed at teardown
+    opened: list[Any] = dataclasses.field(default_factory=list)
+    #: the seams the case's worker was built from, so a changed seam rebuilds it
+    _seams: tuple[Any, Any] | None = None
 
     # seeding ----------------------------------------------------------------------------------------
     async def tenant(self, tenant: str, *, state: str = "active", team: bool = True, wired: bool = True) -> None:
@@ -106,17 +118,30 @@ class People:
         await self.identity.sign_out(user.id, f"no-session-{user.id}")
 
     # the worker -------------------------------------------------------------------------------------
-    def build(self, **config: Any) -> Any:
-        """The worker under test (one per world unless a case builds another, e.g. a second process)."""
+    def own_repository(self) -> Any:
+        """A tenants repository of its own: on PostgreSQL a new connection set, so its lock is its own process's; the
+        memory twin has one store, which is one process, so it is the world's."""
+        if self.dsn is None:
+            return self.tenants
+        from defender.tenancy.postgres import PostgresTenantRepository
+
+        repository = PostgresTenantRepository(self.dsn)
+        self.opened.append(repository)
+        return repository
+
+    def build(self, tenants: Any = None, **config: Any) -> Any:
+        """A worker over `tenants`; with none, a second process (a repository of its own, see `own_repository`)."""
         port = self.sessions_port if self.sessions_port is not None else sessions_port(self.sessions.dsn)
         cfg = dataclasses.replace(self.config, **config) if config else self.config
-        return people_worker(self.tenants, identity=self.identity, forge=self.forge, sessions=port, config=cfg,
-                             clock=self.clock)
+        return people_worker(tenants if tenants is not None else self.own_repository(), identity=self.identity,
+                             forge=self.forge, sessions=port, config=cfg, clock=self.clock)
 
     async def step(self) -> None:
-        """One poll, then every task it started (`settle()`), bounded by `SETTLE_TIMEOUT`."""
-        if self.worker is None:
-            self.worker = self.build()
+        """One poll, then every task it started (`settle()`), bounded by `SETTLE_TIMEOUT`. The case's worker is built
+        here, over the world's repository, from the seams as they are now."""
+        if self.worker is None or self._seams != (self.sessions_port, self.config):
+            self.worker = self.build(self.tenants)
+            self._seams = (self.sessions_port, self.config)
         await self.worker.poll()
         await asyncio.wait_for(self.worker.settle(), timeout=SETTLE_TIMEOUT)
 
@@ -143,20 +168,20 @@ def sessions() -> Iterator[Sessions]:
 
 
 @pytest.fixture
-async def people(tmp_path: Path, data_root: Path, sessions: Sessions) -> AsyncIterator[People]:
+async def people(tmp_path: Path, data_root: Path, sessions: Sessions, caplog: Any) -> AsyncIterator[People]:
     """The memory twins over one store, `PeopleForge`, and a real sessions database."""
     from defender.identity import InMemoryIdentityRepository
     from defender.tenancy import InMemoryTenantRepository
 
     tenants: Any = InMemoryTenantRepository()
     world = People(tenants, InMemoryIdentityRepository(tenants=tenants), PeopleForge(tmp_path / "forge"), sessions,
-                   people_config(tmp_path, data_root, sessions_dsn=sessions.dsn), Clock())
+                   people_config(tmp_path, data_root, sessions_dsn=sessions.dsn), Clock(), caplog=caplog)
     yield world
     await world.identity.close()
 
 
 @pytest.fixture
-async def pg_people(tmp_path: Path, data_root: Path, sessions: Sessions) -> AsyncIterator[People]:
+async def pg_people(tmp_path: Path, data_root: Path, sessions: Sessions, caplog: Any) -> AsyncIterator[People]:
     """Both PostgreSQL repositories over one migrated database (the lock, the triggers' requests, the parity cases)."""
     from defender.identity.postgres import PostgresIdentityRepository
     from defender.tenancy.postgres import PostgresTenantRepository
@@ -164,9 +189,12 @@ async def pg_people(tmp_path: Path, data_root: Path, sessions: Sessions) -> Asyn
 
     with database(migrated=True) as dsn:
         world = People(PostgresTenantRepository(dsn), PostgresIdentityRepository(dsn), PeopleForge(tmp_path / "forge"),
-                       sessions, people_config(tmp_path, data_root, sessions_dsn=sessions.dsn), Clock(), dsn=dsn)
+                       sessions, people_config(tmp_path, data_root, sessions_dsn=sessions.dsn), Clock(), dsn=dsn,
+                       caplog=caplog)
         try:
             yield world
         finally:
             await world.identity.close()
             await world.tenants.close()
+            for repository in world.opened:
+                await repository.close()

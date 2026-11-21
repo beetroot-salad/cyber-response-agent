@@ -26,7 +26,7 @@ from defender.tests.tenancy.people_1592._spec1592 import (
     sessions_twin,
 )
 from defender.tests.tenancy.people_1592._world1592 import T, U2, People
-from defender.tests.tenancy.people_1592._worker1592 import CountingSessions, settled, use
+from defender.tests.tenancy.people_1592._worker1592 import CountingSessions, errors, records, settled, use
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
@@ -38,6 +38,10 @@ async def _two(people: People, *, other_tenant: bool):
     person = await people.person("erin@x.org", *((T, U2) if other_tenant else (T,)), session=False)
     other = await people.person("gina@x.org", T, session=False)
     await settled(people)
+    # The case worker's first poll runs the cap job (r15.2: at the first poll that holds the lock), which deletes
+    # unstamped `UID_ENTRY` rows; take that poll now, with nothing planted, so the cases below see the worker's own
+    # session step. The fake clock never moves, so no later poll is due for another.
+    await people.step()
     return person, other
 
 
@@ -106,10 +110,12 @@ async def test_a_person_with_a_large_forgejo_id_loses_their_row_when_suspended(p
 
 
 async def test_an_unreadable_stamped_row_is_deleted_and_logged_without_its_key(people: People, caplog):
-    """S2-20 / OD-11: a stamped row the prefilter selects but the reader refuses goes in a run with a session step."""
+    """S2-20 / OD-11: a stamped row the prefilter selects but the reader refuses goes in a run with a session step; one
+    log line per row names the user and the row's `signed_in_at`, never its key or data."""
     caplog.set_level(logging.INFO)
     erin, gina = await _two(people, other_tenant=False)
-    people.sessions.plant("weird", uid_tail_row(b"\x02\x00\x03"), signed_in_at=now() - MINUTE)
+    weird_at = now() - 17 * MINUTE  # distinct from every other row's time, so a line naming it names this row
+    people.sessions.plant("weird", uid_tail_row(b"\x02\x00\x03"), signed_in_at=weird_at)
     people.sessions.plant("weird-un", uid_tail_row(b"\x02\x00\x03"), signed_in_at=None)
     _plant(people, erin, gina, now())
     await people.end(erin, T)
@@ -117,10 +123,13 @@ async def test_an_unreadable_stamped_row_is_deleted_and_logged_without_its_key(p
     await people.step()
 
     assert people.sessions.keys() == _k("weird-un", "unstamped", "gina", "gina-un", "anon")
-    text = "\n".join(r.getMessage() for r in caplog.records)
-    assert str(erin.id) in text
-    assert session_key("weird") not in text
-    assert uid_tail_row(b"\x02\x00\x03").hex() not in text
+    messages = [r.getMessage() for r in records(caplog)]
+    stamps = {weird_at.isoformat(), str(weird_at), weird_at.strftime("%Y-%m-%dT%H:%M:%S"), weird_at.strftime("%Y-%m-%d %H:%M:%S")}
+    row_lines = [m for m in messages if str(erin.id) in m and any(stamp in m for stamp in stamps)]
+    assert len(row_lines) == 1, f"one line per deleted row naming the user and its signed_in_at, got {row_lines}"
+    for message in messages:
+        assert session_key("weird") not in message
+        assert uid_tail_row(b"\x02\x00\x03").hex() not in message
 
 
 # --- the cap job ------------------------------------------------------------------------------------------
@@ -143,31 +152,34 @@ async def test_the_cap_job_deletes_old_and_unstamped_entry_rows_without_decoding
     await worker.cap()
 
     assert people.sessions.keys() == _k("fresh", "anon", "odd-fresh")
-    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert not [r for r in records(caplog) if r.levelno >= logging.WARNING]
 
 
 async def test_the_cap_runs_only_once_its_period_has_passed_and_a_failure_is_logged(people: People, caplog):
-    """S2-37: not on every poll; an unreachable sessions database is logged and the poll goes on."""
+    """S2-37 (r15.2, "The cap job"): at the first poll that holds the lock, then at the first poll `forge_cap_every` after
+    the last run began, not on every poll; an unreachable sessions database is logged and the poll goes on."""
     await people.tenant(T)
     await settled(people)
     counting = CountingSessions(sessions_port(people.sessions.dsn))
     use(people, sessions=counting)
     await people.step()
-    first = counting.calls.get("cap", 0)
+    assert counting.calls.get("cap", 0) == 1, "the cap job did not run at the first poll that held the lock"
     people.clock.advance(dt.timedelta(seconds=30))
     await people.step()
-    assert counting.calls.get("cap", 0) == first
+    assert counting.calls.get("cap", 0) == 1
     people.clock.advance(MINUTE)
     await people.step()
-    assert counting.calls.get("cap", 0) == first + 1
+    assert counting.calls.get("cap", 0) == 2
     await people.step()
-    assert counting.calls.get("cap", 0) == first + 1
+    assert counting.calls.get("cap", 0) == 2
 
+    before = len(errors(caplog))
     broken = use(people, sessions=sessions_port(UNREACHABLE_DSN))
     people.clock.advance(5 * MINUTE)
     await people.step()
     assert broken is people.worker
-    assert [r for r in caplog.records if r.levelno >= logging.ERROR], "the cap failure was not logged"
+    # the new worker's first take of the lock is one error (OD-12); the cap failure is another
+    assert len(errors(caplog)) - before >= 2, "the cap failure was not logged"
 
 
 # --- the port and its twin --------------------------------------------------------------------------------

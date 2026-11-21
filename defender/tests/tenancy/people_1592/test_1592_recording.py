@@ -522,7 +522,7 @@ async def run_sequence(backend: str, seed: int, length: int = 40) -> collections
 @pytest.mark.parametrize("seed", range(60))
 async def test_generated_write_sequences_leave_the_same_requests_on_the_twin_and_on_postgresql(seed):
     """S1-11 (cross-slice): seeds included, a generated sequence of writes records the same multiset of (user, tenant)
-    in memory and on PostgreSQL, same-value writes and missed fences among them."""
+    in memory and on PostgreSQL, same-value writes (a state set to itself, a membership ended again) among them."""
     twin = await run_sequence("memory", seed)
     database_ = await run_sequence("postgres", seed)
     assert twin == database_, f"seed {seed}: only in memory {twin - database_}, only on PostgreSQL {database_ - twin}"

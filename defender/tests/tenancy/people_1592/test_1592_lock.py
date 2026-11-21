@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import random
 
 import pytest
 
@@ -62,7 +63,38 @@ async def test_without_the_lock_the_worker_does_nothing_and_logs_one_standby_err
     assert session_key("old") in people.sessions.keys(), "the cap job ran without the lock"  # noqa: SIM118 — a method
     standby = [m for m in errors(caplog) if "standby" in m.lower()]
     assert len(standby) == 1
-    assert len(errors(caplog)) == 1
+    assert len(errors(caplog)) == 1, "the log since setup holds more than the one standby error"
+
+
+def _held_sequence(seed: int, length: int = 14) -> list[bool]:
+    """A seeded held/not-held sequence whose first answer alternates with the seed, so both starts are covered."""
+    rng = random.Random(seed)
+    return [seed % 2 == 0, *(rng.random() < 0.5 for _ in range(length - 1))]
+
+
+@pytest.mark.parametrize("seed", range(8))
+async def test_the_worker_logs_one_error_per_change_the_first_poll_included_and_none_on_an_unchanged_poll(
+        people: People, caplog, seed: int):
+    """S2-26b (OD-12, r15.2 "The worker's lock"): over a scripted lock, poll one logs one error (a take, or `standby`), a
+    later change logs one (`lost the people lock` on a loss), and a poll with no change logs none."""
+    await people.tenant(T)
+    await settled(people)
+    script = ScriptedLock(people.tenants)
+    use(people, tenants=script)
+    previous: bool | None = None
+    for polled, held in enumerate(_held_sequence(seed)):
+        script.held = held
+        before = len(errors(caplog))
+        await people.step()
+        new = errors(caplog)[before:]
+        where = f"seed {seed}, poll {polled} ({previous} -> {held}): {new}"
+        if previous is not None and held == previous:
+            assert new == [], f"an error on an unchanged poll, {where}"
+            continue
+        assert len(new) == 1, f"one error per change, {where}"
+        if not held:
+            assert ("standby" if previous is None else "lost the people lock") in new[0].lower(), where
+        previous = held
 
 
 async def test_a_lock_lost_with_a_run_in_flight_cancels_it_and_deletes_no_ids_then_resumes(people: People, caplog):
@@ -135,9 +167,13 @@ async def test_a_holder_whose_backend_ends_loses_its_run_ids_and_the_lock_is_reg
 
 async def test_a_second_worker_takes_over_when_the_first_holders_backend_ends(pg_people: People):
     """S2-28: the standby does nothing while the first holds; after the holder's crash it carries the request out."""
-    bob = await _bob(pg_people)  # settled by the world's own worker, which now holds the lock
+    await pg_people.tenant(T)
+    bob = await pg_people.person("bob@x.org", T)
+    await settled(pg_people)  # the setup worker over its own repository, closed: the lock is free
+    await pg_people.step()  # the world's worker takes the lock (nothing to carry out yet)
     (held,) = holders(pg_people.dsn)
-    standby = pg_people.build()
+    await pg_people.end(bob, T)  # a request the standby could carry out
+    standby = pg_people.build()  # a second process: a repository of its own
     await settled_one(standby, pg_people)
     assert (str(bob.id), T) in await pg_people.open_requests(), "the standby acted while the lock was held"
     end_backend(pg_people.dsn, held)

@@ -361,10 +361,12 @@ def _directory(dsn: str):
 
 
 def test_the_wrapper_returns_the_users_wanted_in_a_tenant_S3_4():
-    """S3-4: `PeopleDirectory(open_repository).wanted_users(T)` is the set of planted member ids, as plain strings or ids."""
+    """S3-4: `PeopleDirectory(open_repository).wanted_users(T)` is the active member's id (an invited and an ended member
+    are the negative controls: wanted is an active membership, S1-16), as plain strings or ids."""
     with database(migrated=True) as dsn:
         insert_active_tenant(dsn, T1)
-        planted = {plant_member(dsn, T1, "ann@s34.example"), plant_member(dsn, T1, "bob@s34.example", "invited")}
+        planted = {plant_member(dsn, T1, "ann@s34.example")}
+        plant_member(dsn, T1, "bob@s34.example", "invited")
         plant_member(dsn, T1, "ended@s34.example", "ended")
         got = _directory(dsn).wanted_users(T1)
         assert {str(u) for u in got} == planted

@@ -361,7 +361,8 @@ def test_a_rotation_gives_a_tenant_recorded_before_r8_its_sign_login_key_and_rul
     assert bao.approle_policies[new.sign_approle] == [SIGN_POLICY] and bao.transit_keys[_key(tenant)]["type"] == "ed25519"
     assert new.sign_secret_file.is_file() and not old.host_secret_file.exists()
     rule = world.forge.rule(full)
-    assert (rule["enable_push"], rule["enable_merge_whitelist"], rule["merge_whitelist_teams"]) == (False, True, ["Owners"])
+    # Amends #1163 A23 (#1592 r15.2, "Forgejo organisation and team"): the whitelist is exactly team `members`.
+    assert (rule["enable_push"], rule["enable_merge_whitelist"], rule["merge_whitelist_teams"]) == (False, True, ["members"])
     assert [c.path for c in bao.calls[mark:] if "None" in c.path] == []
 
 
@@ -488,7 +489,8 @@ def test_a_pending_generation_recorded_before_r8_completes_with_its_sign_login(w
     assert _sign(world, sign, tenant) == 200
     rule = world.forge.rule(repo_of(tenant))
     assert (rule["enable_push"], rule["enable_merge_whitelist"]) == (False, True), "the pre-r8 rule was healed before install"
-    assert "Owners" in rule["merge_whitelist_teams"] and not rule["merge_whitelist_usernames"]
+    assert rule["merge_whitelist_teams"] == ["members"]  # Amends #1163 A23 (#1592 r15.2): exactly team `members`
+    assert not rule["merge_whitelist_usernames"]
     view = as_bot(world, jwts(world, gen)[-1], f"repos/{repo_of(tenant)}/branches/main").json()
     assert (view["user_can_push"], view["user_can_merge"]) == (False, False)
 

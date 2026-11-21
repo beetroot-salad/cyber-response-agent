@@ -14,7 +14,7 @@ import pytest
 from defender.tests.migrations.test_1339_migrations import catalog
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.tenancy.lifecycle_1214.test_repository_contract import fill_row
-from defender.tests.migrations._marked1470 import upgrade_marking_tenants
+from defender.tests.migrations._marked1470 import BEFORE_PEOPLE, upgrade_marking_tenants
 
 BASELINE = "0001_baseline"
 TENANCY = "0002_tenancy"
@@ -159,7 +159,9 @@ def test_existing_tenant_rows_are_backfilled_as_failed_creates_at_names(empty_da
     worker takes it until an administrator resumes it), dates kept (O11)."""
 
     _at_baseline(empty_database, tenants=(LAB, OTHER, THIRD))
-    upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
+    # Stops at 0026: from 0027 on the upgrade refuses over pending work (OD-5), which these rows are; the helper
+    # finishes pending actions only on its way to head, so the rows asserted below are the backfill's own.
+    upgrade_marking_tenants(empty_database, to=BEFORE_PEOPLE)
     rows = execute(empty_database, """SELECT id, created_at, state, pending_action, step, step_actor, failure,
                                       repo_url, offboarded_at, repo_delete_after FROM tenancy.tenants ORDER BY id""")
     assert len(rows) == 3

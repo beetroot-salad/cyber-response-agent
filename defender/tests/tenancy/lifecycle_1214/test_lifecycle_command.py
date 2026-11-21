@@ -83,16 +83,48 @@ def _settings(tmp_path: Path, forge_url: str) -> dict[str, str]:
             SOURCE_ENV: str(KEYCLOAK_SOURCE_ID), SESSIONS_ENV: "postgresql://fs_lifecycle_login@sessions.test:5432/forgejo_sessions"}
 
 
-@pytest.mark.parametrize("missing", [SOURCE_ENV, SESSIONS_ENV])
-@pytest.mark.parametrize("command", ["serve", "resync-people"])
+def _required(command: str) -> list[str]:
+    """The settings each command refuses to run without (design, `resync-people`: its four "and nothing else"; Settings:
+    `serve` also needs the Keycloak source and the sessions login #1592 adds)."""
+    from defender.lifecycle import config as names
+
+    if command == "resync-people":
+        return [names.FORGE_URL_ENV, names.FORGE_TOKEN_FILE_ENV, SOURCE_ENV, DSN_ENV]
+    return [SOURCE_ENV, SESSIONS_ENV]
+
+
+@pytest.mark.parametrize(("command", "missing"), [(c, m) for c in ("serve", "resync-people") for m in _required(c)])
 @pytest.mark.postgres
-def test_a_missing_required_people_setting_refuses_as_the_command_naming_it(migrated_database, tmp_path, command, missing):
-    """Every setting but one of the two #1592 requires: exit 2, one line naming the command and the setting (OD-4, OD-12, S3-18)."""
+def test_a_missing_required_setting_refuses_as_the_command_naming_it(migrated_database, tmp_path, command, missing):
+    """Every setting but one of the command's required ones: exit 2, naming the command and the setting; `serve` over the
+    two #1592 adds, `resync-people` over its four (OD-4, OD-12, S3-18)."""
     settings = {k: v for k, v in _settings(tmp_path, "http://127.0.0.1:1").items() if k != missing}
-    done = _lifecycle(command, dsn=migrated_database, settings=settings)
+    done = _lifecycle(command, dsn=None if missing == DSN_ENV else migrated_database, settings=settings)
     assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
     assert command in done.stderr and missing in done.stderr, done.stderr
     assert "Traceback" not in done.stderr
+
+
+@pytest.mark.postgres
+def test_resync_people_reads_its_four_settings_and_nothing_else(migrated_database, forge_url, tmp_path):
+    """With exactly the forge address, the admin token file, the Keycloak source and the database address set (no sessions
+    login, no OpenBao, no integration, no data root), `resync-people` does its work and exits 0 (S3-18, C8)."""
+    from defender.lifecycle import config as names
+
+    forge, url = forge_url
+    tenant = fixture_uuid("tenant:1592-four-t")
+    insert_active_tenant(migrated_database, tenant)
+    forge.add_account(login_of(fixture_uuid("user:1592-four-u")), login_name="whatever")
+    (tmp_path / "forge-token").write_text(ADMIN_TOKEN + "\n", encoding="utf-8")
+    four = {names.FORGE_URL_ENV: url, names.FORGE_TOKEN_FILE_ENV: str(tmp_path / "forge-token"),
+            SOURCE_ENV: str(KEYCLOAK_SOURCE_ID)}
+    seen = {r.id for r in requests_sql(migrated_database)}
+
+    done = _lifecycle("resync-people", dsn=migrated_database, settings=four)
+
+    assert done.returncode == 0, (done.returncode, done.stdout, done.stderr)
+    new = pairs([r for r in requests_sql(migrated_database) if r.id not in seen])
+    assert new == collections.Counter({(None, tenant): 1, (fixture_uuid("user:1592-four-u"), None): 1}), new
 
 
 @pytest.mark.parametrize("fault", ["unreachable", "revision"])
@@ -151,9 +183,10 @@ def _plant_user(dsn: str, user: str, sub: str) -> None:
 
 def test_resync_people_records_the_tenants_and_every_person_account_and_lists_the_oddities_without_changing_them(  # noqa: F811, PLR0914
         migrated_database, forge_url, tmp_path, monkeypatch, capsys):
-    """Three wired tenants give (none, T) each, the tenant with no wiring none; the 54 `p-` accounts of the source (past
-    one page, known to the product or not) give (U, none) each; a non-`p-` login, a login_name that is not its user's sub, and
-    an account of another source are not recorded; the first two are listed; the forge is written to never (OD-4, S3-17)."""
+    """Three wired tenants give (none, T) each, the tenant with no wiring none; the 54 canonical `p-<id>` accounts of the
+    source (past one page, known to the product or not) give (U, none) each; a non-`p-` login, a `p-` login that is not
+    canonical, and an account of another source are recorded for nobody; the first two are listed, and so is a canonical
+    account whose login_name is not its user's sub (which is recorded); the forge is written to never (OD-4, S3-17)."""
     from defender.lifecycle import __main__ as entry
 
     forge, url = forge_url
@@ -172,10 +205,13 @@ def test_resync_people_records_the_tenants_and_every_person_account_and_lists_th
     for login in unknown:
         forge.add_account(login, login_name="whatever")
     forge.add_account("operator-alice", login_name="alice")
+    non_canonical = ["p-not-a-uuid", f"p-{fixture_uuid('user:1592-resync-upper').upper()}"]
+    for login in non_canonical:  # `p-` logins that are not `p-` + a canonical user id: listed, never recorded, never changed
+        forge.add_account(login, login_name="whatever")
     elsewhere = login_of(fixture_uuid("user:1592-resync-elsewhere"))
     forge.add_account(elsewhere, login_name="x", source_id=KEYCLOAK_SOURCE_ID + 1)
     on_source = [login for login, a in forge.accounts.items() if a["source_id"] == KEYCLOAK_SOURCE_ID]
-    assert len(on_source) == 55, "premise: the source holds more than one page of accounts"
+    assert len(on_source) == 57, "premise: the source holds more than one page of accounts"
     before = ({k: dict(v) for k, v in forge.accounts.items()}, set(forge.prohibit_login), set(forge.users))
     seen = {r.id for r in requests_sql(migrated_database)}
     forge.calls.clear()
@@ -195,6 +231,8 @@ def test_resync_people_records_the_tenants_and_every_person_account_and_lists_th
     assert pairs(new) == expected
     out = capsys.readouterr().out
     assert "operator-alice" in out and odd_login in out, out
+    for login in non_canonical:
+        assert login in out, f"the non-canonical {login} was not listed: {out}"
     assert login_of(known[0]) not in out and elsewhere not in out, "a clean account, or one of another source, was listed"
     assert forge.writes() == [], "resync-people wrote to the forge"
     assert ({k: dict(v) for k, v in forge.accounts.items()}, set(forge.prohibit_login), set(forge.users)) == before

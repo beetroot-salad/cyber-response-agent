@@ -22,9 +22,11 @@ from defender.tests.support.api._identity1306 import NINA, AuditLog, user_id  # 
 from defender.tests.tenancy.lifecycle_1214._fakes import ADMIN_LOGIN, org_of, repo_of  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import (  # noqa: E402
     as_bot,
+    body_of,
     in_order,
     jwts,
     member_browser,
+    openbao_failing,
     sample,
 )
 from defender.tests.tenancy.lifecycle_1214._support import (  # noqa: E402
@@ -691,6 +693,25 @@ def test_a_rotation_restores_the_organisation_to_the_shape_after_hand_edits(worl
     assert any(c.body.get("includes_all_repositories") is False for c in patches)
 
 
+def test_rotation_gives_an_existing_tenants_new_integration_write_issue(world):
+    """A tenant whose live integration predates the grant (write:repository only: the issue API refuses its bot) has
+    write:issue on the integration its next rotation creates (#1414 D13; moved here from the retired
+    `test_1414_merge_eligibility`, whose creation twin `test_entry_guards` already pins through the recorded `--scope`)."""
+    tenant = world.active_tenant()
+    full = repo_of(tenant)
+    old = world.live(tenant)
+    [rule] = [r for r in world.forge.integration_rules.values() if r["user"] == old.bot_login]
+    rule["scopes"] = ["write:repository"]
+    assert as_bot(world, jwts(world, old)[-1], f"repos/{full}/issues").status_code == 403, "control: no write:issue"
+    _rotate(world, tenant)
+    world.drive()
+    new = world.live(tenant)
+    assert new.salt != old.salt
+    [made] = [c for c in world.integration.created if c["user"] == new.bot_login]
+    assert sorted(part for value in made["scopes"] for part in value.split(",")) == ["write:issue", "write:repository"]
+    assert as_bot(world, jwts(world, new)[-1], f"repos/{full}/issues").status_code == 200
+
+
 @pytest.mark.parametrize("how", ["bot merge-whitelisted", "merge whitelist off"])
 def test_rotation_install_fails_when_the_new_bot_can_merge_main_and_resumes_once_it_cannot(world, how):
     """Rotation's install makes the same check as creation's: a rule at install that lets the new bot merge fails install
@@ -729,9 +750,17 @@ def test_wrap_enforces_the_rule_again_and_heals_a_whitelist_that_holds_owners_or
     tenant = world.active_tenant()
     full = repo_of(tenant)
     world.forge.users.add("carol")
+    # `protect`, `integration` and `wrap` run in one service pass, so a stop between passes cannot land before `wrap`.
+    # Failing `integration` once (the role's client-id write; it calls no forge) gives the pass boundary: `protect` has
+    # run, `wrap` has not, and the planted rule is the one `wrap`'s own `_protect_main` reads.
+    flaky = openbao_failing(world, lambda r: r.method in ("POST", "PUT") and "/identity/oidc/role/" in r.url.path
+                            and bool(body_of(r).get("client_id")))
     _rotate(world, tenant)
-    world.drive(stop=lambda: world.item(tenant)["step"] == "wrap")
+    world.drive()
+    assert flaky.hit, "premise: the integration step never reached the role's client-id write"
+    assert world.item(tenant)["step"] == "integration", world.item(tenant)
     world.forge.repos[full]["protections"]["main"] = {**world.forge.rule(full), "merge_whitelist_usernames": [], **held}
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     mark = len(world.forge.calls)
     world.drive()
     assert world.item(tenant)["state"] == "active" and world.item(tenant)["failure"] is None

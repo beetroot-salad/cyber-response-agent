@@ -17,12 +17,11 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from defender.tests.support.frontend import _allowlist1592 as allowlist
 from defender.tests.support.frontend._ingress1161 import FORGE_DOMAIN, ingress
 
 UPSTREAM_BODY = b"the echo upstream"
 R = "/t-4f1c7a52-3b9d-4c3e-8a21-5d0e9b7c1a66/knowledge"
-OTHER_R = "/t-0a0a0a0a-1b1b-4c1c-8d1d-2e2e2e2e2e2e/knowledge"
-SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
 @dataclass
@@ -104,73 +103,9 @@ def site(tmp_path_factory) -> Iterator[Site]:
 
 # --- S3-11: the allowlist ---------------------------------------------------------------------------------------------
 
-ALLOWED: list[tuple[str, str]] = [
-    ("GET", "/"), ("GET", "/user/login"), ("GET", "/user/oauth2/product"), ("GET", "/user/oauth2/product/callback"),
-    ("POST", "/user/logout"), ("GET", "/repo/search"),
-    ("GET", "/assets/js/index.js"), ("GET", "/assets/css/index.css"), ("GET", "/favicon.ico"),
-    ("GET", "/avatars/0a1b2c3d4e5f60718293a4b5c6d7e8f9"),
-    ("GET", R), ("GET", f"{R}/src/branch/main"), ("GET", f"{R}/src/branch/main/agent/skills/a.md"),
-    ("GET", f"{R}/raw/branch/main/agent/skills/a.md"), ("GET", f"{R}/blame/branch/main/a.md"),
-    ("GET", f"{R}/commits/branch/main"), ("GET", f"{R}/commit/{SHA}"), ("GET", f"{R}/branches/list"),
-    ("GET", f"{R}/media/branch/main/a.png"), ("GET", f"{R}/blob_excerpt/{SHA}"),
-    ("GET", f"{R}/pulls"), ("GET", f"{R}/pulls/3"), ("GET", f"{R}/pulls/3/commits"), ("GET", f"{R}/pulls/3/files"),
-    ("GET", f"{R}/pulls/3/files/reviews/new_comment"),
-    ("POST", f"{R}/pulls/3/files/reviews/comments"), ("POST", f"{R}/pulls/3/files/reviews/submit"),
-    ("POST", f"{R}/pulls/3/merge"), ("GET", f"{R}/issues/3/content-history/overview"), ("POST", "/-/fetch-redirect"),
-    ("GET", f"{R}/_edit/main/a.md"), ("POST", f"{R}/_edit/main/a.md"), ("GET", f"{R}/_new/main/"),
-    ("POST", f"{R}/_new/main/"), ("GET", f"{R}/_delete/main/a.md"), ("POST", f"{R}/_delete/main/a.md"),
-    ("POST", f"{R}/_preview/main/a.md"), ("POST", f"{R}/markup"),
-    ("GET", f"{R}/compare/main...feature"), ("POST", f"{R}/compare/main...feature"),
-    ("GET", f"{R}/issues"), ("GET", f"{R}/issues/3"), ("GET", f"{R}/issues/suggestions"),
-    ("POST", f"{R}/issues/3/comments"),
-    ("GET", f"{OTHER_R}/pulls/3"),  # `{R}` is the shape `/t-<uuid>/knowledge`: any tenant's, Forgejo's own rules decide
-]
-
-OFF_LIST: dict[str, list[tuple[str, str]]] = {
-    "git transport without a suffix": [
-        ("GET", f"{R}/info/refs?service=git-upload-pack"), ("POST", f"{R}/git-upload-pack"),
-        ("POST", f"{R}/git-receive-pack"), ("GET", f"{R}/HEAD"), ("GET", f"{R}/objects/info/packs")],
-    "git transport with .git": [
-        ("GET", f"{R}.git"), ("GET", f"{R}.git/info/refs?service=git-upload-pack"), ("POST", f"{R}.git/git-upload-pack"),
-        ("POST", f"{R}.git/git-receive-pack")],
-    "dot segments": [
-        ("GET", f"{R}/src/../../../user/settings"), ("GET", "/assets/../user/settings"), ("GET", "/./user/login"),
-        ("GET", f"{R}/src/branch/main/.."), ("GET", "/assets/%2e%2e/user/settings"), ("GET", "/assets/.%2e/user/settings"),
-        ("GET", "/assets/%2E%2E/user/settings")],
-    "encoded slashes": [
-        ("GET", "/user%2flogin"), ("GET", "/user%2Flogin"), ("GET", f"{R}/src/branch/main/a%2fb"),
-        ("GET", f"{R}%2fsettings"), ("GET", "/assets/js%2f..%2f..%2fuser/settings")],
-    "doubled slashes": [
-        ("GET", "//user/login"), ("GET", f"{R}//src"), ("GET", "/assets//x.js"), ("GET", "//"), ("GET", "///")],
-    "case variants of a fixed segment": [
-        ("GET", "/User/Login"), ("GET", "/USER/LOGIN"), ("GET", "/API/v1/version"), ("GET", "/Api/V1/Version"),
-        ("GET", "/user/Settings"), ("GET", "/Explore/repos")],
-    "a reserved first segment where a repository is expected": [
-        ("GET", "/user/knowledge"), ("GET", "/api/knowledge/src/branch/main"), ("GET", "/explore/knowledge"),
-        ("GET", "/-/knowledge"), ("GET", "/admin/knowledge"), ("GET", "/t-not-a-uuid/knowledge"),
-        ("GET", f"{R[:-len('knowledge')]}other"), ("GET", f"{R}x"), ("GET", f"{R}-other/src/branch/main")],
-    "the API": [
-        ("GET", "/api/v1/version"), ("GET", "/api/v1/user"), ("POST", "/api/v1/repos/migrate"), ("GET", "/api/healthz"),
-        ("GET", "/api/swagger"), ("GET", f"/api/v1/repos{R}"), ("DELETE", "/api/v1/user")],
-    "the user's settings": [
-        ("GET", "/user/settings"), ("GET", "/user/settings/applications"), ("GET", "/user/settings/security"),
-        ("POST", "/user/settings/applications")],
-    "account linking": [
-        ("GET", "/user/link_account"), ("POST", "/user/link_account_signin"), ("GET", "/user/link_account_signup"),
-        ("GET", "/user/link_account/x")],
-    "administration": [("GET", "/-/admin"), ("GET", "/-/admin/users"), ("POST", "/-/admin/users/new")],
-    "explore": [("GET", "/explore"), ("GET", "/explore/repos"), ("GET", "/explore/users")],
-    "the repository's settings": [
-        ("GET", f"{R}/settings"), ("GET", f"{R}/settings/hooks"), ("POST", f"{R}/settings/collaboration"),
-        ("POST", f"{R}/settings/delete")],
-    "other pages off the list": [
-        ("GET", "/user/events"), ("GET", "/notifications"), ("GET", "/notifications/new"), ("GET", "/login/oauth/authorize"),
-        ("POST", "/login/oauth/access_token"), ("GET", "/org/create"), ("GET", "/repo/create"), ("GET", "/repo/migrate")],
-}
-
-WRONG_METHOD = [("POST", "/user/login"), ("GET", "/user/logout"), ("POST", "/user/oauth2/product"),
-                ("GET", f"{R}/pulls/3/merge"), ("DELETE", "/"), ("PUT", f"{R}/_edit/main/a.md"),
-                ("GET", "/-/fetch-redirect"), ("PATCH", f"{R}/issues/3/comments")]
+ALLOWED = allowlist.allowed(R) + [("GET", f"{allowlist.OTHER_R}/pulls/3")]  # `{R}` is a shape: Forgejo's rules decide who reads
+OFF_LIST = allowlist.off_list(R)
+WRONG_METHOD = allowlist.wrong_method(R)  # "a path listed without a method allows GET only", from the one module
 
 
 @pytest.mark.parametrize(("method", "target"), ALLOWED, ids=[f"{m} {t}" for m, t in ALLOWED])
@@ -199,7 +134,7 @@ def test_1592_every_class_off_the_list_is_404_and_never_reaches_the_upstream(sit
 
 @pytest.mark.parametrize(("method", "target"), WRONG_METHOD, ids=[f"{m} {t}" for m, t in WRONG_METHOD])
 def test_1592_an_allowed_path_with_a_method_the_list_does_not_give_it_is_404(site, method, target):
-    """S3-11: the list names methods; any other method on the same path is refused at the edge."""
+    """S3-11: the list names methods, none meaning GET only; every other method on every entry is refused at the edge."""
     before = len(site.echo.seen)
     assert site.send(method, target)[0] == 404
     assert site.echo.seen[before:] == []
@@ -218,7 +153,7 @@ def test_1592_the_allowlist_is_a_list_not_a_denylist(site):
 
 # --- S3-12: the Cookie drop on the sign-in start ------------------------------------------------------------------------
 
-START = "/user/oauth2/product"
+START = allowlist.SIGNIN_START
 COOKIE = {"Cookie": "i_like_gitea=a-signed-in-session; _csrf=x"}
 
 

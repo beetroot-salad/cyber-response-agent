@@ -322,8 +322,9 @@ jobs:
               ports: ["127.0.0.1:5433:5432"]
           YAML
           COMPOSE="docker compose -f .devcontainer/docker-compose.yml -f $RUNNER_TEMP/live-override.yml"
-          # The shipped dev setup script: the sessions database and its two logins before Forgejo starts, then the
-          # Keycloak login source. Run as the dev setup runs it, on a fresh volume.
+          # The shipped dev setup script (r15.2 "setup.sh"): it takes COMPOSE from the environment, starts postgres,
+          # builds the sessions database and the two dev logins, starts keycloak and forgejo, and adds the `product`
+          # login source. Run as dev runs it, on a fresh volume; it prints nothing this job parses.
           COMPOSE="$COMPOSE" .devcontainer/forgejo/setup.sh
           # S4-11's non-superuser product login (the script's own logins are Forgejo's and the lifecycle's).
           $COMPOSE exec -T postgres psql -U defender -d postgres -v ON_ERROR_STOP=1 \
@@ -332,9 +333,8 @@ jobs:
             timeout 180 sh -c "until curl -sf -o /dev/null http://localhost:8080/realms/$realm/.well-known/openid-configuration; do sleep 2; done"
           done
           timeout 180 sh -c 'until curl -sf -o /dev/null http://localhost:3000/api/v1/version; do sleep 2; done'
-          # The lifecycle's DSN is the script's login that is a member of `fs_lifecycle`.
-          LOGIN=$($COMPOSE exec -T postgres psql -U defender -d postgres -Atc "SELECT m.rolname FROM pg_auth_members a JOIN pg_roles r ON r.oid = a.roleid JOIN pg_roles m ON m.oid = a.member WHERE r.rolname = 'fs_lifecycle' AND m.rolcanlogin")
-          echo "LIFECYCLE_DSN=postgresql://$LOGIN:dev-only-change-me@127.0.0.1:5433/forgejo_sessions" >> "$GITHUB_ENV"
+          # The lifecycle's DSN is the script's named login `fs_lifecycle_dev` (password `dev-only-change-me`).
+          echo "LIFECYCLE_DSN=postgresql://fs_lifecycle_dev:dev-only-change-me@127.0.0.1:5433/forgejo_sessions" >> "$GITHUB_ENV"
 
       - name: Create the live tokens
         run: |

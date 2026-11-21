@@ -12,6 +12,7 @@ from defender.api.app import create_app
 from defender.api.refusing import Refusing
 from defender.api.ports import ApiDeps
 from defender.tests.support.api._identity1306 import FRONTEND_ORIGIN, T1
+from defender.tests.support.api._server1083 import FORGE_DOMAIN  # #1592 r15.2: `ApiDeps.forge_domain` is required
 from defender.tests.support.api._mount1161 import API
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -57,7 +58,7 @@ def route_table_deps() -> ApiDeps:
                                       "audit", "host_requests")}  # #1471: the host-requests port, once ApiDeps has it
     known = {f.name for f in dataclasses.fields(ApiDeps)}
     return ApiDeps(**{k: v for k, v in ports.items() if k in known},  # type: ignore[arg-type]
-                   identity=None, frontend_origin=FRONTEND_ORIGIN, tenants=None)
+                   identity=None, frontend_origin=FRONTEND_ORIGIN, forge_domain=FORGE_DOMAIN, tenants=None)
 
 
 @functools.lru_cache(maxsize=1)

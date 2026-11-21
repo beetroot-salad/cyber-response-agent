@@ -146,3 +146,23 @@ def test_1592_the_tests_one_config_carries_the_required_fields(tmp_path):
     config = lifecycle_config(tmp_path, tmp_path / "data")
     assert config.keycloak_source_id == 7
     assert config.forge_sessions_dsn
+
+
+@pytest.mark.parametrize("field", ["people_poll", "people_call_timeout", "forge_session_cap", "forge_cap_every"])
+@pytest.mark.parametrize("bad", [0, 0.0, -1, -0.5])
+def test_1592_each_people_duration_must_be_positive(tmp_path, field, bad):
+    """S3-23 (r15.2 Settings: durations are float seconds and must be positive, as `poll_interval`): zero and a negative
+    number are refused at construction, and a small positive one is accepted."""
+    from defender.lifecycle.config import ConfigRefused
+
+    both = {"keycloak_source_id": 7, "forge_sessions_dsn": "postgresql://fs@db.test/forgejo_sessions"}
+    assert getattr(_config(tmp_path, **both, **{field: 0.001}), field) == 0.001  # control: positive
+    with pytest.raises(ConfigRefused):
+        _config(tmp_path, **both, **{field: bad})
+
+
+def test_1592_the_sessions_login_never_appears_in_the_configs_repr(tmp_path):
+    """S3-23 (`forge_sessions_dsn` is `repr=False`: it holds a password): the DSN's password is not in `repr(config)`."""
+    config = _config(tmp_path, keycloak_source_id=7, forge_sessions_dsn="postgresql://fs:hunter2-pw@db.test/forgejo_sessions")
+    assert config.forge_sessions_dsn.endswith("forgejo_sessions")  # control: the config does hold it
+    assert "hunter2-pw" not in repr(config)
