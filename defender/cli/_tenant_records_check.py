@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -178,10 +178,15 @@ def census_findings(table: TableFindings, systems: Collection[str] | None) -> Ta
 
 
 def leftover_findings(knowledge: Path) -> list[str]:
+    """O9: the retired parts a tenant repo's `settings/` still holds (`retired_findings`)."""
+    return retired_findings(Path(knowledge) / SETTINGS_HALF)
+
+
+def retired_findings(settings: Path) -> list[str]:
     """O9: the retired `settings/systems/` folder, `settings/case-record.yaml` and (#1503) `settings/lead-zero.yaml`
-    a tenant repo still holds. Each is
-    reported as retired and ignored; neither is opened, so an unreadable one is reported the same."""
-    settings = Path(knowledge) / SETTINGS_HALF
+    a tenant's `settings` still holds. Each is reported as retired and ignored; neither is opened, so an unreadable one
+    is reported the same."""
+    settings = Path(settings)
     lines: list[str] = []
     if (settings / RETIRED_SYSTEMS).is_symlink() or (settings / RETIRED_SYSTEMS).exists():
         lines.append(f"settings/{RETIRED_SYSTEMS}/ is retired and ignored: the tenant's systems are records "
@@ -195,12 +200,94 @@ def leftover_findings(knowledge: Path) -> list[str]:
     return lines
 
 
+def feedback_findings(settings: Path) -> list[str]:
+    """The feedback setting in `settings` (#1414 O1): an unreadable file, or one naming an unknown outcome."""
+    from defender.tenancy import feedback_setting
+
+    try:
+        feedback_setting.load_feedback_outcomes(Path(settings))
+    except feedback_setting.FeedbackSettingError as bad:
+        return [str(bad)]
+    return []
+
+
+def registry_findings(agent: Path) -> list[str]:
+    """The tacit-knowledge registry file under `agent` judged by what `tacit_cli check` fails on (a whole-file
+    refusal or a dropped entry, #1390 O7), whether or not the grant table reaches `lookup` (A10). Date-dependent notes
+    stay advisory, so a tenant's CI does not go red by the calendar."""
+    from defender.systems import tacit_registry
+
+    path = tacit_registry.registry_path(Path(agent))
+    return [f"{tacit_registry.SYSTEM} registry: {why}" for why in tacit_registry.read_registry(path).problems]
+
+
+def registry_grant_findings(agent: Path, settings: Path, *, note: Callable[[str], None] | None = None) -> list[str]:
+    """The registry file under `agent` against the grant table in `settings`, which only this check holds together:
+    `lookup` granted with no file behind it fails. Entries with no `lookup` grant only earn a note (`note`, when given),
+    since a tenant may write them before it grants the verb. An unloadable table is reported where the table is
+    judged, so it costs only this comparison."""
+    from defender.systems import tacit_registry
+    from defender.systems.verb_dispositions import run_grants
+
+    try:
+        gather = run_grants(Path(settings)).gather
+    except DispositionError:
+        return []
+    granted = any(system == tacit_registry.SYSTEM and verb == "lookup" for system, verb, _ in gather.entries)
+    read = tacit_registry.read_registry(tacit_registry.registry_path(Path(agent)))
+    if granted and read.absent:
+        return [f"{tacit_registry.SYSTEM} registry: gather is granted `lookup`, but there is no "
+                "registry file for it to read"]
+    if read.entries and not granted and note is not None:
+        note(f"note: {tacit_registry.SYSTEM} registry holds {len(read.entries)} entr(ies), but "
+             "gather is not granted `lookup`, so none of them is consulted yet")
+    return []
+
+
+def readiness_census(agent: Path, settings: Path, *, systems: Collection[str], defender_dir: Path
+                     ) -> list[tuple[str, str]]:
+    """The census warnings of a readiness check (#1471 R4, R13-3), as `(kind, sentence)` pairs, one per finding line:
+    a tenant's published copy (its `agent` and `settings` halves) judged as `check --folder` judges a repo, narrowed to
+    the tenant's `systems` (`census_findings`): the retired files, the grant census both ways against the code tree at
+    `defender_dir`, the tacit registry and its grants, the feedback setting. Not reported: a refused platform-served
+    adapter name, and the committed `.tenant-id` (a copy is no clone). `CensusUnavailable` when the census cannot be
+    taken (or the table, which run start loads first, does not load)."""
+    from defender.cli import _tenant_census
+
+    census = _tenant_census.take_census(Path(defender_dir))
+    try:
+        table = census_findings(_tenant_census.table_findings(Path(settings), census), systems)
+    except DispositionError as unloadable:
+        raise _tenant_census.CensusUnavailable(str(unloadable)) from None
+    name = f"{SETTINGS_HALF}/{dispositions_path(Path(settings)).name}"
+    none: tuple[tuple[str, str], ...] = ()
+
+    def only(**kept: tuple[tuple[str, str], ...]) -> list[str]:
+        gaps = dataclasses.replace(table.gaps, **{"undecided": none, "phantom": none, "unreasoned": none, **kept})
+        return dataclasses.replace(table, gaps=gaps).lines(name)
+
+    found = [("retired_file", line) for line in retired_findings(Path(settings))]
+    # An unreasoned gap cannot reach here (the table's loader refuses it, R13-3); were one to, it is a verb decided by
+    # nobody.
+    found += [("verb_undecided", line) for line in only(undecided=table.gaps.undecided, unreasoned=table.gaps.unreasoned)]
+    found += [("verb_undeclared", line) for line in only(phantom=table.gaps.phantom)]
+    found += [("tacit_registry", line) for line in registry_findings(Path(agent))]
+    found += [("tacit_grant", line) for line in registry_grant_findings(Path(agent), Path(settings))]
+    found += [("feedback_setting", line) for line in feedback_findings(Path(settings))]
+    return found
+
+
 __all__ = [
     "NO_CREDENTIALS",
     "RecordsCheck",
     "census_findings",
     "credential_findings",
+    "feedback_findings",
     "grant_findings",
     "leftover_findings",
+    "readiness_census",
     "records_check",
+    "registry_findings",
+    "registry_grant_findings",
+    "retired_findings",
 ]

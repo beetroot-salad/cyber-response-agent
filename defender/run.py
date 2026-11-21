@@ -1439,7 +1439,17 @@ def _launch_facts(request: Callable[..., dict[str, Any]], *, kind: str, tenant: 
     """The helper's launch facts for this job (#1170 A6), or the refusal naming why there are none or
     why they are not this job's (`kind`, `tenant`, `job`; `label` names the caller in each refusal):
     the helper admitted the tenant and ran the publish before this container started, and says so
-    here. An investigation's job is its own id; a learning sibling's, its learning job's (its episode)."""
+    here. An investigation's job is its own id; a learning sibling's, its learning job's (its episode).
+    Two halves: whether the helper and this container agree (`_launch_answer`), then the tenant's state
+    the helper read (`_launch_tenant_active`), which a readiness check sorts apart (#1471 R13-1.4)."""
+    launch = _launch_answer(request, kind=kind, tenant=tenant, job=job, label=label)
+    _launch_tenant_active(launch, label=label)
+    return launch
+
+
+def _launch_answer(request: Callable[..., dict[str, Any]], *, kind: str, tenant: str, job: str,
+                   label: str) -> dict[str, Any]:
+    """`_launch_facts`' first half: the helper's answer, and that it is this job's, or the refusal."""
     try:
         launch = request("launch")
     except job_socket.Refused as refused:
@@ -1450,33 +1460,103 @@ def _launch_facts(request: Callable[..., dict[str, Any]], *, kind: str, tenant: 
     said = {key: launch.get(key) for key in ("kind", "tenant", "job")}
     if said != {"kind": kind, "tenant": tenant, "job": job}:
         sys.exit(f"[run.py] {label}: this job container's launch facts are not this {kind} job's: {said}")
-    if launch.get("tenant_state") != "active":
-        sys.exit(f"[run.py] {label}: this run's tenant cannot be used: it is {launch.get('tenant_state')!r}")
     return launch
 
 
-def _container_tenant(ns: argparse.Namespace, data_root: DataRoot) -> tenancy.Tenant:
+def _launch_tenant_active(launch: Mapping[str, Any], *, label: str) -> None:
+    """`_launch_facts`' second half: the tenant the helper admitted is `active`, or the refusal."""
+    if launch.get("tenant_state") != "active":
+        sys.exit(f"[run.py] {label}: this run's tenant cannot be used: it is {launch.get('tenant_state')!r}")
+
+
+def _container_tenant(ns: argparse.Namespace, data_root: DataRoot, *,
+                      defender_dir: Path | None = None) -> tenancy.Tenant:
     """The job's tenant inside its container: the folder rules only, over its own tenant folder (the
     one the container mounts), as run start judges them (`clone_tree=False`). No host lock and no
     admission: the job's host helper holds the one and ran the other, and their verdict is in the
-    launch facts (#1170 A6, C19)."""
+    launch facts (#1170 A6, C19). `defender_dir`: the code tree the entry reads (`DEFENDER_DIR`)."""
     try:
-        return tenancy.accept_tenant(data_root, ns.tenant, defender_dir=DEFENDER_DIR, clone_tree=False)
+        return tenancy.accept_tenant(data_root, ns.tenant, clone_tree=False,
+                                     defender_dir=defender_dir if defender_dir is not None else DEFENDER_DIR)
     except TenantRefused as refused:
         sys.exit(f"[run.py] job {ns.job}: this run's tenant cannot be used: {refused}")
 
 
-def _helper_made(ns: argparse.Namespace, accepted: tenancy.Tenant,
-                 launch: Mapping[str, Any]) -> tuple[Run, run_knowledge.RunCopy]:
-    """The run folder and its knowledge copy the job's host helper made at the job's id (#1170 A6):
-    opened, never made. The launch facts must name the same two places."""
-    copy = run_knowledge.RunCopy(accepted.run_knowledge / ns.job)
+def _helper_run(ns: argparse.Namespace, accepted: tenancy.Tenant, launch: Mapping[str, Any]) -> Run:
+    """The run folder the job's host helper made at the job's id (#1170 A6): opened, never made. The
+    launch facts must name the same place."""
     run = _open_run(accepted.runs_repository(), ns.job, what=f"job {ns.job}: its run folder")
-    for what, made, said in (("run folder", run.run_dir, launch.get("run_dir")),
-                             ("knowledge copy", copy.root, launch.get("run_copy"))):
-        if str(made) != str(said):
-            sys.exit(f"[run.py] job {ns.job}: the helper's {what} {said!r} is not this job's {made}")
-    return run, copy
+    _helper_named("run folder", run.run_dir, launch.get("run_dir"), job=ns.job)
+    return run
+
+
+def _helper_copy(ns: argparse.Namespace, accepted: tenancy.Tenant,
+                 launch: Mapping[str, Any]) -> run_knowledge.RunCopy:
+    """The knowledge copy the job's host helper made at the job's id (#1170 A6): the launch facts
+    must name it (its path only; #1471 R13-1.4)."""
+    copy = run_knowledge.RunCopy(accepted.run_knowledge / ns.job)
+    _helper_named("knowledge copy", copy.root, launch.get("run_copy"), job=ns.job)
+    return copy
+
+
+def _helper_named(what: str, made: Path, said: object, *, job: str) -> None:
+    if str(made) != str(said):
+        sys.exit(f"[run.py] job {job}: the helper's {what} {said!r} is not this job's {made}")
+
+
+class _StageExit(SystemExit):
+    """A container set-up refusal (`SystemExit`, its code the text as before) tagged with the stage of
+    `_container_tenant_steps` it came from (#1471 R13-1.4): `container_tenant`, `handover` or `systems`."""
+
+    def __init__(self, stage: str, code: object) -> None:
+        super().__init__(code)
+        self.stage = stage
+
+
+def _staged(stage: str, call: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """`call`, its `SystemExit` refusal tagged with `stage` (`_StageExit`)."""
+    try:
+        return call(*args, **kwargs)
+    except _StageExit:
+        raise
+    except SystemExit as exited:
+        raise _StageExit(stage, exited.code) from None
+
+
+@dataclasses.dataclass(frozen=True)
+class _ContainerTenant:
+    """What a job container's tenant-level steps settled (`_container_tenant_steps`)."""
+
+    accepted: tenancy.Tenant
+    run: Run | None
+    copy: run_knowledge.RunCopy
+    records: TenantRecords
+    verdict: Any
+    systems: RunSystems
+
+    @property
+    def tenant(self) -> RunTenant:
+        return self.verdict.tenant
+
+
+def _container_tenant_steps(  # noqa: PLR0913 — the request, its facts and the steps' seams
+    ns: argparse.Namespace, data_root: DataRoot, launch: Mapping[str, Any], *, roster: Any,
+    defender_dir: Path | None = None, made: Callable[..., Run] | None = None, warn: bool = True,
+) -> _ContainerTenant:
+    """A job container's tenant-level steps (#1471 P-1), one code for an investigation's run half and a
+    readiness check: the tenant by the folder rules (`container_tenant`), the run folder its helper made
+    when the job has one (`made`, the investigation's), the knowledge copy the launch facts name and the
+    records they hand over (`handover`: whether the helper and this container agree), then the tenant
+    over the copy and its one judgement of its systems (`systems`). Each refusal is a `_StageExit`
+    naming its stage. `defender_dir` is the one code tree read (`DEFENDER_DIR`); `warn` logs the ignored
+    grants (a readiness check reports them instead)."""
+    accepted = _staged("container_tenant", _container_tenant, ns, data_root, defender_dir=defender_dir)
+    run = _staged("handover", made, ns, accepted, launch) if made is not None else None
+    copy = _staged("handover", _helper_copy, ns, accepted, launch)
+    current = _staged("handover", _run.handed_records, launch, label=f"job {ns.job}")
+    verdict, systems = _staged("systems", _container_verdict, accepted, copy=copy, records=current, roster=roster,
+                               dispatches_lead_zero=True, defender_dir=defender_dir, warn=warn)
+    return _ContainerTenant(accepted=accepted, run=run, copy=copy, records=current, verdict=verdict, systems=systems)
 
 
 def _container_systems(  # noqa: PLR0913 — the tenant, its copy and records, the roster, the lead flag, the ids
@@ -1488,12 +1568,24 @@ def _container_systems(  # noqa: PLR0913 — the tenant, its copy and records, t
     catalog this container reads, its grants narrowed to them, then judged by the adapters' own
     settings checks. The judgement runs adapter code, so it is the container's, never the
     helper's (#1170 O5, N7)."""
+    verdict, systems = _container_verdict(accepted, copy=copy, records=records, roster=roster,
+                                          dispatches_lead_zero=dispatches_lead_zero, known_ids=known_ids)
+    return verdict.tenant, systems
+
+
+def _container_verdict(  # noqa: PLR0913 — `_container_systems`' inputs, the code tree and the warning
+    accepted: tenancy.Tenant, *, copy: run_knowledge.RunCopy, records: TenantRecords, roster: Any,
+    dispatches_lead_zero: bool, known_ids: Any = (), defender_dir: Path | None = None, warn: bool = True,
+) -> tuple[Any, RunSystems]:
+    """`_container_systems` with the whole grants x records verdict (its ignored grants too, #1471 R4),
+    over the code tree `defender_dir` (`DEFENDER_DIR`); `warn` logs each ignored grant."""
+    tree = defender_dir if defender_dir is not None else DEFENDER_DIR
     tenant = _resolve_run_tenant(accepted, dispatches_lead_zero=dispatches_lead_zero, records=records,
                                  copy=copy)
-    verdict = _tenant_verdict(tenant, roster if roster is not None else _run_roster(DEFENDER_DIR))
-    systems = _judge_start(verdict.tenant, defender_dir=DEFENDER_DIR, roster=verdict.systems.roster,
+    verdict = _tenant_verdict(tenant, roster if roster is not None else _run_roster(tree), warn=warn)
+    systems = _judge_start(verdict.tenant, defender_dir=tree, roster=verdict.systems.roster,
                            known_ids=known_ids, catalog=verdict.systems.catalog.roster)
-    return verdict.tenant, systems
+    return verdict, systems
 
 
 def _set_up_in_container(  # noqa: PLR0913 — the request, its launch facts, the socket and the run half's seams
@@ -1504,11 +1596,9 @@ def _set_up_in_container(  # noqa: PLR0913 — the request, its launch facts, th
     resolved over the copy its helper made, its systems judged once, the preflight, the run its
     helper made opened and announced — or the refusal (`SystemExit` naming it; `_PreflightRefused`).
     Its read pass comes from the helper, asked when a call needs it."""
-    accepted = _container_tenant(ns, data_root)
-    run, copy = _helper_made(ns, accepted, launch)
-    current = _run.handed_records(launch, label=f"job {ns.job}")
-    tenant, systems = _container_systems(
-        accepted, copy=copy, records=current, roster=roster, dispatches_lead_zero=True)
+    steps = _container_tenant_steps(ns, data_root, launch, roster=roster, made=_helper_run)
+    accepted, tenant, systems, run = steps.accepted, steps.tenant, steps.systems, steps.run
+    assert run is not None  # `made` opened it
     passes = _HelperPass(request, run_id=ns.job, proxy_url=str(launch.get("proxy_url") or ""),
                          granted=bool(launch.get("grant")))
     model = driver.resolve_main_model(ns.model)
@@ -1523,12 +1613,15 @@ def _set_up_in_container(  # noqa: PLR0913 — the request, its launch facts, th
                     check_root=tenancy.data_root_for_child(data_root), case=case)
 
 
-def _case_at_start(tenant: RunTenant, systems: RunSystems, *, job: str) -> case_system.CaseTarget | case_system.CaseSettingsFault:
-    """A flagged job's case system, judged once at run start over the roster the run reads (#1366 R16). The judgement
-    loads the adapter, so a crash in it is held as the record step's fault, never the run's: the run goes on, and the
-    receipt names only the crash's type (its text may carry a host path; the log has it)."""
+def _case_at_start(tenant: RunTenant, systems: RunSystems, *, job: str,
+                   defender_dir: Path | None = None) -> case_system.CaseTarget | case_system.CaseSettingsFault:
+    """A flagged job's case system, judged once at run start over the roster the run reads (#1366 R16), and a readiness
+    check's (#1471 W8, C3: the one site). The judgement loads the adapter, so a crash in it is held as the record
+    step's fault, never the run's: the run goes on, and the receipt names only the crash's type (its text may carry a
+    host path; the log has it). `defender_dir`: the code tree the entry reads (`DEFENDER_DIR`)."""
     try:
-        return case_system.case_verdict(tenant, defender_dir=DEFENDER_DIR, roster=systems.roster)
+        return case_system.case_verdict(tenant, roster=systems.roster,
+                                        defender_dir=defender_dir if defender_dir is not None else DEFENDER_DIR)
     except Exception as crashed:  # noqa: BLE001 — the comment's judgement must never stop the run
         _logger.warning("job %s: judging the case system raised: %r", job, crashed)
         return case_system.CaseSettingsFault(
@@ -1628,6 +1721,110 @@ def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection sea
         return refused.rc
 
 
+# -- a readiness check in its job container (#1471 C5, R13-1.3, R13-1.4) ----------------------------
+
+#: The prefix of a container set-up refusal's text: a readiness sentence is the refusal's words without it (P-2).
+_SETUP_PREFIX = re.compile(r"^\[run\.py\] (?:(?:job|readiness) [0-9a-fA-F-]+: )?")
+
+
+def parse_readiness_args(argv: list[str]) -> argparse.Namespace:
+    """The readiness entry's arguments: `--readiness <id> --tenant <T>` and nothing else. The id is the check's (a
+    UUID), held as `job`, the name the container's shared set-up steps read; the data root comes from
+    `DEFENDER_DATA_ROOT`."""
+    p = argparse.ArgumentParser(description="Judge one readiness check in its job container (#1471).")
+    p.add_argument("--readiness", dest="job", required=True, help="the readiness check's id")
+    p.add_argument("--tenant", required=True, help="the tenant the check is of")
+    ns = p.parse_args(argv)
+    try:
+        canonical = str(uuid.UUID(ns.job))
+    except ValueError:
+        canonical = ""
+    if canonical != ns.job:
+        p.error(f"--readiness takes a readiness check's id (a UUID), not {ns.job!r}")
+    return ns
+
+
+def readiness_main(argv: list[str], *, environ: Mapping[str, str] | None = None, roster: Any = None,
+                   defender_dir: Path | None = None) -> int:
+    """The readiness check's container entry (#1471 C5): `run.py --readiness <id> --tenant <T>`, the process its host
+    helper starts, answered `launch` alone. It judges what an investigation's container judges at its start, through
+    the same steps (`_container_tenant_steps`), then the case system (W8) and the census over the published copy
+    (R13-3), and writes the one readiness record, create-only, in the tenant's job lane: `refused` at the container's
+    tenant step or the systems check, `ready` with its warnings, or `failed` (`handover`: the helper and this container
+    do not agree; `census_unavailable`). `environ` is the container's environment (`None`: this process's); without a
+    job socket nothing is done. `defender_dir` is the one code tree read (`DEFENDER_DIR`), its census's and, when
+    `roster` is None, its roster's."""
+    ns = parse_readiness_args(argv)
+    tree = Path(defender_dir) if defender_dir is not None else DEFENDER_DIR
+    request = job_socket.from_environ(os.environ if environ is None else environ)
+    if request is None:
+        print(f"[run.py] readiness {ns.job}: no job socket ({job_socket.SOCKET_ENV} is unset): the readiness entry "
+              "runs only inside its job container, started by its host helper; nothing was done", file=sys.stderr)
+        return 2
+    data_root = _request_data_root(ns)
+    try:
+        lane = job_lane.JobLane.open(data_root, ns.tenant)
+    except job_lane.JobLaneRefused as refused:
+        sys.exit(f"[run.py] readiness {ns.job}: {refused}")
+    with lane:
+        record = _readiness_record(ns, data_root, request, roster=roster, defender_dir=tree)
+        try:
+            lane.write_readiness(ns.job, record)
+        except FileExistsError:
+            _logger.error(f"readiness {ns.job}: a result record is already there; it is kept, and this one "
+                          f"({record.text()}) is not written")
+            return 1
+    return 0
+
+
+def _readiness_record(ns: argparse.Namespace, data_root: DataRoot, request: Callable[..., dict[str, Any]], *,
+                      roster: Any, defender_dir: Path) -> job_lane.ReadinessRecord:
+    """The check's result (R13-1.3, R13-1.4): an exit that judges whether the helper and this container agree is
+    `failed`/`handover`; one that judges the tenant's state is `refused` at its step, our own sentence (P-2)."""
+    from defender.cli._tenant_census import CensusUnavailable
+
+    label = f"readiness {ns.job}"
+    try:
+        launch = _launch_answer(request, kind="readiness", tenant=ns.tenant, job=ns.job, label=label)
+    except SystemExit as unagreed:
+        _logger.warning(f"{label}: {unagreed.code}")
+        return job_lane.ReadinessRecord.failed("handover")
+    try:
+        _launch_tenant_active(launch, label=label)
+        steps = _container_tenant_steps(ns, data_root, launch, roster=roster, defender_dir=defender_dir, warn=False)
+    except SystemExit as exited:
+        _logger.warning(f"{label}: {exited.code}")
+        stage = getattr(exited, "stage", "container_tenant")
+        if stage == "handover":
+            return job_lane.ReadinessRecord.failed("handover")
+        return job_lane.ReadinessRecord.refused(stage, _SETUP_PREFIX.sub("", str(exited.code)).strip())
+    try:
+        warnings = _readiness_warnings(steps, job=ns.job, defender_dir=defender_dir)
+    except CensusUnavailable as untaken:
+        _logger.error(f"{label}: the census could not be taken: {untaken}")
+        return job_lane.ReadinessRecord.failed("census_unavailable")
+    return job_lane.ReadinessRecord.ready(job_lane.ReadinessWarning(kind, sentence) for kind, sentence in warnings)
+
+
+def _readiness_warnings(steps: _ContainerTenant, *, job: str, defender_dir: Path) -> list[tuple[str, str]]:
+    """A launchable tenant's warnings (R4), as `(kind, sentence)`: each system the systems check found down with its
+    cause, each grant the verdict ignored with its own reason (C9), the case verdict's fault when the tenant has a case
+    record (W8, through the flagged launch's one site), then the census over the published copy (R13-3)."""
+    from defender.cli._tenant_records_check import readiness_census
+
+    found = [("system_down", f"system {name} is down: {cause.reason}")
+             for name, cause in sorted(steps.systems.down.items())]
+    found += [("grant_ignored", f"the grants on system {system} are ignored: {why}")
+              for system, why in sorted(steps.verdict.ignored.items())]
+    if steps.tenant.case_record is not None:
+        case = _case_at_start(steps.tenant, steps.systems, job=job, defender_dir=defender_dir)
+        if isinstance(case, case_system.CaseSettingsFault):
+            found.append(("case_system", f"the case system cannot take a flagged investigation's comment: {case}"))
+    found += readiness_census(steps.copy.agent, steps.copy.settings, systems=steps.records.systems,
+                              defender_dir=defender_dir)
+    return found
+
+
 def serve_job(  # noqa: PLR0913 — the entries' inputs plus their injection seams
     argv: list[str],
     *,
@@ -1648,6 +1845,8 @@ def serve_job(  # noqa: PLR0913 — the entries' inputs plus their injection sea
     _interrupt_on_sigterm()
     job_socket.sigterm_on_stdin_eof()
     try:
+        if any(a == "--readiness" or a.startswith("--readiness=") for a in argv):
+            return readiness_main(argv, environ=os.environ, roster=roster)
         if any(a == "--job" or a.startswith("--job=") for a in argv):
             return job_main(argv, environ=os.environ, lifecycle=lifecycle, visualize=visualize,
                             preflight=preflight, roster=roster)

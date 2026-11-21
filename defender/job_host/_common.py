@@ -13,16 +13,18 @@ from __future__ import annotations
 import shutil
 
 import contextlib
+import dataclasses
 import logging
 import math
 import secrets
 import signal
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from defender.job_socket import Refused
 
-from ._session import KINDS, Box, PassMint, Registry, Session, SetupRefused, Signing, StartFailed
+from ._session import KINDS, Box, PassMint, Registry, Session, SetupRefused, Signing, StartFailed, setup_step
 
 if TYPE_CHECKING:
     from defender.records import Run
@@ -32,6 +34,28 @@ _logger = logging.getLogger(__name__)
 #: A command's timeout when the job names none: the bash tool's own.
 DEFAULT_EXEC_TIMEOUT = 120.0
 DEFAULT_CWD = "/runs/current"
+#: The job kinds a box is started for (`box.*`): a host request starts none (#1471 C4).
+BOX_KINDS = ("investigation", "learning", "post-step")
+#: The runs-folder check's name in `StepRefused`: P-1's step 5, machinery and never a readiness refusal step
+#: (#1471 R13-1.1).
+RUNS_FOLDER = "runs_folder"
+
+
+class StepRefused(SetupRefused):
+    """A tenant-level launch step's refusal (#1471 P-1): the job's `setup: refused`, its message the cause as before,
+    tagged with the step (`job_lane.READINESS_STEPS`, or `RUNS_FOLDER`) it is the refusal of, and, for the publish
+    step, the report it was refused on (`run_common.KnowledgeExit.report`)."""
+
+    def __init__(self, step: str, text: str, *, report: Any = None) -> None:
+        super().__init__(text)
+        self.step = step
+        self.report = report
+
+
+class HelperFault(Exception):  # noqa: N818 — named for what it reports
+    """A fault of the helper's own machinery that no kind's ending records (#1471 R13-1.1, .2: a runs folder gone after
+    the worker's pre-open, a host-request knowledge record that cannot be written): the helper exits non-zero, and
+    the worker reads that exit as the helper's own failure."""
 
 
 def _answer_launch(session: Session, _fields: dict[str, Any]) -> dict[str, Any]:
@@ -201,20 +225,21 @@ def mirror_run_page(run: Run, tenant: Any) -> None:
         mirror_page(page, run.run_dir.name, tenant)
 
 
-def settle_knowledge(session: Session, accepted: Any, records: Any) -> Any:
-    """The export the job reads (O5): the launch-time publish run under this helper's hold (C19), then the export it
-    settled on, by run setup's shared step (`run_common.resolve_knowledge`, the operator command's too, A6). Told to
-    stop while the publish ran, the helper starts no container (A1); any other refusal is `setup: refused`."""
+def settle_knowledge(session: Session, accepted: Any, records: Any, *, trigger: str) -> Any:
+    """The export the job reads (O5): the launch-time publish run under this helper's hold (C19), told who asked for it
+    (`trigger`, #1471), then the export it settled on, by run setup's shared step (`run_common.resolve_knowledge`, the
+    operator command's too, A6). Told to stop while the publish ran, the helper starts no container (A1); any other
+    refusal is `setup: refused` (`StepRefused` at `publish`, holding the report it was refused on)."""
     from defender import run_common
 
     try:
         return run_common.resolve_knowledge(accepted, pin=None, publish=session.publish, data_root=session.root,
-                                            records=records)
+                                            records=records, trigger=trigger)
     except SystemExit as refused:
         if refused.code == 128 + signal.SIGTERM:
             session.signalled.set()
             raise StartFailed("the helper was told to stop before its container started; none was started") from None
-        raise SetupRefused(str(refused.code)) from None
+        raise StepRefused("publish", str(refused.code), report=getattr(refused, "report", None)) from None
 
 
 def grant(run_tenant: Any) -> tuple[str, ...]:
@@ -227,14 +252,15 @@ def grant(run_tenant: Any) -> tuple[str, ...]:
 
 def set_up_signing(session: Session, accepted: Any, records: Any) -> Signing:
     """The job's signer and the proxy's address (O5): a proxy address and a sign login for the tenant's live
-    generation, or the job is refused. Nothing is signed here, so a sealed signer is not asked yet."""
+    generation, or the job is refused (`StepRefused` at `signing`). Nothing is signed here, so a sealed signer is not
+    asked yet."""
     from defender.credential_proxy import signing_access
     from defender.kit.faults import ConfigFault
 
     try:
         signer, address = signing_access(accepted.id, directory=records, signer=session.signer)
     except ConfigFault as refused:
-        raise SetupRefused(f"the job's passes cannot be signed: {refused.detail}") from None
+        raise StepRefused("signing", f"the job's passes cannot be signed: {refused.detail}") from None
     return Signing(signer, address, str(accepted.id))
 
 
@@ -245,16 +271,123 @@ def first_pass(session: Session, accepted: Any, records: Any, reads: tuple[str, 
 
 
 def read_passes(session: Session, signing: Signing, reads: tuple[str, ...]) -> PassMint | None:
-    """The read-pass mint over a non-empty grant on `signing`, its first pass signed now (O11); None for an empty
-    grant."""
+    """The read-pass mint over a non-empty grant on `signing`, its first pass signed now under the job's id (O11;
+    #1471 R12-1: a readiness check's id); None for an empty grant. A first pass that cannot be signed is `StepRefused`
+    at `first_pass`."""
     if not reads:
         return None
     mint = PassMint(signing, reads)
     try:
         mint.mint(str(session.job_id))
     except Exception as failed:  # noqa: BLE001 — a first pass that cannot be signed refuses the job (O11)
-        raise SetupRefused(f"the job's first pass could not be signed: {type(failed).__name__}: {failed}") from None
+        raise StepRefused("first_pass",
+                          f"the job's first pass could not be signed: {type(failed).__name__}: {failed}") from None
     return mint
+
+
+@dataclasses.dataclass
+class LaunchFacts:
+    """What the tenant-level launch steps settled (`tenant_launch_steps`, #1471 P-1), each field set as it becomes
+    true, as `run._JobFacts` holds the job-end facts: a caller reads how far the launch went after a refusal (a
+    readiness check writes its knowledge record when `source` is set) and everything it settled once it is done.
+    `cleanup` removes what the steps made (the run copy); it is the caller's to close once the steps returned, and
+    is closed by the steps themselves when they refuse."""
+
+    accepted: Any = None
+    #: The tenant records the tenant was admitted through.
+    records: Any = None
+    #: The tenant's current records (`TenantRecords`), read once.
+    current: Any = None
+    mapping: Any = None
+    source: Any = None
+    #: The checked launch an investigation hands in (`launch=` of `tenant_launch_steps`), and the run its runs
+    #: repository builds for it at the runs-folder step.
+    launched: Any = None
+    run: Any = None
+    copy: Any = None
+    run_tenant: Any = None
+    roster: Any = None
+    verdict: Any = None
+    reads: tuple[str, ...] = ()
+    signing: Signing | None = None
+    passes: PassMint | None = None
+    cleanup: contextlib.ExitStack = dataclasses.field(default_factory=contextlib.ExitStack)
+
+
+def _at(step: str, call: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """`setup_step` (a `run_common` step's `SystemExit` is the job's refusal, its message the cause) tagged with the
+    launch step it is the refusal of."""
+    try:
+        return setup_step(call, *args, **kwargs)
+    except SetupRefused as refused:
+        raise StepRefused(step, str(refused)) from None
+
+
+def tenant_launch_steps(session: Session, hold: contextlib.ExitStack, *, copy_id: str, facts: LaunchFacts,
+                        trigger: str, launch: Callable[[], Any] | None = None) -> LaunchFacts:
+    """The launch's tenant-level steps (#1471 P-1, C2, R12-1), in order and as one code for an investigation and a
+    readiness check: the tenant's lock and admission (entered on `hold`), its current records, its alert mapping, the
+    launch-time publish (`trigger`: who asked), the runs-folder check, the run copy (named `copy_id`), the tenant over
+    the copy, the roster, the grants x records verdict, the grant, the signing set-up (every job, W-D8) and the first
+    pass (a non-empty grant only, signed under the job's id). An investigation's launch check, read after the
+    admission as it always was, is `launch` (`job_lane.JobLane.check_launch` under its own refusal): its run is then
+    built at the runs-folder step (`RunsRepository.launched`, which asks the same check); with none the runs-folder
+    check is asked alone. Each refusal is `StepRefused` naming its step, the copy removed; `facts` holds what was
+    settled, and is returned."""
+    from defender import run_common
+    from defender.records.formats import TenantRefused
+    from defender.systems.run_tenant import host_tenant
+
+    try:
+        admitted = host_tenant(session.root, session.tenant_id, directory=session.directory,
+                               defender_dir=session.defender_dir, clone_tree=False)
+    except TenantRefused as refused:
+        raise StepRefused("tenant", f"this job's tenant cannot be used: {refused}") from None
+    hold.enter_context(admitted)
+    facts.accepted, facts.records = admitted.tenant, admitted.directory
+    session.tenant_accepted(facts.accepted)
+    if launch is not None:
+        facts.launched = launch()
+    # The tenant's current records, read once here (#1366 O6): a tenant whose records are not known (#1470 O8) is
+    # refused before its alert mapping is read. The container reads no database; it is handed these in the launch facts.
+    facts.current = _at("records", run_common.read_records, facts.records, facts.accepted.id)
+    facts.mapping = _at("alert_mapping", run_common.read_alert_mapping, facts.records, facts.accepted.id)
+    facts.source = settle_knowledge(session, facts.accepted, facts.records, trigger=trigger)
+    repository = facts.accepted.runs_repository()
+    try:
+        if facts.launched is not None:
+            facts.run = repository.launched(facts.launched)
+        else:
+            repository.require_runs_folder()
+    except TenantRefused as refused:
+        raise StepRefused(RUNS_FOLDER, str(refused)) from None
+    try:
+        _copied_steps(session, facts, copy_id)
+    except BaseException:
+        facts.cleanup.close()
+        raise
+    return facts
+
+
+def _copied_steps(session: Session, facts: LaunchFacts, copy_id: str) -> None:
+    """`tenant_launch_steps` from the run copy on (P-1 steps 6-12), the copy's removal on `facts.cleanup`."""
+    from defender import run_common
+    from defender.records.formats import TenantRefused
+
+    facts.copy = _at("knowledge_copy", run_common.copy_knowledge, facts.accepted, facts.source, copy_id)
+    facts.cleanup.callback(facts.copy.remove)
+    try:
+        facts.run_tenant = _at("run_tenant", run_common.run_tenant_or_exit, facts.accepted, dispatches_lead_zero=True,
+                               records=facts.current, copy=facts.copy)
+    except TenantRefused as refused:
+        raise StepRefused("run_tenant", f"this job's tenant cannot be used: {refused}") from None
+    # The tenant's systems over the catalog (read cold: no adapter code runs here, N7), its grants narrowed to the
+    # systems it has enabled records of (#1366 R12), so the pass names none it has not; the container warns.
+    facts.roster = _at("roster", run_common.run_roster, session.defender_dir)
+    facts.verdict = _at("tenant_verdict", run_common.tenant_verdict, facts.run_tenant, facts.roster, warn=False)
+    facts.reads = grant(facts.verdict.tenant)
+    facts.signing = set_up_signing(session, facts.accepted, facts.records)  # every job, whatever its grant (W-D8)
+    facts.passes = read_passes(session, facts.signing, facts.reads)
 
 
 def answer_pass(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
@@ -270,11 +403,13 @@ def answer_pass(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
 
 
 def register_common(registry: Registry) -> None:
+    """`launch` for every kind; the `box.*` requests for the kinds that start boxes (`BOX_KINDS`): a host request is
+    answered no box request (#1471 C4)."""
     registry.add("launch", kinds=KINDS, handler=_answer_launch, after_signal=True)
-    registry.add("box.start", kinds=KINDS, handler=lambda s, f: _box_start(s, f, registry=registry),
+    registry.add("box.start", kinds=BOX_KINDS, handler=lambda s, f: _box_start(s, f, registry=registry),
                  required=("kind", "id"))
-    registry.add("box.exec", kinds=KINDS, handler=_box_exec, required=("handle", "frame"),
+    registry.add("box.exec", kinds=BOX_KINDS, handler=_box_exec, required=("handle", "frame"),
                  optional=("cwd", "timeout"), after_signal=True)
-    registry.add("box.window", kinds=KINDS, handler=_box_window, required=("handle",))
-    registry.add("box.halt", kinds=KINDS, handler=_box_halt, required=("handle",), after_signal=True)
-    registry.add("box.stop", kinds=KINDS, handler=_box_stop, required=("handle",), after_signal=True)
+    registry.add("box.window", kinds=BOX_KINDS, handler=_box_window, required=("handle",))
+    registry.add("box.halt", kinds=BOX_KINDS, handler=_box_halt, required=("handle",), after_signal=True)
+    registry.add("box.stop", kinds=BOX_KINDS, handler=_box_stop, required=("handle",), after_signal=True)
