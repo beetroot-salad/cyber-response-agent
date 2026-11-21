@@ -227,17 +227,26 @@ def test_r4_every_retired_leftover_file_is_reported(tmp_path, monkeypatch, migra
 def test_r13_3_the_census_reads_the_published_copy_not_the_host_clone(tmp_path, monkeypatch, migrated_database):
     """The host clone and the published copy diverge in a census input: a retired file only the copy holds is warned, one
     only the clone holds is not (R13-3 "over the published copy"; R4: the copy trailing the clone is no longer reported).
-    Control: each warns when it is in the copy (`test_r4_every_retired_leftover_file_is_reported`). (repair 5, G3)"""
+    Both census halves diverge: `settings/` (the retired files) and `agent/` (a tacit registry broken in the clone only).
+    Controls: each warns when it is in the copy (`test_r4_every_retired_leftover_file_is_reported`,
+    `test_r4_r13_3_each_census_gap_of_the_published_copy_is_a_warning_of_its_kind_and_the_tenant_reads_ready`).
+    (repair 5 and 6, G3)"""
     files = {"settings/case-record.yaml": "system: ticket\n"}
     with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL, files=files) as scene:
         clone_settings = Path(scene.t.clone) / "settings"
         (clone_settings / "case-record.yaml").unlink()  # the copy holds it, the clone no longer does
         (clone_settings / "lead-zero.yaml").write_text("system: elastic\n", encoding="utf-8")  # the clone only
+        registry = Path(scene.t.clone) / "agent" / "skills" / "tacit-knowledge" / "registry.yaml"
+        assert registry.is_file(), "premise: the clone holds the tacit registry the copy holds"
+        registry.write_text(REGISTRY_BROKEN, encoding="utf-8")  # the clone only: the copy's stays sound
         ran = readiness(scene)
-        retired = _of(_warnings(ran), "retired_file")
+        warnings = _warnings(ran)
+        retired = _of(warnings, "retired_file")
         assert ran.facts is not None, "premise: the container was handed its facts"
         assert "case-record.yaml" in retired, f"the copy's retired file is not warned: {ran.said()}"
         assert "lead-zero.yaml" not in retired, f"the host clone was censused, not the published copy: {ran.said()}"
+        assert not [w for w in warnings if w["kind"].startswith("tacit_")], (
+            f"the host clone's agent half was censused, not the published copy's: {ran.said()}")
         assert Path(ran.facts["run_copy"]) != Path(scene.t.clone), "premise: the copy is not the clone"
 
 

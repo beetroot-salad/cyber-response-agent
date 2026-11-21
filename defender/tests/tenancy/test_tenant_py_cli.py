@@ -162,17 +162,8 @@ def test_a_venv_without_pyvenv_cfg_is_exec_d_once_not_forever(tmp_path: Path) ->
         raise AssertionError("tenant.py re-exec'd itself in a loop") from None
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason='root reads a mode-000 directory')
-def test_check_over_an_unreadable_tenant_folder_refuses(tmp_path: Path) -> None:
-    """`<root>/<T>` at mode 000: `check <T>` (the tenant active in the directory) refuses naming the data root."""
-    root = tmp_path / "data"
-    H.place_knowledge(root)
-    folder = H.tenant_folder(root)
-    folder.chmod(0)
-    try:
-        H.assert_refused(H.check(tenant_py, root, H.TID, seed=[H.TID]), "[tenant.py]", str(root))
-    finally:
-        folder.chmod(0o755)
+# Retired (#1471 B3, stale): `test_check_over_an_unreadable_tenant_folder_refuses` pinned `check <T>` over the data root,
+# which retired with `check <id>`; `check --folder` takes no data root.
 
 
 # Retired (#1366 O9/DC8, P2): `test_an_unreadable_case_record_is_named_by_check`. The case-record file is retired, never read:
