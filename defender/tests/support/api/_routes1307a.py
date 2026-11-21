@@ -76,3 +76,16 @@ def authenticating_routes() -> list[tuple[str, str]]:
 
 def route_id(route: tuple[str, str]) -> str:
     return f"{route[0]} {route[1]}"
+
+
+#: #1471 R1/A1: a host-request start answers 201 when it queues and 200 when it replays the one already queued, so a test
+#: that compares two answers of one route primes such a start first; every later call then replays.
+REPLAYING_STARTS = frozenset({("POST", API + "/tenants/{tenant_id}/readiness"),
+                              ("POST", API + "/tenants/{tenant_id}/systems/{system_id}/adoptions")})
+
+
+def prime_start(client: Any, route: tuple[str, str]) -> None:
+    """Send `route` once as `client` when it is a replaying start (else nothing), so its answer is the same each time."""
+    if route in REPLAYING_STARTS:
+        got = client.request(route[0], concrete(route[1]))
+        assert got.status_code not in (401, 403, 500), (route, got.status_code, got.text)

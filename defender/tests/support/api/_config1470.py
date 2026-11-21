@@ -62,6 +62,10 @@ CONFIG_ROUTES = frozenset({
     ("PUT", "/api/tenants/{}/systems/{}/credentials"), ("POST", "/api/tenants/{}/systems/{}/check"),
     ("GET", "/api/tenants/{}/case-record"), ("PUT", "/api/tenants/{}/case-record"), ("DELETE", "/api/tenants/{}/case-record"),
 })
+#: #1471 A1 (stale, updated): the adoption starts sit under `/systems/{}` but are host requests (their own tests,
+#: `test_1471_host_request_routes`), not #1470 config routes.
+NOT_CONFIG_ROUTES = frozenset({("POST", "/api/tenants/{}/systems/{}/adoptions"),
+                               ("POST", "/api/admin/tenants/{}/systems/{}/adoptions")})
 #: The permission each declares (config.read for reads, config.write for the rest, the check included).
 CONFIG_PERMISSION = {route: "config.read" if route[0] == "GET" else "config.write" for route in CONFIG_ROUTES}
 #: A body in the new shape for each route that takes one (valid shape; its content need not be accepted).
@@ -263,7 +267,8 @@ def served_config_routes(app: Any) -> set[tuple[str, str]]:
 
     found = {(method, normal(route.path)) for route in _served(app.routes) for method in route.methods
              if method not in {"HEAD", "OPTIONS"}}
-    return {r for r in found if r in CONFIG_ROUTES or any(w in r[1] for w in ("/systems", "/adapters", "/case-record"))}
+    return {r for r in found if r in CONFIG_ROUTES or any(w in r[1] for w in ("/systems", "/adapters", "/case-record"))} - (
+        NOT_CONFIG_ROUTES)
 
 
 async def config_call(served: Configured, route: tuple[str, str], headers: Mapping[str, str], *, tenant: str = A,

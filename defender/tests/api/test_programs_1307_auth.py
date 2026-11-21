@@ -51,6 +51,7 @@ from defender.tests.support.api._routes1307a import (  # noqa: E402
     app_routes,
     authenticating_routes,
     concrete,
+    prime_start,
     route_id,
 )
 from defender.tests.support.api._server1083 import (  # noqa: E402
@@ -191,6 +192,7 @@ def test_a_cookie_beside_an_authorization_header_changes_nothing_on_every_authen
     header of another scheme is not ours: beside a session it answers as the session alone (O1, P-F as amended in the
     #1450 reviews: a load balancer's cookie must not lock a program out, nor a proxy's Basic login a person)."""
     s = soar()
+    prime_start(s.ann, route)  # #1471: a start's 201 then 200 is not the cookie's doing (stale, updated)
     credential = issue_oauth(s.ann, T1, s.program_id)
     token = s.world.realm.issue(credential)
     for value in (f"Bearer {s.key}", f"Bearer {token}"):
@@ -392,7 +394,7 @@ def test_platform_routes_refuse_a_program_and_a_person_without_the_flag() -> Non
     key = issue_key(me, LAB, str(create_program(me, LAB)["id"]))[1]
     ops = world.sign_in_admin()
     admin_routes = [r for r in app_routes() if r[1].startswith(API + "/admin")]
-    assert len(admin_routes) == 7
+    assert len(admin_routes) == 11  # #1471 C8: the 4 admin readiness and adoption routes (stale, updated)
     for route in admin_routes:
         path = concrete(route[1].replace("{tenant_id}", LAB))
         assert world.bearer(key).request(route[0], path).status_code == 403, route
