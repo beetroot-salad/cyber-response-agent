@@ -1,5 +1,7 @@
 {
   "realm": "defender",
+  "displayName": "Sluice",
+  "displayNameHtml": "Sluice",
   "loginTheme": "defender",
   "enabled": true,
   "sslRequired": "external",
@@ -45,7 +47,7 @@
   "clients": [
     {
       "clientId": "defender-api",
-      "name": "Defender API (sign-in)",
+      "name": "Sluice",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": false,

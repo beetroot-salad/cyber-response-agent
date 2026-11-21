@@ -41,6 +41,19 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade: the sign-in screens' name and wording
+
+The sign-in screens name the product and say it is invite-only. On an existing sign-in provider (the dev realm file is
+imported on first start only):
+
+1. In the sign-in realm, set the display name and its HTML form to `Sluice` (Realm settings > General), and the sign-in
+   client's name to `Sluice`. Until then the form is titled with the realm's id, and the client's name is what a person
+   reads on the provider's own pages.
+2. Copy the login theme folder, `defender/frontend/keycloak-theme/`, over the deployed one (the folder the realm's <!-- lint-shippable: ok — the folder's own path -->
+   `loginTheme` names): it now holds `login/login.ftl` (the form with the invite-only line, and without the "Please
+   re-authenticate" banner the API's `prompt=login` makes the provider show on a later sign-in) and `login/messages/`.
+   Restart the provider if it caches themes.
+
 ## Upgrade from before #1620
 
 No migration. The API now refuses to start when the sign-in realm does not accept its sign-in client and redirect
