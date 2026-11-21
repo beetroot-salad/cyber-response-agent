@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re
 
 import pytest
 
@@ -109,6 +110,18 @@ async def test_a_person_with_a_large_forgejo_id_loses_their_row_when_suspended(p
     assert people.sessions.keys() == _k("near")
 
 
+_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}(?::?\d{2})?)?")
+
+
+def _logged_instants(message: str) -> list[dt.datetime]:
+    """Every timestamp a log line holds, as an instant (a stamp with no zone is read as UTC)."""
+    found = []
+    for text in _TIMESTAMP.findall(message):
+        at = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        found.append(at if at.tzinfo else at.replace(tzinfo=dt.timezone.utc))
+    return found
+
+
 async def test_an_unreadable_stamped_row_is_deleted_and_logged_without_its_key(people: People, caplog):
     """S2-20 / OD-11: a stamped row the prefilter selects but the reader refuses goes in a run with a session step; one
     log line per row names the user and the row's `signed_in_at`, never its key or data."""
@@ -124,8 +137,7 @@ async def test_an_unreadable_stamped_row_is_deleted_and_logged_without_its_key(p
 
     assert people.sessions.keys() == _k("weird-un", "unstamped", "gina", "gina-un", "anon")
     messages = [r.getMessage() for r in records(caplog)]
-    stamps = {weird_at.isoformat(), str(weird_at), weird_at.strftime("%Y-%m-%dT%H:%M:%S"), weird_at.strftime("%Y-%m-%d %H:%M:%S")}
-    row_lines = [m for m in messages if str(erin.id) in m and any(stamp in m for stamp in stamps)]
+    row_lines = [m for m in messages if str(erin.id) in m and any(abs(at - weird_at) < dt.timedelta(seconds=1) for at in _logged_instants(m))]
     assert len(row_lines) == 1, f"one line per deleted row naming the user and its signed_in_at, got {row_lines}"
     for message in messages:
         assert session_key("weird") not in message

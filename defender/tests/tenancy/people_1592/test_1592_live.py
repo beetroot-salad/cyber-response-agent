@@ -190,13 +190,39 @@ def _seed_content(live: Live1592, tenant: str, marker: str) -> None:
     live.put_file(path, "b.md", marker.encode(), new_branch="feature")
 
 
-SIGN_IN_PAGES = ("/user/login",)  # the sign-in page itself is a page a person with no session is meant to get
-#: Design line "a callback without the OAuth state answers 500" (Sessions): not one of F10's three outcomes (design gap, reported).
 CALLBACK = "/user/oauth2/product/callback"
+PUBLIC_ASSETS = ("/assets/", "/avatars/", "/favicon.ico")
+SIGN_IN_TARGETS = ("/user/login", "/user/oauth2/", "/realms/")
+
+
+def no_session_answer_ok(method: str, path: str, status: int, where: str) -> bool:
+    """F10's no-session set for one allowlisted path: a 4xx refusal anywhere; a redirect only to the sign-in page, the
+    sign-in start or Keycloak; a 200 only for the sign-in page or a public asset; a 500 only for the callback."""
+    if 400 <= status < 500:
+        return True
+    if 300 <= status < 400:
+        return urllib.parse.urlsplit(where).path.startswith(SIGN_IN_TARGETS)
+    if status == 200:
+        return method == "GET" and (path == "/user/login" or path.startswith(PUBLIC_ASSETS))
+    return status == 500 and path == CALLBACK
+
+
+def test_s4_15_classifier_accepts_the_ruled_answers_and_rejects_the_others():
+    """S4-15 / F10: the no-session classifier takes exactly the answers the design names."""
+    ok = [("GET", "/x", 401, ""), ("POST", "/x", 403, ""), ("GET", "/x", 404, ""), ("GET", "/", 303, "/user/login"),
+          ("GET", "/", 302, "http://kc/realms/r/auth"), ("GET", "/x", 307, "/user/oauth2/product?a=1"),
+          ("GET", "/user/login", 200, ""), ("GET", "/assets/js/index.js", 200, ""), ("GET", CALLBACK, 500, ""),
+          ("GET", "/avatars/ab", 303, "/user/login")]
+    bad = [("GET", "/x", 200, ""), ("GET", "/user/login/x", 200, ""), ("POST", "/user/logout", 200, ""),
+           ("GET", "/", 302, "/elsewhere"), ("GET", "/x", 302, ""), ("POST", "/user/logout", 302, "https://evil/other"),
+           ("GET", "/x", 500, ""), ("POST", CALLBACK, 200, ""), ("GET", "/x", 502, ""), ("GET", "/assets/a", 301, "/assets/b"),
+           ("GET", CALLBACK, 302, "/")]
+    assert [c for c in ok if not no_session_answer_ok(*c)] == []
+    assert [c for c in bad if no_session_answer_ok(*c)] == []
 
 
 async def test_s4_15_every_allowlisted_path_asked_with_no_session_never_shows_tenant_content(rig: Rig, live: Live1592):
-    """S4-15 / OD-1a: each entry of the allowlist, anonymously, answers a sign-in redirect, a public asset or 404, with no tenant content."""
+    """S4-15 / OD-1a, F10: each allowlist entry, anonymously, answers only what the design names, with no tenant content."""
     tenant = await rig.tenant()
     person = await rig.person(tenant)
     marker = f"TENANT-CONTENT-{uuid.uuid4().hex}"
@@ -210,16 +236,7 @@ async def test_s4_15_every_allowlisted_path_asked_with_no_session_never_shows_te
         response = anonymous.request(method, path)
         status, where = response.status_code, response.headers.get("location", "")
         assert marker not in response.text, (method, path)
-        if method == "POST":  # an anonymous POST carries no CSRF token: refused, never a success (design gap: F10 names GET's outcomes)
-            ok = status >= 300
-        elif path == CALLBACK:
-            ok = status in (302, 303, 307, 404, 500)
-        elif path in SIGN_IN_PAGES:
-            ok = status == 200 or (status in (302, 303, 307) and ("/user/oauth2/" in where or "/realms/" in where))
-        elif path.startswith(("/assets/", "/avatars/", "/favicon.ico")):
-            ok = status in (200, 301, 302, 303, 307, 404)  # a public asset, its default, or no such file
-        else:
-            ok = status == 404 or (status in (301, 302, 303, 307) and any(k in where for k in ("/user/login", "/user/oauth2/", "/realms/")))
+        ok = no_session_answer_ok(method, path, status, where)
         if not ok:
             wrong.append((method, path, status, where))
     assert wrong == []
@@ -257,17 +274,19 @@ async def test_s4_2_the_cookie_drop_defeats_the_signed_in_link(rig: Rig, live: L
         if cookie.domain.split(":")[0] != visit_m.host():
             visit_a.client.cookies.jar.set_cookie(cookie)
     holding_alice = {k for k, (d, _a) in rig.session_rows().items() if holds(d, alice_uid)}
-    attack = live.browse(path, client=visit_a.client)
+    attack = live.browse(path, client=visit_a.client, username=mallory_name)  # Mallory's password, typed in Alice's browser
     assert not reached_link_page(attack), (path, attack.trail)
     rows = rig.session_rows()
     # Alice's session was never part of the start: her row is where it was, and nothing new signed in as her.
     assert {k for k, (d, _a) in rows.items() if holds(d, alice_uid)} == holding_alice, (path, attack.trail)
     assert alice_keys <= set(rows)
     assert live.account(alice.login)["login_name"] == login_before and live.accounts() == accounts_before
-    if mallory_uid is not None and path == LINK_PATHS[0]:  # the attack visit's own session is Mallory's, never Alice's
+    if attack.trail[0][2] == 404:  # a variant the edge (or Forgejo) refuses at the start goes no further
+        assert len(attack.trail) == 1, attack.trail
+    elif mallory_uid is not None:  # forwarded: the attack's session is Mallory's, never Alice's
         final = session_keys(rig, attack) - alice_keys
         assert final and all(holds(rows[k][0], mallory_uid) and not holds(rows[k][0], alice_uid) for k in final), attack.trail
-    if mallory_uid is None and path == LINK_PATHS[0]:  # the unknown identity arrived with no session of Alice's: the link page, refused
+    else:  # forwarded, the unknown identity arrived with no session of Alice's: the link page, refused
         assert any(urllib.parse.urlsplit(u).path.startswith("/user/link_account") and s == 404 for _m, u, s in attack.trail), attack.trail
     fresh = live.browse("/user/oauth2/product", username=mallory_name)  # Mallory alone, later: she is not Alice
     assert not {k for k in session_keys(rig, fresh) if holds(rig.session_rows()[k][0], alice_uid)}, fresh.trail
@@ -411,6 +430,8 @@ async def test_s4_8_a_row_revived_by_requests_in_flight_is_gone_by_the_next_cap_
     assert await rig.worker.cap() is not None, "the cap job failed"
     rows = rig.session_rows()
     assert revived_key not in rows, "the cap run left a revived (unstamped) row holding a uid"
+    assert not [k for k, (d, at) in rows.items() if at is None and oracle.UID_ENTRY in d], \
+        "an unstamped row holding UID_ENTRY (Forgejo's own revival included) survived the cap run"
     assert anonymous_key in rows, "control: an anonymous row (no uid) is left to Forgejo's own expiry"
 
 
