@@ -485,7 +485,7 @@ class LearningStore(FeedbackVerbs):
     async def add_pitfall(self, tenant: str, row: Mapping[str, Any]) -> bool:
         """Queue one pitfall occurrence; a keyless row is keyed by its digest. The same pitfall again is ignored; other
         content at a held pitfall id is refused (`ItemRefused`, #1565): its id is minted from its run's recorded query,
-        so it is a collision, not another occurrence."""
+        so it is a collision, not another occurrence. A held id the store then shows no item for raises `ItemNotHeld`."""
         refuse_unholdable(row)
         key = str(row["pitfall_id"]) if row.get("pitfall_id") else digest(dict(row))
         mistake = mistake_key_of(row, key)
@@ -497,7 +497,7 @@ class LearningStore(FeedbackVerbs):
     async def enqueue_request(self, tenant: str, run_id: str, case_id: str, spec: Mapping[str, Any]) -> bool:
         """File a curation request for `case_id`; the later run wins: an older waiting request is skipped, superseded.
         A run's request filed again as it was is a no-op; with other content it is refused (`ItemRefused`, #1565), and
-        supersedes nothing."""
+        supersedes nothing; a held run the store then shows no request for raises `ItemNotHeld`."""
         refuse_unholdable([run_id, case_id, spec])
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)

@@ -211,6 +211,8 @@ async def test_1565_an_id_the_insert_skipped_but_the_store_does_not_hold_is_retr
             await refuse_colliding(s, BLUE, "finding", [("f1", finding("f1"))])  # control: a held repeat passes
             with pytest.raises(ItemNotHeld, match="ghost"):
                 await refuse_colliding(s, BLUE, "finding", [("f1", finding("f1")), ("ghost", finding("ghost"))])
+            with pytest.raises(store_mod().ItemRefused, match="'f1'"):  # a clash outranks a missing key before it
+                await refuse_colliding(s, BLUE, "finding", [("ghost", finding("ghost")), ("f1", finding("f2"))])
     with pytest.raises(FindingsNotStored):
         _refusal_of(ItemNotHeld("a finding with id 'ghost' was not added"))
 
@@ -261,12 +263,15 @@ async def test_1565_a_curation_request_with_other_content_for_a_filed_run_is_ref
     filed one unchanged, and no other request of the case is superseded by it. (#1565)"""
     spec = {"case_id": "case-9", "tenant_id": str(BLUE), "run_id": "run-9"}
     async with learning_store(dsn) as store:
+        assert await store.enqueue_request(BLUE, "run-8", "case-10", {**spec, "run_id": "run-8"}) is True
         assert await store.enqueue_request(BLUE, "run-9", "case-9", spec) is True
         assert await store.enqueue_request(BLUE, "run-9", "case-9", dict(spec)) is False
         with pytest.raises(store_mod().ItemRefused, match="'run-9'"):
             await store.enqueue_request(BLUE, "run-9", "case-9", {**spec, "case_id": "case-10"})
         after = await items(store)
-    assert {k: (i.payload, i.status) for k, i in after.items()} == {("curation_request", "run-9"): (spec, "waiting")}
+    assert {k: (i.payload, i.status) for k, i in after.items()} == {
+        ("curation_request", "run-9"): (spec, "waiting"),
+        ("curation_request", "run-8"): ({**spec, "run_id": "run-8"}, "waiting")}
 
 
 async def test_a_row_with_no_key_takes_a_key_from_its_digest(dsn):

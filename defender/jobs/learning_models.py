@@ -410,8 +410,8 @@ async def refuse_colliding(s: AsyncSession, tenant: str, kind: str,
     """The one rule for an item an insert did not add because its key was held (#1565): `(key, payload)` pairs of
     `tenant`'s `kind`, read in the transaction `s` is in, after the insert, so the row a concurrent call committed
     first is the one compared. The same content, as jsonb compares it (`false` is not `0`; `1e23` is its integer), is
-    a repeat and passes; other content raises `ItemCollision`, naming the first such pair in order; a key the store
-    shows no item for raises `ItemNotHeld`."""
+    a repeat and passes; other content raises `ItemCollision`, naming the first such pair in order; else a key the
+    store shows no item for raises `ItemNotHeld`."""
     if not items:
         return
     table = cast(Table, WorkItemRow.__table__)
@@ -419,7 +419,7 @@ async def refuse_colliding(s: AsyncSession, tenant: str, kind: str,
         "SELECT g.k, w.item_key IS NULL AS missing "
         "FROM unnest(CAST(:keys AS text[]), CAST(:docs AS text[])) WITH ORDINALITY AS g(k, d, n) "
         f"LEFT JOIN {table.fullname} w ON w.tenant_id = CAST(:tenant AS uuid) AND w.kind = :kind AND w.item_key = g.k "
-        "WHERE w.payload IS DISTINCT FROM CAST(g.d AS jsonb) ORDER BY g.n LIMIT 1"),  # a missing row: NULL, distinct
+        "WHERE w.payload IS DISTINCT FROM CAST(g.d AS jsonb) ORDER BY w.item_key IS NULL, g.n LIMIT 1"),  # missing: NULL, distinct
         {"keys": [str(key) for key, _ in items], "docs": [json.dumps(dict(payload)) for _, payload in items],
          "tenant": str(TenantId(tenant)), "kind": kind})).first()
     if found is None:
