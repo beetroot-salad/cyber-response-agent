@@ -110,15 +110,37 @@ def test_o14_alert_raw_is_the_exact_text_and_a_parsed_object_is_refused():
         models.Alert(**_alert(raw={"a": 1}))
 
 
+LISTED = {"alert_id", "vendor", "vendor_ticket_id", "title", "description", "fired_at", "changed_at", "received_at"}
+
+
 def test_o14_the_summary_has_a_description_and_neither_severity_nor_rule():
-    """`AlertSummary` fields are exactly the list plus `description`; `Alert` adds only `raw`. (O14)"""
-    assert set(models.AlertSummary.model_fields) == {
-        "alert_id", "vendor", "vendor_ticket_id", "title", "description", "fired_at", "changed_at",
-        "received_at"}
-    assert set(models.Alert.model_fields) == set(models.AlertSummary.model_fields) | {"raw"}
-    assert models.AlertSummary(**_alert()).model_dump()["description"] == "d"
+    """`AlertSummary` is the listed fields plus `outcome` and `latest_status`; `Alert` is them plus `raw` and no outcome:
+    it is no longer a superset of the summary. (O14, O1; conflict, updated)"""
+    assert set(models.AlertSummary.model_fields) == LISTED | {"outcome", "latest_status"}
+    assert set(models.Alert.model_fields) == LISTED | {"raw"}
+    summary = _alert(outcome=None, latest_status=None)
+    assert models.AlertSummary(**summary).model_dump()["description"] == "d"
+    assert models.AlertSummary.model_fields["outcome"].is_required()
+    assert models.AlertSummary.model_fields["latest_status"].is_required()
+    assert models.AlertSummary(**summary).model_dump()["outcome"] is None, "a null outcome is carried, not dropped"
     with pytest.raises(ValidationError):
-        models.AlertSummary(**{k: v for k, v in _alert().items() if k != "description"})
+        models.AlertSummary(**{k: v for k, v in summary.items() if k != "description"})
+
+
+def test_o1_the_summary_takes_a_disposition_or_null_and_a_status_or_null_and_nothing_else():
+    """`outcome` is one of the five dispositions or null, `latest_status` one of the investigation statuses or null; any other
+    word is refused. (O1, AP4)"""
+    from defender._vocab import DISPOSITION_VALUES
+
+    for outcome in (*DISPOSITION_VALUES, None):
+        assert models.AlertSummary(**_alert(outcome=outcome, latest_status=None)).outcome == outcome
+    for status in (*typing.get_args(models.InvestigationStatus), None):
+        assert models.AlertSummary(**_alert(outcome=None, latest_status=status)).latest_status == status
+    for bad in ("unsanctioned-benign", "none", "Benign", ""):
+        with pytest.raises(ValidationError):
+            models.AlertSummary(**_alert(outcome=bad, latest_status=None))
+    with pytest.raises(ValidationError):
+        models.AlertSummary(**_alert(outcome=None, latest_status="finished"))
 
 
 def test_o14_list_alerts_has_no_severity_filter_in_ports_the_real_ports_and_the_route():
@@ -127,6 +149,9 @@ def test_o14_list_alerts_has_no_severity_filter_in_ports_the_real_ports_and_the_
 
     assert "severity" not in inspect.signature(AlertsRepository.list_alerts).parameters
     assert "severity" not in inspect.signature(JobStorePorts.list_alerts).parameters
+    for signature in (inspect.signature(AlertsRepository.list_alerts), inspect.signature(JobStorePorts.list_alerts)):
+        assert signature.parameters["outcome"].kind is inspect.Parameter.KEYWORD_ONLY, "#1581 O2: a required keyword, no default"
+        assert signature.parameters["outcome"].default is inspect.Parameter.empty
     from defender.tests.api.test_api_stub import Api
 
     doc = Api().client.get(API + "/openapi.json").json()
@@ -336,3 +361,51 @@ def test_1537_a_set_aside_cause_is_published_as_its_closed_list_not_free_text(mo
     schema = getattr(models, model).model_json_schema()["properties"]["cause"]
     [listed] = [s for s in schema["anyOf"] if s.get("type") != "null"]
     assert sorted(listed["enum"]) == sorted(getattr(learning_causes, causes))
+
+
+# --- AP4: one owner for the outcome codes ---------------------------------------------------------------------------------
+
+def _enum_of(schema: dict) -> list[str]:
+    """The string values a (possibly nullable) schema allows, wherever the generator put them."""
+    found = list(schema.get("enum", []))
+    for branch in schema.get("anyOf", []):
+        found += _enum_of(branch)
+    return [v for v in found if v is not None]
+
+
+def test_ap4_the_vocabulary_declares_the_codes_once_as_a_literal_and_the_tuple_is_its_arguments():
+    """`Disposition` is a `Literal` of the five codes and `DISPOSITION_VALUES` is its arguments, in order. (AP4)"""
+    from defender._vocab import DISPOSITION_VALUES, Disposition
+
+    assert typing.get_origin(Disposition) is typing.Literal
+    assert typing.get_args(Disposition) == DISPOSITION_VALUES
+    assert len(set(DISPOSITION_VALUES)) == len(DISPOSITION_VALUES) == 5
+
+
+def test_ap4_the_published_document_enumerates_the_dispositions_on_the_summary_the_investigation_and_the_filter():
+    """The OpenAPI document's `AlertSummary.outcome` and `Investigation.disposition` allow exactly the vocabulary's codes
+    (and null), the list's `outcome` parameter those and `none`, and `latest_status` the statuses. (AP4, O1, O2)"""
+    from defender._vocab import DISPOSITION_VALUES
+    from defender.tests.api.test_api_stub import Api
+
+    doc = Api().client.get(API + "/openapi.json").json()
+    schemas = doc["components"]["schemas"]
+    for schema, field in (("AlertSummary", "outcome"), ("Investigation", "disposition")):
+        prop = schemas[schema]["properties"][field]
+        assert sorted(_enum_of(prop)) == sorted(DISPOSITION_VALUES), (schema, prop)
+        assert any(b.get("type") == "null" for b in prop.get("anyOf", [])) or None in prop.get("enum", []), "null stays allowed"
+    assert {"outcome", "latest_status"} <= set(schemas["AlertSummary"]["required"]), "required, though nullable (O2 r3.1)"
+    status = schemas["AlertSummary"]["properties"]["latest_status"]
+    assert any(b.get("type") == "null" for b in status.get("anyOf", [])) or None in status.get("enum", []), "latest_status is nullable"
+    assert sorted(_enum_of(status)) == sorted(typing.get_args(models.InvestigationStatus))
+    [parameter] = [p for p in doc["paths"][API + "/tenants/{tenant_id}/alerts"]["get"]["parameters"] if p["name"] == "outcome"]
+    assert sorted(_enum_of(parameter["schema"])) == sorted([*DISPOSITION_VALUES, "none"])
+    assert parameter.get("required", False) is False
+
+
+def test_ap4_the_ports_filter_is_a_disposition_the_no_outcome_marker_or_none_and_never_the_string_none():
+    """`AlertsRepository.list_alerts(outcome=)` is typed `Disposition | NoOutcome | None`. (AP4, O2)"""
+    from defender._vocab import Disposition, NoOutcome
+
+    hint = typing.get_type_hints(AlertsRepository.list_alerts)["outcome"]
+    assert set(typing.get_args(hint)) == {Disposition, NoOutcome, type(None)}

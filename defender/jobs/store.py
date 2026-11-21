@@ -20,13 +20,14 @@ from collections.abc import AsyncIterator, Callable, Collection, Mapping, Sequen
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import case, delete, false, func, literal, select, update
+from sqlalchemy import case, delete, false, func, literal, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, InterfaceError, InternalError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from defender._text import postgres_can_hold
+from defender._vocab import Disposition, NoOutcome, normalized_disposition
 from defender.database import async_engine, newest_first_query, sessions
 from defender.records.formats import (
     ALERT_MAPPING_MISSING,
@@ -132,6 +133,52 @@ def is_outage(fault: BaseException) -> bool:
     return isinstance(fault, OperationalError | InterfaceError | InternalError | PoolTimeout | OSError)
 
 
+
+def _latest_status() -> Any:
+    """The listed alert's newest investigation's stage by `(created_at, id)`, or null: a correlated lookup (#1581 O1)."""
+    return (select(InvestigationRow.stage)
+            .where(InvestigationRow.tenant_id == AlertRow.tenant_id, InvestigationRow.alert_id == AlertRow.id)
+            .order_by(InvestigationRow.created_at.desc(), InvestigationRow.id.desc())
+            .limit(1).correlate(AlertRow).scalar_subquery().label("latest_status"))
+
+
+# The alert's stored outcome (#1581 AP1) is a copy of the disposition of its newest `completed` investigation by
+# `(created_at, id)`, with that investigation's id and `created_at` (its source). Only a finish to `completed` and the
+# investigation delete can change it, and each does one conditional update of the alert row, judged against the stored
+# source, so the copy is right whichever order racing writes commit in: PostgreSQL applies two updates of one row one
+# after the other, and the second re-checks its condition against the first's committed result.
+
+async def _outcome_after_completion(s: AsyncSession, row: InvestigationRow) -> None:
+    """After a finish's fenced update to `completed`: this investigation becomes the alert's outcome unless the stored
+    source is newer by `(created_at, id)`. Locks the alert row after the investigation row (D1: a plain update takes
+    `FOR NO KEY UPDATE`, which does not block take-over's retry insert)."""
+    await s.execute(
+        update(AlertRow).where(
+            AlertRow.tenant_id == row.tenant_id, AlertRow.id == row.alert_id,
+            AlertRow.outcome_investigation_id.is_(None)
+            | (tuple_(AlertRow.outcome_created_at, AlertRow.outcome_investigation_id)
+               < tuple_(literal(row.created_at, AlertRow.outcome_created_at.type),
+                        literal(row.id, AlertRow.outcome_investigation_id.type))))
+        .values(outcome=row.disposition, outcome_investigation_id=row.id, outcome_created_at=row.created_at)
+        .execution_options(synchronize_session=False))
+
+
+async def _outcome_after_delete(s: AsyncSession, tenant_id: TenantId, alert_id: AlertId, deleted: Sequence[str]) -> None:
+    """After the investigation delete removed `deleted`: when the stored source is one of them, the alert's outcome
+    becomes the newest remaining completed investigation's, or none. The delete holds the alert's lock already."""
+    newest = (await s.execute(
+        select(InvestigationRow.disposition, InvestigationRow.id, InvestigationRow.created_at).where(
+            InvestigationRow.tenant_id == tenant_id, InvestigationRow.alert_id == alert_id,
+            InvestigationRow.stage == "completed")
+        .order_by(InvestigationRow.created_at.desc(), InvestigationRow.id.desc()).limit(1))).first()
+    disposition, source, created_at = newest if newest is not None else (None, None, None)
+    await s.execute(
+        update(AlertRow).where(
+            AlertRow.tenant_id == tenant_id, AlertRow.id == alert_id, AlertRow.outcome_investigation_id.in_(deleted))
+        .values(outcome=disposition, outcome_investigation_id=source, outcome_created_at=created_at)
+        .execution_options(synchronize_session=False))
+
+
 def _refuse_unstorable_text(**fields: str) -> None:
     """`UnstorableText` naming the first field PostgreSQL text cannot hold, before any query."""
     for name, text in fields.items():
@@ -219,18 +266,31 @@ class JobStore:
                 AlertRow.tenant_id == tenant_id, AlertRow.id == alert_id))).scalars().first()
         return None if row is None else stored_alert(row)
 
-    async def list_alerts(
+    async def list_alerts(  # noqa: PLR0913 — the list's filters, cursor and page size
         self, tenant_id: TenantId, *, fired_after: _dt.datetime | None, fired_before: _dt.datetime | None,
-        after: tuple[_dt.datetime, str] | None, limit: int,
+        outcome: Disposition | NoOutcome | None, after: tuple[_dt.datetime, str] | None, limit: int,
     ) -> list[AlertListing]:
         """Up to `limit` of the tenant's alerts with `fired_after <= fired_at < fired_before` (a bound left `None`
-        is open), newest first by `(fired_at, id)` descending, strictly after the position `after` when given. Never
-        reads an alert's `raw` (#1507): `get_alert` is the read that carries it."""
-        query = select(*ALERT_LISTING_COLUMNS).where(AlertRow.tenant_id == tenant_id)
+        is open), newest first by `(fired_at, id)` descending, strictly after the position `after` when given.
+        `outcome` narrows to the alerts whose stored outcome is that disposition, or (`NoOutcome`) is null, before the
+        limit; `None` does not narrow (#1581 O2). Selects no `raw` (#1507); each alert's `latest_status` is its newest
+        investigation's stage, one index lookup per row returned."""
+        query = select(*ALERT_LISTING_COLUMNS, _latest_status()).where(AlertRow.tenant_id == tenant_id)
         if fired_after is not None:
             query = query.where(AlertRow.fired_at >= fired_after)
         if fired_before is not None:
             query = query.where(AlertRow.fired_at < fired_before)
+        if outcome is not None:
+            if isinstance(outcome, NoOutcome):
+                query = query.where(AlertRow.outcome.is_(None))
+            elif normalized_disposition(outcome) == outcome:
+                query = query.where(AlertRow.outcome == outcome)
+            else:
+                raise ValueError(f"{outcome!r} is not a disposition")
+            # A constant within the filter, so the order is unchanged; leading with it makes `alerts_outcome_newest_first`
+            # the one index that reads the page in order. Without it the planner, its null fraction pooled over every
+            # tenant, walked `alerts_newest_first` filtering a tenant where `none` is rare (C8b: 300-500 ms at 50k).
+            query = query.order_by(AlertRow.outcome)
         query = newest_first_query(query, AlertRow.fired_at, AlertRow.id, after, limit)
         async with self._tx() as s:
             rows: Sequence[Any] = (await s.execute(query)).all()
@@ -511,6 +571,7 @@ class JobStore:
             await s.execute(delete(InvestigationRow).where(
                 InvestigationRow.tenant_id == tenant_id, InvestigationRow.alert_id == named.alert_id,
                 InvestigationRow.request_key == named.request_key))
+            await _outcome_after_delete(s, tenant_id, named.alert_id, inv_ids)
         announce("investigation.delete", actor=actor, tenant_id=tenant_id, target=investigation_id,
                  credential_id=credential_id)
 
@@ -543,6 +604,7 @@ class JobStore:
                 return None
             record = investigation_record(row)
             if stage == "completed":
+                await _outcome_after_completion(s, row)
                 # Not announced: the investigation's finish is its audit event (#1342's audit stream).
                 s.add(LearningJobRow(
                     id=LearningJobId.mint(), tenant_id=record.tenant_id, alert_id=record.alert_id,

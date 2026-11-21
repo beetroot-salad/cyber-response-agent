@@ -12,7 +12,7 @@ from pydantic.json_schema import SkipJsonSchema
 
 from defender._clock import as_utc
 from defender._text import postgres_can_hold
-from defender._vocab import DISPOSITION_VALUES, normalized_disposition
+from defender._vocab import Disposition, normalized_disposition
 from defender.identity.models import Email
 from defender.records.learning_causes import BatchCause, ItemCause
 from defender.records.formats import (
@@ -21,6 +21,10 @@ from defender.records.formats import (
 )
 
 InvestigationStatus = Literal["queued", "running", "completed", "unparseable", "failed", "aborted"]
+
+#: The alert list's `outcome` filter (#1581 O2): a disposition, or `none` for alerts with no completed investigation.
+NO_OUTCOME = "none"
+OutcomeFilter = Literal[Disposition, "none"]
 
 LearningJobStatus = Literal["queued", "running", "completed", "failed", "skipped"]
 
@@ -75,8 +79,8 @@ class _Request(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class AlertSummary(BaseModel):
-    """An alert as listed. The raw alert is left out of lists; `GET /alerts/{id}` carries it."""
+class _AlertFields(BaseModel):
+    """The fields every read of an alert carries: the list's (`AlertSummary`) and the single read's (`Alert`)."""
 
     alert_id: AlertId
     vendor: str = Field(description="The ticket system the alert was pulled from.")
@@ -88,7 +92,19 @@ class AlertSummary(BaseModel):
     received_at: Instant = Field(description="When we pulled it; our own clock.")
 
 
-class Alert(AlertSummary):
+class AlertSummary(_AlertFields):
+    """An alert as listed, with what its investigations concluded. The raw alert is left out of lists;
+    `GET /alerts/{id}` carries it."""
+
+    outcome: Disposition | None = Field(
+        description="The disposition of the alert's newest completed investigation (by creation time, then id); null "
+                    "when no investigation of it has completed.")
+    latest_status: InvestigationStatus | None = Field(
+        description="The status of the alert's newest investigation of any status; null when it has none. A rerun "
+                    "running over a completed investigation is `running` here while `outcome` keeps the earlier answer.")
+
+
+class Alert(_AlertFields):
     raw: str = Field(description="The alert's text exactly as the vendor sent it: not parsed, not re-serialized.")
 
 
@@ -117,11 +133,18 @@ class Investigation(BaseModel):
     request_key: str = Field(
         description="The `client_request_id` of the request this investigation answers.")
     attempt: int = Field(description="Which attempt of the request this is; the first is 1.")
-    disposition: str | None = Field(
+    disposition: Disposition | None = Field(
         default=None,
-        description="Set once the investigation completes: the disposition its closing record holds.",
-        json_schema_extra={"enum": [*DISPOSITION_VALUES, None]},
+        description="Set once the investigation completes: the disposition its closing record holds; always set when it "
+                    "is `completed`.",
     )
+
+    @field_validator("disposition", mode="before")
+    @classmethod
+    def _known_disposition(cls, value: object) -> object:
+        if value is not None and normalized_disposition(value) != value:
+            raise ValueError(f"not a disposition: {value!r}")
+        return value
     cost_usd: float | None = Field(
         description="Model cost so far while the investigation is live (0 until its first update), "
                     "final once the status is terminal and its worker has written its last figure; "
@@ -153,13 +176,6 @@ class Investigation(BaseModel):
         description="The tenant knowledge the run read; null when there is no run record to say "
                     "(no run yet, or a run from before knowledge was recorded).",
     )
-
-    @field_validator("disposition")
-    @classmethod
-    def _known_disposition(cls, value: str | None) -> str | None:
-        if value is not None and normalized_disposition(value) != value:
-            raise ValueError(f"not a disposition: {value!r}")
-        return value
 
 
 class InvestigationCreate(_Request):

@@ -471,6 +471,12 @@ jobs:
         working-directory: defender/frontend
         run: bun run test
 
+      # The exhaustive calendar, refill and day-label oracles (#1581), kept out of `bun run test` because the build
+      # tests run that command dozens of times. (FORMAT_FULL=1 walks every zone and year; local only.)
+      - name: Frontend generated tests
+        working-directory: defender/frontend
+        run: bun run test:generated
+
       - name: Frontend lint
         working-directory: defender/frontend
         run: bun run lint
