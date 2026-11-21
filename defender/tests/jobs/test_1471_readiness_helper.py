@@ -517,6 +517,23 @@ def test_r12_1_a_sealed_signer_refuses_a_check_with_a_grant_at_the_first_pass_an
         assert ran.record is None
 
 
+def test_p2_a_first_pass_refusal_carries_our_sentence_and_never_the_signers_own_error_text(
+        tmp_path, monkeypatch, migrated_database):
+    """The signer's error (OpenBao's reply) is not our words: the `first_pass` sentence the admin reads says the pass
+    could not be signed and quotes none of it; the helper's log still names it. (P-2: never a reply from another
+    system)"""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    reply = "vault-reply-7f3a: the barrier is sealed at 10.0.0.9"
+    with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=("identity",)) as scene:
+        ran = readiness(scene, signer=A.RaisingSigner(RuntimeError(reply)), container=lambda c: 0)
+        sentence = assert_refused_shape(ran.result(), "first_pass")
+        assert "could not be signed" in norm(sentence), sentence
+        assert "vault-reply-7f3a" not in sentence, f"the signer's reply reached the admin: {sentence!r}"
+        assert "10.0.0.9" not in sentence, f"the signer's reply reached the admin: {sentence!r}"
+        assert "vault-reply-7f3a" in ran.err, f"the helper's log lost the cause: {ran.said()}"
+
+
 def test_r12_1_the_first_read_pass_is_signed_once_under_the_readiness_id_and_thrown_away(
         tmp_path, monkeypatch, migrated_database):
     """A non-empty grant: exactly one signing call, naming the tenant, the readiness id and the grant; the container is

@@ -16,17 +16,25 @@ from __future__ import annotations
 
 import base64
 import contextlib
-import logging
-import sys
 from dataclasses import dataclass
 from typing import Any, NoReturn
 
+from . import _host_request
 from ._learning import _TenantCredential, forge_token_answer
-from ._session import DOCKER_DID_NOT_RUN, KindSpec, Prepared, Registry, Session, SetupRefused
-
-_logger = logging.getLogger(__name__)
+from ._session import KindSpec, Prepared, Registry, Session, SetupRefused
 
 KIND = "adoption"
+
+
+def _adoption_lane() -> _host_request.ResultLane:
+    from defender.records import job_lane
+
+    return _host_request.ResultLane(
+        kind=KIND, read=lambda lane, rid: lane.read_adoption(rid), write=lambda lane, rid, rec: lane.write_adoption(rid, rec),
+        failed=job_lane.AdoptionRecord.failed, refused_reason="setup_refused")
+
+
+_LANE = _adoption_lane()
 
 
 @dataclass
@@ -36,49 +44,25 @@ class _Adoption:
     credential: Any
 
 
-def _write_failed(session: Session, reason: str) -> None:
-    """The helper's own `{failed, reason}` record, create-only: one already there is kept. One that cannot be written
-    raises, so the helper exits non-zero, which the worker reads as the helper's own failure."""
-    from defender.records import job_lane
-
-    with job_lane.JobLane.open(session.root, session.tenant_id) as lane:
-        if lane.read_adoption(str(session.job_id)) is not None:
-            return
-        lane.write_adoption(str(session.job_id), job_lane.AdoptionRecord.failed(reason))
-
-
 def _refuse_adoption(session: Session, reason: str, why: str) -> NoReturn:
     """The helper's ending for a refusal it can name: the record, then `SetupRefused` (which ends the helper before any
-    container starts, with the record kept: `adoption_end` writes `setup_refused` only when none is there)."""
-    _write_failed(session, reason)
+    container starts, with the record kept: the shared ending writes `setup_refused` only when none is there)."""
+    from defender.records import job_lane
+
+    _host_request.write_once(session, _LANE, job_lane.AdoptionRecord.failed(reason))
     raise SetupRefused(why)
-
-
-def _state_now(session: Session) -> str | None:
-    """The tenant's state as the records say it now, or None when it cannot be read or the tenant is unknown."""
-    from defender.records.formats import TenantId
-    from defender.systems.run_tenant import entry_directory
-
-    try:
-        return entry_directory(None).state(TenantId(session.tenant_id))
-    except Exception:  # noqa: BLE001 — a state that cannot be read is no reason to call the refusal anything finer
-        return None
 
 
 def _admit_adoption_tenant(session: Session, hold: contextlib.ExitStack) -> Any:
     from defender.records.formats import TenantRefused
-    from defender.systems.run_tenant import host_tenant
 
     try:
-        admitted = host_tenant(session.root, session.tenant_id, defender_dir=session.defender_dir)
+        return _host_request.admit_host_tenant(session, hold)
     except TenantRefused as refused:
-        state = _state_now(session)
+        state = _host_request.tenant_state(session)
         if state is not None and state != "active":
             _refuse_adoption(session, "tenant_not_active", f"this job's tenant is {state}, not active")
         _refuse_adoption(session, "setup_refused", f"this job's tenant cannot be used: {refused}")
-    hold.enter_context(admitted)
-    session.tenant_accepted(admitted.tenant)
-    return admitted
 
 
 def _render_for_system(session: Session, admitted: Any) -> tuple[dict[str, bytes], str]:
@@ -135,37 +119,12 @@ def prepare_adoption(session: Session, hold: contextlib.ExitStack) -> Prepared:
     except BaseException:
         cleanup.close()
         raise
-    job = str(session.job_id)
+    job = _host_request.request_id(session)
     command = session.command or ["python3", "-m", "defender.adoption", "--job", job, "--tenant", session.tenant_id]
     facts = {"kind": KIND, "tenant": session.tenant_id, "job": job, "tenant_state": "active", "system": session.system,
              "digest": digest, "rendering": {path: base64.b64encode(data).decode("ascii") for path, data in rendering.items()},
              "forge_origin": wiring.origin, "forge_repo": wiring.repo}
-    return Prepared(launch=facts, command=list(command), state=_Adoption(credential), cleanup=cleanup, exited=_adoption_exited)
-
-
-def adoption_end(session: Session, cause: str) -> None:
-    """The adoption's `{failed, reason}` record for an ending decided before the container (module doc). A stop writes
-    none; a refusal keeps the record its step wrote."""
-    if cause == "start-failed" and session.signalled.is_set():
-        return
-    _write_failed(session, {"refused": "setup_refused", "start-failed": "start_failed"}.get(cause, "worker_error"))
-
-
-def _adoption_exited(session: Session, rc: int) -> None:
-    """After the container: a `docker run` that never ran the job (and so wrote no record) is a start failure."""
-    from defender.records import job_lane
-
-    if rc not in DOCKER_DID_NOT_RUN:
-        return
-    try:
-        with job_lane.JobLane.open(session.root, session.tenant_id) as lane:
-            written = lane.read_adoption(str(session.job_id)) is not None
-    except (OSError, job_lane.JobLaneRefused):
-        written = False
-    if not written:
-        sys.stderr.write(f"[job_host] adoption {session.job_id}: the job container did not start (docker exit {rc}); "
-                         "the job ran nowhere\n")
-        adoption_end(session, "start-failed")
+    return Prepared(launch=facts, command=list(command), state=_Adoption(credential), cleanup=cleanup, exited=_host_request.after_container(_LANE))
 
 
 def _adoption_forge_token(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
@@ -178,7 +137,7 @@ def _adoption_forge_token(session: Session, fields: dict[str, Any]) -> dict[str,
 
 
 def register_adoption(registry: Registry) -> None:
-    """The adoption kind's hooks and its two requests: `launch` and `forge.token` (`after_signal`: the container unwinds)."""
-    registry.kind(KIND, KindSpec(prepare=prepare_adoption, end=adoption_end))
-    registry.add("launch", kinds=(KIND,), handler=lambda session, _fields: session.launch(), after_signal=True)
+    """The adoption kind's hooks and its own request, `forge.token` (`after_signal`: the container unwinds); `launch` is
+    every kind's (`register_common`)."""
+    registry.kind(KIND, KindSpec(prepare=prepare_adoption, end=_host_request.end_before_container(_LANE)))
     registry.add("forge.token", kinds=(KIND,), handler=_adoption_forge_token, required=("min_validity",), after_signal=True)

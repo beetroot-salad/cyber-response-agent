@@ -82,18 +82,18 @@ def test_with_the_helpers_own_facts_the_entry_opens_the_offer_and_writes_opened(
 
 @pytest.mark.parametrize("fault", ["refused", "crashed"])
 def test_a_forge_token_the_helper_cannot_give_ends_delivery_failed_with_a_record_not_a_crash(repo, forge, tmp_path, fault):
-    """The helper refusing `forge.token` (its issuer sealed: `forge-fault`), or a fault of a kind no step names, is
-    `delivery_failed`: the entry writes its record whatever the delivery raised, and nothing is opened. (A3: a fixed
-    reason for anything else)"""
+    """The helper refusing `forge.token` (its issuer sealed: `forge-fault`), or an answer the container cannot read (no
+    `token`: a `KeyError` in the container, a fault of a kind no step names), is `delivery_failed`: the entry writes its
+    record whatever the delivery raised, and nothing is opened. (A3: a fixed reason for anything else)"""
     from defender.job_socket import Refused
 
     def refuse(fields):
         raise Refused("the forge token could not be minted", "forge-fault")
 
-    def crash(fields):
-        raise LookupError("nothing the delivery names")
+    def unreadable(fields):
+        return {"not_a_token": True}
 
-    record = _enter(repo, forge, tmp_path, token=refuse if fault == "refused" else crash)
+    record = _enter(repo, forge, tmp_path, token=refuse if fault == "refused" else unreadable)
     assert record == {"outcome": "failed", "reason": "delivery_failed"}
     assert forge.creates == []
 

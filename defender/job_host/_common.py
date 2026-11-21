@@ -42,13 +42,16 @@ RUNS_FOLDER = "runs_folder"
 
 
 class StepRefused(SetupRefused):
-    """A tenant-level launch step's refusal (#1471 P-1): the job's `setup: refused`, its message the cause as before,
-    tagged with the step (`job_lane.READINESS_STEPS`, or `RUNS_FOLDER`) it is the refusal of, and, for the publish
-    step, the report it was refused on (`run_common.KnowledgeExit.report`)."""
+    """A tenant-level launch step's refusal (#1471 P-1): the job's `setup: refused`, tagged with the step
+    (`job_lane.READINESS_STEPS`, or `RUNS_FOLDER`) it is the refusal of, and, for the publish step, the report it was
+    refused on (`run_common.KnowledgeExit.report`). Two texts, set where it is raised (P-2): `sentence`, our own words,
+    the one a readiness record may carry; and `detail`, another system's reply (a signer's error), for the log only.
+    The message (the helper's log, the investigation's refusal) is both."""
 
-    def __init__(self, step: str, text: str, *, report: Any = None) -> None:
-        super().__init__(text)
+    def __init__(self, step: str, sentence: str, *, detail: str | None = None, report: Any = None) -> None:
+        super().__init__(sentence if detail is None else f"{sentence}: {detail}")
         self.step = step
+        self.sentence = sentence
         self.report = report
 
 
@@ -281,8 +284,8 @@ def read_passes(session: Session, signing: Signing, reads: tuple[str, ...]) -> P
     try:
         mint.mint(str(session.job_id))
     except Exception as failed:  # noqa: BLE001 — a first pass that cannot be signed refuses the job (O11)
-        raise StepRefused("first_pass",
-                          f"the job's first pass could not be signed: {type(failed).__name__}: {failed}") from None
+        raise StepRefused("first_pass", "the job's first pass could not be signed",
+                          detail=f"{type(failed).__name__}: {failed}") from None
     return mint
 
 

@@ -205,6 +205,22 @@ def test_a_tenant_still_creating_is_failed_tenant_not_active_and_no_container_st
     assert docker.creates() == []
 
 
+def test_the_helper_admits_the_tenant_and_reads_its_records_through_the_directory_it_was_handed(
+        scene, checkout, monkeypatch):
+    """`job_host.main(directory=)` reaches the adoption kind as it reaches readiness and learning: with no database address
+    in the process, the tenant is admitted and its system record read through the handed records, and the container is
+    handed over. (#1471 `main(directory=)`, A3)"""
+    from defender.tests.support.jobs._readiness1471 import RestatingDirectory
+
+    directory = RestatingDirectory(scene, state="active")
+    monkeypatch.delenv("DEFENDER_DATABASE_DSN")
+    job_id = str(uuid.uuid4())
+    _, docker, _ = _run(scene, job_id, SYSTEM, lambda c: (c.request("launch"), 0)[1], directory=directory)
+    assert directory.admitted_active, "the tenant was not admitted through the handed directory"
+    assert str(scene.tenant) in directory.records_asked, "the system record was not read through the handed directory"
+    assert docker.boxes, f"the adoption was not handed over: {_record(scene, job_id)!r}"
+
+
 def test_the_helper_refuses_an_adoption_with_no_system_named(scene, checkout):
     """`--system` is required for the adoption kind: without it no container starts. (R13-1, A1)"""
     docker = ContainerStandIn(lambda c: 0)

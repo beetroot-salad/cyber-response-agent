@@ -1735,11 +1735,11 @@ def parse_readiness_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--readiness", dest="job", required=True, help="the readiness check's id")
     p.add_argument("--tenant", required=True, help="the tenant the check is of")
     ns = p.parse_args(argv)
+    from defender.records.formats import HostRequestId, IdRefused
+
     try:
-        canonical = str(uuid.UUID(ns.job))
-    except ValueError:
-        canonical = ""
-    if canonical != ns.job:
+        HostRequestId(ns.job)
+    except IdRefused:
         p.error(f"--readiness takes a readiness check's id (a UUID), not {ns.job!r}")
     return ns
 

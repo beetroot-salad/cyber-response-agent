@@ -54,7 +54,7 @@ def test_render_places_the_files_under_the_system_name_and_fills_only_the_system
     }
 
 
-@pytest.mark.parametrize("state", ["missing", "empty", "a file"])
+@pytest.mark.parametrize("state", ["missing", "empty", "only empty folders", "a file"])
 def test_a_declared_base_files_folder_that_is_missing_empty_or_not_a_folder_is_refused_not_rendered_as_nothing(
         tmp_path, state):
     """A release whose declared folder is gone, holds nothing, or is a file renders no empty set: `render` raises, so an
@@ -62,9 +62,11 @@ def test_a_declared_base_files_folder_that_is_missing_empty_or_not_a_folder_is_r
     folder = tmp_path / "base"
     if state == "empty":
         folder.mkdir()
+    elif state == "only empty folders":
+        (folder / "skills" / "{system}").mkdir(parents=True)
     elif state == "a file":
         folder.write_bytes(b"x")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="declares base files at"):
         _base().render(_entry_over(folder), "acme-cmdb")
 
 

@@ -11,8 +11,8 @@ What it computed it writes once, create-only, in the tenant's job lane, keyed by
 - when the publish gave a source, the knowledge record (`JobLane.write_request_knowledge`), before anything below;
 - a step's refusal: `{refused, step, sentence}`, our own sentence (P-2: a publish refusal names only its kind), and
   no container;
-- a container that cannot be started (or its socket opened): `{failed, start_failed}`; a crash: `{failed,
-  worker_error}` (R13-1.2);
+- a container that cannot be started (or its socket opened): `{failed, start_failed}`; a crash, or a refusal before
+  the container that is no step's: `{failed, worker_error}` (R13-1.2; the shared ending, `_host_request`);
 - otherwise nothing: the readiness container (`run.py --readiness <id>`, `run.readiness_main`) writes the result,
   answered `launch` alone (C4).
 
@@ -21,14 +21,11 @@ failure (`HelperFault`): no record, and a non-zero exit the worker reads (R13-1.
 from __future__ import annotations
 
 import contextlib
-import logging
-import uuid
 from typing import Any
 
+from . import _host_request
 from ._common import HelperFault, LaunchFacts, StepRefused, tenant_launch_steps
-from ._session import DOCKER_DID_NOT_RUN, KindSpec, Prepared, Registry, Session
-
-_logger = logging.getLogger(__name__)
+from ._session import KindSpec, Prepared, Registry, Session
 
 KIND = "readiness"
 #: Who asked for the launch-time publish, as its outcome is recorded (design §6 "Publish trigger").
@@ -37,16 +34,17 @@ TRIGGER = "readiness"
 _RUN_PY = "[run.py] "
 
 
-def _request_id(session: Session) -> str:
-    """The check's id, as the worker handed it (`--job`): a UUID in its canonical text, or the helper's own failure."""
-    raw = str(session.job_id)
-    try:
-        canonical = str(uuid.UUID(raw))
-    except ValueError:
-        canonical = ""
-    if canonical != raw:
-        raise HelperFault(f"{raw!r} is not a readiness check's id (a UUID)")
-    return raw
+def _readiness_lane() -> _host_request.ResultLane:
+    from defender.records import job_lane
+
+    # A refusal before the container that wrote no record is no step's refusal the check can name: the helper's error.
+    return _host_request.ResultLane(
+        kind=KIND, read=lambda lane, rid: lane.read_readiness(rid),
+        write=lambda lane, rid, rec: lane.write_readiness(rid, rec), failed=job_lane.ReadinessRecord.failed,
+        refused_reason=job_lane.WORKER_ERROR)
+
+
+_LANE = _readiness_lane()
 
 
 def _publish_sentence(report: Any) -> str:
@@ -65,10 +63,11 @@ def _publish_sentence(report: Any) -> str:
 
 
 def _readiness_sentence(refused: StepRefused) -> str:
-    """The readiness sentence of a step's refusal: the launch's own words (P-2), the publish's its kind alone."""
+    """The readiness sentence of a step's refusal: the launch's own words (P-2: its `sentence`, never its log-only
+    `detail`), the publish's its kind alone."""
     if refused.step == "publish":
         return _publish_sentence(refused.report)
-    return str(refused).removeprefix(_RUN_PY).strip()
+    return refused.sentence.removeprefix(_RUN_PY).strip()
 
 
 def _write_knowledge(session: Session, source: Any) -> None:
@@ -83,18 +82,6 @@ def _write_knowledge(session: Session, source: Any) -> None:
         raise HelperFault(f"the check's knowledge record could not be written: {type(fault).__name__}: {fault}") from None
 
 
-def _write_readiness_record(session: Session, record: Any) -> None:
-    """The check's one result record, create-only: one already there is kept (and this one logged, not written)."""
-    from defender.records import job_lane
-
-    try:
-        with job_lane.JobLane.open(session.root, session.tenant_id) as lane:
-            lane.write_readiness(session.job_id, record)
-    except FileExistsError:
-        _logger.error("readiness %s: a result record is already there; it is kept, and this one (%s) is not written",
-                      session.job_id, record.text())
-
-
 def _readiness_refused(session: Session, facts: LaunchFacts, refused: StepRefused) -> None:
     """A tenant-level step refused the check: its knowledge record first when the publish gave a source, then the
     refusal. A refusal of the runs-folder check is no step's (R13-1.1): the helper's own failure."""
@@ -104,12 +91,12 @@ def _readiness_refused(session: Session, facts: LaunchFacts, refused: StepRefuse
         raise HelperFault(f"its {refused.step} check refused: {refused}") from None
     if facts.source is not None:
         _write_knowledge(session, facts.source)
-    _write_readiness_record(session, job_lane.ReadinessRecord.refused(refused.step, _readiness_sentence(refused)))
+    _host_request.write_once(session, _LANE, job_lane.ReadinessRecord.refused(refused.step, _readiness_sentence(refused)))
 
 
 def _prepare_readiness(session: Session, hold: contextlib.ExitStack) -> Prepared:
     """The host half (module doc): the shared steps, the knowledge record, then the container's launch facts."""
-    rid = _request_id(session)
+    rid = _host_request.request_id(session)
     facts = LaunchFacts()
     try:
         tenant_launch_steps(session, hold, copy_id=rid, facts=facts, trigger=TRIGGER)
@@ -132,40 +119,12 @@ def _prepare_readiness(session: Session, hold: contextlib.ExitStack) -> Prepared
             "records": current.as_wire(),
         }
         # The first pass was signed and is thrown away (R12-1): the container is handed no pass and answered none.
-        return Prepared(launch=launch, command=list(command), passes=None, cleanup=facts.cleanup, exited=_readiness_exited)
+        return Prepared(launch=launch, command=list(command), passes=None, cleanup=facts.cleanup, exited=_host_request.after_container(_LANE))
     except BaseException:
         facts.cleanup.close()
         raise
 
 
-def _readiness_end(session: Session, cause: str) -> None:
-    """The helper's own result for an ending decided before the container (R13-1.2): a container that could not be
-    started is `start_failed`, a crash `worker_error`. A refusal's record is already written (`_readiness_refused`); a helper told
-    to stop before its container started writes none, so the stopping worker's own ending stands (R13-5)."""
-    from defender.records import job_lane
-
-    if cause == "refused" or (cause == "start-failed" and session.signalled.is_set()):
-        return
-    reason = "start_failed" if cause == "start-failed" else job_lane.WORKER_ERROR
-    _write_readiness_record(session, job_lane.ReadinessRecord.failed(reason))
-
-
-def _readiness_exited(session: Session, rc: int) -> None:
-    """After the container: a `docker run` that never ran the entry (so wrote no record) is a start failure."""
-    from defender.records import job_lane
-
-    if rc not in DOCKER_DID_NOT_RUN:
-        return
-    try:
-        with job_lane.JobLane.open(session.root, session.tenant_id) as lane:
-            written = lane.read_readiness(session.job_id) is not None
-    except (OSError, job_lane.JobLaneRefused):
-        written = False
-    if not written:
-        _logger.warning("readiness %s: the container did not start (docker exit %s)", session.job_id, rc)
-        _write_readiness_record(session, job_lane.ReadinessRecord.failed("start_failed"))
-
-
 def register_readiness(registry: Registry) -> None:
     """The readiness kind: answered `launch` alone (`register_common`), never a pass or a box (C4)."""
-    registry.kind(KIND, KindSpec(prepare=_prepare_readiness, end=_readiness_end))
+    registry.kind(KIND, KindSpec(prepare=_prepare_readiness, end=_host_request.end_before_container(_LANE)))
