@@ -1781,7 +1781,7 @@ def _readiness_record(ns: argparse.Namespace, data_root: DataRoot, request: Call
                       roster: Any, defender_dir: Path) -> job_lane.ReadinessRecord:
     """The check's result (R13-1.3, R13-1.4): an exit that judges whether the helper and this container agree is
     `failed`/`handover`; one that judges the tenant's state is `refused` at its step, our own sentence (P-2)."""
-    from defender.cli._tenant_census import CensusUnavailable
+    from defender.learning.leads.tenant_census import CensusUnavailable
 
     label = f"readiness {ns.job}"
     try:
@@ -1794,7 +1794,7 @@ def _readiness_record(ns: argparse.Namespace, data_root: DataRoot, request: Call
         steps = _container_tenant_steps(ns, data_root, launch, roster=roster, defender_dir=defender_dir, warn=False)
     except SystemExit as exited:
         _logger.warning(f"{label}: {exited.code}")
-        stage = getattr(exited, "stage", "container_tenant")
+        stage = exited.stage if isinstance(exited, _StageExit) else "container_tenant"
         if stage == "handover":
             return job_lane.ReadinessRecord.failed("handover")
         return job_lane.ReadinessRecord.refused(stage, _SETUP_PREFIX.sub("", str(exited.code)).strip())
@@ -1810,7 +1810,7 @@ def _readiness_warnings(steps: _ContainerTenant, *, job: str, defender_dir: Path
     """A launchable tenant's warnings (R4), as `(kind, sentence)`: each system the systems check found down with its
     cause, each grant the verdict ignored with its own reason (C9), the case verdict's fault when the tenant has a case
     record (W8, through the flagged launch's one site), then the census over the published copy (R13-3)."""
-    from defender.cli._tenant_records_check import readiness_census
+    from defender.learning.leads.tenant_census import readiness_census
 
     found = [("system_down", f"system {name} is down: {cause.reason}")
              for name, cause in sorted(steps.systems.down.items())]

@@ -64,7 +64,7 @@ def _publish_sentence(report: Any) -> str:
     return "the launch-time publish settled on no published knowledge a run can start on"
 
 
-def _sentence(refused: StepRefused) -> str:
+def _readiness_sentence(refused: StepRefused) -> str:
     """The readiness sentence of a step's refusal: the launch's own words (P-2), the publish's its kind alone."""
     if refused.step == "publish":
         return _publish_sentence(refused.report)
@@ -83,7 +83,7 @@ def _write_knowledge(session: Session, source: Any) -> None:
         raise HelperFault(f"the check's knowledge record could not be written: {type(fault).__name__}: {fault}") from None
 
 
-def _write_record(session: Session, record: Any) -> None:
+def _write_readiness_record(session: Session, record: Any) -> None:
     """The check's one result record, create-only: one already there is kept (and this one logged, not written)."""
     from defender.records import job_lane
 
@@ -95,7 +95,7 @@ def _write_record(session: Session, record: Any) -> None:
                       session.job_id, record.text())
 
 
-def _refused(session: Session, facts: LaunchFacts, refused: StepRefused) -> None:
+def _readiness_refused(session: Session, facts: LaunchFacts, refused: StepRefused) -> None:
     """A tenant-level step refused the check: its knowledge record first when the publish gave a source, then the
     refusal. A refusal of the runs-folder check is no step's (R13-1.1): the helper's own failure."""
     from defender.records import job_lane
@@ -104,7 +104,7 @@ def _refused(session: Session, facts: LaunchFacts, refused: StepRefused) -> None
         raise HelperFault(f"its {refused.step} check refused: {refused}") from None
     if facts.source is not None:
         _write_knowledge(session, facts.source)
-    _write_record(session, job_lane.ReadinessRecord.refused(refused.step, _sentence(refused)))
+    _write_readiness_record(session, job_lane.ReadinessRecord.refused(refused.step, _readiness_sentence(refused)))
 
 
 def _prepare_readiness(session: Session, hold: contextlib.ExitStack) -> Prepared:
@@ -114,7 +114,7 @@ def _prepare_readiness(session: Session, hold: contextlib.ExitStack) -> Prepared
     try:
         tenant_launch_steps(session, hold, copy_id=rid, facts=facts, trigger=TRIGGER)
     except StepRefused as refused:
-        _refused(session, facts, refused)
+        _readiness_refused(session, facts, refused)
         raise
     try:
         _write_knowledge(session, facts.source)
@@ -136,14 +136,14 @@ def _prepare_readiness(session: Session, hold: contextlib.ExitStack) -> Prepared
 
 def _readiness_end(session: Session, cause: str) -> None:
     """The helper's own result for an ending decided before the container (R13-1.2): a container that could not be
-    started is `start_failed`, a crash `worker_error`. A refusal's record is already written (`_refused`); a helper told
+    started is `start_failed`, a crash `worker_error`. A refusal's record is already written (`_readiness_refused`); a helper told
     to stop before its container started writes none, so the stopping worker's own ending stands (R13-5)."""
     from defender.records import job_lane
 
     if cause == "refused" or (cause == "start-failed" and session.signalled.is_set()):
         return
     reason = "start_failed" if cause == "start-failed" else job_lane.WORKER_ERROR
-    _write_record(session, job_lane.ReadinessRecord.failed(reason))
+    _write_readiness_record(session, job_lane.ReadinessRecord.failed(reason))
 
 
 def _readiness_exited(session: Session, rc: int) -> None:
@@ -159,7 +159,7 @@ def _readiness_exited(session: Session, rc: int) -> None:
         written = False
     if not written:
         _logger.warning("readiness %s: the container did not start (docker exit %s)", session.job_id, rc)
-        _write_record(session, job_lane.ReadinessRecord.failed("start_failed"))
+        _write_readiness_record(session, job_lane.ReadinessRecord.failed("start_failed"))
 
 
 def register_readiness(registry: Registry) -> None:

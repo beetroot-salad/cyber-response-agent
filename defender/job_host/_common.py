@@ -239,7 +239,8 @@ def settle_knowledge(session: Session, accepted: Any, records: Any, *, trigger: 
         if refused.code == 128 + signal.SIGTERM:
             session.signalled.set()
             raise StartFailed("the helper was told to stop before its container started; none was started") from None
-        raise StepRefused("publish", str(refused.code), report=getattr(refused, "report", None)) from None
+        report = refused.report if isinstance(refused, run_common.KnowledgeExit) else None
+        raise StepRefused("publish", str(refused.code), report=report) from None
 
 
 def grant(run_tenant: Any) -> tuple[str, ...]:
@@ -314,7 +315,7 @@ class LaunchFacts:
     cleanup: contextlib.ExitStack = dataclasses.field(default_factory=contextlib.ExitStack)
 
 
-def _at(step: str, call: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+def _launch_step(step: str, call: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """`setup_step` (a `run_common` step's `SystemExit` is the job's refusal, its message the cause) tagged with the
     launch step it is the refusal of."""
     try:
@@ -350,8 +351,8 @@ def tenant_launch_steps(session: Session, hold: contextlib.ExitStack, *, copy_id
         facts.launched = launch()
     # The tenant's current records, read once here (#1366 O6): a tenant whose records are not known (#1470 O8) is
     # refused before its alert mapping is read. The container reads no database; it is handed these in the launch facts.
-    facts.current = _at("records", run_common.read_records, facts.records, facts.accepted.id)
-    facts.mapping = _at("alert_mapping", run_common.read_alert_mapping, facts.records, facts.accepted.id)
+    facts.current = _launch_step("records", run_common.read_records, facts.records, facts.accepted.id)
+    facts.mapping = _launch_step("alert_mapping", run_common.read_alert_mapping, facts.records, facts.accepted.id)
     facts.source = settle_knowledge(session, facts.accepted, facts.records, trigger=trigger)
     repository = facts.accepted.runs_repository()
     try:
@@ -374,17 +375,17 @@ def _copied_steps(session: Session, facts: LaunchFacts, copy_id: str) -> None:
     from defender import run_common
     from defender.records.formats import TenantRefused
 
-    facts.copy = _at("knowledge_copy", run_common.copy_knowledge, facts.accepted, facts.source, copy_id)
+    facts.copy = _launch_step("knowledge_copy", run_common.copy_knowledge, facts.accepted, facts.source, copy_id)
     facts.cleanup.callback(facts.copy.remove)
     try:
-        facts.run_tenant = _at("run_tenant", run_common.run_tenant_or_exit, facts.accepted, dispatches_lead_zero=True,
+        facts.run_tenant = _launch_step("run_tenant", run_common.run_tenant_or_exit, facts.accepted, dispatches_lead_zero=True,
                                records=facts.current, copy=facts.copy)
     except TenantRefused as refused:
         raise StepRefused("run_tenant", f"this job's tenant cannot be used: {refused}") from None
     # The tenant's systems over the catalog (read cold: no adapter code runs here, N7), its grants narrowed to the
     # systems it has enabled records of (#1366 R12), so the pass names none it has not; the container warns.
-    facts.roster = _at("roster", run_common.run_roster, session.defender_dir)
-    facts.verdict = _at("tenant_verdict", run_common.tenant_verdict, facts.run_tenant, facts.roster, warn=False)
+    facts.roster = _launch_step("roster", run_common.run_roster, session.defender_dir)
+    facts.verdict = _launch_step("tenant_verdict", run_common.tenant_verdict, facts.run_tenant, facts.roster, warn=False)
     facts.reads = grant(facts.verdict.tenant)
     facts.signing = set_up_signing(session, facts.accepted, facts.records)  # every job, whatever its grant (W-D8)
     facts.passes = read_passes(session, facts.signing, facts.reads)
