@@ -145,7 +145,7 @@ def refusals() -> tuple[type[Exception], ...]:
 
 
 def resolve_tenant(  # noqa: PLR0913 — the request, the folder rules' inputs and the records seam
-    data_root: DataRoot, tenant_id: str, *, defender_dir: Path, dispatches_lead_zero: bool,
+    data_root: DataRoot, tenant_id: str, *, defender_dir: Path, dispatches_lead_zero: bool, catalog: Catalog,
     box_mounted: tuple[Path | RunsBase | EpisodesRoot, ...] = (),
     directory: TenantDirectory | None = None,
 ) -> RunTenant:
@@ -161,11 +161,11 @@ def resolve_tenant(  # noqa: PLR0913 — the request, the folder rules' inputs a
     tenant = accept_tenant(
         data_root, tenant_id, defender_dir=defender_dir, box_mounted=box_mounted)
     records = entry_directory(directory).current_records(tenant.id)
-    return run_tenant_for(tenant, dispatches_lead_zero=dispatches_lead_zero, records=records)
+    return run_tenant_for(tenant, dispatches_lead_zero=dispatches_lead_zero, records=records, catalog=catalog)
 
 
 def run_tenant_for(  # noqa: PLR0913 — the tenant, its records, its two roots, the staged token, the flag
-    tenant: Tenant, *, dispatches_lead_zero: bool, records: TenantRecords,
+    tenant: Tenant, *, dispatches_lead_zero: bool, records: TenantRecords, catalog: Catalog,
     agent_root: Path | None = None, settings_root: Path | None = None,
     stage_token: Path | None = None, defender_dir: Path | None = None,
 ) -> RunTenant:
@@ -175,7 +175,8 @@ def run_tenant_for(  # noqa: PLR0913 — the tenant, its records, its two roots,
     records (#1366 R10, O6; DC7: no folder read for them); its grants and lead-zero dispatch from
     `settings_root`'s table. `agent_root`/`settings_root` are the two halves of the one export
     the run reads (#1108 P4, O-B: run start hands its run copy's); each defaults to the tenant's
-    own folder (`clone_halves`). `defender_dir` is accepted for callers that still pass it and is
+    own folder (`clone_halves`). `catalog` is the one the caller holds over the run's single roster read: the adapter's
+    list of non-GET reads a record's access is judged against (#1504 O3), never a read of its own. `defender_dir` is accepted for callers that still pass it and is
     not read. Which of its records are its systems is the catalog's (`tenant_systems`)."""
     del defender_dir
     clone_agent, clone_settings = clone_halves(tenant)
@@ -185,14 +186,15 @@ def run_tenant_for(  # noqa: PLR0913 — the tenant, its records, its two roots,
         settings, tenant_id=tenant.id, dispatches_lead_zero=dispatches_lead_zero)
     return RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation,
                      agent_root=agent, settings_root=settings, stage_token=stage_token,
-                     records=records, **record_settings(records))
+                     records=records, **record_settings(records, catalog=catalog))
 
 
-def record_settings(records: TenantRecords) -> dict[str, Any]:
+def record_settings(records: TenantRecords, *, catalog: Catalog) -> dict[str, Any]:
     """The parts of `RunTenant` built from the tenant's records (#1366 O6), as the keyword
     arguments it takes: each enabled record's stored settings (`systems`) and its declaration
     parsed (`access`, K4; a declaration that does not parse is kept as its fault, located at the
-    record, DC6), and the case record (`case_record`). Nothing raises for a record's content
+    record, DC6; a catalog record's non-GET reads that differ from its adapter's list in `catalog` are such a fault,
+    #1504 O3), and the case record (`case_record`). Nothing raises for a record's content
     (O5): a part that cannot stand is carried as the fault that says why."""
     from defender.system_rules import located_access
 
@@ -200,7 +202,8 @@ def record_settings(records: TenantRecords) -> dict[str, Any]:
     access: dict[str, AccessDeclaration | ConfigFault] = {}
     for system, record in enabled.items():
         try:
-            access[system] = located_access(record.access, system=system)
+            access[system] = located_access(record.access, system=system, adapter=record.adapter_id,
+                                            catalog=None if record.custom_ref is not None else catalog)
         except ConfigFault as fault:
             access[system] = ConfigFault(str(fault))  # the text only, as the other parts do
     return {
@@ -305,7 +308,7 @@ def warn_ignored(verdict: TenantVerdict) -> None:
     for system, why in verdict.ignored.items():
         _logger.warning(
             f"{verdict.tenant.grants.path}: the grants on system {system} are ignored for this run: {why} "
-            "(`tenant check` reports it)")
+            "(the readiness check reports it)")
 
 
 def _narrowed(grants: RunGrants, ignored: frozenset[str]) -> RunGrants:

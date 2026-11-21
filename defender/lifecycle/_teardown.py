@@ -1,6 +1,6 @@
 """Stopping what works for a tenant on the execution host before its folder goes (#1214 P3, O4,
 Flow 2.3): the processes recorded under the tenant's host lock, and its box containers (labelled
-`defender.tenant=<T>`). Blocking; the host actor runs it in a worker thread."""
+`defender.tenant=<T>`). It blocks; the host actor runs it in a worker thread."""
 from __future__ import annotations
 
 import logging

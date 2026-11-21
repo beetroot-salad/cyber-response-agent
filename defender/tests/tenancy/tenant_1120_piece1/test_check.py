@@ -65,11 +65,6 @@ def _write_table(settings: Path, doc: dict[str, Any]) -> None:
         yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
 
 
-def _check_id(root: Path, *extra: str, **kw: Any):
-    """`tenant.py check acme` against `root`."""
-    return H.check(tenant_py, root, H.TID, *extra, **kw)
-
-
 def _check_folder(folder: Path, **kw: Any):
     """`tenant.py check --folder <folder>` with `DEFENDER_DATA_ROOT` unset."""
     return H.check(tenant_py, None, "--folder", str(folder), **kw)
@@ -110,13 +105,8 @@ def extra_checkout(tmp_path_factory) -> Path:
     return checkout
 
 
-def test_1120_check_exits_zero_over_a_clean_tenant_and_a_clean_folder(tmp_path: Path) -> None:
-    root = tmp_path / "data"
-    H.adopted(root)
-    before = H.tree_census(root)
-    H.assert_clean(_check_id(root))
-    assert H.census_diff(before, H.tree_census(root)) == [], "check wrote into the data root"
-
+def test_1120_check_exits_zero_over_a_clean_folder() -> None:
+    # #1471 B3: `check <id>` retired; its data-root half is gone with it (stale, updated)
     for folder in (H.FIXTURE, H.TEMPLATE):
         assert not (folder / H.TENANT_ID_FILE).exists(), f"{folder} commits a .tenant-id"
         committed = H.tree_census(folder)
@@ -124,50 +114,11 @@ def test_1120_check_exits_zero_over_a_clean_tenant_and_a_clean_folder(tmp_path: 
         assert H.census_diff(committed, H.tree_census(folder)) == [], f"check wrote into {folder}"
 
 
-def _missing_required_setting(knowledge: Path) -> str:
-    target = knowledge / "settings" / "verb-grants.yaml"  # #1359, #1503: the one required setting
-    target.unlink()
-    return str(target)
-
-
-def _symlink_in_settings(knowledge: Path) -> str:
-    link = knowledge / "settings" / "planted-grants-link.yaml"
-    link.symlink_to(knowledge / "settings" / "verb-grants.yaml")
-    return "planted-grants-link.yaml"
-
-
-def _mismatched_tenant_id(knowledge: Path) -> str:
-    H.write_tenant_id_file(knowledge, H.TID, f"{H.OTHER}\n")
-    return ".tenant-id"
-
-
-ACCEPTANCE_FAILURES = [
-    pytest.param(_missing_required_setting, id="REQUIRED_SETTINGS-missing"),
-    pytest.param(_symlink_in_settings, id="settings-symlink-inside"),
-    pytest.param(_mismatched_tenant_id, id="tenant_id_file-other-id"),
-]
-
-
-@pytest.mark.parametrize("plant", ACCEPTANCE_FAILURES)
-def test_1120_check_refuses_a_tenant_that_fails_acceptance_naming_the_file(
-        tmp_path: Path, plant) -> None:
-    root = tmp_path / "data"
-    H.adopted(root)
-    H.assert_clean(_check_id(root))
-    named = plant(H.knowledge_dir(root))
-    before = H.tree_census(root)
-    text = H.assert_refused(_check_id(root), named)
-    assert "[tenant.py]" in text, f"the refusal is not tenant.py's own surface:\n{text}"
-    assert H.census_diff(before, H.tree_census(root)) == [], "check wrote into the data root"
-    H.assert_verbatim(text, H.accept_refusal(_tenant, root, H.TID), entry="tenant.py check")
-
-
 def test_1120_check_refuses_every_grant_gap_in_both_directions_naming_each(
         tmp_path: Path) -> None:
-    root = tmp_path / "data"
-    H.adopted(root)
-    H.assert_clean(_check_id(root))
-    settings = H.settings_dir(root)
+    folder = _folder(tmp_path, "tenant")  # #1471 B3: over `--folder`, `check <id>` retired (stale, updated)
+    H.assert_clean(_check_folder(folder))
+    settings = folder / "settings"
     doc = _table(settings)
     rows = doc["dispositions"]
     del rows["change-mgmt"]["get-change"]
@@ -175,7 +126,7 @@ def test_1120_check_refuses_every_grant_gap_in_both_directions_naming_each(
     rows["cmdb"]["no-such-verb"] = {"roles": ["gather"]}
     rows["no-such-system"] = {"health-check": {"roles": ["gather"]}}
     _write_table(settings, doc)
-    H.assert_refused(_check_id(root), "change-mgmt.get-change", "threat-intel.list-indicators",
+    H.assert_refused(_check_folder(folder), "change-mgmt.get-change", "threat-intel.list-indicators",
                      "cmdb.no-such-verb", "no-such-system")
 
 
@@ -205,14 +156,8 @@ def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import
 
 def test_1120_s6_defender_dir_env_names_another_tree(
         tmp_path: Path, extra_checkout: Path) -> None:
-    copy_defender = extra_checkout / "defender"
-    root = copy_defender / f"data-{tmp_path.name}"
-    H.adopted(root)
-    text = H.assert_clean(_check_id(root, DEFENDER_DIR=str(copy_defender)))
-    assert EXTRA_PAIR not in text, f"check took its census from DEFENDER_DIR:\n{text}"
-
+    # #1471 B3: the `check <id>` halves retired with it (stale, updated)
     script = _copy_script(extra_checkout)
-    H.assert_refused(H.checkout_tenant_py(extra_checkout, "check", H.TID, root=root), str(copy_defender))
     H.assert_refused(
         H.run_script(script, "check", "--folder", str(_folder(tmp_path, "tenant")), root=None),
         EXTRA_PAIR)
@@ -290,36 +235,33 @@ def test_1120_s6_check_folder_reached_through_symlink_or_bind_mount(tmp_path: Pa
 
 
 def test_1120_s9_check_over_a_grant_table_repeats_a_top_level_key(tmp_path: Path) -> None:
-    root = tmp_path / "data"
-    H.adopted(root)
-    H.assert_clean(_check_id(root))
-    table = H.settings_dir(root) / "verb-grants.yaml"
+    folder = _folder(tmp_path, "tenant")  # #1471 B3: over `--folder`, `check <id>` retired (stale, updated)
+    H.assert_clean(_check_folder(folder))
+    table = folder / "settings" / "verb-grants.yaml"
     table.write_text(table.read_text(encoding="utf-8")
                      + "\n  cmdb:\n    get-host: {roles: [gather]}\n", encoding="utf-8")
-    H.assert_refused(_check_id(root), "verb-grants.yaml", "cmdb")
+    H.assert_refused(_check_folder(folder), "verb-grants.yaml", "cmdb")
 
 
 def test_1120_s9_check_over_a_grant_table_that_fails_to_parse_as_yaml(tmp_path: Path) -> None:
-    root = tmp_path / "data"
-    H.adopted(root)
-    H.assert_clean(_check_id(root))
-    table = H.settings_dir(root) / "verb-grants.yaml"
+    folder = _folder(tmp_path, "tenant")  # #1471 B3: over `--folder`, `check <id>` retired (stale, updated)
+    H.assert_clean(_check_folder(folder))
+    table = folder / "settings" / "verb-grants.yaml"
     text = table.read_text(encoding="utf-8")
     table.write_text(text.replace("  cmdb:", "<<<<<<< HEAD\n  cmdb:", 1), encoding="utf-8")
-    H.assert_refused(_check_id(root), "verb-grants.yaml")
+    H.assert_refused(_check_folder(folder), "verb-grants.yaml")
 
 
 def test_1120_s9_check_over_grant_table_verb_filed_under_wrong_real_system(
         tmp_path: Path) -> None:
-    root = tmp_path / "data"
-    H.adopted(root)
-    H.assert_clean(_check_id(root))
-    settings = H.settings_dir(root)
+    folder = _folder(tmp_path, "tenant")  # #1471 B3: over `--folder`, `check <id>` retired (stale, updated)
+    H.assert_clean(_check_folder(folder))
+    settings = folder / "settings"
     doc = _table(settings)
     rows = doc["dispositions"]
     rows["cmdb"]["list-authorized-hosts"] = rows["identity"].pop("list-authorized-hosts")
     _write_table(settings, doc)
-    H.assert_refused(_check_id(root), "cmdb.list-authorized-hosts",
+    H.assert_refused(_check_folder(folder), "cmdb.list-authorized-hosts",
                      "identity.list-authorized-hosts")
 
 
@@ -329,10 +271,9 @@ def test_1186_tenant_commands_ignore_the_retired_learning_overlap(
     H.adopted(root)
     overlap = {OVERLAP_ENV: str(root / "learning-state")}
     folder = _folder(tmp_path, "tenant")
-    H.assert_clean(H.check(tenant_py, root, "--folder", str(folder), **overlap))
-
     before = H.tree_census(root)
-    H.assert_clean(_check_id(root, **overlap))
+    H.assert_clean(H.check(tenant_py, root, "--folder", str(folder), **overlap))
+    # #1471 B3: the `check <id>` half retired with it (stale, updated)
     assert H.tree_census(root) == before, "check wrote into the tenant"
     assert not (H.tenant_folder(root) / "learning").exists(), "check created learning state"
 
@@ -341,8 +282,7 @@ def test_1120_check_with_both_or_neither_selector_is_a_usage_error(tmp_path: Pat
     root = tmp_path / "data"
     H.adopted(root)
     folder = _folder(tmp_path, "tenant")
-    H.assert_clean(_check_id(root))
-    H.assert_clean(_check_folder(folder))
+    H.assert_clean(_check_folder(folder))  # #1471 B3: `check <id>` retired; its clean control with it (stale, updated)
     before = H.tree_census(root)
     for argv in ((H.TID, "--folder", str(folder)), ()):
         proc = H.check(tenant_py, root, *argv)
@@ -358,12 +298,8 @@ def _withhold_all(settings: Path) -> None:
 
 
 def test_1120_check_does_not_report_an_all_withheld_table_as_a_finding(tmp_path: Path) -> None:
-    root = tmp_path / "data"
-    H.adopted(root)
-    _withhold_all(H.settings_dir(root))
-    folder = _folder(tmp_path, "tenant")
+    folder = _folder(tmp_path, "tenant")  # #1471 B3: the `check <id>` half retired with it (stale, updated)
     _withhold_all(folder / "settings")
-    H.assert_clean(_check_id(root))
     H.assert_clean(_check_folder(folder))
 
     doc = _table(folder / "settings")
@@ -401,10 +337,9 @@ def test_1120_check_accepts_a_table_granting_gather_no_query_verb(
     (the refusal at `setup` retired with `setup`, F-12)."""
     rerun = tmp_path / "rerun"
     H.place_knowledge(rerun)
-    H.assert_clean(_check_id(rerun))
+    H.assert_clean(_check_folder(H.knowledge_dir(rerun)))  # #1471 B3: over `--folder` (stale, updated)
     plant(H.settings_dir(rerun))
     before = H.tree_census(rerun)
-    H.assert_clean(_check_id(rerun))
     H.assert_clean(_check_folder(H.knowledge_dir(rerun)))
     assert H.census_diff(before, H.tree_census(rerun)) == [], "check wrote into the tenant"
 
@@ -435,15 +370,13 @@ def test_1120_check_refuses_a_clones_tenant_id_that_its_repo_does_not_commit(
 
     assert H.accept(_tenant, root).id == H.TID
 
-    H.assert_refused(_check_id(root), named)
-    decoy = _decoy_repo(tmp_path)
-    H.assert_refused(_check_id(root, GIT_DIR=str(decoy / ".git")), named)
+    decoy = _decoy_repo(tmp_path)  # #1471 B3: over `--folder`, `check <id>` retired (stale, updated)
+    H.assert_refused(_check_folder(knowledge, GIT_DIR=str(decoy / ".git")), named)
     H.assert_refused(_check_folder(knowledge), named)
     assert H.git_status(knowledge) == status, "check changed the clone's git state"
 
     committed = tmp_path / "committed"
     clean_clone = H.cloned_tenant(tmp_path / "committed-src", committed)
-    H.assert_clean(_check_id(committed))
     H.assert_clean(_check_folder(clean_clone))
     H.assert_clean(_check_folder(_folder(tmp_path, "plain", tenant_id_file="id")))
 
@@ -545,13 +478,12 @@ def test_1120_check_fails_closed_when_git_cannot_say_the_tenant_id_is_committed(
     knowledge = H.cloned_tenant(tmp_path / "src", root)
     env, reason, repair = fault(tmp_path, knowledge)
     try:
-        for proc in (_check_id(root, **env), _check_folder(knowledge, **env)):
+        for proc in (_check_folder(knowledge, **env),):  # #1471 B3: `check <id>` retired (stale, updated)
             text = H.assert_refused(proc, H.CANNOT_VERIFY_TENANT_ID)
             assert re.search(reason, _without(text, str(tmp_path), H.CANNOT_VERIFY_TENANT_ID)), (
                 f"check does not give git's reason (/{reason}/) for not answering:\n{text}")
     finally:
         repair()
-    H.assert_clean(_check_id(root))
     H.assert_clean(_check_folder(knowledge))
 
 
@@ -589,7 +521,7 @@ def test_1159_check_says_this_machines_git_failed_and_exits_1(
         f"a plain folder (no git work tree) is exempt from the committed-.tenant-id rule:\n{text}")
     assert_census_taken(text)
 
-    for proc in (_check_folder(knowledge, **env), _check_id(root, **env)):
+    for proc in (_check_folder(knowledge, **env),):  # #1471 B3: `check <id>` retired (stale, updated)
         text = H.assert_refused(proc, H.CANNOT_VERIFY_TENANT_ID)
         assert_census_taken(text)
         unverified = [ln for ln in text.splitlines() if H.CANNOT_VERIFY_TENANT_ID in ln]
@@ -803,34 +735,6 @@ def test_1390_check_still_judges_the_tacit_rows_that_are_present(tmp_path: Path)
     doc["dispositions"][TACIT]["lookup"] = {"roles": []}
     _write_table(bare / "settings", doc)
     H.assert_refused(_check_folder(bare), f"{TACIT}.lookup", "reason")
-
-
-@pytest.mark.parametrize("kind", ["dropped-entry", "refused-whole"])
-def test_1390_plain_check_by_tenant_id_fails_on_a_broken_registry_too(tmp_path: Path, kind: str) -> None:
-    """`tenant check <id>` over a placed tenant (not `--folder`) fails on a dropped entry or a refused file, and is clean without one. O7, A10."""
-    root = tmp_path / "data"
-    H.adopted(root)
-    H.assert_clean(_check_id(root))
-    _plant_registry_fault(H.knowledge_dir(root), kind)
-
-    text = H.assert_refused(_check_id(root), TACIT)
-
-    for reason in _cli_failures(H.agent_dir(root)):
-        assert reason in text, f"`check <id>` does not carry the CLI's reason {reason!r}:\n{text}"
-
-
-def test_1390_plain_check_by_tenant_id_names_a_reserved_adapter_name_with_its_reason(tmp_path: Path) -> None:
-    """With a reserved-name adapter in the checkout, `tenant check <id>` fails naming `tacit-knowledge` and the reserved reason, not an anomalous name. A11."""
-    checkout = H.tmp_checkout(tmp_path / "checkout")
-    root = tmp_path / "data"
-    H.adopted(root)
-    H.assert_clean(H.checkout_tenant_py(checkout, "check", H.TID, root=root))
-
-    H.add_adapter(checkout, TACIT, RESERVED_ADAPTER)
-    out = H.assert_refused(H.checkout_tenant_py(checkout, "check", H.TID, root=root), TACIT)
-
-    assert "reserved" in out, f"the refusal gives no reason:\n{out}"
-    assert "anomalous adapter name" not in out, f"the refusal reads as a malformed name:\n{out}"
 
 
 def _non_regular(path: Path, kind: str) -> None:

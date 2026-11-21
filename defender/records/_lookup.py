@@ -284,12 +284,18 @@ class RunsRepository(Generic[_T]):
         if launched.record.tenant_id != str(self._tenant.id):
             raise TenantRefused(f"the launch record of job {quoted(launched.record.investigation_id)} "
                                 f"names another tenant than {quoted(self._tenant.id)}")
+        self.require_runs_folder()
+        return Run.under(self._tenant.runs, launched.run_id, io=self._io, tenant_id=self._tenant.id)
+
+    def require_runs_folder(self) -> None:
+        """The tenant's natural runs container is there: walked no-follow and never made (#1471 R13-0: tenant setup
+        makes it, so an absent one is damage), else `TenantRefused`. A job's launch (`launched`) and a host request
+        (#1471 P-1's step 5) ask it; nothing is written."""
         try:
             self._natural().close()
         except FileNotFoundError:
             raise TenantRefused(f"the runs folder {unwrap_runs_base(self._tenant.runs)} is absent: "
                                 "tenant setup makes it, and a job never does") from None
-        return Run.under(self._tenant.runs, launched.run_id, io=self._io, tenant_id=self._tenant.id)
 
     def resolve(self, address: RunAddress) -> Run:
         """The run a stored `address` names, in this repository, refused as `open` refuses

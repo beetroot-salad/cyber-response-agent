@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from defender.records.formats import AlertMapping
     from defender.records.job_lane import Launched
     from defender.records.formats import ResumeWorld
+    from defender.systems.catalog import Catalog
     from defender.systems.run_tenant import RunTenant, TenantVerdict
     from defender.systems.verbs import RosterRead
     from defender.tenancy.record_values import TenantRecords
@@ -528,9 +529,20 @@ def read_alert_mapping(records: Any, tenant_id: Any) -> AlertMapping:
 
 class PublishLaunch(Protocol):
     """The launch-time publish run start calls (`publish_launch.launch_publish`, or an in-process
-    caller's stand-in): typed, so the tenant id reaches the records it writes as a `TenantId`."""
+    caller's stand-in): typed, so the tenant id reaches the records it writes as a `TenantId`. `trigger` is who asked
+    for the publish (`publish_report` hands it whenever a job's helper names one, #1471); a stand-in takes it too."""
 
-    def __call__(self, tenant_id: TenantId, *, data_root: Path) -> object: ...
+    def __call__(self, tenant_id: TenantId, *, data_root: Path, trigger: str = ...) -> object: ...
+
+
+class KnowledgeExit(SystemExit):
+    """`resolve_knowledge`'s `[run.py]` refusal (a `SystemExit` like every run setup refusal, its code the text), with
+    the publish report it was refused on (`None` for a pinned run's): a caller that must not pass the report's reason
+    on (#1471 P-2: a readiness check names only the kind) reads the kind here, never from the text."""
+
+    def __init__(self, text: str, *, report: PublishReport | None) -> None:
+        super().__init__(text)
+        self.report = report
 
 
 def default_publish(records: tenancy.TenantDirectory) -> PublishLaunch:
@@ -565,40 +577,44 @@ def stopped_by_sigterm() -> Iterator[None]:
 
 def publish_report(
     publish: PublishLaunch | None, tenant: tenancy.Tenant, data_root: DataRoot,
-    records: tenancy.TenantDirectory,
+    records: tenancy.TenantDirectory, *, trigger: str | None = None,
 ) -> PublishReport:
     """The launch-time publish's outcome (#1108 P4, U7): the child is handed identifiers only
     — the tenant id and the data root (O8: no login material passes through the run process)
     — and its one report line is read back. The real launcher never raises and records every
     outcome itself in the tenant records; a seam that raises is U11's `stale:operator`, never
-    fresh, recorded by the same recorder the launcher uses."""
+    fresh, recorded by the same recorder the launcher uses. `trigger` (who asked: a job's
+    helper names its own, #1471) is handed to the publish when given, and records its outcomes;
+    none keeps the launcher's own (an investigation's launch)."""
     from defender.tenancy import run_knowledge
 
+    named = {} if trigger is None else {"trigger": trigger}
     try:
         launch = publish if publish is not None else default_publish(records)
         with stopped_by_sigterm():
-            line = launch(tenant.id, data_root=tenancy.data_root_for_child(data_root))
+            line = launch(tenant.id, data_root=tenancy.data_root_for_child(data_root), **named)
     except Exception as failed:  # noqa: BLE001 — U11: a failed child is stale:operator, recorded
         from defender.tenancy import record_report
 
         line = run_knowledge.failed_line(f"{type(failed).__name__}: {failed}")
-        record_report(records, tenant.id, line, by="launch-time publish")
+        record_report(records, tenant.id, line, by=trigger or "launch-time publish")
     return run_knowledge.read_publish_report(line)
 
 
 def resolve_knowledge(
     tenant: tenancy.Tenant, *, pin: str | None, publish: PublishLaunch | None,
-    data_root: DataRoot, records: tenancy.TenantDirectory,
+    data_root: DataRoot, records: tenancy.TenantDirectory, trigger: str | None = None,
 ) -> KnowledgeSource:
     """Which export this run reads and why: the pinned one (no publish), else `current` after
-    the launch-time publish — or the refusal before the box (O-A, O9)."""
+    the launch-time publish (`trigger`: who asked for it, `publish_report`) — or the refusal
+    before the box (O-A, O9), a `KnowledgeExit` holding the report it was refused on."""
     from defender.tenancy import run_knowledge
 
-    report = None if pin is not None else publish_report(publish, tenant, data_root, records)
+    report = None if pin is not None else publish_report(publish, tenant, data_root, records, trigger=trigger)
     try:
         source = run_knowledge.resolve_source(tenant, report=report, pinned=pin)
     except run_knowledge.KnowledgeRefused as refused:
-        sys.exit(f"[run.py] {refused}")
+        raise KnowledgeExit(f"[run.py] {refused}", report=report) from None
     if source.kind == run_knowledge.STALE:
         _logger.warning(f"knowledge is stale ({source.stale_kind}): the run reads the last "
                         f"published snapshot {source.commit[:12]}; the publish said: "
@@ -625,7 +641,7 @@ def copy_knowledge(tenant: tenancy.Tenant, source: KnowledgeSource, run_id: str)
 
 def run_tenant_or_exit(
     tenant: tenancy.Tenant, *, defender_dir: Path | None = None, dispatches_lead_zero: bool,
-    records: TenantRecords, copy: RunCopy | None = None,
+    records: TenantRecords, catalog: Catalog, copy: RunCopy | None = None,
 ) -> RunTenant:
     """The accepted tenant ready to run — its grants and lead-zero dispatch from run start's
     readiness function, over the run's own copy of its knowledge (#1108 P4, O-B: settings,
@@ -636,7 +652,9 @@ def run_tenant_or_exit(
     lead. Without `copy` (a direct caller), the grants are resolved over the tenant's own
     folder. Its systems, access and case record are the tenant's current `records` (#1366 O6),
     read once at setup (`read_records`; inside a job container, the ones its host helper read and
-    handed over). `defender_dir` is not read: the code tree holds no tenant knowledge (O1)."""
+    handed over). `catalog` is the one the caller built over the run's single roster read: a record's
+    reads are judged against its adapters' lists (#1504 O3). `defender_dir` is not read: the code tree
+    holds no tenant knowledge (O1)."""
     from defender.systems import run_tenant as run_tenant_mod
 
     del defender_dir
@@ -645,7 +663,7 @@ def run_tenant_or_exit(
               "stage_token": copy.token})
     try:
         return run_tenant_mod.run_tenant_for(
-            tenant, dispatches_lead_zero=dispatches_lead_zero, records=records, **roots)
+            tenant, dispatches_lead_zero=dispatches_lead_zero, records=records, catalog=catalog, **roots)
     except run_tenant_mod.TenantRefused as refusal:
         sys.exit(f"[run.py] this run's tenant {tenant.id!r} cannot be used: {refusal}")
 

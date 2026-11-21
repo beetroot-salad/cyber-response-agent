@@ -91,6 +91,11 @@ This file covers the rest — the calls a script can't make.
       calls with a method other than `GET`/`HEAD` (the proxy admits those as reads); `config.env` holds exactly the adapter's `REQUIRED_CONFIG_KEYS`. A
       credential is the operator's to store with the proxy (noted in the
       summary).
+- [ ] **The adapter declares its reads and ships its reference (generate path).** The module's `READ_ROUTES` lists
+      exactly the non-GET requests its tools send (`()` for none) and `access.yaml`'s `reads` is that list, no more
+      and no fewer; a reference `{system}_adapter.md` sits beside the module with a `## Credential` and a
+      `## Pitfalls` section holding what no check refuses (`None known.` when nothing). CI refuses a missing list
+      or reference, and a test drives every tool to hold the list true.
 - [ ] **One system.** If others came up in the interview, they were noted
       for a separate re-run, not folded in here.
 - [ ] **Divergences surfaced.** Any legitimate departure from the default

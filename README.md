@@ -128,7 +128,7 @@ and the host actor in one process) creates its repository from the committed tem
 credentials, and the clone and empty learning state under `$DEFENDER_DATA_ROOT/<id>/`, then marks it
 `active`. Follow it with `GET /api/admin/tenants/<id>`; a failed step is recorded there and resumed with
 `POST /api/admin/tenants/<id>/resume`. Every host entry point (`run.py`, the drains, `tenant.py
-check|update|propose`) works only for an `active` tenant, reading the tenant records from
+check --folder`, which reads no tenant) works only for an `active` tenant, reading the tenant records from
 `DEFENDER_DATABASE_DSN`; see
 [Host process settings](defender/docs/development-operations.md#host-process-settings-1214).
 
@@ -136,7 +136,7 @@ check|update|propose`) works only for an `active` tenant, reading the tenant rec
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout
 export DEFENDER_DATABASE_DSN=<the tenant database>
 export TENANT_ID=<the id POST /api/admin/tenants answered>
-python3 defender/cli/tenant.py check "$TENANT_ID"   # the tenant admitted and its folder accepted
+# then ask for its readiness: POST /api/tenants/$TENANT_ID/readiness (a tenant admin), and poll the GET it names
 ```
 
 A tenant that predates #1214 (the lab's) is moved once by hand; see

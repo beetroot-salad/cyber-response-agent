@@ -121,7 +121,7 @@ class PublishedTenant:
 
     def admitted(self) -> Any:
         """The tenant's host acceptance over `directory` (r10.1 C3: checked at the call, released by `with`): the value
-        the connect command's verbs (`update`, `propose`, `check_tenant`) take (C1: a tenant is the scope's value)."""
+        the connect command's verbs (`update`, `propose`) take (C1: a tenant is the scope's value)."""
         from defender.systems.run_tenant import host_tenant
         from defender.tests.support.shared._locations_1210 import fixture_data_root
 

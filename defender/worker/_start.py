@@ -42,11 +42,14 @@ DSN_ENV = "DEFENDER_DATABASE_DSN"
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 SLOTS_ENV = "DEFENDER_WORKER_SLOTS"
 LEARNING_SLOTS_ENV = "DEFENDER_WORKER_LEARNING_SLOTS"
+#: How many host requests (#1471: readiness checks and adoptions) run at once, outside the slots (R13-6).
+HOST_REQUEST_SLOTS_ENV = "DEFENDER_WORKER_HOST_REQUEST_SLOTS"
 LEARNING_CHECK_ENV = "DEFENDER_WORKER_LEARNING_CHECK_SECONDS"
 POST_STEP_LIMIT_ENV = "DEFENDER_WORKER_POST_STEP_SECONDS"
 #: The origin a flagged job's ticket comment links to (#1471 W3, W9): the API's own setting, read by the same rule.
 FRONTEND_ORIGIN_ENV = "DEFENDER_API_FRONTEND_ORIGIN"
 DEFAULT_SLOTS = 3
+DEFAULT_HOST_REQUEST_SLOTS = 1
 #: How long a tenant goes without a post-step before the worker checks it without a family (#1344
 #: amendment 1).
 DEFAULT_LEARNING_CHECK_SECONDS = 300
@@ -77,6 +80,7 @@ class Settings:
     learning_slots: int
     learning_check_seconds: int = DEFAULT_LEARNING_CHECK_SECONDS
     post_step_seconds: int = DEFAULT_POST_STEP_SECONDS
+    host_request_slots: int = DEFAULT_HOST_REQUEST_SLOTS
     #: The screen links' origin, as `frontend_origin` checked it (#1471 W3, W9): required, so no default the worker refuses.
     frontend_origin: str = field(kw_only=True)
 
@@ -88,6 +92,14 @@ def _setting_count(environ: Mapping[str, str], name: str, default: int) -> int:
     if not re.fullmatch(r"-?[0-9]+", raw.strip()):
         raise WorkerStartRefused(f"{name}={raw!r} is not a whole number")
     return int(raw.strip())
+
+
+def _at_least_one(environ: Mapping[str, str], name: str, default: int, *, unit: str = "") -> int:
+    """`_setting_count`, refused (`WorkerStartRefused` naming it) below 1."""
+    count = _setting_count(environ, name, default)
+    if count < 1:
+        raise WorkerStartRefused(f"{name}={count} must be at least 1{unit}")
+    return count
 
 
 def build_commit(environ: Mapping[str, str]) -> str:
@@ -123,22 +135,19 @@ def read_settings(environ: Mapping[str, str]) -> Settings:
     """The worker's settings, judged before any work: a build stamp that is a commit
     (`build_commit`), slots of at least one, learning slots between 0 and slots - 1 (default
     min(1, slots - 1)), the family-less check's interval, whole seconds of at least 1
-    (default 300), and the post-step's limit, whole seconds of at least 1 (default 14400, #1487 Amendment r5.4). Learning is on by default in production (#1344 D3); 0 is the off switch."""
+    (default 300), the post-step's limit, whole seconds of at least 1 (default 14400, #1487 Amendment r5.4), and the
+    host requests' slots, at least 1 (default 1, #1471 R13-6: a worker that could claim none never starts, so no request
+    is accepted that nothing can run). Learning is on by default in production (#1344 D3); 0 is the off switch."""
     commit = build_commit(environ)
-    slots = _setting_count(environ, SLOTS_ENV, DEFAULT_SLOTS)
-    if slots < 1:
-        raise WorkerStartRefused(f"{SLOTS_ENV}={slots} must be at least 1")
+    slots = _at_least_one(environ, SLOTS_ENV, DEFAULT_SLOTS)
+    host_requests = _at_least_one(environ, HOST_REQUEST_SLOTS_ENV, DEFAULT_HOST_REQUEST_SLOTS)
     learning = _setting_count(environ, LEARNING_SLOTS_ENV, min(1, slots - 1))
     if not 0 <= learning <= slots - 1:
         raise WorkerStartRefused(
             f"{LEARNING_SLOTS_ENV}={learning} must be between 0 and {SLOTS_ENV} - 1 ({slots - 1}): "
             "investigations always keep a slot")
-    check = _setting_count(environ, LEARNING_CHECK_ENV, DEFAULT_LEARNING_CHECK_SECONDS)
-    if check < 1:
-        raise WorkerStartRefused(f"{LEARNING_CHECK_ENV}={check} must be at least 1 (seconds)")
-    post_step = _setting_count(environ, POST_STEP_LIMIT_ENV, DEFAULT_POST_STEP_SECONDS)
-    if post_step < 1:
-        raise WorkerStartRefused(f"{POST_STEP_LIMIT_ENV}={post_step} must be at least 1 (seconds)")
+    check = _at_least_one(environ, LEARNING_CHECK_ENV, DEFAULT_LEARNING_CHECK_SECONDS, unit=" (seconds)")
+    post_step = _at_least_one(environ, POST_STEP_LIMIT_ENV, DEFAULT_POST_STEP_SECONDS, unit=" (seconds)")
     dsn = environ.get(DSN_ENV, "")
     if not dsn:
         raise WorkerStartRefused(f"{DSN_ENV} is not set: the worker claims its work from the job store")
@@ -149,7 +158,8 @@ def read_settings(environ: Mapping[str, str]) -> Settings:
     if not root.is_dir():
         raise WorkerStartRefused(f"{DATA_ROOT_ENV}={raw_root!r} is not a folder")
     return Settings(dsn=dsn, root=root, build_commit=commit, slots=slots, learning_slots=learning,
-                    learning_check_seconds=check, post_step_seconds=post_step, frontend_origin=frontend_origin(environ))
+                    learning_check_seconds=check, post_step_seconds=post_step, host_request_slots=host_requests,
+                    frontend_origin=frontend_origin(environ))
 
 
 def check_learning_settings() -> None:

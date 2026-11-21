@@ -23,6 +23,7 @@ from defender.kit.access import (
     AccessDeclaration,
     Auth,
     Route,
+    route_shape_fault,
 )
 from defender.kit.faults import ConfigFault
 from defender.kit.paths import url_fault
@@ -35,7 +36,6 @@ ACCESS_FILE = "access.yaml"
 _KNOWN = ("access", "base", "auth", "reads", "writes", "ca")
 #: The credential-set field names a scheme may name (the API's `CredentialKey` pattern).
 _FIELD = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
-_METHOD = re.compile(r"[A-Z]{3,10}")
 _HEADER_NAME = re.compile(r"[A-Za-z0-9-]{1,64}")
 _SCHEME_FIELDS: Mapping[str, tuple[str, ...]] = {
     BEARER: ("field",),
@@ -208,11 +208,10 @@ def _routes(shown: str, value: object, key: str) -> tuple[Route, ...]:
             raise ConfigFault(f"{shown}: each `{key}` entry must be a mapping")
         _yaml.reject_unread_keys(shown, item, ("method", "path"), error=ConfigFault)
         method, path = item.get("method"), item.get("path")
-        if not isinstance(method, str) or not _METHOD.fullmatch(method):
-            raise ConfigFault(f"{shown}: a `{key}` entry needs an upper-case `method`")
-        if not isinstance(path, str) or not path.startswith("/") or "?" in path or "#" in path:
-            raise ConfigFault(f"{shown}: a `{key}` entry needs a `path` starting with `/`")
-        routes.append(Route(method, path))
+        why = route_shape_fault(method, path)
+        if why is not None:
+            raise ConfigFault(f"{shown}: a `{key}` entry is not a route: {why}")
+        routes.append(Route(str(method), str(path)))  # both text: route_shape_fault refuses any other
     return tuple(routes)
 
 

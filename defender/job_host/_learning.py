@@ -140,7 +140,8 @@ def _admit_tenant(session: Session, hold: contextlib.ExitStack) -> Any:
     from defender.systems.run_tenant import host_tenant
 
     try:
-        admitted = host_tenant(session.root, session.tenant_id, defender_dir=session.defender_dir)
+        admitted = host_tenant(session.root, session.tenant_id, directory=session.directory,
+                               defender_dir=session.defender_dir)
     except TenantRefused as refused:
         raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
     hold.enter_context(admitted)
@@ -176,7 +177,9 @@ def _shared(scratch: Path) -> Path:
 def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     from defender import run_common
     from defender.records.formats import TenantRefused
+    from defender.systems.catalog import Catalog
     from defender.systems.run_tenant import run_tenant_for
+    from defender.investigation.publish_launch import LAUNCH_TRIGGER
     from defender.tenancy import run_knowledge
 
     job = str(session.job_id)
@@ -186,16 +189,18 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     # The tenant's current records, read once for the whole job (#1366 O6; a tenant not active refused, #1470 O8): the
     # container, which reads no database, is handed them in the launch facts, and so is each sibling's run.
     current = setup_step(run_common.read_records, records, accepted.id)
-    source = settle_knowledge(session, accepted, records)
+    source = settle_knowledge(session, accepted, records, trigger=LAUNCH_TRIGGER)
+    # The catalog's roster, read cold (no adapter code, N7) once: the records' reads are judged against it (#1504 O3)
+    # and the tenant's systems are narrowed to it (#1366 R12).
+    roster = setup_step(run_common.run_roster, session.defender_dir)
     try:
         export = session.inside_tenant(accepted.export_folder(source.commit))
-        ready = run_tenant_for(accepted, dispatches_lead_zero=False, records=current,
+        ready = run_tenant_for(accepted, dispatches_lead_zero=False, records=current, catalog=Catalog(roster),
                                agent_root=export / run_knowledge.AGENT_HALF,
                                settings_root=export / run_knowledge.SETTINGS_HALF)
     except (TenantRefused, Refused) as refused:
         raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
-    # Narrowed to the systems the tenant has enabled records of (#1366 R12), read cold (no adapter code, N7).
-    roster = setup_step(run_common.run_roster, session.defender_dir)
+    # Narrowed to the systems the tenant has enabled records of (#1366 R12), over the same roster.
     ready = setup_step(run_common.tenant_verdict, ready, roster, warn=False).tenant
     # The grant is the launch export's, not the family's pinned commit (which the container settles later): the proxy
     # serves a system only by its declaration in the tenant's `current` export, and this helper holds the tenant's
@@ -562,20 +567,26 @@ def _drain_credential(session: Session, state: _PostStep) -> Any:
     return state.credential
 
 
-def _forge_token(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
+def forge_token_answer(fields: dict[str, Any], credential: Any) -> dict[str, Any]:
+    """`forge.token` for a kind that holds a forge credential (the post-step's drain, an adoption): a token valid for
+    `min_validity` more seconds (0 to `FORGE_TOKEN_CAP`) from `credential`, or the request's refusal."""
     validity = fields["min_validity"]
     if isinstance(validity, bool) or not isinstance(validity, (int, float)) or not math.isfinite(validity) \
             or not 0 <= validity <= job_socket.FORGE_TOKEN_CAP:
         raise Refused(f"forge.token's min_validity is a number of seconds from 0 to "
                       f"{job_socket.FORGE_TOKEN_CAP:.0f}",
                       "bad-fields")
-    state = _state(session, _PostStep)
     try:
-        token = _drain_credential(session, state).token(min_validity=float(validity))
+        token = credential().token(min_validity=float(validity))
     except Exception as failed:  # noqa: BLE001 — a token that cannot be minted is the job's to report
         raise Refused(f"the forge token could not be minted: {type(failed).__name__}: {failed}",
                       "forge-fault") from None
     return {"token": str(token)}
+
+
+def _forge_token(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
+    state = _state(session, _PostStep)
+    return forge_token_answer(fields, lambda: _drain_credential(session, state))
 
 
 def _record_published(session: Session, fields: dict[str, Any]) -> dict[str, Any]:

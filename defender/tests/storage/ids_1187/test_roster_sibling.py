@@ -912,7 +912,8 @@ ALL_SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_fai
                         ".record-versions.json")  # #1366: the record versions a run read at start (shared-interface)
 #: #1487: the post-step's record and its pending hand-over retired with the pending set.
 LEARNING_RECORD_SUFFIXES = (".learning-progress.json", ".learning-end.json")
-ACCEPTED_ONLY_SIDECAR_SUFFIXES = (".launch.json", ".alert.json", *LEARNING_RECORD_SUFFIXES)
+ACCEPTED_ONLY_SIDECAR_SUFFIXES = (".launch.json", ".alert.json", *LEARNING_RECORD_SUFFIXES,
+                                  ".readiness.json", ".adoption.json")  # #1471 R13-1.7: the host requests' records (stale, updated)
 
 
 def test_1279_o8_the_sidecar_tests_cover_every_reserved_suffix():

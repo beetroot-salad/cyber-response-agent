@@ -27,9 +27,10 @@ from defender.records.formats import TenantId
 from defender.system_records import NoCurrentRecord, RecordRefused, RecordStore, Stale
 from defender.system_rules import Catalog
 from defender.tenancy import TenantRepository
+from defender.tenancy.record_refusals import NoSuchTenant, TenantNotActive
 from defender.tenancy.record_values import SystemRecord
 
-from .models import CaseRecord, CaseRecordPut, CatalogAdapter, SavedSystem, System, SystemPut
+from .models import CaseRecord, CaseRecordPut, CatalogAdapter, CatalogRead, SavedSystem, System, SystemPut
 from .ports import CredentialsUnused, Principal, SecretStoreRefused, SecretStoreUnavailable
 
 _logger = logging.getLogger(__name__)
@@ -92,7 +93,9 @@ class ConfigRecords:
 
     async def list_adapters(self) -> list[CatalogAdapter]:
         return [CatalogAdapter(adapter_id=e.adapter_id, display_name=e.display_name, settings_keys=list(e.stored_keys),
-                               sample_settings=None if e.sample_settings is None else dict(e.sample_settings), lab_example=e.example)
+                               sample_settings=None if e.sample_settings is None else dict(e.sample_settings), lab_example=e.example,
+                               reads=None if e.reads is None else [CatalogRead(method=m, path=p) for m, p in e.reads],
+                               reads_unusable=e.reads_unusable, reference=e.reference)
                 for e in self._catalog.entries()]
 
     async def list_systems(self, tenant_id: TenantId, *, after: str | None, limit: int) -> list[SystemRecord]:
@@ -104,6 +107,20 @@ class ConfigRecords:
 
     async def served(self, tenant_id: TenantId, record: SystemRecord) -> System:
         return self._system(record, has=await has_credentials(self._secrets, tenant_id, record))
+
+    async def without_credentials(self, tenant_id: TenantId) -> list[str] | None:
+        """Every current system, disabled included, with no set at its generation, sorted (#1471 D10). The tenant's state is
+        asked first: a tenant that is not active has no known records, so the secret store is never reached (R13-2)."""
+        try:
+            current = (await self._tenants.current_records(tenant_id)).systems
+        except (NoSuchTenant, TenantNotActive):
+            return None
+        held = await asyncio.gather(*(has_credentials(self._secrets, tenant_id, current[s]) for s in sorted(current)))
+        return [s for s, has in zip(sorted(current), held, strict=True) if not has]
+
+    async def ships_base_files(self, system_id: str) -> bool:
+        """A system's adapter is its id (P4); an id the catalog lacks ships none."""
+        return system_id in self._catalog and self._catalog.entry(system_id).base_files is not None
 
     def _system(self, record: SystemRecord, *, has: bool) -> System:
         return System(**self._saved(record).model_dump(), has_credentials=has)

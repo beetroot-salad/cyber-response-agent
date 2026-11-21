@@ -4,6 +4,7 @@ parser that reads it from a tenant's settings stays in `tenancy`."""
 from __future__ import annotations
 
 import contextlib
+import re
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -294,6 +295,59 @@ class Route:
     path: str
 
 
+# --- the one route rule (#1504 A6.1): its readers take it from here and keep no copy --------------------------------
+
+#: The methods the credential proxy admits as reads with no declared route (#1163 O3): a record declares none of them,
+#: an adapter's `READ_ROUTES` lists none of them, and the in-process read-endpoint confinement judges exactly them.
+READ_METHODS = ("GET", "HEAD")
+#: A declared route's method: upper-case letters, 3 to 10 of them.
+_ROUTE_METHOD = re.compile(r"[A-Z]{3,10}")
+
+
+def is_read_method(method: str) -> bool:
+    """True for a method the proxy admits as a read with no declared route (`READ_METHODS`): the one question of which
+    methods need a declaration, which the record judgement asks too (#1504 O3)."""
+    return method in READ_METHODS
+
+
+def route_shape_fault(method: object, path: object) -> str | None:
+    """Why `(method, path)` is not a well-formed declared route, as a clause naming each bad part, or None when it is:
+    the method is upper-case letters, 3 to 10; the path is text starting with `/` and holding no `?` or `#`. THE shape:
+    the access declaration's parser, the catalog reader and the catalog declarations lint all ask it."""
+    faults = []
+    if not (isinstance(method, str) and _ROUTE_METHOD.fullmatch(method)):
+        faults.append(f"its method {method!r} is not 3 to 10 upper-case letters")
+    if not (isinstance(path, str) and path.startswith("/") and "?" not in path and "#" not in path):
+        faults.append(f"its path {path!r} does not start with `/`, or holds `?` or `#`")
+    return "; ".join(faults) or None
+
+
+def read_routes_fault(value: object) -> str | None:
+    """Why `value`, an adapter's `READ_ROUTES` as read cold, is not a usable list, as one line naming each offending entry
+    (or the value), or None when it is usable: a tuple of `(method, path)` pairs, each of the declared route shape
+    (`route_shape_fault`), none of a method in `READ_METHODS` (those need no declaration), none repeated. THE rule: the
+    catalog reader and the catalog declarations lint both judge a list with it (#1504 A6.1)."""
+    if not isinstance(value, tuple):
+        return f"is {value!r}, not a tuple of (method, path) routes"
+    faults: list[str] = []
+    seen: list[object] = []  # a list, not a set: an entry read cold may be unhashable (a dict)
+    for route in value:
+        if not (isinstance(route, tuple) and len(route) == 2):
+            faults.append(f"holds {route!r}, which is not a (method, path) pair")
+            continue
+        method, path = route
+        why = route_shape_fault(method, path)
+        if why is None and method in READ_METHODS:
+            why = f"the proxy admits a {method} with no declared route, so the list names none"
+        if why is not None:
+            faults.append(f"holds {route!r}: {why}")
+        elif route in seen:
+            faults.append(f"holds {route!r} more than once")
+        seen.append(route)
+    faults = list(dict.fromkeys(faults))  # each offending entry named once, however often it recurs
+    return "; ".join(faults) or None
+
+
 @dataclass(frozen=True)
 class AccessDeclaration:
     """One system's merged declaration: its single base URL (A2), its auth, the non-GET reads
@@ -323,6 +377,7 @@ def ticket_write_fault(declaration: AccessDeclaration) -> str | None:
 __all__ = [
     "TOKEN_REUSE_MARGIN_SEC", "TOKEN_SEC", "BASIC", "BEARER", "CALLER_GRACE_SEC", "caller_wait_sec", "CLIENT_ID", "CLIENT_SECRET", "CREDENTIAL_KINDS", "HEADER", "HTTP_PROXY",
     "OAUTH_CLIENT_CREDENTIALS", "PASSWORD", "PROXY_OVERHEAD_SEC", "PROXY_URL_ENV", "PUBLIC_FIELD_NAMES", "SCHEMES",
-    "SECRET_MIN_LENGTH", "STATIC", "USERNAME", "AccessDeclaration", "Auth", "CredentialRefused", "RequestAccess", "Route",
-    "check_credentials", "credential_faults", "credential_fields", "ticket_write_fault",
+    "READ_METHODS", "SECRET_MIN_LENGTH", "STATIC", "USERNAME", "AccessDeclaration", "Auth", "CredentialRefused", "RequestAccess", "Route",
+    "check_credentials", "credential_faults", "credential_fields", "is_read_method", "read_routes_fault",
+    "route_shape_fault", "ticket_write_fault",
 ]

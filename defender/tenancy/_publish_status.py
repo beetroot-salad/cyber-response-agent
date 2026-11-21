@@ -3,7 +3,7 @@
 
 Every publish trigger records its outcome — the refusal with its kind (`transient`, an outage that
 may pass by itself, or `operator`, one that needs a human), or the commit it published (which
-clears the refusal) — so `tenant.py check` can say why `current` trails `origin/main` instead of
+clears the refusal) — so the readiness check can say why `current` trails `origin/main` instead of
 staying silent. Host processes write it (P2): the publish child, the run launcher for the outcomes
 only it sees (a publish child that crashed or was stopped), the drains and the connect command, all
 through the same `record_report`. Best effort: an outcome that cannot be recorded is logged, and

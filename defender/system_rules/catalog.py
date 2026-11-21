@@ -1,6 +1,6 @@
 """The catalog of adapters (#1366 DC7): every `*_adapter.py` under the checkout's `integrations/`, with the declarations
 each makes as module constants (`DISPLAY_NAME`, `EXAMPLE`, `PREFIX`, `REQUIRED_CONFIG_KEYS`, `PATH_KEYS`,
-`SAMPLE_SETTINGS`, read cold, K2) and its `comment_route` (read by loading the module, C1). The surfaces with no tenant
+`SAMPLE_SETTINGS`, `BASE_FILES`, read cold, K2) and its `comment_route` (read by loading the module, C1). The surfaces with no tenant
 read it: the product CI census lint, the invlang ceiling gate, connect, `check --folder`, the API's catalog read and the
 record judgement. A tenant's systems (`systems.catalog.TenantSystems`) are drawn from it.
 
@@ -14,16 +14,20 @@ import dataclasses
 import threading
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from defender._io import read_bytes_capped
 from defender._paths import adapters_under, process_defender_dir
+from defender.kit.access import read_routes_fault
 from defender.kit.transport import REQUIRED_CONFIG_KEYS_TEMPLATE
 from defender.kit.verbs import COMMENT_ACTION
 from defender.system_rules.registry import RosterRead, fresh_adapter_module, read_roster
 
+#: The declaration holding the adapter's non-GET reads (#1504 O1).
+READS = "READ_ROUTES"
 #: The module constants every catalog adapter declares, read cold (K2).
-DECLARATIONS = ("PREFIX", "REQUIRED_CONFIG_KEYS", "PATH_KEYS", "DISPLAY_NAME", "EXAMPLE", "SAMPLE_SETTINGS")
+DECLARATIONS = ("PREFIX", "REQUIRED_CONFIG_KEYS", "PATH_KEYS", "DISPLAY_NAME", "EXAMPLE", "SAMPLE_SETTINGS",
+                READS, "BASE_FILES")
 #: The adapter function that declares the comment route (C1).
 COMMENT_ROUTE = "comment_route"
 #: The shared keys template an adapter's keys may splat (`*transport.REQUIRED_CONFIG_KEYS_TEMPLATE`).
@@ -34,7 +38,9 @@ _TEMPLATE_NAME = "REQUIRED_CONFIG_KEYS_TEMPLATE"
 class CatalogEntry:
     """One catalog adapter as its module declares it, read without running it. A declaration the module lacks, or does
     not spell as a literal, is None (`PATH_KEYS` defaults to none); `unparsed` is the roster's reason when its source
-    could not be read. `sample_settings` is its `SAMPLE_SETTINGS` (stored key -> an example value, #1470 D11)."""
+    could not be read. `sample_settings` is its `SAMPLE_SETTINGS` (stored key -> an example value, #1470 D11).
+    `base_files` is the folder of its `BASE_FILES` (a literal path relative to `integrations/`, #1471 P-8), None when it
+    declares none, or one that is not a path below `integrations/`; `system_rules.base_files` renders it."""
 
     adapter_id: str
     path: Path
@@ -46,6 +52,18 @@ class CatalogEntry:
     tools: frozenset[str]
     unparsed: str | None = None
     sample_settings: Mapping[str, str] | None = None
+    #: The adapter's `READ_ROUTES` (#1504 O1): the non-GET `(method, path)` routes its tools send, `()` for none. None
+    #: when it has no usable list (A6.2: none declared, one not readable cold, or one `kit.access.read_routes_fault`
+    #: refuses): a record of it cannot be judged, so it is refused (O3).
+    reads: tuple[tuple[str, str], ...] | None = None
+    #: Why `reads` is None, as one line (for a list that is not usable, naming each offending entry); None exactly when
+    #: `reads` is a list (#1504 A6.2).
+    reads_unusable: str | None = None
+    #: The text of the reference beside the module, `<module stem>.md` (#1504 O5), read with the entry so the API's
+    #: catalog, built whole at start, serves it without a file read; None when no such file can be read (the catalog
+    #: lint holds one present).
+    reference: str | None = None
+    base_files: Path | None = None
 
     @property
     def stored_keys(self) -> tuple[str, ...]:
@@ -108,12 +126,15 @@ class Catalog:
             path = self._roster.adapter_files[adapter_id]
             unparsed = self._roster.unparsed.get(adapter_id)
             values = {} if unparsed is not None else _cold_declarations(path)
+            reads, reads_unusable = _read_routes(values, unparsed)
             made = CatalogEntry(
                 adapter_id=adapter_id, path=path,
                 display_name=_nonblank(values.get("DISPLAY_NAME")), example=values.get("EXAMPLE") is True,
                 prefix=_nonblank(values.get("PREFIX")), required_keys=_keys(values.get("REQUIRED_CONFIG_KEYS")),
                 path_keys=_keys(values.get("PATH_KEYS")) or (), tools=self._roster.declared_verbs(adapter_id),
-                unparsed=unparsed, sample_settings=_text_map(values.get("SAMPLE_SETTINGS")))
+                unparsed=unparsed, sample_settings=_text_map(values.get("SAMPLE_SETTINGS")),
+                base_files=_folder_below(path.parent, values.get("BASE_FILES")),
+                reads=reads, reads_unusable=reads_unusable, reference=_reference_text(path.with_suffix(".md")))
             self._entries[adapter_id] = made
             return made
 
@@ -167,11 +188,12 @@ def route_of(module: Any, settings: Mapping[str, str]) -> tuple[str, str] | None
 
 def _cold_declarations(path: Path) -> dict[str, object]:
     """The module-level declarations of the adapter at `path`, each as its literal value, without running it. A name
-    assigned a value that is not a literal (a call, an expression) or not at module level is absent."""
+    not assigned at module level is absent; one assigned a value that is not a literal (a call, an expression) is
+    `_UNREAD`, which no reader takes for a value."""
     try:
         tree = ast.parse(read_bytes_capped(path))
     except (OSError, SyntaxError, ValueError):
-        return {}
+        return dict.fromkeys(DECLARATIONS, _UNREAD)  # each declaration made, for all we know, but none readable
     assigned: dict[str, ast.expr] = {}
     for node in tree.body:
         if isinstance(node, ast.Assign):
@@ -183,9 +205,7 @@ def _cold_declarations(path: Path) -> dict[str, object]:
     out: dict[str, object] = {}
     for name in DECLARATIONS:
         if name in assigned:
-            value = _literal(assigned[name], assigned, depth=0)
-            if value is not _UNREAD:
-                out[name] = value
+            out[name] = _literal(assigned[name], assigned, depth=0)
     return out
 
 
@@ -242,10 +262,45 @@ def _nonblank(value: object) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
+def _folder_below(integrations: Path, value: object) -> Path | None:
+    """`value`, a relative path literal, as a folder below `integrations`; None for anything else (absent, not text,
+    absolute, or climbing out)."""
+    text = _nonblank(value)
+    if text is None or Path(text).is_absolute() or ".." in Path(text).parts:
+        return None
+    return integrations / text
+
+
 def _keys(value: object) -> tuple[str, ...] | None:
     if isinstance(value, tuple) and all(isinstance(v, str) for v in value):
         return value
     return None
+
+
+def _reference_text(path: Path) -> str | None:
+    """The reference at `path` (the adapter module's `<stem>.md`), or None when it cannot be read."""
+    try:
+        return read_bytes_capped(path).decode("utf-8")
+    except (OSError, ValueError):
+        return None
+
+
+def _read_routes(values: Mapping[str, object], unparsed: str | None) -> tuple[tuple[tuple[str, str], ...] | None, str | None]:
+    """The adapter's usable `READ_ROUTES` list and None, or None and why it has none (#1504 A6.2): its source does not
+    parse, it declares none, it declares one not readable cold, or the list rule (`kit.access.read_routes_fault`)
+    refuses the value."""
+    if unparsed is not None:
+        return None, f"the adapter's module cannot be read ({unparsed}), so it has no READ_ROUTES readable without running it"
+    if READS not in values:
+        return None, f"the adapter declares no {READS} (the non-GET routes its tools send, `()` for none)"
+    value = values[READS]
+    if value is _UNREAD:
+        return None, (f"{READS} is not readable without running the module: declare it as a literal tuple of "
+                      "(method, path) routes")
+    why = read_routes_fault(value)
+    if why is not None:
+        return None, f"{READS} {why}"
+    return cast("tuple[tuple[str, str], ...]", value), None
 
 
 def _text_map(value: object) -> Mapping[str, str] | None:

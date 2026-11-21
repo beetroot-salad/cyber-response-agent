@@ -49,11 +49,15 @@ ROUTE_FLOOR = 20
 
 def route_table_deps() -> ApiDeps:
     """Dependencies enough to build the app and read its route table: no identity service is needed to list routes."""
+    import dataclasses
+
     store = Refusing("route table only (#1496)")
-    return ApiDeps(
-        alerts=store, investigations=store, learning_jobs=store, learning_work=store, lessons=store, systems=store, writes=store,
-        secrets=store, checker=store, artifact_links=store, offboarding=store, alert_mapping=store, audit=store,
-        identity=None, frontend_origin=FRONTEND_ORIGIN, tenants=None)  # type: ignore[arg-type]
+    ports = {name: store for name in ("alerts", "investigations", "learning_jobs", "learning_work", "lessons", "systems",
+                                      "writes", "secrets", "checker", "artifact_links", "offboarding", "alert_mapping",
+                                      "audit", "host_requests")}  # #1471: the host-requests port, once ApiDeps has it
+    known = {f.name for f in dataclasses.fields(ApiDeps)}
+    return ApiDeps(**{k: v for k, v in ports.items() if k in known},  # type: ignore[arg-type]
+                   identity=None, frontend_origin=FRONTEND_ORIGIN, tenants=None)
 
 
 @functools.lru_cache(maxsize=1)
@@ -72,3 +76,16 @@ def authenticating_routes() -> list[tuple[str, str]]:
 
 def route_id(route: tuple[str, str]) -> str:
     return f"{route[0]} {route[1]}"
+
+
+#: #1471 R1/A1: a host-request start answers 201 when it queues and 200 when it replays the one already queued, so a test
+#: that compares two answers of one route primes such a start first; every later call then replays.
+REPLAYING_STARTS = frozenset({("POST", API + "/tenants/{tenant_id}/readiness"),
+                              ("POST", API + "/tenants/{tenant_id}/systems/{system_id}/adoptions")})
+
+
+def prime_start(client: Any, route: tuple[str, str]) -> None:
+    """Send `route` once as `client` when it is a replaying start (else nothing), so its answer is the same each time."""
+    if route in REPLAYING_STARTS:
+        got = client.request(route[0], concrete(route[1]))
+        assert got.status_code not in (401, 403, 500), (route, got.status_code, got.text)

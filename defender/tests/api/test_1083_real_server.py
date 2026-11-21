@@ -838,6 +838,10 @@ PERMISSION_OF = {
     ("POST", f"{TENANT}/systems/{{}}/check"): "config.write",
     ("GET", f"{TENANT}/alert-mapping"): "config.read",
     ("PUT", f"{TENANT}/alert-mapping"): "config.write",
+    ("POST", f"{TENANT}/readiness"): "config.write",  # #1471 R1 (stale, copied from test_programs_1307_roles)
+    ("GET", f"{TENANT}/readiness/{{}}"): "config.read",  # #1471 R2
+    ("POST", f"{TENANT}/systems/{{}}/adoptions"): "config.write",  # #1471 A1
+    ("GET", f"{TENANT}/adoptions/{{}}"): "config.read",  # #1471 A2
     ("GET", f"{TENANT}/learning/items"): "work.read",  # #1485 O3
     ("GET", f"{TENANT}/learning/parked-batches"): "work.read",  # #1485 O3
     ("POST", f"{TENANT}/learning/items/{{}}/release"): "learning.manage",  # #1537 O7 (r3.1 forced choice)

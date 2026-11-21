@@ -1,7 +1,8 @@
 """The job store's tables and the records it hands out. Every value is set in Python (no server
 defaults). The alerts and investigations tables carry exactly the lean constraints of #1081's
 design; the migration `0004_jobs` creates them and `0005_uuid_ids` makes their ids `uuid` (#1382).
-The learning jobs and learning checks tables (#1344) are `0008_learning_jobs`'s."""
+The learning jobs and learning checks tables (#1344) are `0008_learning_jobs`'s; the host requests table (#1471) is
+`0026_host_requests`'s."""
 
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from defender._model import model
 from defender._vocab import DISPOSITION_VALUES, Disposition
 from defender.database import Base, IdColumn
-from defender.records.formats import AlertId, InvestigationId, LearningJobId, TenantId
+from defender.records.formats import AlertId, HostRequestId, InvestigationId, LearningJobId, TenantId
 from defender.tenancy.models import SCHEMA as TENANCY_SCHEMA
 
 SCHEMA = "jobs"
@@ -198,6 +199,86 @@ class LearningCheckRow(Base, kw_only=True):
     #: A job ended `completed` while a post-step held the row (live or lapsed, #1487 O7): set only by that end's arm,
     #: cleared by a new hold; the hold's end then makes the tenant due at once, whatever its own post-step found.
     armed_while_held: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+#: A host request's stages (#1471 R2): it ends `completed` with its kind's result, or `failed` with a fixed reason.
+HOST_REQUEST_STAGES = ("queued", "running", "completed", "failed")
+HOST_REQUEST_LIVE = ("queued", "running")
+#: The host-request kinds (#1471): the table's `kind`, the helper's `--kind` and the launch facts' `kind`.
+READINESS, ADOPTION = "readiness", "adoption"
+HOST_REQUEST_KINDS = (READINESS, ADOPTION)
+
+
+class HostRequestRow(Base, kw_only=True):
+    """One short host request (#1471): a readiness check of a tenant, or an adoption of a system's base files. A request
+    is never retried (B2): it runs once, and ends `completed` with its kind's result or `failed` with a fixed reason and
+    the worker's own words. At most one row of a kind and dedupe key is queued (readiness: the tenant; adoption:
+    `<tenant>/<system>`); a running or ended one dedupes nothing. `0026_host_requests` creates it."""
+
+    __tablename__ = "host_requests"
+    __table_args__ = (
+        # No ON DELETE action, as every jobs table (M10): a tenant row is never deleted.
+        ForeignKeyConstraint(["tenant_id"], [f"{TENANCY_SCHEMA}.tenants.id"]),
+        CheckConstraint(f"stage IN ({_quoted(HOST_REQUEST_STAGES)})", name="stage"),
+        CheckConstraint(f"kind IN ({_quoted(HOST_REQUEST_KINDS)})", name="kind"),
+        CheckConstraint("stage <> 'running' OR lease_expires_at IS NOT NULL", name="running_has_a_lease"),
+        Index("host_requests_one_queued_per_key", "kind", "dedupe_key", unique=True,
+              postgresql_where=text("stage = 'queued'")),
+        Index("host_requests_queued_by_age", "created_at", "id", postgresql_where=text("stage = 'queued'")),
+        Index("host_requests_running_by_lease", "lease_expires_at", "id", postgresql_where=text("stage = 'running'")),
+        Index("host_requests_live_by_tenant", "tenant_id", postgresql_where=text(f"stage IN ({_quoted(HOST_REQUEST_LIVE)})")),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[HostRequestId] = mapped_column(IdColumn(HostRequestId), primary_key=True)
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId))
+    kind: Mapped[str] = mapped_column(Text)
+    dedupe_key: Mapped[str] = mapped_column(Text)
+    #: The adopted system; null for a readiness check.
+    system_id: Mapped[str | None] = mapped_column(Text, default=None)
+    requester: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+    started_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    finished_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    stage: Mapped[str] = mapped_column(Text)
+    lease_expires_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    #: The kind's result, validated by the worker: set exactly on a `completed` row.
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True), default=None)
+    failure_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    failure_message: Mapped[str | None] = mapped_column(Text, default=None)
+
+
+@model(frozen=True)
+class HostRequestRecord:
+    """A host request as read (#1471): the row's fields, in the store's words; `request_id` is the row's id."""
+
+    request_id: HostRequestId
+    tenant_id: TenantId
+    kind: str
+    system_id: str | None
+    stage: str
+    requester: str
+    created_at: _dt.datetime
+    started_at: _dt.datetime | None
+    finished_at: _dt.datetime | None
+    result: dict[str, Any] | None
+    failure_reason: str | None
+    failure_message: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class HostRequestClaim:
+    """A claimed host request. No tenant state is read with it: the worker starts the request's helper whatever the
+    state, and the helper's own tenant admission refuses a tenant that is not active."""
+
+    record: HostRequestRecord
+
+
+def host_request_record(row: HostRequestRow) -> HostRequestRecord:
+    return HostRequestRecord(
+        request_id=row.id, tenant_id=row.tenant_id, kind=row.kind, system_id=row.system_id, stage=row.stage,
+        requester=row.requester, created_at=row.created_at, started_at=row.started_at, finished_at=row.finished_at,
+        result=row.result, failure_reason=row.failure_reason, failure_message=row.failure_message)
 
 
 @model(frozen=True)

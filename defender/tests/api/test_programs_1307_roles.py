@@ -93,6 +93,10 @@ PERMISSION_OF = {
     ("POST", f"{TENANT}/learning/items/{{}}/release"): "learning.manage",  # #1537 O7 (r3.1 forced choice)
     ("POST", f"{TENANT}/learning/batches/{{}}/release"): "learning.manage",
     ("POST", f"{TENANT}/learning/batches/{{}}/abandon"): "learning.manage",
+    ("POST", f"{TENANT}/readiness"): "config.write",  # #1471 R1
+    ("GET", f"{TENANT}/readiness/{{}}"): "config.read",  # #1471 R2
+    ("POST", f"{TENANT}/systems/{{}}/adoptions"): "config.write",  # #1471 A1
+    ("GET", f"{TENANT}/adoptions/{{}}"): "config.read",  # #1471 A2
     ("GET", f"{TENANT}/members"): "people.manage",
     ("DELETE", f"{TENANT}/members/{{}}"): "people.manage",
     ("GET", f"{TENANT}/invitations"): "people.manage",
@@ -114,6 +118,8 @@ OUTSIDE = {
     ("GET", API + "/admin/tenants"), ("POST", API + "/admin/tenants"), ("GET", API + "/admin/tenants/{}"),
     ("POST", API + "/admin/tenants/{}/resume"), ("POST", API + "/admin/tenants/{}/offboard"),
     ("POST", API + "/admin/tenants/{}/rotate-forge-credential"), ("POST", API + "/admin/tenants/{}/invitations"),
+    ("POST", API + "/admin/tenants/{}/readiness"), ("GET", API + "/admin/tenants/{}/readiness/{}"),  # #1471 C8
+    ("POST", API + "/admin/tenants/{}/systems/{}/adoptions"), ("GET", API + "/admin/tenants/{}/adoptions/{}"),
 }
 BODIES: dict[tuple[str, str], dict[str, object]] = {
     ("POST", f"{TENANT}/investigations"): {"alert_id": ALERT.alert_id, "client_request_id": "rq"},

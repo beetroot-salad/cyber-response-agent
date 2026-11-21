@@ -101,6 +101,14 @@ class LearningJobId(UuidId):
     domain = "learning job"
 
 
+class HostRequestId(UuidId):
+    """A host request's id (#1471): a readiness check's or an adoption's, the one id type of `jobs.host_requests`; the
+    kind is the row's, checked by the read."""
+
+    __slots__ = ()
+    domain = "host request"
+
+
 class CommitId(UuidId):
     """A commit-maker record row's id (#1278)."""
 

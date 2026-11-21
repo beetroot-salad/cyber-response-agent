@@ -39,12 +39,13 @@ def exports_of(t: PublishedTenant) -> Path:
     return export_dir(t.tenant, t.commit).parent
 
 
-def run_record(t: PublishedTenant, records: Any = R.DERIVED) -> Any:
+def run_record(t: PublishedTenant, records: Any = R.DERIVED, *, catalog: Any = None) -> Any:
     """The run's record as run start resolves it, built from RECORDS (#1366 R10: `run_tenant_for(..., records=)`, no folder
     read for systems, access or case). `records` is a `R.RecordsSpec` (exactly that), `None` (the tenant is NOT imported,
     as everywhere in this contract) or `R.DERIVED` (the default: what the first export's planted `settings/` stands for).
-    Grants still come from the first export's settings."""
-    return R.run_tenant_for(t.tenant, dispatches_lead_zero=False, records=records,
+    Grants still come from the first export's settings. `catalog` is the one the builder reads adapters' lists from (#1504 O3;
+    none: the checkout's)."""
+    return R.run_tenant_for(t.tenant, dispatches_lead_zero=False, records=records, catalog=catalog,
                             settings_root=export_dir(t.tenant, t.commit) / "settings")
 
 

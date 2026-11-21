@@ -19,6 +19,9 @@ AuditAction = Literal[
     "system.update", "system.delete", "system.credentials", "case_record.update", "case_record.delete",
     # #1537: a person's release of set-aside learning work and request to abandon a parked batch (the API adapter announces them).
     "learning.release_item", "learning.release_batch", "learning.request_abandon",
+    # #1471: the host requests (readiness checks and adoptions), announced by the store after commit.
+    "readiness.start", "readiness.claim", "readiness.finish", "readiness.takeover",
+    "adoption.start", "adoption.claim", "adoption.finish", "adoption.takeover",
 ]
 
 __all__ = ["SYSTEM", "AuditAction", "announce"]

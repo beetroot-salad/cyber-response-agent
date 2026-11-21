@@ -26,6 +26,8 @@ PREFIX = "EXAMPLE"
 REQUIRED_CONFIG_KEYS = ("TIMEOUT_SEC",)
 #: The keys whose values the adapter puts in a request path (each must be one segment): none here.
 PATH_KEYS: tuple[str, ...] = ()
+#: The non-GET routes this adapter's tools send, read cold (#1504 O1): none, every request it makes is a GET.
+READ_ROUTES: tuple[tuple[str, str], ...] = ()
 #: How the operator's catalog listing names the system (#1366 O2).
 DISPLAY_NAME = "Example system"
 #: True only for a lab stub; an adapter connect writes for a real system says False (#1366 O2).

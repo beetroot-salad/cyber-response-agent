@@ -7,6 +7,7 @@ version as `current_version` (the design's name for it on the wire)."""
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -15,9 +16,14 @@ REFUSAL_NAMES = ("Stale", "Judged", "NoSuchTenant", "TenantNotActive", "NoCurren
 
 SEED = "test member"
 
-#: O10's list, the one literal the O10 and O11 tests share: the operator subcommands removed in #1470.
+#: O10's list, the one literal the O10 and O11 tests share: the operator subcommands removed in #1470, and `update` and
+#: `propose` (#1471 B3, A6). `check <id>` is removed too but `check --folder` stays, so it is `CHECK_BY_ID`, not a word here.
 REMOVED_COMMANDS = frozenset({"set-alert-mapping", "set-system", "delete-system", "set-case", "delete-case", "systems",
-                              "set-credentials", "catalog", "import"})
+                              "set-credentials", "catalog", "import", "update", "propose"})
+
+#: `tenant.py check` (any prefix, any quoting of `tenant.py`) not followed by `--folder`: #1471 B3's removed `check <id>`
+#: (`<id>`, `--token-file ... <id>`, a bare `check`), where `check --folder <path>` or `--folder=<path>` is kept.
+CHECK_BY_ID = re.compile(r"tenant\.py[`'\"]?\s+check(?![\w-])(?!\s+--folder(?![\w-]))")
 
 
 def refusals() -> Mapping[str, type[Exception]]:

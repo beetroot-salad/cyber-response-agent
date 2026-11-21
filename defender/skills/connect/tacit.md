@@ -79,11 +79,10 @@ across an edited `pattern` silently re-points every existing citation.
    tenant's published registry into it: from
    `$DEFENDER_DATA_ROOT/{tenant}/exports/<commit>/agent/skills/tacit-knowledge/registry.yaml`, where
    `<commit>` is what the file `exports/current` holds,
-   to `<staged>/skills/tacit-knowledge/registry.yaml` (run
-   `python3 defender/cli/tenant.py update {tenant}` first so `current` is the merged `main`). A
+   to `<staged>/skills/tacit-knowledge/registry.yaml` (the next run's launch-time publish makes `current` the merged `main`). A
    tenant copied from the template has one, with no entries in it. A tenant from before then may
    not: start from `knowledge/tenant-template/agent/skills/tacit-knowledge/registry.yaml`, and
-   propose that template's `SKILL.md` beside it, because without that page the system is missing
+   stage that template's `SKILL.md` beside it, because without that page the system is missing
    from gather's index.
 
    ```bash
@@ -115,22 +114,18 @@ across an edited `pattern` silently re-points every existing citation.
    [name]'s sign-off" — and get a yes. This is the last point at which a
    misheard scope is cheap to fix.
 
-5. **Propose it to the tenant's repo. Do not merge.**
-
-   ```bash
-   python3 defender/cli/tenant.py propose {tenant} <staged>
-   ```
-
-   `propose` replaces the registry in the tenant's `agent/` with the staged one and opens a
-   pull request on the tenant's forge. Present: the entry, the check output, the pull
-   request, and who must review it. The review and merge of that pull request is the
-   sign-off — say so, so nobody treats the proposal as the end of the process.
+5. **Hand it over for the tenant's repo. Do not merge.** The product has no command or request
+   that records a tacit-knowledge sanction, so this route ends with the staged folder: a
+   person commits the staged `registry.yaml` to the tenant's repo as a pull request. Present:
+   the entry, the check output, the staged folder, and who must review it. The review and merge
+   of that pull request is the sign-off — say so, so nobody treats the handover as the end of
+   the process.
 
 ## Refreshing or removing one
 
 **Refreshing** is the same flow with a smaller interview: confirm the
 sanction still holds and who is re-attesting it, then move `added_at` and
-`review_by` forward in a fresh proposal. Its merged commit is the re-attestation,
+`review_by` forward in a fresh staged folder. Its merged commit is the re-attestation,
 which is the step a file cannot perform for itself. Do not edit `pattern`
 or the scopes under a kept `id` — that is a different sanction and needs a
 different id.
@@ -143,7 +138,7 @@ flags it for exactly that reason.
 
 - Write any file but `registry.yaml`, and the template's `SKILL.md` for a tenant that has none.
 - Author an entry the human did not state in full.
-- Merge, push, or treat its own proposal as approval.
+- Merge, push, or treat its own handover as approval.
 - Add an entry because an investigation concluded something. A run's own
   finding is not a sanction, and a registry populated from closes is the
   system authorizing itself — the failure this whole design is shaped
