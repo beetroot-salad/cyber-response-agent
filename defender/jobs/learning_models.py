@@ -370,19 +370,25 @@ async def insert_findings(s: AsyncSession, tenant: str, channels: Mapping[str, S
 async def _insert_chunk(s: AsyncSession, tenant: str, kind: str, chunk: Sequence[Mapping[str, Any]],
                         source_run: str) -> int:
     """Insert one statement's rows; how many it added. A row it did not add must match what the store holds for its
-    id, or `_Collision` is raised."""
+    id (`refuse_colliding`)."""
     added = {str(key) for (key,) in (await s.execute(_findings_insert(tenant, kind, chunk, source_run))).all()}
-    await _refuse_colliding_held(s, tenant, kind, _not_added(chunk, added))
+    await refuse_colliding(s, tenant, kind, [(row["finding_id"], row) for row in _not_added(chunk, added)])
     return len(added)
 
 
-class _Collision(Exception):
-    """A finding id the store holds with other content than the row given for it (#1565)."""
+class ItemCollision(ItemRefused):
+    """An item arrived at a key the store holds for its tenant and kind with other content (#1565): a collision, not
+    a retry, refused for good."""
+
+
+class ItemNotHeld(Exception):
+    """An insert did not add an item, yet the store shows no item at its key: nothing says what became of it, so it is
+    neither stored nor refused, and the caller retries."""
 
 
 def _collision_words(kind: str, key: str) -> str:
-    return (f"a {kind} with id {key!r} is already held with different content: a collision, not a retry, so no row "
-            "of this call is stored")
+    return (f"a {kind} with id {key!r} came with content other than the one the store holds for that id (stored "
+            "before, or earlier in the same call): a collision, not a retry")
 
 
 def _not_added(rows: Sequence[Mapping[str, Any]], added: set[str]) -> list[Mapping[str, Any]]:
@@ -399,21 +405,28 @@ def _not_added(rows: Sequence[Mapping[str, Any]], added: set[str]) -> list[Mappi
     return rest
 
 
-async def _refuse_colliding_held(s: AsyncSession, tenant: str, kind: str, rows: Sequence[Mapping[str, Any]]) -> None:
-    """Raise `_Collision` if the store holds any of `rows` (an insert's rows it did not add, their id already held,
-    by an earlier call or this one) with other content, as jsonb compares them (`false` is not `0`; `1e23` is its
-    integer). Read after the insert, so a row a concurrent call committed first is the one compared."""
-    if not rows:
+async def refuse_colliding(s: AsyncSession, tenant: str, kind: str,
+                           items: Sequence[tuple[str, Mapping[str, Any]]]) -> None:
+    """The one rule for an item an insert did not add because its key was held (#1565): `(key, payload)` pairs of
+    `tenant`'s `kind`, read in the transaction `s` is in, after the insert, so the row a concurrent call committed
+    first is the one compared. The same content, as jsonb compares it (`false` is not `0`; `1e23` is its integer), is
+    a repeat and passes; other content raises `ItemCollision`, naming the first such pair in order; a key the store
+    shows no item for raises `ItemNotHeld`."""
+    if not items:
         return
     table = cast(Table, WorkItemRow.__table__)
     found = (await s.execute(text(
-        "SELECT g.k FROM unnest(CAST(:keys AS text[]), CAST(:docs AS text[])) AS g(k, d) "
-        f"JOIN {table.fullname} w ON w.tenant_id = CAST(:tenant AS uuid) AND w.kind = :kind AND w.item_key = g.k "
-        "WHERE w.payload IS DISTINCT FROM CAST(g.d AS jsonb) LIMIT 1"),
-        {"keys": [r["finding_id"] for r in rows], "docs": [json.dumps(dict(r)) for r in rows],
+        "SELECT g.k, w.item_key IS NULL AS missing "
+        "FROM unnest(CAST(:keys AS text[]), CAST(:docs AS text[])) WITH ORDINALITY AS g(k, d, n) "
+        f"LEFT JOIN {table.fullname} w ON w.tenant_id = CAST(:tenant AS uuid) AND w.kind = :kind AND w.item_key = g.k "
+        "WHERE w.payload IS DISTINCT FROM CAST(g.d AS jsonb) ORDER BY g.n LIMIT 1"),  # a missing row: NULL, distinct
+        {"keys": [str(key) for key, _ in items], "docs": [json.dumps(dict(payload)) for _, payload in items],
          "tenant": str(TenantId(tenant)), "kind": kind})).first()
-    if found is not None:
-        raise _Collision(_collision_words(kind, found[0]))
+    if found is None:
+        return
+    if found.missing:
+        raise ItemNotHeld(f"a {kind} with id {found.k!r} was not added, yet the store holds none at that id")
+    raise ItemCollision(_collision_words(kind, found.k))
 
 
 #: Rows per INSERT: each row binds 14 values, and the driver takes at most 32767 per statement.
@@ -433,12 +446,12 @@ def _findings_insert(tenant: str, kind: str, rows: Sequence[Mapping[str, Any]], 
 
 def _refusal_of(fault: Exception) -> str:
     """The refusal `fault` makes of an insert, in P4's order: a collision (#1565) and content refuse; an outage is
-    raised again; anything else is `FindingsNotStored`, raised from it."""
+    raised again; anything else, `ItemNotHeld` included, is `FindingsNotStored`, raised from it."""
     from defender.jobs.errors import FindingsNotStored
     from defender.jobs.store import is_outage
 
-    if isinstance(fault, _Collision):  # raised inside the savepoint, so none of the call is stored
-        return str(fault)
+    if isinstance(fault, ItemCollision):  # raised inside the savepoint, so none of the call is stored
+        return f"{fault}; no finding of this call is stored"
     code = _sqlstate(fault)
     if code is not None and code[:2] in _CONTENT_CLASSES:
         return f"the database refused a finding (SQLSTATE {code})"

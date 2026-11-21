@@ -3,7 +3,7 @@
 #1278 (design r8 Schema: "a finding id is unique for good", Flows): the judge's sink inserts into the store, whose unique key
 (tenant, kind, finding id) replaces the file queue's persistent-identity scan. The same obligations are observed through
 `enqueue.StoreFindings` over the real store: a retry keeps the first row and adds distinct ids, a batch's duplicates land
-once, concurrent retries insert one, a duplicate does not bypass validation, and a retried report counts only new rows.
+once (a changed row at a held id refuses the append, #1565), concurrent retries insert one, a duplicate does not bypass validation, and a retried report counts only new rows.
 
 Retired from this file: `test_existing_queue_identity_survives_torn_tail` and `test_another_process_append_is_seen_by_existing_handle`
 (a torn trailing line and a handle's cached read of a file queue: the file and its handle are gone, A1/O10; the other-process
@@ -71,22 +71,31 @@ def _by_id(rows):
 
 
 def test_retry_keeps_first_row_and_appends_distinct_ids(channel_case):
+    """A retry of the same rows adds only its distinct ids. One that changes a held row's content is a collision, not
+    a retry (#1565): it is refused whole, distinct ids beside it included, and the first row is never replaced."""
     dsn, channel, build, append = channel_case
     first = build(finding_id="episode/b/0/0", finding="first content")
     changed = dict(first, finding="retry content must not replace the first")
     other = build(finding_id="episode/b/1/0", finding=first["finding"])
     assert _append(dsn, append, [first]) == (1, 0)
-    assert _append(dsn, append, [changed, other]) == (1, 0)
+    with pytest.raises(JudgeRefused, match="episode/b/0/0"):
+        _append(dsn, append, [changed, other])
+    assert _by_id(_queued(dsn, channel)) == {first["finding_id"]: first}
+    assert _append(dsn, append, [dict(first), other]) == (1, 0)
     assert _by_id(_queued(dsn, channel)) == {first["finding_id"]: first, other["finding_id"]: other}
-    assert _append(dsn, append, [changed, other]) == (0, 0)
+    assert _append(dsn, append, [first, other]) == (0, 0)
     assert _by_id(_queued(dsn, channel)) == {first["finding_id"]: first, other["finding_id"]: other}
 
 
 def test_same_batch_duplicates_land_once_and_the_first_of_them_wins(channel_case):
+    """A batch's identical duplicates land once; a batch carrying two contents for one id is refused whole (#1565)."""
     dsn, channel, build, append = channel_case
     first = build(finding_id="episode/b/0/0", finding="first")
     other = build(finding_id="episode/b/0/1", finding="second")
-    assert _append(dsn, append, [first, other, dict(first, finding="changed"), other]) == (2, 0)
+    with pytest.raises(JudgeRefused, match="episode/b/0/0"):
+        _append(dsn, append, [first, other, dict(first, finding="changed"), other])
+    assert _queued(dsn, channel) == []
+    assert _append(dsn, append, [first, other, dict(first), other]) == (2, 0)
     assert _by_id(_queued(dsn, channel)) == {first["finding_id"]: first, other["finding_id"]: other}
 
 

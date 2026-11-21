@@ -203,3 +203,29 @@ def test_p4_damage_to_one_channels_sink_alone_refuses_both_channels(tmp_path, ch
     found = _findings(run_entry(tmp_path, grade=_holding(2, 2, after=damage_one)))
     assert found["state"] == {"torn-line": "malformed", "unreadable": "unreadable"}[how], found
     assert "text" not in found
+
+
+def test_1565_the_episode_keeps_a_different_row_at_a_held_id_for_the_store_to_refuse(tmp_path):
+    """The episode's findings record decides no collision: an identical repeat is not held twice, but a different row
+    at a held id is held beside the first, so the store's insert at the job's end, the one owner of the rule, refuses
+    them rather than the episode dropping one. (#1565)"""
+    def grade(runs, episode_id, **kw):
+        from defender.learning.core.state import FINDINGS
+        from defender.learning.judge import grade_episode
+        from defender.learning.judge.enqueue import EpisodeFindings
+
+        graded = grade_episode(runs, episode_id, **kw)
+        job = str(episode_id)
+        first, other = defender_row(job, 0), {**defender_row(job, 0), "finding": "a different narrative"}
+        with runs.episode_files(episode_id) as episode:
+            sink = EpisodeFindings(episode)
+            assert sink.append(FINDINGS, [first, dict(first)], dedup_key="finding_id")[0] == 1
+            assert sink.append(FINDINGS, [first], dedup_key="finding_id")[0] == 0
+            assert sink.append(FINDINGS, [other], dedup_key="finding_id")[0] == 1
+        return graded
+
+    ran = run_entry(tmp_path, grade=grade)
+    found = _findings(ran)
+    job = ran.ep.name
+    assert json.loads(found["text"])[FINDING] == [
+        defender_row(job, 0), {**defender_row(job, 0), "finding": "a different narrative"}]

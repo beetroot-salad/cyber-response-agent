@@ -181,11 +181,38 @@ async def test_1565_false_and_zero_are_different_content(dsn, held_first):
     async with learning_store(dsn) as store:
         if held_first:
             await store.publish_findings(BLUE, "run-1", [first], kind="finding")
-            calls = [[second]]
-        else:
-            calls = [[first, second]]
         with pytest.raises(store_mod().ItemRefused, match="f1"):
-            await store.publish_findings(BLUE, "run-2", calls[0], kind="finding")
+            await store.publish_findings(BLUE, "run-2", [second] if held_first else [first, second], kind="finding")
+        after = await items(store)
+    assert {k: i.payload for k, i in after.items()} == ({("finding", "f1"): first} if held_first else {})
+
+
+async def test_1565_a_collision_names_the_first_colliding_row_of_the_call(dsn):
+    """Several collisions in one call: the refusal names the first in the call's order. (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        await store.publish_findings(BLUE, "run-1", [finding(f"f{n}") for n in range(1, 6)], kind="finding")
+        others = [dict(finding(f"f{n}"), finding="other") for n in (4, 2, 5, 1)]
+        with pytest.raises(store_mod().ItemRefused, match="'f4'") as refused:
+            await store.publish_findings(BLUE, "run-2", others, kind="finding")
+    assert "'f1'" not in str(refused.value)
+    assert "'f2'" not in str(refused.value)
+
+
+async def test_1565_an_id_the_insert_skipped_but_the_store_does_not_hold_is_retried_not_refused(dsn):
+    """A key the insert did not add and the store shows no item for says nothing about the content: it is not a
+    collision (refused for good) but `ItemNotHeld`, which the findings insert turns into its retried
+    `FindingsNotStored`. (#1565 item 1)"""
+    from defender.jobs.errors import FindingsNotStored
+    from defender.jobs.learning_models import ItemNotHeld, _refusal_of, refuse_colliding
+
+    async with learning_store(dsn) as store:
+        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        async with store._sessions.begin() as s:
+            await refuse_colliding(s, BLUE, "finding", [("f1", finding("f1"))])  # control: a held repeat passes
+            with pytest.raises(ItemNotHeld, match="ghost"):
+                await refuse_colliding(s, BLUE, "finding", [("f1", finding("f1")), ("ghost", finding("ghost"))])
+    with pytest.raises(FindingsNotStored):
+        _refusal_of(ItemNotHeld("a finding with id 'ghost' was not added"))
 
 
 async def test_1565_the_same_id_in_another_kind_or_tenant_is_no_collision(dsn):
@@ -202,14 +229,44 @@ async def test_1565_the_same_id_in_another_kind_or_tenant_is_no_collision(dsn):
 
 
 async def test_a_repeated_pitfall_id_is_ignored_but_one_mistake_is_a_row_per_occurrence(dsn):
-    """The same pitfall id adds nothing; two ids for one mistake are two rows. (work_items pitfalls)"""
+    """The same pitfall again adds nothing; two ids for one mistake are two rows. (work_items pitfalls; #1565: a repeat
+    with other content is refused, below)"""
     async with learning_store(dsn) as store:
-        await store.add_pitfall(BLUE, pitfall("p1"))
-        await store.add_pitfall(BLUE, pitfall("p1", goal="changed"))
+        assert await store.add_pitfall(BLUE, pitfall("p1")) is True
+        assert await store.add_pitfall(BLUE, pitfall("p1")) is False
         await store.add_pitfall(BLUE, pitfall("p2"))  # the same system and error digest: the same mistake
         pits = {k: i for k, i in (await items(store)).items() if k[0] == "pitfall"}
         assert sorted(pits) == [("pitfall", "p1"), ("pitfall", "p2")]
         assert {i.status for i in pits.values()} == {"waiting"}
+
+
+async def test_1565_a_pitfall_with_other_content_at_a_held_id_is_refused_and_the_held_one_stays(dsn):
+    """A pitfall id is minted from its run's recorded query, so other content at a held id is a collision, not an
+    occurrence: refused, the held row unchanged. Re-filing a run's pitfalls as they were is a no-op. (#1565, amending
+    #1278's "a repeated pitfall id is ignored")"""
+    rows = [pitfall("p1"), pitfall("p2", goal="another goal")]
+    async with learning_store(dsn) as store:
+        assert [await store.add_pitfall(BLUE, r) for r in rows] == [True, True]
+        assert [await store.add_pitfall(BLUE, dict(r)) for r in rows] == [False, False]
+        with pytest.raises(store_mod().ItemRefused, match="'p1'"):
+            await store.add_pitfall(BLUE, pitfall("p1", goal="changed"))
+        with pytest.raises(store_mod().ItemRefused, match="'p1'"):
+            await store.add_pitfall(BLUE, pitfall("p1", stderr_digest=0))
+        after = {k: i.payload for k, i in (await items(store)).items()}
+    assert after == {("pitfall", "p1"): rows[0], ("pitfall", "p2"): rows[1]}
+
+
+async def test_1565_a_curation_request_with_other_content_for_a_filed_run_is_refused(dsn):
+    """A run files one request; filing it again as it was is a no-op, with other content a collision: refused, the
+    filed one unchanged, and no other request of the case is superseded by it. (#1565)"""
+    spec = {"case_id": "case-9", "tenant_id": str(BLUE), "run_id": "run-9"}
+    async with learning_store(dsn) as store:
+        assert await store.enqueue_request(BLUE, "run-9", "case-9", spec) is True
+        assert await store.enqueue_request(BLUE, "run-9", "case-9", dict(spec)) is False
+        with pytest.raises(store_mod().ItemRefused, match="'run-9'"):
+            await store.enqueue_request(BLUE, "run-9", "case-9", {**spec, "case_id": "case-10"})
+        after = await items(store)
+    assert {k: (i.payload, i.status) for k, i in after.items()} == {("curation_request", "run-9"): (spec, "waiting")}
 
 
 async def test_a_row_with_no_key_takes_a_key_from_its_digest(dsn):

@@ -59,6 +59,7 @@ from defender.jobs.learning_models import (
     ItemRefused,
     WorkItemRow,
     insert_findings,
+    refuse_colliding,
     refuse_unholdable,
 )
 
@@ -482,7 +483,9 @@ class LearningStore(FeedbackVerbs):
         return inserted.added, len(rows) - inserted.added
 
     async def add_pitfall(self, tenant: str, row: Mapping[str, Any]) -> bool:
-        """Queue one pitfall occurrence; a repeated pitfall id is ignored, a keyless row is keyed by its digest."""
+        """Queue one pitfall occurrence; a keyless row is keyed by its digest. The same pitfall again is ignored; other
+        content at a held pitfall id is refused (`ItemRefused`, #1565): its id is minted from its run's recorded query,
+        so it is a collision, not another occurrence."""
         refuse_unholdable(row)
         key = str(row["pitfall_id"]) if row.get("pitfall_id") else digest(dict(row))
         mistake = mistake_key_of(row, key)
@@ -492,7 +495,9 @@ class LearningStore(FeedbackVerbs):
                                                 mistake_key=mistake))
 
     async def enqueue_request(self, tenant: str, run_id: str, case_id: str, spec: Mapping[str, Any]) -> bool:
-        """File a curation request for `case_id`; the later run wins: an older waiting request is skipped, superseded."""
+        """File a curation request for `case_id`; the later run wins: an older waiting request is skipped, superseded.
+        A run's request filed again as it was is a no-op; with other content it is refused (`ItemRefused`, #1565), and
+        supersedes nothing."""
         refuse_unholdable([run_id, case_id, spec])
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
@@ -500,6 +505,7 @@ class LearningStore(FeedbackVerbs):
             have = (await s.execute(select(_I.c.item_key).where(
                 _I.c.tenant_id == TenantId(tenant), _I.c.kind == "curation_request", _I.c.item_key == run_id))).first()
             if have is not None:
+                await refuse_colliding(s, tenant, "curation_request", [(run_id, dict(spec))])
                 return False
             await s.execute(update(_I).where(
                 _I.c.tenant_id == TenantId(tenant), _I.c.kind == "curation_request", _I.c.coalesce_key == case_id,
@@ -520,9 +526,12 @@ class LearningStore(FeedbackVerbs):
             enqueued_at=func.now(), updated_at=func.now()).on_conflict_do_nothing(
             index_elements=["tenant_id", "kind", "item_key"]).returning(_I.c.item_key)
         try:
-            return len((await s.execute(stmt)).all())
+            added = len((await s.execute(stmt)).all())
         except DataError as refused:
             raise ItemRefused(str(refused.orig)) from refused
+        if not added:  # the key is held: the same content is a repeat, other content a collision (#1565)
+            await refuse_colliding(s, tenant, kind, [(key, payload)])
+        return added
 
     # -- views -------------------------------------------------------------------------------------------------
 

@@ -263,8 +263,9 @@ def append_world_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
 def append_world_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
                              state: FindingsSink) -> tuple[int, int]:
     """Append `rows` to the questioner findings channel through `state`; return `(appended,
-    malformed lines seen)` on that queue, as `append_rows_report` does. A row whose
-    `finding_id` the sink already holds is not appended again."""
+    malformed lines seen)` on that queue, as `append_rows_report` does. A row the sink already
+    holds at its `finding_id` is not appended again; one with other content there is refused
+    by the store (#1565)."""
     rows = list(rows)
     for row in rows:
         _validate_world_row(row, episode_dir=episode_dir)
@@ -503,8 +504,9 @@ class StoreFindings:
 
     def append(self, channel: Any, rows: list[dict[str, Any]], *,
                dedup_key: str | None = None) -> tuple[int, int]:
-        """Insert `rows` as `channel`'s kind: `(inserted, 0)`. Dedup is the store's, by finding id
-        (`dedup_key` is always that). An empty append calls nothing."""
+        """Insert `rows` as `channel`'s kind: `(inserted, 0)`. The store decides a repeat by finding id (`dedup_key`
+        is always that): the same content is not inserted again, other content is refused (#1565). An empty append
+        calls nothing."""
         del dedup_key
         if not rows:
             return 0, 0
@@ -571,18 +573,20 @@ class EpisodeFindings:
 
     def append(self, channel: Any, rows: list[dict[str, Any]], *,
                dedup_key: str | None = None) -> tuple[int, int]:
-        """Append `rows` to the episode's record for `channel`, dropping a row whose
-        `dedup_key` the record or an earlier row already holds, as the queue does:
-        `(appended, unreadable lines seen)`. An empty append makes nothing."""
+        """Append `rows` to the episode's record for `channel`, dropping only a row the record or an earlier row
+        already holds as the same JSON text at its `dedup_key`: `(appended, unreadable lines seen)`. A row with other
+        content at a held id is kept beside the first, so the store's insert at the job's end, the one owner of that
+        rule, refuses the job's findings (#1565) rather than this record dropping one. An empty append makes nothing."""
         existing, malformed = self.rows_report(channel)
-        seen = {r[dedup_key] for r in existing if dedup_key and isinstance(r.get(dedup_key), str)}
+        seen = {(r[dedup_key], json.dumps(r)) for r in existing if dedup_key and isinstance(r.get(dedup_key), str)}
         fresh = []
         for row in rows:
             identity = row.get(dedup_key) if dedup_key else None
             if isinstance(identity, str):
-                if identity in seen:
+                held = (identity, json.dumps(row))
+                if held in seen:
                     continue
-                seen.add(identity)
+                seen.add(held)
             fresh.append(row)
         if fresh:
             getattr(self._episode, self._record(channel)).append(
