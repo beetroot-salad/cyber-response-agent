@@ -71,8 +71,10 @@ def _refusal_prefix(episode_dir: Path | None) -> str:
 
 class FindingsSink(Protocol):
     """Where a pass's rows go: the learning store (`StoreFindings`) or a job's episode
-    (`EpisodeFindings`). One commit's rows of every channel arrive in one `append` (#1565), so
-    the store decides them as one call."""
+    (`EpisodeFindings`). One commit's rows of every channel arrive in one `append` (#1565): the
+    store decides them as one call, all stored or none; the episode writes one record per
+    channel, so a fault between them can leave the first written (the world's row stays
+    `queueing`, which a rerun refuses)."""
 
     def rows(self, channel: Any) -> list[dict[str, Any]]: ...
 

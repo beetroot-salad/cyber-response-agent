@@ -301,6 +301,8 @@ async def test_1565_a_curation_request_with_other_content_for_a_filed_run_is_ref
         assert await store.enqueue_request(BLUE, "run-9", "case-9", dict(spec)) is False
         with pytest.raises(store_mod().ItemRefused, match="'run-9'"):
             await store.enqueue_request(BLUE, "run-9", "case-9", {**spec, "case_id": "case-10"})
+        with pytest.raises(store_mod().ItemRefused):  # a re-filed spec the database cannot hold: refused, not raw
+            await store.enqueue_request(BLUE, "run-9", "case-9", {**spec, "weight": float("nan")})
         with pytest.raises(store_mod().ItemRefused, match="'run-9'"):  # the same spec filed under another case
             await store.enqueue_request(BLUE, "run-9", "case-10", spec)
         after = await items(store)

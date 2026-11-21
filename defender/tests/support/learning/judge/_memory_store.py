@@ -33,8 +33,23 @@ class MemoryStore:
     def item_keys(self, tenant: str, kind: str) -> list[str]:
         return [i.key for i in self.items.get(str(tenant), []) if i.kind == kind]
 
-    def publish_findings(self, tenant: str, run_id: str, rows: Any, *, kind: str) -> tuple[int, int]:  # noqa: ARG002 — the real verb's shape
-        held = self.items.setdefault(str(tenant), [])
+    def publish_findings(self, tenant: str, run_id: str, rows: Any, *, kind: str) -> tuple[int, int]:
+        """One kind's rows: `publish_finding_channels` with one channel."""
+        return self.publish_finding_channels(tenant, run_id, {kind: rows})[kind]
+
+    def publish_finding_channels(self, tenant: str, run_id: str, channels: Any) -> dict[str, tuple[int, int]]:  # noqa: ARG002 — the real verb's shape
+        """Every kind's rows in one call, as the real verb: all stored, or (a clash, or a fault a subclass plants in
+        `_publish_kind`) none. Content is compared as sorted JSON text, close to (not exactly) jsonb's equality."""
+        before = {t: list(held) for t, held in self.items.items()}
+        try:
+            return {kind: self._publish_kind(str(tenant), kind, list(rows)) for kind, rows in channels.items()}
+        except BaseException:
+            self.items.clear()
+            self.items.update(before)
+            raise
+
+    def _publish_kind(self, tenant: str, kind: str, rows: list[Any]) -> tuple[int, int]:
+        held = self.items.setdefault(tenant, [])
         added = 0
         for row in rows:
             key = str(row["finding_id"])
@@ -48,16 +63,6 @@ class MemoryStore:
             held.append(Item(kind, key, dict(row)))
             added += 1
         return added, len(rows) - added
-
-    def publish_finding_channels(self, tenant: str, run_id: str, channels: Any) -> dict[str, tuple[int, int]]:
-        """Every kind's rows in one call, as the real verb: all stored, or (one kind's refusal or fault) none."""
-        before = {t: list(held) for t, held in self.items.items()}
-        try:
-            return {kind: self.publish_findings(tenant, run_id, rows, kind=kind) for kind, rows in channels.items()}
-        except BaseException:
-            self.items.clear()
-            self.items.update(before)
-            raise
 
     def rows(self, channel: Any, tenant: str | None = None) -> list[dict[str, Any]]:
         """The payloads queued as `channel`'s kind (every tenant's when none is named)."""

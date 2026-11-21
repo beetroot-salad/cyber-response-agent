@@ -355,6 +355,14 @@ def _checked_since_request(last_checked: _dt.datetime | None, requested: _dt.dat
     return last_checked if last_checked >= requested else None
 
 
+async def _compared(s: AsyncSession, tenant: str, items: Sequence[KeyedItem]) -> None:
+    """`refuse_colliding` over items already held, a value the database can never hold refused as `ItemRefused`."""
+    try:
+        await refuse_colliding(s, tenant, items)
+    except DataError as refused:
+        raise ItemRefused(str(refused.orig)) from refused
+
+
 async def _inserted(s: AsyncSession, tenant: str, items: Sequence[KeyedItem]) -> dict[str, int]:
     """`insert_items` (the one keyed insert, #1565), a value the database can never hold refused as `ItemRefused`."""
     try:
@@ -536,7 +544,7 @@ class LearningStore(FeedbackVerbs):
             have = (await s.execute(select(_I.c.item_key).where(
                 _I.c.tenant_id == TenantId(tenant), _I.c.kind == "curation_request", _I.c.item_key == run_id))).first()
             if have is not None:
-                await refuse_colliding(s, tenant, [item])
+                await _compared(s, tenant, [item])
                 return False
             await s.execute(update(_I).where(
                 _I.c.tenant_id == TenantId(tenant), _I.c.kind == "curation_request", _I.c.coalesce_key == case_id,

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pytest
 
 from defender import _yaml
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
@@ -829,3 +830,31 @@ def test_1234_questioner_dedup_and_gate_resolve_per_draw_ids_with_skipped_indexe
     lane = S.lane_of(other, fid)
     assert on_queue or (lane is not None and lane != S.LANES["questioner"]), (
         f"the dedup silently dropped the new design finding at {fid}: lane {lane!r}")
+
+
+def test_1565_a_held_id_check_that_could_not_read_the_queue_stops_the_pass_before_any_append(tmp_path):
+    """The judge checks a finding id against what its queue holds (A25). A check that cannot read the queue, even once,
+    is never taken as "nothing held": the pass stops at that world's commit, its row left `queueing`, nothing of it
+    appended, so no second row can reach a held id unseen (on the job lane the store would then refuse the whole job's
+    findings at its end). (#1565)"""
+    from defender.tests.support.learning.judge._memory_store import MemoryStore
+
+    class OnceUnreadable(MemoryStore):
+        failed = False
+
+        def item_keys(self, tenant: str, kind: str) -> list[str]:
+            if not self.failed:
+                self.failed = True
+                raise ConnectionError("the learning store cannot be reached (listing held ids)")
+            return super().item_keys(tenant, kind)
+
+    store = OnceUnreadable()
+    other = _built(tmp_path, episode_id=EP3)
+    fid = other.finding_id(B, 0, 0)
+    old = S.pre_change_world_row(fid, finding=f"{_claim(B, 'old')} — stopped early")
+    J.findings_sink(store, tenant=str(S.J.episode_runs_for(other.ep).tenant.id)).append({_channel(QUESTIONER_Q): [old]})
+    with pytest.raises(ConnectionError, match="listing held ids"):
+        S.grade(other, S.judge({B: _reply(world=[_design(B, "new")])}), store=store)
+    assert [r for r in S.questioner_queue(store) if r.get("finding_id") == fid] == [old]
+    assert not _carrying(S.questioner_queue(store), S.marker(B, "new")), "a row was appended past the unread check"
+    assert _state_of(S.record(other), B) == S.QUEUEING, _row(S.record(other), B)
