@@ -303,15 +303,15 @@ def _readiness_ending(record: job_lane.ReadinessRecord, knowledge: Callable[[], 
     """A valid readiness record's end (R3, R13-1.5): `failed` with its reason, or `completed` with the stored result.
     The knowledge record is read (`knowledge`) only for `ready` and a refusal after `publish`; there, one absent or
     malformed is `bad_record`. The result carries no commit: `knowledge.commit` is the commit judged (R13-1.6)."""
-    if record.outcome == job_lane.FAILED:
+    if record.is_failed:
         assert record.reason is not None  # the record's shape
         return _host_failed(record.reason)
     shown = None
-    if record.outcome == job_lane.READY or record.step in job_lane.READINESS_STEPS_WITH_KNOWLEDGE:
+    if record.is_ready or record.step in job_lane.READINESS_STEPS_WITH_KNOWLEDGE:
         shown = knowledge().knowledge
         if shown is None:
             return _host_failed(BAD_RECORD, "the request's knowledge record is absent or not a knowledge status")
-    if record.outcome == job_lane.REFUSED:
+    if record.is_refused:
         return HostEnding(_COMPLETED, result={"outcome": record.outcome, "step": record.step,
                                               "sentence": record.sentence, "knowledge": shown})
     return HostEnding(_COMPLETED, result={"outcome": record.outcome, "knowledge": shown,
@@ -320,7 +320,7 @@ def _readiness_ending(record: job_lane.ReadinessRecord, knowledge: Callable[[], 
 
 def _adoption_ending(record: job_lane.AdoptionRecord) -> HostEnding:
     """A valid adoption record's end (A3): `failed` with its reason, or `completed` with `{outcome, pr_number}`."""
-    if record.outcome == job_lane.FAILED:
+    if record.is_failed:
         assert record.reason is not None  # the record's shape
         return _host_failed(record.reason)
     return HostEnding(_COMPLETED, result={"outcome": record.outcome, "pr_number": record.pr_number})

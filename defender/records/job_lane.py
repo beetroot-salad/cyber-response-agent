@@ -457,6 +457,18 @@ class ReadinessRecord:
         if not self._holds():
             raise ValueError(f"not a readiness record: {self!r}")
 
+    @property
+    def is_failed(self) -> bool:
+        return self.outcome == FAILED
+
+    @property
+    def is_refused(self) -> bool:
+        return self.outcome == REFUSED
+
+    @property
+    def is_ready(self) -> bool:
+        return self.outcome == READY
+
     def _holds(self) -> bool:
         if self.outcome == REFUSED:
             return (self.warnings is None and self.reason is None and isinstance(self.step, str)
@@ -532,6 +544,10 @@ class AdoptionRecord:
     def __post_init__(self) -> None:
         if not self._holds():
             raise ValueError(f"not an adoption record: {self!r}")
+
+    @property
+    def is_failed(self) -> bool:
+        return self.outcome == FAILED
 
     def _holds(self) -> bool:
         if self.outcome == FAILED:
