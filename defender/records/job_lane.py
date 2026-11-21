@@ -14,6 +14,12 @@ exits; the worker then reads the job-end record, the knowledge record and the se
 through it, and the run's closing record and cost from the session database the pointer's case id
 derives.
 
+Host requests (#1471: readiness checks and adoptions) share two records here, keyed by the request id: the result
+record (`ReadinessRecord`, `AdoptionRecord`), written create-only by the request's helper or its container, one writer
+per request, and, for a readiness check whose publish gave a source, the knowledge record its helper writes
+(`write_request_knowledge`). The worker reads each into three states: absent, malformed (present, but not of a record's
+shape, or over its cap), or the record; the vocabulary they are judged by lives here, so writer and worker share it.
+
 `<data root>/<T>/runs` is held no-follow from the tenant's folder and never made (#1342 R1: tenant
 setup makes it): absent, a link or anything but a folder is `JobLaneRefused`. Every read is a
 no-follow, size-limited read off that held folder; every write is create-only."""
@@ -25,11 +31,13 @@ import re
 import sqlite3
 import stat
 import sys
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, ClassVar, Protocol
 
 from defender import _io
+from defender._text import postgres_can_hold
 from defender.records._errors import RunRefused
 from defender.records._held import hold_level, level_fault
 from defender.records._id import RunId
@@ -37,7 +45,7 @@ from defender.records.job_facts import (  # noqa: F401 — the worker's reasons,
     EXITED_WITHOUT_RESULT, EXPIRED, LEASE_LAPSED, RETRY_CAP, WORKER_ERROR,
     BOX_NOT_STARTED, BOX_START_FAILED, BOX_STARTED, SETUP_CRASHED, SETUP_DONE, SETUP_REFUSED,
 )
-from defender.records._knowledge_status import UNREADABLE, api_knowledge, knowledge_status
+from defender.records._knowledge_status import UNREADABLE, _record_status, api_knowledge, knowledge_status
 from defender.records._layout import RunPaths, SessionPaths
 from defender.records._locations import DataRoot, RunsBase, unwrap_data_root
 from defender.records._store_errors import StoreError
@@ -368,6 +376,228 @@ def unreadable_findings() -> dict[str, Any]:
     return {"state": FINDINGS_UNREADABLE}
 
 
+# -- host requests (#1471): the result records, their vocabulary and the knowledge record ---------------
+
+#: A host-request record's outcomes besides an adoption's own (surface §5).
+REFUSED, READY, FAILED = "refused", "ready", "failed"
+#: A readiness refusal's steps (surface §5): P-1's sequence (`runs_folder` is machinery, never a step: R13-1.1), then
+#: the container's tenant step and its systems step.
+READINESS_STEPS = ("tenant", "records", "alert_mapping", "publish", "knowledge_copy", "run_tenant", "roster",
+                   "tenant_verdict", "signing", "first_pass", "container_tenant", "systems")
+#: The steps after `publish`: a refusal there carries the knowledge record's status, as `ready` does (R3, R13-1.5).
+READINESS_STEPS_WITH_KNOWLEDGE = frozenset(READINESS_STEPS[READINESS_STEPS.index("publish") + 1:])
+#: A `ready` record's warning kinds (surface §5, R13-3): one warning per census finding line.
+READINESS_WARNING_KINDS = ("case_system", "system_down", "grant_ignored", "verb_undecided", "verb_undeclared",
+                           "tacit_registry", "tacit_grant", "feedback_setting", "retired_file")
+#: A readiness `failed` record's reasons, by writer (R13-1.2, .3, R13-3). The worker judges the union: it cannot tell
+#: the writers apart and need not.
+READINESS_HELPER_REASONS = frozenset({"start_failed", WORKER_ERROR})
+READINESS_CONTAINER_REASONS = frozenset({"census_unavailable", "handover"})
+#: An adoption's outcomes (r11), and those that name a pull request by its number.
+ADOPTION_OUTCOMES = ("opened", "already_open", "rejected", "nothing_to_adopt")
+ADOPTION_OUTCOMES_WITH_NUMBER = frozenset({"opened", "already_open", "rejected"})
+#: An adoption `failed` record's reasons, by writer (A3, R13-1.2, .3; surface §9 addenda).
+ADOPTION_HELPER_REASONS = frozenset({"system_gone", "no_base_files", "tenant_not_active", "setup_refused",
+                                     "start_failed", WORKER_ERROR})
+ADOPTION_CONTAINER_REASONS = frozenset({"tenant_not_active", "repository_busy", "delivery_failed", "handover"})
+#: The most text one readiness record holds, in UTF-8 bytes of the whole record (`findings_text_bytes`, R13-4): a
+#: generous guess, as the findings cap is; over it the record is malformed. There is no per-sentence cap and no cap on the
+#: number of warnings.
+READINESS_RECORD_TEXT_CAP_BYTES = 1024 * 1024
+#: An adoption record carries no free text: a bound on what is read of one, far above any record of its shapes.
+_ADOPTION_RECORD_CAP_BYTES = 4096
+
+_READINESS_FIELDS = {REFUSED: frozenset({"outcome", "step", "sentence"}), READY: frozenset({"outcome", "warnings"}),
+                     FAILED: frozenset({"outcome", "reason"})}
+_WARNING_FIELDS = frozenset({"kind", "sentence"})
+
+
+def _sentence(value: object) -> bool:
+    """A record's sentence: text with something in it that PostgreSQL text can hold. Kept as written (D7)."""
+    return isinstance(value, str) and bool(value.strip()) and postgres_can_hold(value)
+
+
+class MalformedRecord:
+    """A host-request record that is present but not one its writers write (`JobLane.read_readiness`,
+    `read_adoption`): not of its shape, not readable text, or over its cap. One value, `MALFORMED`."""
+
+    def __repr__(self) -> str:
+        return "MALFORMED"
+
+
+MALFORMED = MalformedRecord()
+
+
+@dataclass(frozen=True)
+class ReadinessWarning:
+    """One warning of a `ready` readiness record: a closed kind and its sentence."""
+
+    kind: str
+    sentence: str
+
+    def __post_init__(self) -> None:
+        if not (isinstance(self.kind, str) and self.kind in READINESS_WARNING_KINDS and _sentence(self.sentence)):
+            raise ValueError(f"not a readiness warning: {self!r}")
+
+
+@dataclass(frozen=True)
+class ReadinessRecord:
+    """A readiness check's result record (`<runs>/<request id>.readiness.json`, R13-1): exactly one of
+    `refused {outcome, step, sentence}`, `ready {outcome, warnings}` or `failed {outcome, reason}`, each the JSON field
+    of its name. It carries no knowledge and no commit: the worker reads those from the knowledge record. Build one
+    with `refused`, `ready` or `failed`."""
+
+    outcome: str
+    step: str | None = None
+    sentence: str | None = None
+    warnings: tuple[ReadinessWarning, ...] | None = None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self._holds():
+            raise ValueError(f"not a readiness record: {self!r}")
+
+    def _holds(self) -> bool:
+        if self.outcome == REFUSED:
+            return (self.warnings is None and self.reason is None and isinstance(self.step, str)
+                    and self.step in READINESS_STEPS and _sentence(self.sentence))
+        if self.outcome == READY:
+            return (self.step is None and self.sentence is None and self.reason is None
+                    and isinstance(self.warnings, tuple) and all(isinstance(w, ReadinessWarning) for w in self.warnings))
+        return (self.outcome == FAILED and self.step is None and self.sentence is None and self.warnings is None
+                and isinstance(self.reason, str) and self.reason in READINESS_HELPER_REASONS | READINESS_CONTAINER_REASONS)
+
+    @classmethod
+    def refused(cls, step: str, sentence: str) -> ReadinessRecord:
+        return cls(REFUSED, step=step, sentence=sentence)
+
+    @classmethod
+    def ready(cls, warnings: Iterable[ReadinessWarning] = ()) -> ReadinessRecord:
+        return cls(READY, warnings=tuple(warnings))
+
+    @classmethod
+    def failed(cls, reason: str) -> ReadinessRecord:
+        return cls(FAILED, reason=reason)
+
+    def body(self) -> dict[str, Any]:
+        """The record's JSON object: its variant's fields only."""
+        if self.outcome == REFUSED:
+            return {"outcome": self.outcome, "step": self.step, "sentence": self.sentence}
+        if self.outcome == READY:
+            return {"outcome": self.outcome,
+                    "warnings": [{"kind": w.kind, "sentence": w.sentence} for w in self.warnings or ()]}
+        return {"outcome": self.outcome, "reason": self.reason}
+
+    def text(self) -> str:
+        return json.dumps(self.body())
+
+    @classmethod
+    def parse(cls, text: str) -> ReadinessRecord | None:
+        """The record `text` holds, or `None` when it is not one of the three shapes exactly (every field of its
+        variant and no other, a known step, kind or reason, a sentence with text in it), or its whole text is over
+        `READINESS_RECORD_TEXT_CAP_BYTES` (R13-4)."""
+        if findings_text_bytes(text) > READINESS_RECORD_TEXT_CAP_BYTES:
+            return None
+        obj, unreadable = _io.load_json_artifact(text)
+        if unreadable is not None or not isinstance(obj, dict):
+            return None
+        outcome = obj.get("outcome")
+        if not isinstance(outcome, str) or _READINESS_FIELDS.get(outcome) != set(obj):
+            return None
+        try:
+            if outcome == READY:
+                return cls.ready(_warnings(obj["warnings"]))
+            return cls(outcome, step=obj.get("step"), sentence=obj.get("sentence"), reason=obj.get("reason"))
+        except (TypeError, ValueError):
+            return None
+
+
+def _warnings(raw: object) -> list[ReadinessWarning]:
+    """A `ready` record's warnings, in order; `ValueError` for anything but a list of exact `{kind, sentence}`."""
+    if not isinstance(raw, list) or not all(isinstance(w, dict) and set(w) == _WARNING_FIELDS for w in raw):
+        raise ValueError("not a list of warnings")
+    return [ReadinessWarning(kind=w["kind"], sentence=w["sentence"]) for w in raw]
+
+
+@dataclass(frozen=True)
+class AdoptionRecord:
+    """An adoption's result record (`<runs>/<request id>.adoption.json`, A3, R13-1): `{outcome, pr_number}` for one of
+    `ADOPTION_OUTCOMES`, the number a positive integer exactly for `opened`, `already_open` and `rejected` and null
+    otherwise; or `failed {outcome, reason}`. Each the JSON field of its name; there is no `refused` shape."""
+
+    outcome: str
+    pr_number: int | None = None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self._holds():
+            raise ValueError(f"not an adoption record: {self!r}")
+
+    def _holds(self) -> bool:
+        if self.outcome == FAILED:
+            return (self.pr_number is None and isinstance(self.reason, str)
+                    and self.reason in ADOPTION_HELPER_REASONS | ADOPTION_CONTAINER_REASONS)
+        if self.reason is not None or self.outcome not in ADOPTION_OUTCOMES:
+            return False
+        if self.outcome not in ADOPTION_OUTCOMES_WITH_NUMBER:
+            return self.pr_number is None
+        number = self.pr_number
+        return isinstance(number, int) and not isinstance(number, bool) and number > 0
+
+    @classmethod
+    def failed(cls, reason: str) -> AdoptionRecord:
+        return cls(FAILED, reason=reason)
+
+    def body(self) -> dict[str, Any]:
+        """The record's JSON object: its variant's fields only."""
+        if self.outcome == FAILED:
+            return {"outcome": self.outcome, "reason": self.reason}
+        return {"outcome": self.outcome, "pr_number": self.pr_number}
+
+    def text(self) -> str:
+        return json.dumps(self.body())
+
+    @classmethod
+    def parse(cls, text: str) -> AdoptionRecord | None:
+        """The record `text` holds, or `None` when it is not one of its shapes exactly."""
+        if findings_text_bytes(text) > _ADOPTION_RECORD_CAP_BYTES:
+            return None
+        obj, unreadable = _io.load_json_artifact(text)
+        if unreadable is not None or not isinstance(obj, dict):
+            return None
+        fields = {"outcome", "reason"} if obj.get("outcome") == FAILED else {"outcome", "pr_number"}
+        if set(obj) != fields or not isinstance(obj["outcome"], str):
+            return None
+        try:
+            return cls(obj["outcome"], pr_number=obj.get("pr_number"), reason=obj.get("reason"))
+        except (TypeError, ValueError):
+            return None
+
+
+class _HostRecorded(Protocol):
+    """What the knowledge record is written from: a `tenancy.run_knowledge.KnowledgeSource` (records sits below
+    tenancy, so the type is not named)."""
+
+    def host_record(self) -> dict[str, Any]: ...
+
+
+@dataclass(frozen=True)
+class RequestKnowledge:
+    """A host request's knowledge record as the worker reads it (`JobLane.read_request_knowledge`, R13-1.5): one of
+    `RequestKnowledge.ABSENT`, `RequestKnowledge.MALFORMED` (present, but no knowledge status), or a present status,
+    whose `knowledge` is its `api_knowledge` shape. Unlike `JobLane.knowledge`, an absent record is not read as stale."""
+
+    knowledge: dict[str, str | None] | None
+    state: str = "present"
+
+    ABSENT: ClassVar[RequestKnowledge]
+    MALFORMED: ClassVar[RequestKnowledge]
+
+
+RequestKnowledge.ABSENT = RequestKnowledge(None, "absent")
+RequestKnowledge.MALFORMED = RequestKnowledge(None, "malformed")
+
+
 def _run_id(raw: object) -> RunId:
     if isinstance(raw, RunId):
         return raw
@@ -387,12 +617,10 @@ class JobLane:
         self.tenant_id = tenant_id
 
     @classmethod
-    def open(cls, data_root: DataRoot, tenant_id: object, *, make: bool = False) -> JobLane:
-        """`<data root>/<tenant_id>/runs`, held no-follow from the tenant's folder. Never made,
-        except with `make` (a learning post-step, #1344, whose record must land for a tenant whose
-        runs folder nothing has made yet): then a missing one is made below the held tenant
-        folder, never through a link. The tenant is not accepted here: only its id's grammar is
-        judged."""
+    def open(cls, data_root: DataRoot, tenant_id: object) -> JobLane:
+        """`<data root>/<tenant_id>/runs`, held no-follow from the tenant's folder. Never made: the host's `prepare`
+        step makes it with the tenant (#1471 R13-0), and a missing one is damage, refused. The tenant is not accepted
+        here: only its id's grammar is judged."""
         try:
             tenant = TenantId(tenant_id)
         except TenantRefused as refused:
@@ -406,11 +634,6 @@ class JobLane:
         except OSError as exc:
             raise JobLaneRefused(f"the tenant folder {folder} {level_fault(exc)}") from None
         try:
-            if make:
-                try:
-                    top.mkdir(_RUNS)  # lint-unguarded-tree-write: ok — `Held.mkdir`, the rooted mkdir below the tenant folder held no-follow
-                except OSError as exc:
-                    raise JobLaneRefused(f"the runs folder {runs} {level_fault(exc)}") from None
             held = hold_level(top, _RUNS, runs, io=_io, what="the runs folder")
         except FileNotFoundError:
             raise JobLaneRefused(f"the runs folder {runs} is absent: tenant setup makes it, and "
@@ -524,6 +747,51 @@ class JobLane:
         writes (the worker treats all three alike)."""
         read = self._held.view().read(self._paths(_run_id(job_id)).learning_end().name)
         return None if read.text is None else LearningEnd.parse(read.text)
+
+    # -- a host request's records (#1471) ----------------------------------------------------------
+
+    def write_readiness(self, request_id: object, record: ReadinessRecord) -> None:
+        """A readiness check's result record, create-only: one already there is `FileExistsError` and is kept."""
+        self._held.write(self._paths(_run_id(request_id)).readiness_record().name, record.text(), mode="create")
+
+    def read_readiness(self, request_id: object) -> ReadinessRecord | MalformedRecord | None:
+        """A readiness check's result record: `None` when nothing is at its name, `MALFORMED` when something is that is
+        not a readable record of its shapes within its cap (R13-4), else the record."""
+        return self._host_record(self._paths(_run_id(request_id)).readiness_record().name,
+                                 READINESS_RECORD_TEXT_CAP_BYTES, ReadinessRecord.parse)
+
+    def write_adoption(self, request_id: object, record: AdoptionRecord) -> None:
+        """An adoption's result record, create-only: one already there is `FileExistsError` and is kept."""
+        self._held.write(self._paths(_run_id(request_id)).adoption_record().name, record.text(), mode="create")
+
+    def read_adoption(self, request_id: object) -> AdoptionRecord | MalformedRecord | None:
+        """An adoption's result record, read as `read_readiness` reads its own."""
+        return self._host_record(self._paths(_run_id(request_id)).adoption_record().name,
+                                 _ADOPTION_RECORD_CAP_BYTES, AdoptionRecord.parse)
+
+    def _host_record(self, name: str, cap: int, parse: Any) -> Any:
+        """One host-request record, no-follow, at most `cap` bytes plus one taken off the file (so one over its cap is
+        seen over it and refused): absent `None`, anything unreadable or refused by `parse` `MALFORMED`."""
+        read = self._held.view().read(name, max_bytes=cap + 1)
+        if read.text is None:
+            return None if read.absent else MALFORMED
+        found = parse(read.text)
+        return MALFORMED if found is None else found
+
+    def write_request_knowledge(self, request_id: object, source: _HostRecorded) -> None:
+        """A readiness check's knowledge record (R13-1.2): the source its publish step gave, in the host record's
+        format (`tenancy.run_knowledge.write_host_record`), at `<request id>.knowledge-source.json`, create-only."""
+        text = json.dumps(source.host_record(), indent=2, sort_keys=True) + "\n"
+        self._held.write(self._paths(_run_id(request_id)).knowledge_source().name, text, mode="create")
+
+    def read_request_knowledge(self, request_id: object) -> RequestKnowledge:
+        """A host request's knowledge record, with no run-started gate (R13-1.5): `RequestKnowledge.ABSENT` when nothing
+        is at its name, `MALFORMED` when what is there is not a knowledge status, else its status in the API's shape."""
+        read = self._held.view().read(self._paths(_run_id(request_id)).knowledge_source().name)
+        if read.text is None:
+            return RequestKnowledge.ABSENT if read.absent else RequestKnowledge.MALFORMED
+        status = _record_status(read.text)
+        return RequestKnowledge.MALFORMED if status is None else RequestKnowledge(api_knowledge(status))
 
     # -- what the run left ------------------------------------------------------------------------
 
