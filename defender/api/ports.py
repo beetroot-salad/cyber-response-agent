@@ -251,6 +251,14 @@ AuditAction = Literal[
     "case_record.update",
     "case_record.delete",
     "alert_mapping.update",
+    "readiness.start",
+    "readiness.claim",
+    "readiness.finish",
+    "readiness.takeover",
+    "adoption.start",
+    "adoption.claim",
+    "adoption.finish",
+    "adoption.takeover",
 ]
 
 
