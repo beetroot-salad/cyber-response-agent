@@ -33,7 +33,7 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 
-from . import _common, _investigation, _learning, _store_relay
+from . import _adoption, _common, _investigation, _learning, _store_relay
 from ._container import (
     STOP_GRACE,
     job_container_name,
@@ -46,7 +46,7 @@ from ._container import (
     start,
 )
 from ._server import Server
-from ._session import DOCKER_DID_NOT_RUN, KINDS, HandBack, KindSpec, Registry, Session, SetupRefused, StartFailed
+from ._session import DOCKER_DID_NOT_RUN, HOST_REQUEST_KINDS, KINDS, HandBack, KindSpec, Registry, Session, SetupRefused, StartFailed
 
 _logger = logging.getLogger(__name__)
 
@@ -63,6 +63,7 @@ def registry() -> Registry:
     _common.register_common(built)
     _investigation.register_investigation(built)
     _learning.register(built)
+    _adoption.register_adoption(built)
     _store_relay.register_store(built)
     return built
 
@@ -70,7 +71,7 @@ def registry() -> Registry:
 def _parse_argv(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="python -m defender.job_host",
                                 description="Run one job of one tenant in its own container (#1170).")
-    p.add_argument("--kind", required=True, choices=KINDS, help="the job's kind")
+    p.add_argument("--kind", required=True, choices=(*KINDS, *HOST_REQUEST_KINDS), help="the job's kind")
     p.add_argument("--job", help="the job's id (an investigation's, a learning job's; none for a family-less "
                                  "post-step)")
     p.add_argument("--tenant", required=True, help="the job's tenant")
@@ -81,9 +82,12 @@ def _parse_argv(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--post-ticket", action="store_true",
                    help="the investigation was flagged to post to its ticket (#1471 W1), from the worker")
     p.add_argument("--ticket-link", help="with --post-ticket: the investigation screen's address (#1471 W3)")
+    p.add_argument("--system", help="an adoption's system (#1471 A1), from the worker")
     ns = p.parse_args(argv)
     if ns.kind != "post-step" and not ns.job:
         p.error(f"a {ns.kind} job needs --job")
+    if ns.kind == "adoption" and not ns.system:
+        p.error("an adoption job needs --system")
     return ns
 
 
@@ -304,7 +308,7 @@ def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: An
                       docker=docker if docker is not None else run_docker,
                       defender_dir=process_defender_dir().resolve(), signer=signer, publish=publish, forge=forge,
                       client=client, command=list(command) if command is not None else None,
-                      alert_digest=ns.alert_digest, post_ticket=bool(ns.post_ticket),
+                      alert_digest=ns.alert_digest, system=ns.system, post_ticket=bool(ns.post_ticket),
                       ticket_link=ns.ticket_link if ns.post_ticket else None)
     session.container = job_container_name(session)
     spec = registry().kinds.get(ns.kind)

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 from defender import _git, _io
 
 from .auth import CLOCK_SKEW, TOKEN_TTL, ForgeCredential
-from .forgejo import ForgejoForge, PullRequest
+from .forgejo import ForgejoForge, OpenedPullRequest, PullRequest
 from .model import _REGULAR_MODES, ChangeSet, DeliveryRefused
 from .transport import _NO_BACKGROUND_GIT, GitTransport
 
@@ -361,5 +361,5 @@ class GitRepository(LocalRepository):
         wanted = frozenset(commits)
         return [pr for pr in self.forge.pull_requests() if pr.head_sha in wanted]
 
-    def open_pr(self, *, branch: str, title: str, body: str) -> str:
+    def open_pr(self, *, branch: str, title: str, body: str) -> OpenedPullRequest:
         return self.forge.open_pr(base="main", head=branch, title=title, body=body)

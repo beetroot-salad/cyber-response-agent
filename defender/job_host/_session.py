@@ -25,6 +25,9 @@ from defender.records.formats import TenantId
 
 #: The job kinds the helper is started for (the worker's three).
 KINDS = ("investigation", "learning", "post-step")
+#: The kinds that serve a host request (#1471), started with `--job <request id>` and answered per kind: each registers its own
+#: `launch` and the few requests it is answered, never the box requests `KINDS` share.
+HOST_REQUEST_KINDS = ("adoption",)
 #: The exit statuses of a `docker run` that never ran the job: docker's own failure (an image missing, a runtime
 #: refused, 125), a command it could not invoke (126) or find (127). Every kind's after-the-container hook reads them.
 DOCKER_DID_NOT_RUN = frozenset({125, 126, 127})
@@ -162,6 +165,8 @@ class Session:
     alert_digest: str | None = None
     post_ticket: bool = False
     ticket_link: str | None = None
+    #: An adoption's system, from the worker's `--system` (#1471 A1), never read from the tenant folder.
+    system: str | None = None
     signalled: threading.Event = field(default_factory=threading.Event)
     #: The status the helper exits with once it served the job to its end: 0, or a post-step's answer whether work still
     #: waits (`job_host.NOTHING_WAITS`, `WORK_WAITS`), which its `exited` sets.

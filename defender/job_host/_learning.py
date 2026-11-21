@@ -562,20 +562,26 @@ def _drain_credential(session: Session, state: _PostStep) -> Any:
     return state.credential
 
 
-def _forge_token(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
+def forge_token_answer(fields: dict[str, Any], credential: Any) -> dict[str, Any]:
+    """`forge.token` for a kind that holds a forge credential (the post-step's drain, an adoption): a token valid for
+    `min_validity` more seconds (0 to `FORGE_TOKEN_CAP`) from `credential`, or the request's refusal."""
     validity = fields["min_validity"]
     if isinstance(validity, bool) or not isinstance(validity, (int, float)) or not math.isfinite(validity) \
             or not 0 <= validity <= job_socket.FORGE_TOKEN_CAP:
         raise Refused(f"forge.token's min_validity is a number of seconds from 0 to "
                       f"{job_socket.FORGE_TOKEN_CAP:.0f}",
                       "bad-fields")
-    state = _state(session, _PostStep)
     try:
-        token = _drain_credential(session, state).token(min_validity=float(validity))
+        token = credential().token(min_validity=float(validity))
     except Exception as failed:  # noqa: BLE001 — a token that cannot be minted is the job's to report
         raise Refused(f"the forge token could not be minted: {type(failed).__name__}: {failed}",
                       "forge-fault") from None
     return {"token": str(token)}
+
+
+def _forge_token(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
+    state = _state(session, _PostStep)
+    return forge_token_answer(fields, lambda: _drain_credential(session, state))
 
 
 def _record_published(session: Session, fields: dict[str, Any]) -> dict[str, Any]:

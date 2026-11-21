@@ -293,8 +293,8 @@ class TenantDelivery:
         if tip == batch.base:
             return Delivered(status=DeliveryStatus.NOTHING)
         self.repository.push(tip, batch.branch)
-        url = self.repository.open_pr(branch=batch.branch, title=title, body=body)
-        return Delivered(status=DeliveryStatus.OPENED, url=url)
+        opened = self.repository.open_pr(branch=batch.branch, title=title, body=body)
+        return Delivered(status=DeliveryStatus.OPENED, url=opened.url)
 
     def _body(self, tip: str, from_commit: bool) -> str | None:
         """The PR body the tip commit's message holds, when the lane's PRs are described by it (#1414 A2)."""

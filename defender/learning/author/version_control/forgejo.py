@@ -162,6 +162,10 @@ class PullRequest:
     merge_commit_sha: str | None = None
     #: The head branch's name (`None` when the row names none). Not part of what makes two PRs equal.
     head_ref: str | None = field(default=None, compare=False)
+    #: The head's label, the bare branch name for a same-repository PR (`None` when the row names none). Unlike `head_ref`,
+    #: which becomes `refs/pull/<n>/head` once the branch is deleted after a merge or a close, it keeps the branch name
+    #: (#1471 G-A11): how a PR of a branch that is gone is still matched to it.
+    head_label: str | None = field(default=None, compare=False)
     #: The PR's body, head branch and author as the listing carries them (#1414 P6/A2: whose PR names an entry id).
     body: str = ""
     branch: str = ""
@@ -189,10 +193,20 @@ def _pull_request(row: dict) -> PullRequest:
             merge_sha if status == "merged" and isinstance(merge_sha, str) and merge_sha else None
         ),
         head_ref=row["head"].get("ref") if isinstance(row["head"].get("ref"), str) else None,
+        head_label=row["head"].get("label") if isinstance(row["head"].get("label"), str) else None,
         body=str(row.get("body") or ""),
         branch=row["head"].get("ref") if isinstance(row["head"].get("ref"), str) else "",
         author=(row.get("user") or {}).get("login", "") if isinstance(row.get("user"), dict) else "",
     )
+
+
+@dataclass(frozen=True)
+class OpenedPullRequest:
+    """A PR this call created: the number Forgejo gave it and its URL (#1471: the number is what a caller later
+    reports, so it is read from the create response, never parsed out of the URL)."""
+
+    number: int
+    url: str
 
 
 class ForgejoForge:
@@ -381,7 +395,10 @@ class ForgejoForge:
             "PATCH", f"{self.address.api}/pulls/{number}", json={"state": "open"}
         )
 
-    def open_pr(self, *, base: str, head: str, title: str, body: str) -> str:
+    def open_pr(self, *, base: str, head: str, title: str, body: str) -> OpenedPullRequest:
+        """Create a PR of `head` against `base`. A refusal is a `ForgeError` with its `status`: 409 when `head` already
+        has an open PR to `base` (G-A12), 404 when `head` is no branch (G-A14); a head whose PR was closed gets a new one
+        (G-A13)."""
         response = self._request(
             "POST",
             f"{self.address.api}/pulls",
@@ -393,9 +410,13 @@ class ForgejoForge:
             },
         )
         value = self._json(response)
-        if not isinstance(value, dict) or not isinstance(value.get("html_url"), str):
-            raise ForgeError("Forgejo pull creation returned no PR URL")
-        return value["html_url"]
+        if (
+            not isinstance(value, dict)
+            or not isinstance(value.get("html_url"), str)
+            or type(value.get("number")) is not int
+        ):
+            raise ForgeError("Forgejo pull creation returned no PR number and URL")
+        return OpenedPullRequest(number=value["number"], url=value["html_url"])
 
 
     # -- #1414: issues, comments, the merge whitelist ----------------------------------------
