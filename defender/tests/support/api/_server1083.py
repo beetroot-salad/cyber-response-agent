@@ -149,21 +149,32 @@ def _bindable(port: int) -> bool:
     return True
 
 
+def _slice_port(randbelow: Callable[[int], int]) -> int | None:
+    """A bindable port from this worker's slice below the ephemeral range, none of the last 64 handed out and none a
+    browser refuses; None where the system's range leaves no room, or no draw fits. `randbelow` is the draw."""
+    floor = _ephemeral_floor()
+    if floor - _PORT_FLOOR < _SLOTS * 8:
+        return None
+    width = (floor - _PORT_FLOOR) // _SLOTS
+    start = _PORT_FLOOR + _slot_of(os.environ.get("PYTEST_XDIST_WORKER", "")) * width
+    with _PORT_LOCK:
+        for _ in range(200):
+            port = start + randbelow(width)
+            if port not in _RECENT and port not in _UNSAFE_PORTS and _bindable(port):
+                _RECENT.append(port)
+                return port
+    return None
+
+
 def free_port() -> int:
     """A loopback port nothing listens on when this returns (a closed proxy, a foreign port, the port a program is
     about to bind). Drawn from this xdist worker's own slice of the ports below the kernel's ephemeral range, and never
     the same as one of the last 64 handed out, so no other worker, no test client and no earlier call can take it
-    before the caller does. Where the system leaves no such range, a bind to port 0, as before. Never a port a browser refuses to open."""
-    floor = _ephemeral_floor()
-    if floor - _PORT_FLOOR >= _SLOTS * 8:
-        width = (floor - _PORT_FLOOR) // _SLOTS
-        start = _PORT_FLOOR + _slot_of(os.environ.get("PYTEST_XDIST_WORKER", "")) * width
-        with _PORT_LOCK:
-            for _ in range(200):
-                port = start + secrets.randbelow(width)
-                if port not in _RECENT and port not in _UNSAFE_PORTS and _bindable(port):
-                    _RECENT.append(port)
-                    return port
+    before the caller does; never a port a browser refuses to open. Where the system leaves no such range, a bind to
+    port 0, as before."""
+    port = _slice_port(secrets.randbelow)
+    if port is not None:
+        return port
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])
