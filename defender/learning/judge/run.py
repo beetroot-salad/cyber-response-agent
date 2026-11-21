@@ -414,6 +414,27 @@ def validate_reply(doc: Any, *, scope: str = "world", reachable_systems: Any = N
         world_findings=world, gaps=gaps, bucket=bucket, systems=systems)
 
 
+_TEXT: dict[str, Any] = {"type": "string"}
+_TEXTS: dict[str, Any] = {"type": "array", "items": {"type": "string"}}
+_FLAG: dict[str, Any] = {"type": "boolean"}
+#: Each finding field's shape, keyed by the field.
+_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
+    "claim": _TEXT, "root_cause": _TEXT, "anchor": _TEXT, "topic": _TEXT, GAP_WHAT: _TEXT,
+    GAP_HOW: _TEXT, "systems": _TEXTS, CONTRAST_EVIDENCE: _TEXTS, EVIDENCE: _TEXTS,
+    ON_VERDICT_PATH: _FLAG, KEPT_FACTS: _FLAG,
+}
+
+
+def _finding_schema(keys: tuple[str, ...], buckets: frozenset[str] | None = None) -> dict[str, Any]:
+    """One filed list's item: exactly the keys its parser takes, each required (#1607). Declared
+    in full because the OpenAI-compatible mapping closes a bare `{"type": "object"}` to "no
+    keys", and the provider decodes to it: every finding arrived as `{}`."""
+    properties = {k: ({"type": "string", "enum": sorted(buckets)} if k == "bucket" and buckets
+                      else _FIELD_SCHEMAS[k]) for k in keys}
+    return {"type": "object", "properties": properties, "required": list(keys),
+            "additionalProperties": False}
+
+
 #: The shape of the judge's reply as its output tool describes it. A description only: the check
 #: (`validate_reply`) is the owner of validity.
 _REPLY_PROPERTIES: dict[str, Any] = {
@@ -421,9 +442,11 @@ _REPLY_PROPERTIES: dict[str, Any] = {
     "noise_floor_note": {"type": "string"},
     "correlations": {"type": "array"}, "scope_checks": {"type": "array"},
     "derivations": {"type": "array"},
-    INVESTIGATOR_FINDINGS: {"type": "array", "items": {"type": "object"}},
-    WORLD_FINDINGS: {"type": "array", "items": {"type": "object"}},
-    GAPS: {"type": "array", "items": {"type": "object"}},
+    INVESTIGATOR_FINDINGS: {"type": "array", "items": _finding_schema(
+        _INVESTIGATOR_KEYS, INVESTIGATOR_BUCKETS)},
+    WORLD_FINDINGS: {"type": "array", "items": _finding_schema(
+        _WORLD_FINDING_KEYS, WORLD_FINDING_BUCKETS)},
+    GAPS: {"type": "array", "items": _finding_schema(_GAP_KEYS)},
 }
 
 
