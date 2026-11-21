@@ -269,6 +269,23 @@ describe.each(Object.entries(FAILING))(
       expect(probe.now().more).toBeNull();
     });
 
+    it("a Load more drawn for other params, pressed after this read's page failed, does not read it again", async () => {
+      const probe = drawn({ key: ALERTS, params: alerts("malicious") });
+      await waitFor(() => {
+        expect(probe.now().more).not.toBeNull();
+      });
+      const other = probe.now().more;
+      await shown(probe, { key: ALERTS, params }, [`${params.query?.outcome ?? ""}-1`]);
+      await pressed(probe.now().more);
+      await waitFor(() => {
+        expect(probe.now().later).toBe("failed");
+      });
+      const mark = probe.sent.length;
+      await pressed(other);
+      expect(probe.sent.slice(mark).filter((read) => read.cursor !== null && read.what !== "malicious")).toEqual([]);
+      expect(probe.now().later).toBe("failed");
+    });
+
     it("leaving its read and returning reads nothing and shows the page failed", async () => {
       const { probe } = await failedAtPage2(params);
       const what = params.query?.outcome ?? "";
