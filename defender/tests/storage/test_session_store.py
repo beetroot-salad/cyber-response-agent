@@ -207,6 +207,28 @@ def test_writer_open_of_an_empty_file_makes_a_fresh_store(tmp_path):
         assert store.connection.execute("PRAGMA user_version").fetchone()[0] == ss.SCHEMA_VERSION
 
 
+def test_writer_open_refuses_an_emptied_store_whose_log_is_beside_it(tmp_path):
+    """#1458 review: an empty main file with its write-ahead log beside it is a store that lost
+    its pages, not a new one: refused, never rebuilt empty over the case's history."""
+    ss = store_mod()
+    store = make_store(tmp_path)
+    session_id = store.new_session(agent_id="main")
+    store.append(session_id, [user_request("hello")], agent_id="main")
+    path = store.path
+    store.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    store.append(session_id, [user_request("again")], agent_id="main")
+    log = path.with_name(path.name + "-wal")
+    saved = log.read_bytes()
+    assert saved, "control: the second append is still in the log"
+    store.connection.close()
+    path.write_bytes(b"")
+    log.write_bytes(saved)
+    with pytest.raises(ss.UnknownSchemaVersion), ss.open_store(
+            case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path)))):
+        pass
+    assert path.read_bytes() == b"", "the writer rebuilt an emptied store"
+
+
 @pytest.mark.parametrize("absent", ["missing", "a directory", "a device"])
 def test_reader_finds_no_store_where_no_file_is(tmp_path, absent):
     """#1458: no regular file at the path is `FileNotFoundError`, and the reader leaves none there."""

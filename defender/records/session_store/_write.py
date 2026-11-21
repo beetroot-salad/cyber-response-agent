@@ -446,17 +446,23 @@ def open_store(*, case_id: str, sessions: SessionPaths, create: bool = True) -> 
     `create=False` opens only a store that already exists (a branch or resume joining a finished
     run's store), raising `FileNotFoundError` instead of making one (#1458). Whether a store is new
     is decided from the file opened, never from an earlier look: a file with no schema and no
-    version stamp (just created, or left empty) is new; anything else must carry this version."""
+    version stamp (just created, or left empty with no log beside it) is new; anything else must
+    carry this version."""
     # The store's path and the root its directory is made under, from the owner's one
     # hand-out (the one `store_path_for`, which the resume door asks, reads too), asked once.
     path, root = sessions.store(case_id)
-    # The folder guard refuses a symlinked folder below the trust root; for an existing folder it
-    # creates nothing, so the must-exist open runs it too and only skips it when nothing is there.
-    if create or path.parent.is_dir():
-        guarded_mkdir(path.parent, base=unwrap_session_trust_root(root))
+    # The folder guard refuses a symlinked folder below the trust root and creates nothing for a
+    # folder that exists, so the must-exist open runs it too: with no folder, the store is missing
+    # at once, before anything could follow a link planted there afterwards.
+    if not create and not path.parent.is_dir():
+        raise FileNotFoundError(f"session store not found: {path}")
+    guarded_mkdir(path.parent, base=unwrap_session_trust_root(root))
+    # A blank file is new only with no write-ahead log beside it: an emptied store whose log
+    # survived lost its pages (SQLite drops the log on the first read) and is refused, not rebuilt.
+    logged = path.with_name(path.name + "-wal").exists()
     conn = _bare_connect(path) if create else _connect_existing(path)
     try:
-        fresh = create and _is_blank(conn)
+        fresh = create and not logged and _is_blank(conn)
         if not fresh:
             _refuse_stale_version(conn)
         _finish_connect(conn)
