@@ -15,7 +15,6 @@ from defender.learning.core.retired import (
     RETIRED_REPLY_WORDS,
     retired_keys,
 )
-from defender.learning.core.validate import MalformedReply, reply_document_text
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.layout import (
     WorldLayout,
@@ -213,20 +212,24 @@ def _require_list(doc: dict[str, Any], key: str, where: str = "the judge's reply
 
 
 def _reply_text(raw: dict[str, Any], key: str, where: str) -> str:
-    """A required text field: present, not null (`str(None)` would manufacture the content
-    "None"), a scalar."""
+    """A required text field: present and text. Anything else is refused, never stringified: what
+    the host files is what the model wrote."""
     if key not in raw:
         raise JudgeRefused(f"{where} is missing {key!r}")
     value = raw[key]
-    if value is None or isinstance(value, (dict, list)):
+    if not isinstance(value, str):
         raise JudgeRefused(f"{where}.{key} must be text, not {value!r}")
-    return str(value)
+    return value
 
 
 def _pointers(raw: dict[str, Any], key: str, where: str) -> list[str]:
-    """A required pointer list: a list, each entry carried as text (an unresolvable one costs
-    only itself at routing — never the reply)."""
-    return [str(p) for p in _require_list(raw, key, where)]
+    """A required pointer list: a list of text entries (an unresolvable one costs only itself at
+    routing — never the reply)."""
+    pointers = _require_list(raw, key, where)
+    bad = [p for p in pointers if not isinstance(p, str)]
+    if bad:
+        raise JudgeRefused(f"{where}.{key} must hold text pointers, not {bad[0]!r}")
+    return list(pointers)
 
 
 def _systems(value: Any, where: str, *, empty_ok: bool) -> list[str]:
@@ -258,6 +261,21 @@ def _refuse_discipline(bucket: str, where: str, shown_its_facts: bool | None) ->
             f"{' and '.join(sorted(DISCIPLINE_BUCKETS))} are unavailable to it")
 
 
+def _closed_to_keys(raw: dict[str, Any], allowed: tuple[str, ...], where: str) -> None:
+    """Every key of `raw` is one `allowed` names: a reply is closed at every level, so a key the
+    prompt never asks for is refused here, not dropped later."""
+    extra = [str(k) for k in raw if k not in allowed]
+    if extra:
+        raise JudgeRefused(f"{where} carries {extra}, which the judge's reply does not take — "
+                           f"it takes only {list(allowed)}")
+
+
+_INVESTIGATOR_KEYS = ("bucket", "claim", "root_cause", "anchor", "topic", CONTRAST_EVIDENCE,
+                      ON_VERDICT_PATH)
+_WORLD_FINDING_KEYS = ("bucket", "systems", "claim", "root_cause", "anchor", "topic", EVIDENCE)
+_GAP_KEYS = (GAP_WHAT, GAP_HOW, EVIDENCE, KEPT_FACTS)
+
+
 def _parse_investigator(raw: Any, index: int, *, shown_its_facts: bool | None,
                         ) -> InvestigatorFinding:
     where = f"{INVESTIGATOR_FINDINGS}[{index}]"
@@ -267,6 +285,7 @@ def _parse_investigator(raw: Any, index: int, *, shown_its_facts: bool | None,
         raise JudgeRefused(
             f"{where} carries the retired {RETIRED_INVESTIGATOR_FIELD!r} list — an "
             f"investigator finding's pointers are {CONTRAST_EVIDENCE!r} alone (A1)")
+    _closed_to_keys(raw, _INVESTIGATOR_KEYS, where)
     bucket = raw.get("bucket")
     if not isinstance(bucket, str) or bucket not in INVESTIGATOR_BUCKETS:
         raise JudgeRefused(
@@ -293,6 +312,7 @@ def _parse_world_finding(raw: Any, index: int) -> WorldFinding:
     where = f"{WORLD_FINDINGS}[{index}]"
     if not isinstance(raw, dict):
         raise JudgeRefused(f"{where} is not a mapping")
+    _closed_to_keys(raw, _WORLD_FINDING_KEYS, where)
     bucket = raw.get("bucket")
     if not is_world_finding_bucket(bucket):
         raise JudgeRefused(
@@ -309,6 +329,7 @@ def _parse_gap(raw: Any, index: int) -> Gap:
     where = f"{GAPS}[{index}]"
     if not isinstance(raw, dict):
         raise JudgeRefused(f"{where} is not a mapping")
+    _closed_to_keys(raw, _GAP_KEYS, where)
     if not isinstance(raw.get(KEPT_FACTS), bool):
         raise JudgeRefused(f"{where}.{KEPT_FACTS}={raw.get(KEPT_FACTS)!r} must be a boolean")
     return Gap(what=_reply_text(raw, GAP_WHAT, where), how=_reply_text(raw, GAP_HOW, where),
@@ -345,38 +366,17 @@ def _world_verdict(doc: dict[str, Any], *, reachable_systems: Any,
 _WORLD_ONLY_KEYS = ("bucket", "systems", INVESTIGATOR_FINDINGS, GAPS)
 
 
-def validate_reply(text: str, *, scope: str = "world", reachable_systems: Any = None,
+def validate_reply(doc: Any, *, scope: str = "world", reachable_systems: Any = None,
                    shown_its_facts: bool | None = None) -> JudgeReply:
-    """Read `text` as one bare document and validate strictly — the one enforcement point (A5):
-    nothing is read off the reply before this returns, and a reply it refuses is asked again
-    within `_REPLY_ATTEMPTS`."""
-    import yaml
-
-    from defender._yaml import duplicate_key_paths, safe_load
-
-    # An injected seam may return a non-string; refuse it as this draw's failure rather than
-    # raising an `AttributeError` the draw loop does not contain.
-    if not isinstance(text, str):
-        raise JudgeRefused(
-            f"the judge seam returned {type(text).__name__}, not the reply text this design "
-            "parses — one draw is unusable, which is not the episode's grade")
-    try:
-        cleaned = reply_document_text(text)
-    except MalformedReply as shape:
-        raise JudgeRefused(f"the judge's reply is not one bare document: {shape}") from shape
-    try:
-        # `_yaml.safe_load` converts `RecursionError` (deep nesting) and constructor
-        # `ValueError`s (e.g. out-of-range timestamps) into `yaml.YAMLError`, so a bad reply
-        # costs only its draw.
-        doc = safe_load(cleaned)
-        repeated = duplicate_key_paths(cleaned)
-    except yaml.YAMLError as bad:
-        raise JudgeRefused(f"the judge's reply is not valid YAML: {bad}") from bad
+    """Validate the judge's reply, the arguments of its output tool as one mapping, strictly and
+    closed at every level — the one enforcement point (A5): nothing is read off the reply before
+    this returns. Run inside the call, so a refusal goes back to the model with its reason."""
     if not isinstance(doc, dict):
         raise JudgeRefused(
-            f"the judge's reply did not parse to a mapping (got {type(doc).__name__})")
-    if repeated:
-        raise JudgeRefused(f"the judge's reply repeats key(s) {list(repeated)}")
+            f"the judge's reply must be a mapping (got {type(doc).__name__})")
+    top: tuple[str, ...] = ("noise_floor_note", *PASS_TABLES, WORLD_FINDINGS)
+    if scope != "family":
+        top = (*top, *_WORLD_ONLY_KEYS)
     unwritable = unwritable_value(doc)
     if unwritable is not None:
         # Refused here, named, and asked again: a draw document carrying it could not be
@@ -386,17 +386,21 @@ def validate_reply(text: str, *, scope: str = "world", reachable_systems: Any = 
     if retired:
         raise JudgeRefused(f"the judge's reply carries the retired {', '.join(retired)} — "
                            "validity is carried by world findings and gaps, never by a word")
-    tables = [_require_list(doc, key) for key in PASS_TABLES]
-    noise = doc.get("noise_floor_note")
-    world = [_parse_world_finding(f, i)
-             for i, f in enumerate(_require_list(doc, WORLD_FINDINGS))]
     if scope == "family":
         carried = [k for k in _WORLD_ONLY_KEYS if k in doc]
         if carried:
             raise JudgeRefused(f"the family reply carries {carried} — the family call files "
                                "family-scope world findings only")
+    _closed_to_keys(doc, top, "the judge's reply")
+    tables = [_require_list(doc, key) for key in PASS_TABLES]
+    noise = doc.get("noise_floor_note", "")
+    if not isinstance(noise, str):
+        raise JudgeRefused(f"the judge's reply's noise_floor_note must be text, not {noise!r}")
+    world = [_parse_world_finding(f, i)
+             for i, f in enumerate(_require_list(doc, WORLD_FINDINGS))]
+    if scope == "family":
         return JudgeReply(
-            noise_floor_note=str(noise) if noise is not None else "", correlations=tables[0],
+            noise_floor_note=noise, correlations=tables[0],
             scope_checks=tables[1], derivations=tables[2], investigator_findings=[],
             world_findings=world, gaps=[])
     bucket, systems = _world_verdict(doc, reachable_systems=reachable_systems,
@@ -405,9 +409,43 @@ def validate_reply(text: str, *, scope: str = "world", reachable_systems: Any = 
                     for i, f in enumerate(_require_list(doc, INVESTIGATOR_FINDINGS))]
     gaps = [_parse_gap(f, i) for i, f in enumerate(_require_list(doc, GAPS))]
     return JudgeReply(
-        noise_floor_note=str(noise) if noise is not None else "", correlations=tables[0],
+        noise_floor_note=noise, correlations=tables[0],
         scope_checks=tables[1], derivations=tables[2], investigator_findings=investigator,
         world_findings=world, gaps=gaps, bucket=bucket, systems=systems)
+
+
+#: The shape of the judge's reply as its output tool describes it. A description only: the check
+#: (`validate_reply`) is the owner of validity.
+_REPLY_PROPERTIES: dict[str, Any] = {
+    "bucket": {"type": "string"}, "systems": {"type": "array", "items": {"type": "string"}},
+    "noise_floor_note": {"type": "string"},
+    "correlations": {"type": "array"}, "scope_checks": {"type": "array"},
+    "derivations": {"type": "array"},
+    INVESTIGATOR_FINDINGS: {"type": "array", "items": {"type": "object"}},
+    WORLD_FINDINGS: {"type": "array", "items": {"type": "object"}},
+    GAPS: {"type": "array", "items": {"type": "object"}},
+}
+
+
+def reply_schema(scope: str) -> dict[str, Any]:
+    """The reply's shape for `scope`: a family reply is never offered the world-only keys its
+    check refuses (`_WORLD_ONLY_KEYS`)."""
+    keys = [k for k in _REPLY_PROPERTIES if scope != "family" or k not in _WORLD_ONLY_KEYS]
+    return {"type": "object", "properties": {k: _REPLY_PROPERTIES[k] for k in keys}}
+
+
+def reply_check(*, scope: str, reachable_systems: Any, shown_its_facts: bool | None) -> Any:
+    """The in-call check for one draw: `validate_reply` with its context, a refusal going back
+    to the model as a retry with its reason."""
+    from pydantic_ai import ModelRetry
+
+    def check(reply: Any) -> None:
+        try:
+            validate_reply(reply, scope=scope, reachable_systems=reachable_systems,
+                           shown_its_facts=shown_its_facts)
+        except JudgeRefused as refused:
+            raise ModelRetry(str(refused)) from refused
+    return check
 
 
 def draw_document(reply: JudgeReply, *, scope: str) -> dict[str, Any]:
@@ -527,10 +565,8 @@ def _world_task(ctx: JudgeContext) -> str:
         "investigator). A gap is never an investigator finding.\n\n"
         f"{_pointer_rules()}"
         "Before findings, run three passes and report each as its own table: correlations, "
-        "scope_checks, derivations. Cap any table at 20 rows. Quote any YAML scalar containing a "
-        "colon.\n\n"
-        "Reply as one YAML mapping, bare — not inside a code fence, with nothing before or after "
-        f"it: bucket, systems, noise_floor_note, correlations, scope_checks, derivations, "
+        "scope_checks, derivations. Cap any table at 20 rows.\n\n"
+        "Call the verdict tool with your reply; it takes exactly these keys and no others (an unknown key is refused, and you are asked again): bucket, systems, noise_floor_note, correlations, scope_checks, derivations, "
         f"{INVESTIGATOR_FINDINGS}, {WORLD_FINDINGS}, {GAPS}.\n"
     )
     return task
@@ -552,8 +588,8 @@ def _build_family_prompt(manifest: dict[str, Any], runs: RunSet, noise: list[Any
         f"{_guidance(WORLD_FINDING_BUCKETS, _WORLD_FINDING_GUIDANCE, 'world-finding bucket')}\n"
         f"{_DECISION_GLOSSARY}"
         f"{_pointer_rules()}"
-        "Reply as one YAML mapping, bare — not inside a code fence, with nothing before or after "
-        f"it: noise_floor_note, correlations, scope_checks, derivations, {WORLD_FINDINGS} (each: "
+        "Call the verdict tool with your reply; it takes exactly these keys and no others (an unknown key is refused, and you are asked again): "
+        f"noise_floor_note, correlations, scope_checks, derivations, {WORLD_FINDINGS} (each: "
         f"bucket, systems — the systems the flaw is about, each once — claim, root_cause, "
         f"anchor, topic, {EVIDENCE}).\n"
     )

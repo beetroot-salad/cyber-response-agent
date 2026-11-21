@@ -184,7 +184,7 @@
         "type": "object"
       },
       "AlertSummary": {
-        "description": "An alert as listed. The raw alert is left out of lists; `GET /alerts/{id}` carries it.",
+        "description": "An alert as listed, with what its investigations concluded. The raw alert is left out of lists;\n`GET /alerts/{id}` carries it.",
         "properties": {
           "alert_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -214,6 +214,45 @@
             "format": "date-time",
             "title": "Fired At",
             "type": "string"
+          },
+          "latest_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "queued",
+                  "running",
+                  "completed",
+                  "unparseable",
+                  "failed",
+                  "aborted"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The status of the alert's newest investigation of any status; null when it has none. A rerun running over a completed investigation is `running` here while `outcome` keeps the earlier answer.",
+            "title": "Latest Status"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "enum": [
+                  "benign",
+                  "false-positive",
+                  "inconclusive",
+                  "malicious",
+                  "unresolved"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The disposition of the alert's newest completed investigation (by creation time, then id); null when no investigation of it has completed.",
+            "title": "Outcome"
           },
           "received_at": {
             "description": "When we pulled it; our own clock.",
@@ -252,7 +291,9 @@
           "description",
           "fired_at",
           "changed_at",
-          "received_at"
+          "received_at",
+          "outcome",
+          "latest_status"
         ],
         "title": "AlertSummary",
         "type": "object"
@@ -764,21 +805,20 @@
           "disposition": {
             "anyOf": [
               {
+                "enum": [
+                  "benign",
+                  "false-positive",
+                  "inconclusive",
+                  "malicious",
+                  "unresolved"
+                ],
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Set once the investigation completes: the disposition its closing record holds.",
-            "enum": [
-              "benign",
-              "false-positive",
-              "inconclusive",
-              "malicious",
-              "unresolved",
-              null
-            ],
+            "description": "Set once the investigation completes: the disposition its closing record holds; always set when it is `completed`.",
             "title": "Disposition"
           },
           "failure_message": {
@@ -3618,6 +3658,32 @@
                 }
               ],
               "title": "Fired Before"
+            }
+          },
+          {
+            "description": "Only alerts whose outcome is this disposition, or `none`: those with no completed investigation. Applied before paging; a cursor is bound to it.",
+            "in": "query",
+            "name": "outcome",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "benign",
+                    "false-positive",
+                    "inconclusive",
+                    "malicious",
+                    "unresolved",
+                    "none"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only alerts whose outcome is this disposition, or `none`: those with no completed investigation. Applied before paging; a cursor is bound to it.",
+              "title": "Outcome"
             }
           },
           {

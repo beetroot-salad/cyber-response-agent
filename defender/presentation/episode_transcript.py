@@ -1,6 +1,8 @@
 """Episode stage, cost, and transcript rendering."""
 from __future__ import annotations
 
+import json
+
 
 
 import math
@@ -315,6 +317,60 @@ def _message_parts(row: dict[str, Any]) -> tuple[dict[str, Any], list[Any]]:
 
 
 
+def _response_text(parts: list[Any]) -> str:
+    """What a response said: its text parts and, for a typed reply, the arguments of its tool
+    calls (the reply itself), mapping or raw malformed text alike."""
+    pieces: list[str] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        if part.get("part_kind") == "text":
+            pieces.append(str(part.get("content") or ""))
+        elif part.get("part_kind") == "tool-call":
+            pieces.append(_as_text(part.get("args")))
+    return "\n".join(pieces)
+
+
+def _as_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _retry_entries(row: dict[str, Any] | None) -> list[str]:
+    """The retry prompts one request sent: those of its last message row, the one it added."""
+    if row is None:
+        return []
+    _msg, parts = _message_parts(row)
+    return [f'<div class="tx-entry tx-retry">{_uv(_as_text(part.get("content")))}</div>'
+            for part in parts
+            if isinstance(part, dict) and part.get("part_kind") == "retry-prompt"]
+
+
+def _response_line(text: str, model: Any, usage: Any, duration: Any) -> str:
+    """One response's entry: its text, model, input tokens, cost and wall time."""
+    priced = _priced(model, usage)
+    line_bits = [f'<div class="tx-entry">{_uv(text)}']
+    if model:
+        line_bits.append(f'<span class="tx-model">{_uv(model)}</span>')
+    input_tokens = _count(usage.get("input_tokens", 0)) if isinstance(usage, dict) else None
+    if input_tokens is not None:
+        line_bits.append(f'<span class="tx-usage">{input_tokens:,}</span>')
+    else:
+        line_bits.append('<span class="tx-usage">unpriced</span>')
+    if priced is not None:
+        line_bits.append(f'<span class="tx-cost">{_money(priced)}</span>')
+    elif isinstance(usage, dict):
+        line_bits.append('<span class="tx-cost">unpriced</span>')
+    if duration is not None:
+        line_bits.append(f'<span class="tx-wall">{fmt_duration(duration)}</span>')
+    line_bits.append('</div>')
+    return "".join(line_bits)
+
+
 def _no_response_html(trace: _Trace) -> str:
     """The line for a call with no response. A refused plain trace (link, FIFO, unreadable)
     says so, rather than reading like a benign empty call."""
@@ -351,7 +407,7 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
         elif reply and not has_plain_response:
             # Framed-only calls render the bare reply. When the plain trace has a response
             # row, that row (with model/usage/duration) is rendered below instead.
-            entries_html.append(f'<div class="tx-entry">{_uv(reply)}</div>')
+            entries_html.append(f'<div class="tx-entry">{_uv(_as_text(reply))}</div>')
     else:
         request = next((r for r in rows if r.get("kind") == "request"), None)
         if request is not None:
@@ -365,32 +421,30 @@ def _transcript_block(trace: _Trace) -> str:  # noqa: C901, PLR0912 — one call
                                f'<details><summary>instructions</summary>'
                                f'{_uv(instructions)}</details></div>')
 
+    # Every request re-emits the call's whole history, one row per message, ending with the
+    # message it adds: only that last row is new, so each retry prompt shows once, where it was
+    # sent (#1579), however the provider numbers its tool calls.
+    newest: dict[str, Any] | None = None
     for row in rows:
+        if row.get("kind") == "request":
+            newest = row
+            continue
+        if row.get("kind") == "final_refusal":
+            # The reason the call gave up: refused, with no request left to carry it.
+            entries_html.append(
+                f'<div class="tx-entry tx-retry">{_uv(_as_text(row.get("reason")))}</div>')
+            continue
         if row.get("kind") != "response":
             continue
+        entries_html += _retry_entries(newest)
+        newest = None
         model = row.get("model")
         usage = row.get("usage")
         duration = _duration(row.get("duration_ms"))
         _msg, parts = _message_parts(row)
-        text = next((p.get("content") for p in parts if isinstance(p, dict)
-                    and p.get("part_kind") == "text"), "")
-        priced = _priced(model, usage)
-        line_bits = [f'<div class="tx-entry">{_uv(text)}']
-        if model:
-            line_bits.append(f'<span class="tx-model">{_uv(model)}</span>')
-        input_tokens = _count(usage.get("input_tokens", 0)) if isinstance(usage, dict) else None
-        if input_tokens is not None:
-            line_bits.append(f'<span class="tx-usage">{input_tokens:,}</span>')
-        else:
-            line_bits.append('<span class="tx-usage">unpriced</span>')
-        if priced is not None:
-            line_bits.append(f'<span class="tx-cost">{_money(priced)}</span>')
-        elif isinstance(usage, dict):
-            line_bits.append('<span class="tx-cost">unpriced</span>')
-        if duration is not None:
-            line_bits.append(f'<span class="tx-wall">{fmt_duration(duration)}</span>')
-        line_bits.append('</div>')
-        entries_html.append("".join(line_bits))
+        text = _response_text(parts)
+        entries_html.append(_response_line(text, model, usage, duration))
+    entries_html += _retry_entries(newest)
     framed_has_response = framed is not None and (framed.get("failure") or framed.get("reply"))
     if not framed_has_response and not has_plain_response:
         entries_html.append(_no_response_html(trace))

@@ -624,6 +624,28 @@ def _read_document(view: Bound, *, expected_episode_id: str) -> object:
     return doc
 
 
+def check_composed_worlds(*, base_story: Any, discriminator: Any, worlds: Any) -> None:
+    """The manifest gate's rules on a family composed before its host fields exist (#1579 P1):
+    the base story, the discriminator and the worlds as `parse_family` would read them, with a
+    placeholder id standing in for each world's host-assigned one. Raises `FamilyError`.
+
+    One owner: the questioner's in-call checks run this, so a reply the model is asked to fix is
+    held to exactly what the manifest would refuse after it."""
+    if not isinstance(base_story, str) or not base_story:
+        raise FamilyError("the manifest's base_story must be a non-empty string")
+    _parse_discriminator(discriminator)
+    if not isinstance(worlds, list):
+        raise FamilyError(f"the manifest's worlds must be a list, got {type(worlds).__name__}")
+    _parse_worlds([{**w, "world_id": mint_uuid()} if isinstance(w, dict) else w for w in worlds])
+
+
+def check_composed_world(world: Any, *, where: str) -> None:
+    """The world rule on one composed world with a placeholder id (a seat's, a revision's)."""
+    if not isinstance(world, dict):
+        raise FamilyError(f"{where} entry must be a mapping, got {type(world).__name__}")
+    parse_world({**world, "world_id": mint_uuid()}, where=where)
+
+
 def accept_family(document: dict) -> tuple[dict, Family]:
     """Assign identities to an authored declaration once, before publication or preflight.
 

@@ -14,7 +14,9 @@
     "generate": "bun scripts/run.mjs generate",
     "build": "bun scripts/run.mjs build",
     "check": "bun scripts/run.mjs check",
-    "test": "bun scripts/run.mjs generate && vitest run",
+    "test": "bun scripts/run.mjs generate && vitest run --project unit",
+    "test:generated": "bun scripts/run.mjs generate && vitest run --project generated",
+    "test:dom": "bun scripts/run.mjs generate && vitest run --project dom",
     "dev": "bun scripts/run.mjs generate && vite",
     "lint": "eslint . && prettier --check src scripts \"*.mjs\" && knip",
     "format": "prettier --write src scripts \"*.mjs\""
@@ -23,16 +25,21 @@
     "@tanstack/react-query": "5.107.1",
     "openapi-fetch": "0.17.0",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "temporal-polyfill": "1.0.8"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
+    "ajv": "8.20.0",
     "eslint": "10.14.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.13.0",
+    "jsdom": "30.1.3",
     "knip": "6.44.1",
     "openapi-typescript": "7.13.0",
     "prettier": "3.9.10",

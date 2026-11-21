@@ -80,7 +80,7 @@ ALERT = Alert(
     alert_id="a1000000-0000-4000-8000-000000000001", vendor="tickets", vendor_ticket_id="T-1", title="t", description="d",
     fired_at=NOW, changed_at=NOW, received_at=NOW, raw='{"id": "a1000000-0000-4000-8000-000000000001"}',
 )
-SUMMARY = AlertSummary.model_validate(ALERT.model_dump(exclude={"raw"}))
+SUMMARY = AlertSummary.model_validate({**ALERT.model_dump(exclude={"raw"}), "outcome": None, "latest_status": None})  # #1581: the list adds the two (conflict, updated)
 INV = Investigation(
     investigation_id="b1000000-0000-4000-8000-000000000001", alert_id="a1000000-0000-4000-8000-000000000001", status="completed", disposition="benign",
     request_key="req-1", attempt=1,
@@ -931,8 +931,8 @@ def test_an_aware_time_reaches_the_store_as_the_same_instant_in_utc() -> None:
     assert response.json() == {"items": [SUMMARY.model_dump(mode="json")], "next_cursor": None}
     ((tenant,), kwargs), = api.ports.called("list_alerts")
     assert tenant == A
-    assert kwargs == {"fired_after": after, "fired_before": None,
-                      "after": None, "limit": 8}
+    assert kwargs == {"fired_after": after, "fired_before": None, "outcome": None,
+                      "after": None, "limit": 8}  # #1581 O2: the route hands the port the filter, None when absent (conflict, updated)
     assert kwargs["fired_after"].utcoffset() == _dt.timedelta(0)
 
 
@@ -1622,3 +1622,187 @@ def test_1083_the_published_document_is_the_same_whichever_ports_are_passed_and_
     assert refusing["paths"]
     assert refusing == Api().client.get(API + "/openapi.json").json()
     assert "not yet real" not in json.dumps(refusing["info"]).lower()
+
+
+# --- #1581: each listed alert's outcome and latest status, and the outcome filter -------------------------------------------
+
+def _filtered_cursor_api() -> Api:
+    return Api(list_alerts=_rows_after([SUMMARY_2, SUMMARY]))
+
+
+def test_alert_list_o1_each_item_carries_outcome_and_latest_status_null_spelled_out() -> None:
+    """Every listed alert has both keys, with the port's values and null when it has none. (O1, AP2)"""
+    judged = SUMMARY_2.model_copy(update={"outcome": "malicious", "latest_status": "running"})
+    api = Api(list_alerts=[judged, SUMMARY])
+    items = api.client.get(f"{T}/alerts", headers=AUTH).json()["items"]
+    assert [(i["outcome"], i["latest_status"]) for i in items] == [("malicious", "running"), (None, None)]
+    assert all({"outcome", "latest_status"} <= set(i) for i in items), "a null is in the item, not left out"
+    assert all("raw" not in i for i in items)
+
+
+def test_alert_list_o1_the_single_read_carries_no_outcome() -> None:
+    """`GET /alerts/{id}` answers the listed fields and `raw` only. (O1 non-obligation: the single read is unchanged)"""
+    api = Api(get_alert=ALERT)
+    body = api.client.get(f"{T}/alerts/{ALERT.alert_id}", headers=AUTH).json()
+    assert "outcome" not in body
+    assert "latest_status" not in body
+
+
+def test_alert_list_o2_a_disposition_reaches_the_port_as_itself_and_no_filter_as_none() -> None:
+    """Each of the five dispositions is handed to the port as that value, and an absent `outcome` as `None`. (O2)"""
+    from defender._vocab import DISPOSITION_VALUES
+
+    api = Api(list_alerts=[SUMMARY])
+    for value in DISPOSITION_VALUES:
+        assert api.client.get(f"{T}/alerts", headers=AUTH, params={"outcome": value}).status_code == 200, value
+    assert api.client.get(f"{T}/alerts", headers=AUTH).status_code == 200
+    handed = [kwargs["outcome"] for _, kwargs in api.ports.called("list_alerts")]
+    assert handed == [*DISPOSITION_VALUES, None]
+
+
+def test_alert_list_o2_none_reaches_the_port_as_the_no_outcome_marker_never_the_string() -> None:
+    """`outcome=none` is handed to the port as the `NoOutcome` marker, not the string `none`, and not as no filter. (O2, AP4)"""
+    from defender._vocab import NoOutcome
+
+    api = Api(list_alerts=[SUMMARY])
+    assert api.client.get(f"{T}/alerts", headers=AUTH, params={"outcome": "none"}).status_code == 200
+    [(_, kwargs)] = api.ports.called("list_alerts")
+    assert isinstance(kwargs["outcome"], NoOutcome)
+    assert kwargs["outcome"] != "none"
+
+
+@pytest.mark.parametrize("value", ["evil", "NONE", "None", "Benign", "benign,malicious", "unsanctioned-benign", " benign", "false_positive", ""])
+def test_alert_list_o2_a_value_outside_the_six_is_a_422_about_outcome_and_no_port_call(value: str) -> None:
+    """A value that is not exactly one of the five codes or `none` is refused as the `outcome` query value (not the
+    undeclared-name refusal) before the store; control: `benign` is served. (O2)"""
+    api = Api(list_alerts=[SUMMARY])
+    response = api.client.get(f"{T}/alerts", headers=AUTH, params={"outcome": value})
+    assert response.status_code == 422
+    assert [(tuple(e["loc"]), e["type"] == "extra_forbidden") for e in response.json()["errors"]] == [(("query", "outcome"), False)]
+    assert api.ports.calls == []
+    assert api.client.get(f"{T}/alerts", headers=AUTH, params={"outcome": "benign"}).status_code == 200
+
+
+def test_alert_list_o2_a_cursor_is_bound_to_the_outcome_filter() -> None:
+    """A cursor minted under one outcome filter is refused under another, under `none` and under none at all, and a `none`
+    cursor under a disposition; control: under its own it pages on. No refusal reaches the port. (O2)"""
+    api = _filtered_cursor_api()
+    under_benign = _cursor(api, f"{T}/alerts", {"outcome": "benign"})
+    under_none = _cursor(api, f"{T}/alerts", {"outcome": "none"})
+    served = len(api.ports.calls)
+    assert api.client.get(f"{T}/alerts", headers=AUTH, params={"limit": 1, "outcome": "benign", "cursor": under_benign}).status_code == 200
+    assert api.client.get(f"{T}/alerts", headers=AUTH, params={"limit": 1, "outcome": "none", "cursor": under_none}).status_code == 200
+    served = len(api.ports.calls)
+    for params in ({"outcome": "malicious", "cursor": under_benign}, {"outcome": "none", "cursor": under_benign},
+                   {"cursor": under_benign}, {"outcome": "benign", "cursor": under_none}, {"cursor": under_none}):
+        assert api.client.get(f"{T}/alerts", headers=AUTH, params=params).status_code == 422, params
+        assert "the filters changed" in api.client.get(f"{T}/alerts", headers=AUTH, params=params).text, params
+    assert len(api.ports.calls) == served
+
+
+def test_alert_list_o2_a_cursor_minted_without_the_filter_is_refused_under_one() -> None:
+    """The other way: an unfiltered cursor is refused under `outcome` as a changed filter, and pages on unfiltered. (O2)"""
+    api = _filtered_cursor_api()
+    plain = _cursor(api, f"{T}/alerts")
+    served = len(api.ports.calls)
+    assert api.client.get(f"{T}/alerts", headers=AUTH, params={"limit": 1, "cursor": plain}).status_code == 200, "control: under no filter it pages on"
+    served = len(api.ports.calls)
+    refused = api.client.get(f"{T}/alerts", headers=AUTH, params={"outcome": "benign", "cursor": plain})
+    assert refused.status_code == 422
+    assert "the filters changed" in refused.text
+    assert len(api.ports.calls) == served
+
+
+# --- #1581 O2: a cursor is bound to every filter of its route, whatever the route (generated from the published document) ------
+
+#: Each paged route's path in the published document, with its port and the store's first two rows in the route's order. A
+#: paged route that has a filter and is not here fails `test_..._every_filter...` below.
+_PAGED_ROUTES: dict[str, tuple[str, Callable[[], list[Any]]]] = {
+    API + "/tenants/{tenant_id}/alerts": ("list_alerts", lambda: [SUMMARY_2, SUMMARY]),
+    API + "/tenants/{tenant_id}/investigations": ("list_investigations", lambda: [INV_2, INV]),
+    API + "/tenants/{tenant_id}/learning-jobs": ("list_learning_jobs", lambda: [JOB_2, JOB]),
+    API + "/tenants/{tenant_id}/learning/items": ("list_set_aside", _set_aside_rows),
+}
+_INSTANT = _dt.datetime(2026, 3, 4, 5, 6, 7, 123456, tzinfo=_dt.UTC)
+
+
+def _filter_kinds(doc: dict[str, Any], operation: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Each query parameter of the operation other than `cursor` and `limit`, as its schema with `null` and refs resolved."""
+    kinds: dict[str, dict[str, Any]] = {}
+    for param in operation.get("parameters", []):
+        if param["in"] != "query" or param["name"] in {"cursor", "limit"}:
+            continue
+        schema = param["schema"]
+        [schema] = [m for m in schema.get("anyOf", [schema]) if m.get("type") != "null"]
+        if "$ref" in schema:
+            schema = doc["components"]["schemas"][schema["$ref"].rsplit("/", 1)[1]]
+        kinds[param["name"]] = schema
+    return kinds
+
+
+def _spellings(name: str, schema: dict[str, Any], index: int) -> tuple[str, list[str]]:
+    """A value for the `index`-th parameter of its kind, and its neighbours: the same filter changed by its smallest unit, or
+    another member of its enum."""
+    if "enum" in schema:
+        members = list(schema["enum"])
+        return members[index % len(members)], [m for m in members if m != members[index % len(members)]]
+    if schema.get("format") == "date-time":
+        at = _INSTANT + _dt.timedelta(hours=index)
+        return at.isoformat(), [(at + _dt.timedelta(microseconds=1)).isoformat(), (at - _dt.timedelta(microseconds=1)).isoformat()]
+    if "[0-9a-f]{8}" in schema.get("pattern", ""):
+        return fixture_uuid(f"filter:{name}:{index}"), [fixture_uuid(f"filter:{name}:other")]
+    if schema.get("type") == "integer":
+        return str(index + 1), [str(index + 2)]
+    return f"{name}-{index}", [f"{name}-other"]
+
+
+def test_alert_list_o2_a_cursor_is_bound_to_every_filter_of_its_route_each_change_removal_swap_and_addition_is_422_before_the_port() -> None:  # noqa: C901 — every route, filter and way of changing it
+    """For every paged route with filters, read from the published document: a cursor minted with all of them set pages on
+    with the same ones, and is refused (422 "the filters changed", the port never asked) when any one is changed by its
+    smallest unit or to any other enum member, removed, moved to another filter of its kind, swapped with one, or added to a
+    cursor minted without it. (O2)"""
+    doc = Api().client.get(API + "/openapi.json").json()
+    routes = {path.replace("{tenant_id}", A): (path, _filter_kinds(doc, ops["get"])) for path, ops in doc["paths"].items()
+              if "get" in ops and any(p["name"] == "cursor" for p in ops["get"].get("parameters", []))}
+    with_filters = {template for template, kinds in routes.values() if kinds}
+    assert with_filters == set(_PAGED_ROUTES), f"premise: a paged route with filters is scripted here: {sorted(with_filters ^ set(_PAGED_ROUTES))}"
+    alerts = routes[f"{T}/alerts"][1]
+    assert {"fired_after", "fired_before", "outcome"} <= set(alerts), f"premise: the alert list's filters are in the document: {sorted(alerts)}"
+    for path, (template, kinds) in routes.items():
+        if not kinds:
+            continue
+        port, rows = _PAGED_ROUTES[template]
+        api = _learning_api(**{port: _rows_after(rows())})
+        nth: dict[str, int] = {}
+        minted: dict[str, str] = {}
+        others: dict[str, list[str]] = {}
+        for name, schema in kinds.items():
+            key = json.dumps({k: v for k, v in schema.items() if k != "title"}, sort_keys=True)
+            minted[name], others[name] = _spellings(name, schema, nth.get(key, 0))
+            nth[key] = nth.get(key, 0) + 1
+        kind_of = {name: json.dumps({k: v for k, v in schema.items() if k != "title"}, sort_keys=True) for name, schema in kinds.items()}
+
+        def refused(minted_with: dict[str, str], sent: dict[str, str], why: str, path: str = path, api: Api = api) -> None:
+            cursor = _cursor(api, path, minted_with)
+            served = len(api.ports.calls)
+            response = api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor, **sent})
+            assert (response.status_code, "the filters changed" in response.text) == (422, True), f"{path}: {why}: {response.text}"
+            assert len(api.ports.calls) == served, f"{path}: {why}: the port was asked"
+
+        cursor = _cursor(api, path, minted)
+        assert api.client.get(path, headers=AUTH, params={"limit": 1, "cursor": cursor, **minted}).status_code == 200, f"{path}: control"
+        for name in kinds:
+            for other in others[name]:
+                refused(minted, {**minted, name: other}, f"{name} changed to {other}")
+            refused(minted, {k: v for k, v in minted.items() if k != name}, f"{name} removed")
+            refused({k: v for k, v in minted.items() if k != name}, minted, f"{name} added")
+            refused({}, {name: minted[name]}, f"{name} added to an unfiltered cursor")
+            for other in kinds:
+                if other != name and kind_of[other] == kind_of[name]:
+                    refused({name: minted[name]}, {other: minted[name]}, f"{name} moved to {other}")
+                    refused(minted, {**minted, name: minted[other], other: minted[name]}, f"{name} and {other} swapped")
+            if "enum" in kinds[name]:
+                for was in kinds[name]["enum"]:
+                    for now in kinds[name]["enum"]:
+                        if was != now:
+                            refused({name: was}, {name: now}, f"{name} {was} -> {now}")

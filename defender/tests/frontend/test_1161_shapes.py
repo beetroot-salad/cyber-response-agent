@@ -12,17 +12,28 @@ HEX = set("0123456789abcdef")
 _INVESTIGATION = next(s for s in S.SHAPES if s.name == "investigation")
 
 
+def _uuid(text: str) -> bool:
+    groups = text.split("-")
+    return [len(g) for g in groups] == [8, 4, 4, 4, 12] and all(c in HEX for g in groups for c in g)
+
+
 def _investigation_by_hand(value: str) -> bool:
     """A segment-by-segment check with no regular expression (an oracle independent of the classifier)."""
     parts = value.split("/")
     if len(parts) != 5 or parts[0] != "" or parts[1] != "t" or parts[3] != "investigations":
         return False
+    return _uuid(parts[2]) and _uuid(parts[4])
 
-    def uuid(text: str) -> bool:
-        groups = text.split("-")
-        return [len(g) for g in groups] == [8, 4, 4, 4, 12] and all(c in HEX for g in groups for c in g)
 
-    return uuid(parts[2]) and uuid(parts[4])
+def _alerts_by_hand(value: str) -> bool:
+    """The same for `/t/{uuid}/alerts` (alert list design O4)."""
+    parts = value.split("/")
+    return len(parts) == 4 and parts[0] == "" and parts[1] == "t" and parts[3] == "alerts" and _uuid(parts[2])
+
+
+#: Each shape with a uuid placeholder, its regex-free check, and how many near misses are members: each hex digit
+#: of each uuid replaced by each of the 15 others (`64 * 15` for two uuids).
+_BY_HAND = {"investigation": (_investigation_by_hand, 64 * 15), "alerts": (_alerts_by_hand, 32 * 15)}
 
 
 @pytest.mark.parametrize("shape", S.SHAPES, ids=lambda s: s.name)
@@ -43,7 +54,7 @@ def test_the_classifier_is_exact_ascii_case_sensitive_with_no_tolerance():
         assert S.classify(bad) is None, bad
     assert S.classify("/sign-in-failed") == "sign-in-failed" and S.classify("/") == "root"
     assert S.classify("/home") == "home"
-    assert {"home", "investigation"} == S.RETURNABLE  # F4: `root` is non-returnable
+    assert {"home", "investigation", "alerts"} == S.RETURNABLE  # F4: `root` is non-returnable; O4: `alerts` returns
 
 
 def test_the_near_misses_cover_every_edit_kind_and_leave_the_member_out():
@@ -69,12 +80,12 @@ def test_the_classifier_agrees_with_an_independent_check_on_every_near_miss():
             members_found = 0
             for miss in S.near_misses(m):
                 got = S.classify(miss)
-                if shape.name == "investigation":
-                    assert (got == "investigation") == _investigation_by_hand(miss), miss
+                if shape.name in _BY_HAND:
+                    assert (got == shape.name) == _BY_HAND[shape.name][0](miss), miss
                 else:
                     assert got is None, (m, miss, got)  # no other shape has a neighbour that is a member
                 members_found += got is not None
-            assert (members_found == 64 * 15) if shape.name == "investigation" else members_found == 0
+            assert members_found == (_BY_HAND[shape.name][1] if shape.name in _BY_HAND else 0)
 
 
 def test_the_generated_set_holds_members_misses_and_their_classifier_answers():
@@ -85,7 +96,7 @@ def test_the_generated_set_holds_members_misses_and_their_classifier_answers():
     assert all(S.classify(c.value) == c.shape for c in cases)
     assert any(c.shape == "investigation" and c.origin for c in cases), "hex-for-hex misses are members"
     picked = S.sample(cases, 1, 40)
-    assert len(picked) == 40 and {c.shape for c in picked} >= {"root", "home", "investigation", "sign-in-failed", None}
+    assert len(picked) == 40 and {c.shape for c in picked} >= {"root", "home", "investigation", "alerts", "sign-in-failed", None}
     assert S.sample(cases, 1, 40) == picked
 
 

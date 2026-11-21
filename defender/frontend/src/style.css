@@ -70,3 +70,185 @@ main[data-screen="root"] img {
   display: block;
   margin: 0 auto 1rem;
 }
+
+/* The alert list (alert list design O5, O6): the filter bar, the table, its status cells and Load more. */
+main[data-screen="alerts"] {
+  max-width: 74rem;
+  margin: 2rem auto;
+}
+main[data-screen="alerts"] > h1 {
+  margin-bottom: 0.25rem;
+}
+main[data-screen="alerts"] > p:first-of-type {
+  margin-top: 0;
+}
+form[data-form="filters"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+  padding: 1rem;
+  margin: 1.25rem 0;
+  border: 1px solid var(--app-line);
+  border-radius: 8px;
+  background: var(--app-raised);
+}
+form[data-form="filters"] label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+form[data-form="filters"] label > span {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--app-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+form[data-form="filters"] select,
+form[data-form="filters"] input {
+  font: inherit;
+  min-height: 2.5rem;
+  padding: 0 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--app-line);
+  background: var(--app-paper);
+  color: var(--app-ink);
+  color-scheme: dark;
+}
+form[data-form="filters"] select {
+  min-width: 12rem;
+}
+[data-form="actions"] {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+[data-form="actions"] button {
+  min-height: 2.5rem;
+}
+a[data-action="clear-filters"][aria-label] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--app-line);
+  color: var(--app-ink);
+  text-decoration: none;
+  font-size: 1.25rem;
+}
+a[data-action="clear-filters"][aria-label]:hover {
+  border-color: var(--app-accent);
+}
+main[data-screen="alerts"] table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--app-line);
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+main[data-screen="alerts"] th {
+  padding: 0.6rem 1rem;
+  text-align: left;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--app-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--app-raised);
+  border-bottom: 1px solid var(--app-line);
+}
+main[data-screen="alerts"] td {
+  padding: 0.75rem 1rem;
+  vertical-align: top;
+  border-bottom: 1px solid var(--app-line);
+}
+[data-field="fired-time"],
+[data-field="ticket"] {
+  color: var(--app-ink-bright);
+  white-space: nowrap;
+}
+[data-field="ticket"] {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+}
+[data-field="fired-day"],
+[data-field="vendor"] {
+  color: var(--app-muted);
+  font-size: 0.8rem;
+}
+[data-field="title"][data-missing] {
+  color: var(--app-muted);
+  font-style: italic;
+}
+td[data-empty="no-match"] {
+  text-align: center;
+  color: var(--app-muted);
+}
+[data-field="status"] {
+  display: inline-block;
+  padding: 0.1rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+[data-field="status"][data-tone="solid"] {
+  background: var(--app-bad);
+  color: var(--app-paper);
+}
+[data-field="status"][data-tone="outlined"] {
+  border: 1px solid var(--app-muted);
+  color: var(--app-ink-bright);
+}
+[data-field="status"][data-tone="quiet"] {
+  background: var(--app-line);
+  color: var(--app-ink);
+}
+[data-field="status"][data-tone="muted"] {
+  padding: 0;
+  font-weight: 400;
+  color: var(--app-muted);
+}
+button[data-action="load-more"] {
+  display: block;
+  margin: 1.25rem auto 0;
+  background: var(--app-raised);
+  color: var(--app-ink);
+  border-color: var(--app-line);
+}
+button[data-action="load-more"]:disabled {
+  cursor: default;
+  color: var(--app-muted);
+}
+p[data-later="failed"] {
+  text-align: center;
+  color: var(--app-bad);
+}
+
+/* Home (O8, O11): the tenants' alerts links and the open invitations. */
+ul[data-list="tenants"],
+ul[data-list="invitations"] {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0;
+}
+ul[data-list] li {
+  margin: 0.5rem 0;
+}
+li[data-invitation] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+li[data-invitation] p {
+  margin: 0;
+}
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

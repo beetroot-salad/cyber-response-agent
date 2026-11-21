@@ -1,7 +1,8 @@
 // The frontend's addresses (#1161 S2): the shapes in ../api/addresses.json (via the build), compiled to the one
 // membership meaning the API's reader has: a value is a member when the WHOLE string matches a shape, as ASCII,
 // case-sensitive, with no decoding, normalising or trailing-/ tolerance. The build writes each shape's whole pattern;
-// nothing here parses a template. No DOM here: Node loads this file's build.
+// membership is never judged from a template here (`addressOf` fills one, then checks the result against the shape's
+// pattern). No DOM here: Node loads this file's build.
 import {
   LITERAL_ADDRESSES,
   PATTERNS,
@@ -22,6 +23,31 @@ export const RETURNABLE: ReadonlySet<ShapeName> = new Set(
 /** The one address of a shape with no placeholder (its template). A shape with placeholders is not a `LiteralShape`. */
 export function literalAddress(name: LiteralShape): string {
   return LITERAL_ADDRESSES[name];
+}
+
+/** A `{name}` template segment: a placeholder (as the build reads the templates). */
+const PLACEHOLDER = /^\{[a-z]+\}$/;
+
+/** The address of shape `name` with `values` in its placeholders, in the template's order (as `valuesOf` answers
+ * them). Throws when the result is not a member of the shape (a value outside its placeholder's alphabet, or the wrong
+ * number of values): an address that `match` would not read back is never made. */
+export function addressOf<N extends ShapeName>(name: N, values: ShapeValues[N]): string {
+  const shape = SHAPES.find((each) => each.name === name);
+  if (shape === undefined) throw new Error(`no shape ${name}`);
+  let used = 0;
+  const address = shape.template
+    .split("/")
+    .map((segment) => {
+      if (!PLACEHOLDER.test(segment)) return segment;
+      const value = values[used];
+      used += 1;
+      if (value === undefined) throw new Error(`${name} needs more than ${values.length} values`);
+      return value;
+    })
+    .join("/");
+  if (used !== values.length || !PATTERNS[name].test(address))
+    throw new Error(`${JSON.stringify(values)} do not make a ${name} address`);
+  return address;
 }
 
 /** The name of the shape `value` is a member of, or null. */

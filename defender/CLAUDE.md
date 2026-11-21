@@ -54,6 +54,16 @@ tenant, and re-save each system it names with `PUT /systems/<id>` and the reads 
 systems are down, and a tenant whose only query system is one of them has its runs refused. Elastic's in-process <!-- lint-shippable: ok — the vendor-specific product integration. -->
 endpoint check now judges only GET and HEAD; the proxy alone refuses any other undeclared route.
 
+## Upgrade from before #1581
+
+Stop the API and the workers first, as in "Upgrading" above: an old worker would complete investigations without
+keeping the alert's stored outcome. Run migrations (revision `0025_alert_outcome`). It gives `jobs.alerts` its stored
+outcome (filled from each alert's newest completed investigation) and the index the alert list's outcome filter reads,
+and refuses a completed investigation with no disposition, or any disposition outside the five codes. It stops,
+changing nothing, while any such row exists, naming how many of each; no production investigation has run, so no
+remediation is written for them. A list cursor issued before the upgrade is refused once (422, "the filters changed"):
+its client starts again from page 1.
+
 ## Upgrade from before #1589
 
 Run migrations (revision `0024_drop_findings_count`): it drops `jobs.learning_jobs.findings_count`, which nothing

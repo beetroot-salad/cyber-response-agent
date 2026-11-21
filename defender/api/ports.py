@@ -7,6 +7,7 @@ import datetime as _dt
 from typing import Literal, Protocol
 
 from defender._model import model
+from defender._vocab import Disposition, NoOutcome
 from defender.tenancy import TenantRecord, TenantRepository
 from defender.identity import IdentityService
 # The store's refusals are the API's: one class each, so the store's raise is the API's answer
@@ -69,12 +70,14 @@ class AlertsRepository(Protocol):
         *,
         fired_after: _dt.datetime | None,
         fired_before: _dt.datetime | None,
+        outcome: Disposition | NoOutcome | None,
         after: TimePosition | None,
         limit: int,
     ) -> list[AlertSummary]:
         """Up to `limit` alerts strictly after `after`, newest first by `(fired_at, alert_id)`.
         The window is `fired_after <= fired_at < fired_before`, so adjacent windows meet without
-        a gap or an overlap."""
+        a gap or an overlap. `outcome` narrows to the alerts whose outcome is that disposition, or
+        (`NoOutcome`) that have none; `None` does not narrow. Narrowing precedes `limit` (#1581 O2)."""
         ...
 
     async def get_alert(self, tenant_id: TenantId, alert_id: AlertId) -> Alert | None: ...

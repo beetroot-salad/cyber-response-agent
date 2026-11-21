@@ -13,6 +13,7 @@ from typing import Any
 
 from defender import _yaml
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
+from defender.tests.support.learning.core import _typed_output1579 as TY
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -307,7 +308,7 @@ class Watch:
                              f"; it made {[(s.event, s.who, s.kind) for s in self.seen]}")
 
     def __call__(self, prompt: str, **kw: Any) -> str:
-        label, n, _attempt = self.judge.coordinate(kw.get("agent_id", "judge"))
+        label, n = self.judge.coordinate(kw.get("agent_id", "judge"))
         self.snap("call", label, None)
         action = self.at_call.pop((label, n), None) if label is not None else None
         if action is not None:
@@ -717,7 +718,7 @@ def test_1234_not_graded_stamp_then_the_control_is_repaired(tmp_path):
 def test_1234_bare_rerun_grades_only_the_world_with_no_completed_draw(tmp_path):
     """The re-run grades only world C; B's and D's draw files, rows and judge.yaml rows are untouched."""
     built = _built(tmp_path, B, C, D)
-    refused_every_ask = "this text is not a reply document"
+    refused_every_ask = TY.unusable("the reply is not an accepted draw")
     S.grade(built, S.judge({B: _reply(inv=[_inv(B, "b")]), C: refused_every_ask,
                             D: _reply(inv=[_inv(D, "d")])}))
     first = S.record(built)

@@ -54,6 +54,8 @@ def _plant(dsn: str, inv: str, stage: str, ticket: str, *, cost: float = 0, at_h
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
                  f"started_at, finished_at, cost_usd{mark_column}) VALUES (%s, %s, %s, 'k', 1, %s, now(), {started}, {finished}, "  # noqa: S608
                  f"%s{mark})", (inv, TENANT, alert, stage, cost))
+    if stage == "completed":  # #1581 O10: the upgrade to head stops at a completed row with no disposition, and the table refuses one (conflict, updated)
+        execute(dsn, "UPDATE jobs.investigations SET disposition = 'benign' WHERE id = %s", (inv,))
 
 
 def _a_era_database(dsn: str) -> None:

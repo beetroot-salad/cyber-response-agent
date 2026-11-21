@@ -123,7 +123,7 @@ def _launch(scene: Scene, *, argv_extra=(), **seams) -> Launch:
     questioner = S.questioner_for()
     seams.setdefault("preflight", S.no_preflight)
     seams.setdefault("roster", scene.est.roster())
-    seams.setdefault("judge", S.FakeJudge(default="bucket: none\nsystems: []\nfindings: []\n"))
+    seams.setdefault("judge", S.quiet_judge())
     seams.setdefault("oracle", S.oracle(then=S.submit()).model)
     seams.setdefault("verifier", S.passing_verifier().model)
     message = ""

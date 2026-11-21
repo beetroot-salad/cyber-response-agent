@@ -8,7 +8,7 @@ import logging
 from urllib.parse import urlencode
 from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
-from typing import Annotated, Any, Generic, Literal, NamedTuple, TypeVar
+from typing import Annotated, Any, Generic, Literal, NamedTuple, TypeVar, cast
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -18,6 +18,7 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from defender import identity as _identity
+from defender._vocab import Disposition, NoOutcome
 from defender import system_records as _records
 from defender import tenancy as _tenancy
 from defender.identity import Authenticated, IdentityService, PersonCaller, ProgramCaller, audit
@@ -31,6 +32,8 @@ from defender.records.formats import (
 )
 
 from .models import (
+    NO_OUTCOME,
+    OutcomeFilter,
     AlertMapping,
     RECORD_ID_PATTERN,
     Alert,
@@ -499,22 +502,34 @@ def _created_at(request: Request, response: Response, route: str, tenant_id: str
 alerts = _router(prefix="/alerts", tags=["alerts"], responses=_EVERY_ROUTE)
 
 
+def _outcome_wanted(outcome: OutcomeFilter | None) -> Disposition | NoOutcome | None:
+    """The address's `outcome` as the port takes it: `none` is the `NoOutcome` marker, so no store reads the word."""
+    if outcome == NO_OUTCOME:
+        return NoOutcome()
+    return cast(Disposition | None, outcome)  # the six values less `none` are `Disposition`'s
+
+
 @alerts.get("")
 async def list_alerts(
     deps: Deps,
     caller: WorkReader,
     fired_after: Instant | None = None,
     fired_before: Instant | None = None,
+    outcome: Annotated[OutcomeFilter | None, Query(
+        description="Only alerts whose outcome is this disposition, or `none`: those with no completed "
+                    "investigation. Applied before paging; a cursor is bound to it.")] = None,
     cursor: Cursor = None,
     limit: Limit = DEFAULT_PAGE,
 ) -> Page[AlertSummary]:
+    wanted = _outcome_wanted(outcome)
     return await paginate(
         lambda after, n: deps.alerts.list_alerts(
-            caller.tenant_id, fired_after=fired_after, fired_before=fired_before,
+            caller.tenant_id, fired_after=fired_after, fired_before=fired_before, outcome=wanted,
             after=after, limit=n,
         ),
         _ALERT_ORDER, list_name="alerts", tenant_id=caller.tenant_id, cursor=cursor, limit=limit,
-        filters={"fired_after": _filter_moment(fired_after), "fired_before": _filter_moment(fired_before)},
+        filters={"fired_after": _filter_moment(fired_after), "fired_before": _filter_moment(fired_before),
+                 "outcome": outcome},
     )
 
 

@@ -1688,13 +1688,17 @@ def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
         ], agent_id="main")
 
 
+def quiet_judge() -> FakeJudge:
+    """A judge double whose mapping reply grades nothing (bucket `none`, nothing filed): the
+    default for a scenario whose subject is not the judge (#1579: a typed reply is a mapping)."""
+    return FakeJudge(default=J.reply_doc(findings=[], bucket="none", systems=[]))
+
+
 def questioner_for(doc: dict | None = None) -> FakeAgent:
-    """The question-writer double: call 1 answers the family, then one call per authored seat
-    (`author_family`'s protocol), each reply a document."""
+    """The question-writer double: call 1 answers the plan, then one call per planned world's seat
+    (`author_family`'s protocol), each reply a mapping (#1579: what the prompt asks for)."""
     doc = doc if doc is not None else family_v2()  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
-    authored = T.declaration(doc)
-    seats = [w for w in authored["worlds"] if w.get("role") != "A"]
-    return FakeAgent(authored, *seats)
+    return FakeAgent(*T.authoring_replies(doc))
 
 
 def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,  # noqa: PLR0913 — one keyword per scenario knob
@@ -1716,7 +1720,7 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None, 
     seams.setdefault("roster", est.roster())
     # The judge runs at the end of an accepted launch; a scenario not about it must never reach
     # a real provider, so the default is a recording double whose reply grades nothing.
-    seams.setdefault("judge", FakeJudge(default="bucket: none\nsystems: []\nfindings: []\n"))
+    seams.setdefault("judge", quiet_judge())
     if oracle is not None:
         seams["oracle"] = oracle.model
     if verifier is not None:
