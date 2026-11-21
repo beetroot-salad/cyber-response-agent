@@ -64,19 +64,41 @@ def _answer_with(w: Scene, target_suffix: str, answer) -> None:
                                  if r.method == "GET" and r.url.path.rstrip("/").endswith(target_suffix) else None)
 
 
-@pytest.mark.parametrize("target", ["reviews", "pull"])
-def test_h15_each_answer_the_forge_can_give_counts_or_not_as_the_rule_says_and_a_person_is_called_exactly_at_the_ceiling(
-        world, caplog, target):
-    """Every status 400..599, a lost connection, a timeout and good reads, one per tick, on the reviews read and on `GET /pulls/N`: 4xx but 408 and 429 count one; 5xx, 408, 429 and network faults leave the count; a good read zeroes it; the third counted refusal makes the batch needs_person, no sooner. (H15, D7)"""
+def _count_before(answers: list) -> int:
+    """The refusal count the design's rule leaves after `answers` (the model alone): what a slice that starts after them
+    begins with. Mirrors the loop in `check_h15_slice`, primers and a person's release included."""
+    count = 0
+    for answer in answers:
+        if count == 0 and not _counts_as_refusal(answer):
+            count = 1  # the primer
+        count = 0 if answer == "ok" else count + (1 if _counts_as_refusal(answer) else 0)
+        if count >= 3:
+            count = 0  # a person's release
+    return count
+
+
+def check_h15_slice(world, caplog, target: str, part: int, parts: int) -> None:
+    """Every answer of `_answers()` in slice `part` of `parts` (0-based, contiguous), on the reviews read or on
+    `GET /pulls/N`: 4xx but 408 and 429 count one; 5xx, 408, 429 and network faults leave the count; a good read zeroes
+    it; the third counted refusal makes the batch needs_person, no sooner. (H15, D7) A slice after the first starts the
+    batch at the count the model gives it there, by that many counted refusals, so slices in files of their own (a file
+    runs on one worker) check what one run through them all would."""
     from defender.tests.support.shared._postgres1339 import execute
 
+    answers = _answers()
+    size = -(-len(answers) // parts)
+    mine = answers[part * size:(part + 1) * size]
     w = world
     w.seed("f1")
     batch_id, _branch, number = opened(w, FeedbackCurator(_files("f1")), caplog)
     suffix = "/reviews" if target == "reviews" else f"/pulls/{number}"
     writer = FeedbackCurator()
     count, previous = 0, None
-    for answer in _answers():
+    for _ in range(_count_before(answers[:part * size])):  # the count the earlier slices leave
+        _answer_with(w, suffix, 403)
+        tick(w, writer)
+        count += 1
+    for answer in mine:
         if count == 0 and not _counts_as_refusal(answer):
             _answer_with(w, suffix, 403)  # a primer: something for an unknown or a good read to leave or zero
             tick(w, writer)
@@ -97,3 +119,10 @@ def test_h15_each_answer_the_forge_can_give_counts_or_not_as_the_rule_says_and_a
                     (batch_id,))
             count = 0
     assert w.statuses() == {"f1": "in_batch"}, "a refusal lost the item"
+
+
+@pytest.mark.parametrize("target", ["reviews", "pull"])
+def test_h15_each_answer_the_forge_can_give_counts_or_not_as_the_rule_says_and_a_person_is_called_exactly_at_the_ceiling(
+        world, caplog, target):
+    """Every status 400..599, a lost connection, a timeout and good reads, one per tick, on the reviews read and on `GET /pulls/N`: 4xx but 408 and 429 count one; 5xx, 408, 429 and network faults leave the count; a good read zeroes it; the third counted refusal makes the batch needs_person, no sooner. (H15, D7)"""
+    check_h15_slice(world, caplog, target, 0, 1)
