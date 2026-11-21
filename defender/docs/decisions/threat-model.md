@@ -109,6 +109,8 @@ minimal, watch advisories on pydantic-core and the HTTP stack. And no box protec
 the provider key, which the brain holds by construction; only taking the key out of
 the driver (#550) changes the *class* of the loss, from "the org's key, valid
 indefinitely" to "one investigation plus a short-lived token."
+*(2026-11-21: the k3s deployment design keeps the key in the job and accepts this loss, on the premise that adapters
+run outside the job (#1172); see `vps-compose-deployment.md`, Accepted trade-offs.)*
 
 **Three loci, three treatments (added 2026-07-17).** Class 2 is not one place.
 (1) *In the driver* — the big surface (pydantic-ai/core, httpx); real defense is
@@ -160,6 +162,8 @@ in a different context. Controls stay behavioural — loop-as-sole-committer,
 per-batch worktrees, the forward-check regression gate, human PR review.
 
 **Class 6 — egress.** Sanctioned egress is **the connected tools, nothing else**.
+*(2026-11-21: the k3s deployment design accepts a job pod with public egress for its direct model calls; see
+`vps-compose-deployment.md`, Accepted trade-offs.)*
 `--network=none` on the isolate closes *direct dial-out*, which is real and worth
 having. It does not close egress, and the design's "confidentiality and egress
 become structural" is too strong. The precise claim is **unauthorized *direct*
