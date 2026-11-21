@@ -153,6 +153,21 @@ ends the program with that step's message on stderr. Not checked at start: the s
 whether an admin role is write-capable (a read-only role passes);
 each surfaces at first use. Lessons and the connection check answer 501 naming their issue (#1082). A stop signal leaves the app and closes every connection.
 
+**The quick way: `.devcontainer/dev-app.sh start`** (then `status`, `stop`), from the dev container. It checks the
+stack (the database at head, Keycloak's two realms and their issuers, OpenBao unsealed, and that the live realm
+accepts `http://localhost:8000/api/auth/callback`), writes the settings above for the dev stack, and starts the API on
+`127.0.0.1:8001`, Vite's dev server on port 8000 (`/api` sent to the API), and `python -m defender.lifecycle serve` if
+none is running. Each runs in the background with its log under `~/.cache/defender-dev-app/`. The browser on the host
+opens `http://localhost:8000`. An attached editor forwards that port by itself; without one, the script publishes it
+with a small forwarding container (`response-app-forward`). The first administrator is `admin@dev.local`
+(`DEFENDER_DEV_ADMIN` to change it), whose set-password mail is in Mailpit at `http://localhost:8025`. It never
+migrates the database or changes the realm: a check that fails says what to do.
+
+Keycloak imports the realm files on its first start only. A dev Keycloak made before #1161 still has the old callback,
+`http://localhost:8000/auth/callback`, and Keycloak answers `Invalid parameter: redirect_uri` until
+`http://localhost:8000/api/auth/callback` is added to the `defender-api` client's redirect URIs (the admin console, or
+recreating Keycloak's data). The launcher's check catches this.
+
 Walk-through (needs the dev PostgreSQL, Keycloak with both realms imported, Mailpit, the lifecycle's Forgejo and
 OpenBao from `provision-dev-issuer.sh` with `playground-issuer/lifecycle.env`, the database migrated to head, and
 `python -m defender.lifecycle serve` beside the API; no jobs daemon needed: a started investigation stays queued,
