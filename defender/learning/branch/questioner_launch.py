@@ -71,7 +71,7 @@ def reachable_systems(grant: Any) -> list[str]:
     @owns reachable_systems — the manifest's `reachable_systems`, written by `_author` from this
     and nowhere else. M20: a system is reachable when the grant admits at least one read verb on
     it other than `health-check` (which reaches no data). It answers the judge's question, could
-    the investigator have looked? (`judge.run._world_verdict`)."""
+    the investigator have looked? (`judge.run._refuse_unreached`)."""
     from defender.systems.verb_dispositions import HEALTH_CHECK
 
     return sorted({system for system, verb, verb_class in grant.entries

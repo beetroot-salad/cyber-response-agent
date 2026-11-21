@@ -161,7 +161,8 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
             trace_name=WIRE_LOG_NAMES.agent_trace(agent_id), label=agent_id)
         output = TypedOutput(
             name="verdict", description="File your verdict: the reply the task describes.",
-            schema=run_mod.reply_schema(scope), retries=_REPLY_RETRIES,
+            schema=run_mod.reply_schema(scope, shown_its_facts=shown_its_facts),
+            retries=_REPLY_RETRIES,
             check=run_mod.reply_check(scope=scope, reachable_systems=reachable_systems,
                                       shown_its_facts=shown_its_facts))
         doc, sent, failure = None, None, None
