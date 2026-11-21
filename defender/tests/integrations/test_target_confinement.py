@@ -89,7 +89,7 @@ def test_the_two_post_with_body_reads_still_pass_the_endpoint_check():
     confine_read_endpoint("elastic", "http://es:9200/_cluster/health", method="GET")
 
     with pytest.raises(ConfinementFault):
-        confine_read_endpoint("elastic", "http://es:9200/logs-*/_update/1", method="POST")
+        confine_read_endpoint("elastic", "http://es:9200/logs-*/_update/1", method="POST")  # lint-stale-ref: ok — an Elasticsearch URL path, not the removed function
     with pytest.raises(ConfinementFault):
         confine_read_endpoint("elastic", "http://es:9200/logs-*/_search", method="DELETE")
 
@@ -101,10 +101,10 @@ def test_the_endpoint_check_binds_on_the_resolved_normalized_path_without_the_qu
     confine_read_endpoint("elastic", "http://es:9200/logs-*/_search?pretty=true", method="POST")
 
     with pytest.raises(ConfinementFault):
-        confine_read_endpoint("elastic", "http://es:9200/logs-*/_search/../../_update/1",
+        confine_read_endpoint("elastic", "http://es:9200/logs-*/_search/../../_update/1",  # lint-stale-ref: ok — an Elasticsearch URL path, not the removed function
                               method="POST")
     with pytest.raises(ConfinementFault):
-        confine_read_endpoint("elastic", "http://es:9200/%5Flogs/../_update/1", method="POST")
+        confine_read_endpoint("elastic", "http://es:9200/%5Flogs/../_update/1", method="POST")  # lint-stale-ref: ok — an Elasticsearch URL path, not the removed function
 
 
 # ---- the host write entry (#1359 D-6) ----------------------------------------------------------
