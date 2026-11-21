@@ -182,7 +182,7 @@ everything here grows post-merge.
 The per-system skill and its seed templates are the tenant's knowledge, not this repo's: they
 belong in the tenant repo's `agent/` tree. Write them into a **staging folder** of your own,
 outside this repo and empty to begin with (`<staged>` below), shaped like that `agent/` root.
-Step 6 validates it and proposes it to the tenant's repo.
+Step 6 validates it, and step 7 says how it reaches the tenant's repo.
 
 `<staged>/skills/{system}/`:
 
@@ -269,18 +269,18 @@ git add defender/integrations/{system}_adapter.py \
 ```
 
 **The tenant half** (a system with investigator tools) — the system skill and its seed templates
-go to the tenant's own repo as one pull request, never into this one:
+belong to the tenant's own repo, never to this one, and nothing here writes them there.
 
-```bash
-python3 defender/cli/tenant.py propose {tenant} <staged>
-```
+- **A carried adapter that ships base files** (a `BASE_FILES` folder under `defender/integrations/`;
+  Elastic is the one that does today) needs nothing staged: tell the tenant admin to ask for the
+  adoption of its system, which offers the shipped skill and seed templates as a pull request on the
+  tenant's forge for a person to review and merge.
+- **Every other adapter**, a generated one included, ships none: leave `<staged>` (validated in
+  step 6) in the handoff folder and tell the tenant admin its files are to be committed to the
+  tenant repo's `agent/` by a person. A reviewer merging that commit is the sign-off.
 
-`propose` adds or replaces the staged files under the tenant's `agent/` and opens the pull
-request on the tenant's forge; a human merges it there. It refuses (`[tenant.py] ...`) a
-staged file outside a folder of `agent/`; fix what it names and propose again. The grant table
-lives under the tenant repo's `settings/`, which `propose` does not touch: branch and stage it
-there, and run `python3 defender/cli/tenant.py check --folder <that repo>` to see the census
-over it.
+The grant table lives under the tenant repo's `settings/`: branch and stage it there, and run
+`python3 defender/cli/tenant.py check --folder <that repo>` to see the census over it.
 
 **The steps after you**, in this order — give them as one list with the handoff folder. You run
 none of them: the tenant admin writes the tenant's records and its secret through the API, and

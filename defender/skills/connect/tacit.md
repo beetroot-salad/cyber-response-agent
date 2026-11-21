@@ -83,7 +83,7 @@ across an edited `pattern` silently re-points every existing citation.
    `python3 defender/cli/tenant.py update {tenant}` first so `current` is the merged `main`). A
    tenant copied from the template has one, with no entries in it. A tenant from before then may
    not: start from `knowledge/tenant-template/agent/skills/tacit-knowledge/registry.yaml`, and
-   propose that template's `SKILL.md` beside it, because without that page the system is missing
+   stage that template's `SKILL.md` beside it, because without that page the system is missing
    from gather's index.
 
    ```bash
@@ -115,16 +115,12 @@ across an edited `pattern` silently re-points every existing citation.
    [name]'s sign-off" — and get a yes. This is the last point at which a
    misheard scope is cheap to fix.
 
-5. **Propose it to the tenant's repo. Do not merge.**
+5. **Hand it over for review. Do not merge.**
 
-   ```bash
-   python3 defender/cli/tenant.py propose {tenant} <staged>
-   ```
-
-   `propose` replaces the registry in the tenant's `agent/` with the staged one and opens a
-   pull request on the tenant's forge. Present: the entry, the check output, the pull
-   request, and who must review it. The review and merge of that pull request is the
-   sign-off — say so, so nobody treats the proposal as the end of the process.
+   Nothing here writes to the tenant's repo: the product has no request for a tacit registry. Leave the staged
+   registry in the handoff folder and present: the entry, the check output, and who must review it. A person
+   commits it to the tenant repo's `agent/` as a pull request; the review and merge of that pull request is
+   the sign-off — say so, so nobody treats the handoff as the end of the process.
 
 ## Refreshing or removing one
 
