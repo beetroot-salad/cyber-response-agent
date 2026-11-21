@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as _dt
+import json
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
@@ -24,6 +25,7 @@ from sqlalchemy import (
     Table,
     Text,
     func,
+    select,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -321,7 +323,8 @@ _CONTENT_CLASSES = frozenset({"22", "23", "54"})
 @dataclasses.dataclass(frozen=True)
 class FindingsInsert:
     """What `insert_findings` did: every row stored (`stored`, with `added` of them new; a finding id the store already
-    holds stays as it is), or none of them (`refused`, the refusal's words in `why`)."""
+    holds with the same content stays as it is), or none of them (`refused`, the refusal's words in `why`). A finding id
+    held, or given twice, with different content is a collision and refuses them all (#1565)."""
 
     stored: bool
     added: int = 0
@@ -344,10 +347,7 @@ async def insert_findings(s: AsyncSession, tenant: str, channels: Mapping[str, S
         if LANE_OF.get(kind) != AUTHOR_LANE:
             raise ValueError(f"not a findings kind: {kind}")
     try:
-        for rows in channels.values():
-            refuse_unholdable(list(rows))
-            for row in rows:
-                refuse_unkeyed(row)
+        _screen(channels)
     except ItemRefused as refused:
         return FindingsInsert(False, why=str(refused))
     except Exception as fault:  # noqa: BLE001 — rows the screens cannot even read are refused, never raised
@@ -359,10 +359,61 @@ async def insert_findings(s: AsyncSession, tenant: str, channels: Mapping[str, S
             for kind, rows in channels.items():
                 for start in range(0, len(rows), _INSERT_CHUNK):
                     chunk = rows[start:start + _INSERT_CHUNK]
-                    added += len((await s.execute(_findings_insert(tenant, kind, chunk, source_run))).all())
+                    new_keys = {key for (key,) in (await s.execute(_findings_insert(tenant, kind, chunk,
+                                                                                   source_run))).all()}
+                    added += len(new_keys)
+                    await _refuse_colliding_held(s, tenant, kind, [r for r in chunk if r["finding_id"] not in new_keys])
+    except _Collision as collision:  # raised inside the savepoint, so none of the call is stored
+        return FindingsInsert(False, why=str(collision))
     except Exception as fault:  # noqa: BLE001 — classified: content refuses, an outage is raised again
         return FindingsInsert(False, why=_refusal_of(fault))
     return FindingsInsert(True, added=added)
+
+
+def _screen(channels: Mapping[str, Sequence[Mapping[str, Any]]]) -> None:
+    """Every check `insert_findings` makes of its rows before the database sees them; a failure is `ItemRefused`."""
+    for kind, rows in channels.items():
+        refuse_unholdable(list(rows))
+        for row in rows:
+            refuse_unkeyed(row)
+        _refuse_colliding_rows(kind, rows)
+
+
+class _Collision(Exception):
+    """A finding id the store holds with other content than the row given for it (#1565)."""
+
+
+def _content(row: Mapping[str, Any]) -> Any:
+    """A row as its stored payload reads back: through JSON, as jsonb holds it."""
+    return json.loads(json.dumps(dict(row)))
+
+
+def _collision_words(kind: str, key: str) -> str:
+    return (f"a {kind} with id {key!r} is already held with different content: a collision, not a retry, so no row "
+            "of this call is stored")
+
+
+def _refuse_colliding_rows(kind: str, rows: Sequence[Mapping[str, Any]]) -> None:
+    """Refuse two rows of one call that give one finding id different content (#1565); identical ones are a repeat."""
+    seen: dict[str, Any] = {}
+    for row in rows:
+        key, content = row["finding_id"], _content(row)
+        if seen.setdefault(key, content) != content:
+            raise ItemRefused(_collision_words(kind, key))
+
+
+async def _refuse_colliding_held(s: AsyncSession, tenant: str, kind: str, skipped: Sequence[Mapping[str, Any]]) -> None:
+    """Raise `_Collision` if the store holds any of `skipped` (rows the insert did not add, their id already held)
+    with other content. Read after the insert, so a row a concurrent call committed first is the one compared."""
+    if not skipped:
+        return
+    table = cast(Table, WorkItemRow.__table__)
+    held: dict[str, Any] = dict((await s.execute(select(table.c.item_key, table.c.payload).where(
+        table.c.tenant_id == TenantId(tenant), table.c.kind == kind,
+        table.c.item_key.in_([r["finding_id"] for r in skipped])))).all())
+    for row in skipped:
+        if held.get(row["finding_id"]) != _content(row):
+            raise _Collision(_collision_words(kind, row["finding_id"]))
 
 
 #: Rows per INSERT: each row binds 14 values, and the driver takes at most 32767 per statement.
