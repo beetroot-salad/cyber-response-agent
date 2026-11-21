@@ -180,7 +180,7 @@ jobs:
         # module-scoped fixtures and the per-file tmp git repos behave as they did serially.
         #
         # `-n 12`, not `auto` (4 workers on the 4-core runner): the heavy files here are wall-clock
-        # bound, not CPU bound (e.g. tenancy/tenant_1108_p4/test_r6_publish_stop.py is ~577s of
+        # bound, not CPU bound (e.g. tenancy/tenant_1108_p4/test_r6_publish_stop.py (since split in three) was ~577s of
         # `time.sleep` waits around real subprocesses), so a worker blocked in a sleep leaves its core
         # idle. Three workers per core keeps the cores busy and cuts a shard's wall time without a
         # ninth shard. If timing-sensitive tests flake, lower this before adding shards.

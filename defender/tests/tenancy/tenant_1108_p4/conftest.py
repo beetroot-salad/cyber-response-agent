@@ -9,13 +9,16 @@ tenant holds (`_drain_support.carried_impl`); nothing is kept by a module. Every
 `defender/tests` has no `__init__.py`, so a relative import loads a second copy of it."""
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from defender.tests.tenancy.tenant_1108_p4._drain_support import CARRIED, PORT_LANES, TICK_IMPLS, TickImpl
-from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
+from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+from defender.tests.tenancy.tenant_1108_p4._r6_support import WORKTREE
+from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
 
 #: The case parameters that name the lane a tick runs: a port case of a lane the port does not serve never reaches the port
 #: (its tick is the adapter's), so it is not collected.
@@ -129,3 +132,15 @@ def post_step_helper(request, tmp_path, monkeypatch):
     yield start
     for helper in made:
         helper.close()
+
+
+@pytest.fixture
+def child_env(monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}")
+
+
+@pytest.fixture
+def tenant(tmp_path, data_root):
+    with B.run_tenant(tmp_path, data_root) as t:
+        bind_forge(t)
+        yield t
