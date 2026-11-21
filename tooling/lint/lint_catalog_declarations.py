@@ -213,11 +213,19 @@ def _reference_findings(path: Path, rel: str) -> list[str]:
                 f"its module, with a `## {SECTIONS[0]}` and a `## {SECTIONS[1]}` section"]
     bodies: dict[str, list[str]] = {}
     current: list[str] | None = None
+    fence: str | None = None
     for line in text.splitlines():
-        heading = re.match(r"(#{1,6})\s+(.*?)\s*\Z", line)
-        if heading:
+        opens = re.match(r"\s{0,3}(`{3,}|~{3,})", line)
+        if fence is not None:
+            if opens and opens.group(1)[0] == fence[0] and len(opens.group(1)) >= len(fence):
+                fence = None
+        elif opens:
+            fence = opens.group(1)
+        heading = None if fence is not None or opens else re.match(r"(#{1,6})\s+(.*?)\s*\Z", line)
+        if heading and len(heading.group(1)) <= 2:
+            # A level-1 or level-2 heading opens the next section; a deeper one stays inside the enclosing one.
             current = bodies.setdefault(heading.group(2), []) if len(heading.group(1)) == 2 else None
-        elif current is not None:
+        elif current is not None and not heading:
             current.append(line)
     return [f"{shown}: has no non-empty `## {name}` section (write `None known.` when there is nothing to say)"
             for name in SECTIONS if not any(line.strip() for line in bodies.get(name, []))]

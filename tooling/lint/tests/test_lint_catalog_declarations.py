@@ -249,6 +249,44 @@ def test_a_section_heading_of_another_level_is_not_the_section(tmp_path, capsys)
     assert _lines_naming(out, WIDGET_REFERENCE, "Credential"), out
 
 
+def test_text_under_a_subheading_belongs_to_the_enclosing_section(tmp_path, capsys):
+    """A `## Credential` whose only text sits under `###` subheadings is not empty. (#1504 O6)"""
+    text = ("# Widget\n\n## Credential\n\n### Cloud\n\nAn API token.\n\n### Server\n\nA basic user.\n\n"
+            "## Pitfalls\n\nNone known.\n")
+    rc, out = _run(tmp_path, {f"{ADAPTERS}/widget_adapter.py": _module(), WIDGET_REFERENCE: text}, capsys, referenced=False)
+    assert rc == 0, out
+    assert not _lines_naming(out, WIDGET_REFERENCE), out
+
+
+def test_a_subheading_alone_is_not_text_of_its_section(tmp_path, capsys):
+    """A `## Credential` holding only a `###` heading line is still empty. (#1504 O6)"""
+    text = "# Widget\n\n## Credential\n\n### Cloud\n\n## Pitfalls\n\nNone known.\n"
+    rc, out = _run(tmp_path, {f"{ADAPTERS}/widget_adapter.py": _module(), WIDGET_REFERENCE: text}, capsys, referenced=False)
+    assert rc == 1, out
+    assert _lines_naming(out, WIDGET_REFERENCE, "Credential"), out
+
+
+@pytest.mark.parametrize(("fence", "inner"), [
+    ("```", ""), ("~~~", ""),
+    ("```", "~~~\n"),  # the other fence character does not close it
+    ("````", "```\n"),  # a shorter fence does not close it
+])
+def test_a_heading_inside_a_fenced_block_is_not_a_section(tmp_path, capsys, fence, inner):
+    """`## Pitfalls` inside a fenced block neither opens the section nor ends the one around it. (#1504 O6)"""
+    text = f"# Widget\n\n## Credential\n\nA token.\n\n{fence}\n{inner}## Pitfalls\n\nlooks like one\n{fence}\n"
+    rc, out = _run(tmp_path, {f"{ADAPTERS}/widget_adapter.py": _module(), WIDGET_REFERENCE: text}, capsys, referenced=False)
+    assert rc == 1, out
+    assert _lines_naming(out, WIDGET_REFERENCE, "Pitfalls"), out
+    assert not _lines_naming(out, WIDGET_REFERENCE, "Credential"), out
+
+
+
+def test_a_heading_after_a_closed_fence_is_a_section(tmp_path, capsys):
+    """A fence closed by a marker of its own length ends there: the `## Pitfalls` after it counts. (#1504 O6)"""
+    text = "# Widget\n\n## Credential\n\n```\n## Note\n```\n\n## Pitfalls\n\nNone known.\n"
+    rc, out = _run(tmp_path, {f"{ADAPTERS}/widget_adapter.py": _module(), WIDGET_REFERENCE: text}, capsys, referenced=False)
+    assert rc == 0, out
+
 # K8: a declared key that would hold a secret
 
 SECRET_NAMED = ["TOKEN", "API_TOKEN", "PASSWORD", "DB_PASSWD", "CLIENT_SECRET", "SERVICE_CREDENTIAL", "API_KEY",
