@@ -50,6 +50,31 @@ def _bare_connect(path: Path) -> sqlite3.Connection:
                            isolation_level=None)
 
 
+def _connect_existing(path: Path) -> sqlite3.Connection:
+    """`_bare_connect` for a file that must already exist: SQLite's `mode=rw` never creates one, so
+    a store deleted after a caller looked is missing, not a fresh empty database (#1458). Not
+    `mode=ro`: on a WAL store whose writer has closed, a read-only connection creates `-wal`/`-shm`
+    and cannot remove them. Raises `FileNotFoundError` when no regular file is at `path`."""
+    if not path.is_file():
+        raise FileNotFoundError(f"session store not found: {path}")
+    try:
+        return sqlite3.connect(f"{path.absolute().as_uri()}?mode=rw", uri=True,
+                               timeout=STORE_BUSY_TIMEOUT_MS / 1000, isolation_level=None)
+    except sqlite3.OperationalError:
+        if not path.is_file():
+            raise FileNotFoundError(f"session store not found: {path}") from None
+        raise
+
+
+
+
+def _is_uninitialised(conn: sqlite3.Connection) -> bool:
+    """No version stamp and no schema object: a database nothing has initialised yet. Read before
+    any pragma or DDL, so a refused file stays byte-identical."""
+    return (conn.execute("PRAGMA user_version").fetchone()[0] == 0
+            and conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone() is None)
+
+
 
 
 def _finish_connect(conn: sqlite3.Connection) -> None:
@@ -411,19 +436,33 @@ def store_path_for(case_id: str, *, sessions: SessionPaths) -> Path:
 
 
 @contextlib.contextmanager
-def open_store(*, case_id: str, sessions: SessionPaths) -> Iterator[StoreHandle]:
+def open_store(*, case_id: str, sessions: SessionPaths, create: bool = True) -> Iterator[StoreHandle]:
     """The store for `case_id`, created if missing, open for the `with` block only (#1324): it
     opens when the block starts and closes when the block ends, however it ends. The layout
     owner (`sessions`, a run's `RunPaths.session_paths()`) hands over both the store's path and
     the root its directory is made under (#1105 fork S(b)): this module reads neither a runs
-    base nor a trust root."""
+    base nor a trust root.
+
+    `create=False` opens only a store that already exists (a branch or resume joining a finished
+    run's store), raising `FileNotFoundError` instead of making one (#1458). Whether a store is new
+    is decided from the file opened, never from an earlier look: a file with no schema and no
+    version stamp (just created, or left empty with no log beside it) is new; anything else must
+    carry this version."""
     # The store's path and the root its directory is made under, from the owner's one
     # hand-out (the one `store_path_for`, which the resume door asks, reads too), asked once.
     path, root = sessions.store(case_id)
+    # The folder guard refuses a symlinked folder below the trust root and creates nothing for a
+    # folder that exists, so the must-exist open runs it too: with no folder, the store is missing
+    # at once, before anything could follow a link planted there afterwards.
+    if not create and not path.parent.is_dir():
+        raise FileNotFoundError(f"session store not found: {path}")
     guarded_mkdir(path.parent, base=unwrap_session_trust_root(root))
-    fresh = not path.exists()
-    conn = _bare_connect(path)
+    # A blank file is new only with no write-ahead log beside it: an emptied store whose log
+    # survived lost its pages (SQLite drops the log on the first read) and is refused, not rebuilt.
+    logged = path.with_name(path.name + "-wal").exists()
+    conn = _bare_connect(path) if create else _connect_existing(path)
     try:
+        fresh = create and not logged and _is_uninitialised(conn)
         if not fresh:
             _refuse_stale_version(conn)
         _finish_connect(conn)
@@ -448,9 +487,7 @@ def open_store_for_read(store_path: Path) -> Iterator[StoreHandle]:
     Issues no DDL, so an older file may still carry an unscoped `gather_boundary` view with
     the same `SCHEMA_VERSION`; a reader of that view must rebuild it first."""
     store_path = Path(store_path)
-    if not store_path.is_file():
-        raise FileNotFoundError(f"session store not found: {store_path}")
-    conn = _bare_connect(store_path)
+    conn = _connect_existing(store_path)
     try:
         _refuse_stale_version(conn)
         _finish_connect(conn)

@@ -103,6 +103,168 @@ def test_a_store_is_open_exactly_for_its_with_block(tmp_path):
     assert not is_open(reader), "the reader outlived its block"
 
 
+#: A child, because an audit hook cannot be removed: it deletes the store the moment the reader's
+#: open reaches SQLite, the gap between "the file is there" and "the file is open" (#1458).
+_VANISHING_STORE_CHILD = r"""
+import os, sys
+from pathlib import Path
+from urllib.parse import unquote
+from defender.records import session_store as ss
+path = Path(sys.argv[1])
+def vanish(event, args):
+    if event == "sqlite3.connect" and str(path) in unquote(str(args[0])) and path.exists():
+        path.unlink()
+sys.addaudithook(vanish)
+try:
+    with ss.open_store_for_read(path):
+        print("OPENED")
+except BaseException as e:
+    print(type(e).__name__)
+"""
+
+
+def test_reader_never_creates_a_store_that_vanishes_as_it_opens(tmp_path):
+    """#1458: a store deleted between the reader's look and its open is missing, not a fresh empty
+    database: the reader raises `FileNotFoundError` and leaves nothing at the path."""
+    import os
+    import subprocess
+    import sys
+
+    from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
+
+    store = make_store(tmp_path)
+    path = store.path
+    store.connection.close()
+    assert path.is_file(), "control: the store exists before the reader opens it"
+
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(
+        filter(None, [str(H5.WORKTREE), os.environ.get("PYTHONPATH")])), "PYTHONDONTWRITEBYTECODE": "1"}
+    child = subprocess.run(  # noqa: S603 — this interpreter, a fixed script
+        [sys.executable, "-c", _VANISHING_STORE_CHILD, str(path)],
+        capture_output=True, text=True, encoding="utf-8", check=False, env=env,
+        cwd=str(H5.WORKTREE), timeout=120)
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.strip() == "FileNotFoundError", (child.stdout, child.stderr)
+    assert not path.exists(), "the reader created a database where the store had been"
+
+
+#: A writer's twin of `_VANISHING_STORE_CHILD`: the store is deleted as the writer's open reaches
+#: SQLite, after it looked and found the file there (#1458).
+_VANISHING_WRITER_CHILD = r"""
+import sys
+from pathlib import Path
+from urllib.parse import unquote
+from defender.records import SessionPaths, session_store as ss
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+from defender.tests.support.storage._session_store_705 import runs_base
+tmp, path = Path(sys.argv[1]), Path(sys.argv[2])
+def vanish(event, args):
+    if event == "sqlite3.connect" and str(path) in unquote(str(args[0])) and path.exists():
+        path.unlink()
+sys.addaudithook(vanish)
+try:
+    with ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(runs_base(tmp)))) as store:
+        store.new_session(agent_id="main")
+        version = store.connection.execute("PRAGMA user_version").fetchone()[0]
+        print("OPENED", version == ss.SCHEMA_VERSION)
+except BaseException as e:
+    print(type(e).__name__)
+"""
+
+
+def test_writer_open_of_a_store_that_vanishes_as_it_opens_makes_a_fresh_one(tmp_path):
+    """#1458: the writer decides a store is new from the file it opened, so a store deleted after
+    it looked is created fresh at the current version, not left empty and refused."""
+    import os
+    import subprocess
+    import sys
+
+    from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
+
+    store = make_store(tmp_path)
+    path = store.path
+    store.connection.close()
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(
+        filter(None, [str(H5.WORKTREE), os.environ.get("PYTHONPATH")])), "PYTHONDONTWRITEBYTECODE": "1"}
+    child = subprocess.run(  # noqa: S603 — this interpreter, a fixed script
+        [sys.executable, "-c", _VANISHING_WRITER_CHILD, str(tmp_path), str(path)],
+        capture_output=True, text=True, encoding="utf-8", check=False, env=env,
+        cwd=str(H5.WORKTREE), timeout=120)
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.strip() == "OPENED True", (child.stdout, child.stderr)
+
+
+def test_writer_open_of_an_empty_file_makes_a_fresh_store(tmp_path):
+    """#1458: an empty file at a store's path (what the old reader's race left) is a new store to
+    the writer, not a stale version refused on every later run of the case."""
+    ss = store_mod()
+    sessions = SessionPaths(fixture_runs_base(runs_base(tmp_path)))
+    path = ss.store_path_for("case-alpha", sessions=sessions)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+    with ss.open_store(case_id="case-alpha", sessions=sessions) as store:
+        assert store.new_session(agent_id="main")
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == ss.SCHEMA_VERSION
+
+
+def test_writer_open_refuses_an_emptied_store_whose_log_is_beside_it(tmp_path):
+    """#1458 review: an empty main file with its write-ahead log beside it is a store that lost
+    its pages, not a new one: refused, never rebuilt empty over the case's history."""
+    ss = store_mod()
+    store = make_store(tmp_path)
+    session_id = store.new_session(agent_id="main")
+    store.append(session_id, [user_request("hello")], agent_id="main")
+    path = store.path
+    store.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    store.append(session_id, [user_request("again")], agent_id="main")
+    log = path.with_name(path.name + "-wal")
+    saved = log.read_bytes()
+    assert saved, "control: the second append is still in the log"
+    store.connection.close()
+    path.write_bytes(b"")
+    log.write_bytes(saved)
+    with pytest.raises(ss.UnknownSchemaVersion), ss.open_store(
+            case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path)))):
+        pass
+    assert path.read_bytes() == b"", "the writer rebuilt an emptied store"
+
+
+@pytest.mark.parametrize("absent", ["missing", "a directory", "a device"])
+def test_reader_finds_no_store_where_no_file_is(tmp_path, absent):
+    """#1458: no regular file at the path is `FileNotFoundError`, and the reader leaves none there."""
+    ss = store_mod()
+    path = tmp_path / "case.db"
+    if absent == "a directory":
+        path.mkdir()
+    elif absent == "a device":
+        path.symlink_to("/dev/null")
+    with pytest.raises(FileNotFoundError), ss.open_store_for_read(path):
+        pass
+    if absent == "missing":
+        assert not path.exists(), "the reader created a database where none was"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ([] if absent == "missing" else ["case.db"])
+    assert not path.is_file(), "the reader turned what was there into a database"
+
+
+def test_reader_of_a_closed_store_leaves_only_the_store(tmp_path):
+    """#1458: reading a WAL store whose writer has closed leaves no `-wal`/`-shm` behind (a
+    read-only open would), and a path SQLite's URI syntax would misread still opens."""
+    import shutil
+
+    ss = store_mod()
+    store = make_store(tmp_path / "w")
+    session_id = store.new_session(agent_id="main")
+    store.append(session_id, [user_request("hello")], agent_id="main")
+    store.connection.close()
+    folder = tmp_path / "odd #name? 100%"
+    folder.mkdir()
+    path = folder / "case?.db"
+    shutil.copyfile(store.path, path)
+    with ss.open_store_for_read(path) as reader:
+        assert ss.hydrate(reader, session_id, role="analysis"), "control: the copy reads"
+    assert sorted(p.name for p in folder.iterdir()) == ["case?.db"]
+
+
 def test_reader_refuses_an_unknown_user_version(tmp_path):
     ss = store_mod()
     store = make_store(tmp_path)
