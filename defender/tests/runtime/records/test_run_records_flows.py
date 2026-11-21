@@ -413,6 +413,53 @@ def test_source_store_factory_uses_the_opened_source_record_and_cannot_bypass_it
         factory("ignored", tmp_path / "ignored")
 
 
+def test_source_store_factory_refuses_a_source_store_that_is_gone(tmp_path):
+    """#1458: a source run whose store file is gone is refused as `BranchError` when the store
+    opens, and no empty database is created where the branch point was."""
+    store, spec, source, _target, _state, _source_io, _target_io = source_and_sibling(tmp_path)
+    factory = branch.store_factory_for(spec, source_run=source)
+    path = store.path
+    store.connection.close()
+    for leftover in (path, path.with_name(path.name + "-wal"), path.with_name(path.name + "-shm")):
+        leftover.unlink(missing_ok=True)
+    with pytest.raises(branch.BranchError), factory("ignored", tmp_path / "ignored"):
+        pass
+    assert not path.exists(), "the branch open created an empty database in place of the source store"
+
+
+def test_source_store_factory_refuses_a_linked_store_folder(tmp_path):
+    """#1458 review: the branch's must-exist open still refuses a symlinked folder between the
+    session trust root and the store, though it creates no folder."""
+    import shutil
+
+    store, spec, source, _target, _state, _source_io, _target_io = source_and_sibling(tmp_path)
+    factory = branch.store_factory_for(spec, source_run=source)
+    folder = store.path.parent
+    store.connection.close()
+    elsewhere = tmp_path / "elsewhere"
+    shutil.move(str(folder), str(elsewhere))
+    folder.symlink_to(elsewhere, target_is_directory=True)
+    with pytest.raises(OSError, match="symlinked path component"), factory("ignored", tmp_path / "ignored"):
+        pass
+
+
+def test_source_store_factory_refuses_a_source_store_emptied_to_nothing(tmp_path):
+    """#1458: an empty file where the source store was is not a new store to a branch: it is
+    refused, and left as it was."""
+    from defender.records import session_store
+
+    store, spec, source, _target, _state, _source_io, _target_io = source_and_sibling(tmp_path)
+    factory = branch.store_factory_for(spec, source_run=source)
+    path = store.path
+    store.connection.close()
+    for leftover in (path.with_name(path.name + "-wal"), path.with_name(path.name + "-shm")):
+        leftover.unlink(missing_ok=True)
+    path.write_bytes(b"")
+    with pytest.raises(session_store.UnknownSchemaVersion), factory("ignored", tmp_path / "ignored"):
+        pass
+    assert path.read_bytes() == b"", "the branch open initialised an emptied source store"
+
+
 @pytest.mark.parametrize("fault", [False, True])
 def test_resumed_driver_threads_source_run_through_validation_seeding_and_lookup(tmp_path, fault):
     from defender.records import RunPaths

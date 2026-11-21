@@ -68,6 +68,15 @@ def _connect_existing(path: Path) -> sqlite3.Connection:
 
 
 
+def _is_blank(conn: sqlite3.Connection) -> bool:
+    """No version stamp and no schema object: a database nothing has initialised yet. Read before
+    any pragma or DDL, so a refused file stays byte-identical."""
+    return (conn.execute("PRAGMA user_version").fetchone()[0] == 0
+            and conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone() is None)
+
+
+
+
 def _finish_connect(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
@@ -427,19 +436,27 @@ def store_path_for(case_id: str, *, sessions: SessionPaths) -> Path:
 
 
 @contextlib.contextmanager
-def open_store(*, case_id: str, sessions: SessionPaths) -> Iterator[StoreHandle]:
+def open_store(*, case_id: str, sessions: SessionPaths, create: bool = True) -> Iterator[StoreHandle]:
     """The store for `case_id`, created if missing, open for the `with` block only (#1324): it
     opens when the block starts and closes when the block ends, however it ends. The layout
     owner (`sessions`, a run's `RunPaths.session_paths()`) hands over both the store's path and
     the root its directory is made under (#1105 fork S(b)): this module reads neither a runs
-    base nor a trust root."""
+    base nor a trust root.
+
+    `create=False` opens only a store that already exists (a branch or resume joining a finished
+    run's store), raising `FileNotFoundError` instead of making one (#1458). Whether a store is new
+    is decided from the file opened, never from an earlier look: a file with no schema and no
+    version stamp (just created, or left empty) is new; anything else must carry this version."""
     # The store's path and the root its directory is made under, from the owner's one
     # hand-out (the one `store_path_for`, which the resume door asks, reads too), asked once.
     path, root = sessions.store(case_id)
-    guarded_mkdir(path.parent, base=unwrap_session_trust_root(root))
-    fresh = not path.exists()
-    conn = _bare_connect(path)
+    # The folder guard refuses a symlinked folder below the trust root; for an existing folder it
+    # creates nothing, so the must-exist open runs it too and only skips it when nothing is there.
+    if create or path.parent.is_dir():
+        guarded_mkdir(path.parent, base=unwrap_session_trust_root(root))
+    conn = _bare_connect(path) if create else _connect_existing(path)
     try:
+        fresh = create and _is_blank(conn)
         if not fresh:
             _refuse_stale_version(conn)
         _finish_connect(conn)

@@ -5,8 +5,10 @@ Imports none of its siblings.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
+from collections.abc import Iterator
 from contextlib import AbstractContextManager
 from defender._model import model, unwrap_before
 from datetime import datetime
@@ -112,10 +114,11 @@ def open_source_store(run_dir: Path, *, source_run: Run) -> AbstractContextManag
 
     A sibling forks into the source database, where the prefix rows live. The store's path is
     derived as the writer did (the run folder's own `RunPaths.session_paths()`) and checked
-    against the path the pointer recorded: `open_store` creates-if-missing, so a wrong
-    derivation would silently open an empty database. Both sides are resolved before
-    comparing, since callers spell paths differently (relative, `..`, symlinked `/tmp` on
-    macOS).
+    against the path the pointer recorded, so a wrong derivation cannot open some other case's
+    database. The store is opened only if it exists: a source store that is gone is
+    `BranchError` when the block starts, never a fresh empty database (#1458). Both sides are
+    resolved before comparing, since callers spell paths differently (relative, `..`,
+    symlinked `/tmp` on macOS).
     """
     # Resolve first: `Path("run-x").parent` is `.`, which would derive the store under the cwd.
     run_dir = source_run.run_dir.resolve()
@@ -137,11 +140,25 @@ def open_source_store(run_dir: Path, *, source_run: Run) -> AbstractContextManag
     if derived != recorded:
         raise BranchError(
             f"{run_dir} records its store at {recorded}, but its case {case_id!r} resolves "
-            f"to {derived} beside the run — opening the derived path would create an empty "
+            f"to {derived} beside the run — opening the derived path would join another "
             "database and lose the branch point")
-    # lint-parse: ok — the returned value is `open_store`'s own context manager, not parser
+    # lint-parse: ok — the returned value wraps `open_store`'s own context manager, not parser
     # output; the parsed `case_id` is only its argument, already checked by `store_path_for`.
-    return session_store.open_store(case_id=case_id, sessions=sessions)
+    return _existing_source_store(case_id, sessions, run_dir)
+
+
+@contextlib.contextmanager
+def _existing_source_store(case_id: str, sessions: Any, run_dir: Path) -> Iterator[Any]:
+    """`open_store` for a store that must already exist, its absence refused as `BranchError`;
+    the store's own refusals (another schema version, a linked folder) and errors inside the
+    block pass through unchanged."""
+    with contextlib.ExitStack() as stack:
+        try:
+            store = stack.enter_context(
+                session_store.open_store(case_id=case_id, sessions=sessions, create=False))
+        except FileNotFoundError as e:
+            raise BranchError(f"{run_dir}'s session store is gone, and with it the branch point: {e}") from e
+        yield store
 
 
 def source_store_if_any(run_dir: Path, *, source_run: Run) -> AbstractContextManager[Any] | None:

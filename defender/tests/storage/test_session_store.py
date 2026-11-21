@@ -148,6 +148,65 @@ def test_reader_never_creates_a_store_that_vanishes_as_it_opens(tmp_path):
     assert not path.exists(), "the reader created a database where the store had been"
 
 
+#: A writer's twin of `_VANISHING_STORE_CHILD`: the store is deleted as the writer's open reaches
+#: SQLite, after it looked and found the file there (#1458).
+_VANISHING_WRITER_CHILD = r"""
+import sys
+from pathlib import Path
+from urllib.parse import unquote
+from defender.records import SessionPaths, session_store as ss
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+from defender.tests.support.storage._session_store_705 import runs_base
+tmp, path = Path(sys.argv[1]), Path(sys.argv[2])
+def vanish(event, args):
+    if event == "sqlite3.connect" and str(path) in unquote(str(args[0])) and path.exists():
+        path.unlink()
+sys.addaudithook(vanish)
+try:
+    with ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(runs_base(tmp)))) as store:
+        store.new_session(agent_id="main")
+        version = store.connection.execute("PRAGMA user_version").fetchone()[0]
+        print("OPENED", version == ss.SCHEMA_VERSION)
+except BaseException as e:
+    print(type(e).__name__)
+"""
+
+
+def test_writer_open_of_a_store_that_vanishes_as_it_opens_makes_a_fresh_one(tmp_path):
+    """#1458: the writer decides a store is new from the file it opened, so a store deleted after
+    it looked is created fresh at the current version, not left empty and refused."""
+    import os
+    import subprocess
+    import sys
+
+    from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
+
+    store = make_store(tmp_path)
+    path = store.path
+    store.connection.close()
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(
+        filter(None, [str(H5.WORKTREE), os.environ.get("PYTHONPATH")])), "PYTHONDONTWRITEBYTECODE": "1"}
+    child = subprocess.run(  # noqa: S603 — this interpreter, a fixed script
+        [sys.executable, "-c", _VANISHING_WRITER_CHILD, str(tmp_path), str(path)],
+        capture_output=True, text=True, encoding="utf-8", check=False, env=env,
+        cwd=str(H5.WORKTREE), timeout=120)
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.strip() == "OPENED True", (child.stdout, child.stderr)
+
+
+def test_writer_open_of_an_empty_file_makes_a_fresh_store(tmp_path):
+    """#1458: an empty file at a store's path (what the old reader's race left) is a new store to
+    the writer, not a stale version refused on every later run of the case."""
+    ss = store_mod()
+    sessions = SessionPaths(fixture_runs_base(runs_base(tmp_path)))
+    path = ss.store_path_for("case-alpha", sessions=sessions)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+    with ss.open_store(case_id="case-alpha", sessions=sessions) as store:
+        assert store.new_session(agent_id="main")
+        assert store.connection.execute("PRAGMA user_version").fetchone()[0] == ss.SCHEMA_VERSION
+
+
 @pytest.mark.parametrize("absent", ["missing", "a directory", "a device"])
 def test_reader_finds_no_store_where_no_file_is(tmp_path, absent):
     """#1458: no regular file at the path is `FileNotFoundError`, and the reader leaves none there."""
