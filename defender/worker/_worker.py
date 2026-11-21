@@ -700,7 +700,7 @@ class Worker:
         if not retry:
             return await self._claim_one(on_done=on_done)
         try:
-            return await self._claim_one(on_done=on_done)
+            return await self._claim_one(on_done=on_done, retry=True)
         except Exception as fault:  # noqa: BLE001 — a store fault is waited out, never ends serving
             self._note_store_fault(fault)
             _logger.exception("the worker could not claim an investigation; retrying")
@@ -720,16 +720,24 @@ class Worker:
 
     # -- slots ------------------------------------------------------------------------------------
 
-    async def _claim_one(self, *, on_done: Callable[[], None] | None = None) -> str:
+    async def _claim_one(self, *, on_done: Callable[[], None] | None = None, retry: bool = False) -> str:
         """Claim one queued row into a task (`_CLAIMED`): while fewer host requests than `host_request_slots` run, the
         oldest of either kind (#1471 R13-6); else, while fewer jobs than `slots` run, the oldest job
-        (`_claim_job`). `_NOTHING` when every pool with room found nothing queued, `_NO_SLOT` when a pool was full."""
+        (`_claim_job`). `_NOTHING` when every pool with room found nothing queued, `_NO_SLOT` when a pool was full.
+        With `retry` (serving), a fault claiming a host request is logged and the jobs are still claimed: the host pool
+        sits beside the jobs, never in front of them. Without it (a drain), the fault raises."""
         if self._stopping:
             return _NOTHING
         full = False
         if len(self._host_tasks) < self._host_request_slots:
-            if await self._claim_host_request(on_done):
-                return _CLAIMED
+            try:
+                if await self._claim_host_request(on_done):
+                    return _CLAIMED
+            except Exception as fault:  # noqa: BLE001 — serving waits a store fault out; the jobs are claimed below
+                if not retry:
+                    raise
+                self._note_store_fault(fault)
+                _logger.exception("the worker could not claim a host request; claiming the jobs")
         else:
             full = True
         if len(self._tasks) - len(self._host_tasks) < self._slots:

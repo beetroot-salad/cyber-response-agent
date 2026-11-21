@@ -268,11 +268,10 @@ class HostRequestRecord:
 
 @dataclasses.dataclass(frozen=True)
 class HostRequestClaim:
-    """A claimed host request and its tenant's state, read in the claim's own transaction, as `Claim`. The worker starts
-    the request's helper whatever the state: the helper's own tenant admission refuses a tenant that is not active."""
+    """A claimed host request. No tenant state is read with it: the worker starts the request's helper whatever the
+    state, and the helper's own tenant admission refuses a tenant that is not active."""
 
     record: HostRequestRecord
-    tenant_state: str
 
 
 def host_request_record(row: HostRequestRow) -> HostRequestRecord:

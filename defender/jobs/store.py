@@ -1130,7 +1130,7 @@ class JobStore:
 
     async def claim_host_request(self) -> HostRequestClaim | None:
         """Move the oldest queued host request of any kind (by `created_at`, ties by id; R13-6) to `running` with a
-        lease, with its tenant's state read in the same transaction, as `claim` does, or `None`. A row another
+        lease, or `None`. The tenant's state is not read: the helper's own admission refuses a tenant that is not active. A row another
         transaction holds is skipped, never waited for. Announced `<kind>.claim`."""
         async with self._tx() as s:
             # The id only, never the row as an entity: the UPDATE ... RETURNING below must hand back the row as it now
@@ -1148,10 +1148,9 @@ class JobStore:
             if row is None:  # not reachable while this transaction holds the row; the compare-and-set is the contract
                 return None
             record = host_request_record(row)
-            state = (await s.execute(select(TenantRecord.state).where(TenantRecord.id == record.tenant_id))).scalar_one()
         announce(f"{record.kind}.claim", actor=SYSTEM, tenant_id=record.tenant_id,  # type: ignore[arg-type]
                  target=record.request_id)
-        return HostRequestClaim(record=record, tenant_state=state)
+        return HostRequestClaim(record=record)
 
     async def finish_host_request(  # noqa: PLR0913 — the one terminal write: stage, result and failure detail
         self, tenant_id: str, request_id: str, *, stage: str, result: Mapping[str, Any] | None = None,

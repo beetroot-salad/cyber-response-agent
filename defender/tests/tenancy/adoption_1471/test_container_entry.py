@@ -50,7 +50,7 @@ def _facts(repo, forge, **over):
     return {**facts, **over}
 
 
-def _enter(repo, forge, tmp_path, *, facts=None, silent=False):
+def _enter(repo, forge, tmp_path, *, facts=None, silent=False, token=None):
     """Run the entry once against a socket handing `facts` (default: the helper's own); returns the record it wrote, or None."""
     from defender import adoption
     from defender.job_socket import SOCKET_ENV
@@ -61,9 +61,10 @@ def _enter(repo, forge, tmp_path, *, facts=None, silent=False):
     runs.mkdir(exist_ok=True)
     own = _facts(repo, forge, job_id=job_id)
     handed = own if facts is None else facts(own)
-    token = fixture_identity(tenant).token()
+    minted = fixture_identity(tenant).token()
+    answer = token if token is not None else (lambda fields: {"token": minted})
     environ = {**os.environ, "DEFENDER_DATA_ROOT": str(tmp_path / "data")}
-    with SocketStandIn(tenant, launch=handed, answers={"forge.token": lambda fields: {"token": token}}) as stand_in:
+    with SocketStandIn(tenant, launch=handed, answers={"forge.token": answer}) as stand_in:
         for gone in set(own) - set(handed):  # the stand-in fills `tenant`/`tenant_state` by default: serve the removal
             stand_in.launch.pop(gone, None)
         environ[SOCKET_ENV] = str(tmp_path / "no-such-socket") if silent else str(stand_in.path)
@@ -77,6 +78,24 @@ def test_with_the_helpers_own_facts_the_entry_opens_the_offer_and_writes_opened(
     record = _enter(repo, forge, tmp_path)
     [pr] = [r for r in forge.prs if r["head"]["label"] == branch_for(DIGEST)]
     assert record == {"outcome": "opened", "pr_number": pr["number"]}
+
+
+@pytest.mark.parametrize("fault", ["refused", "crashed"])
+def test_a_forge_token_the_helper_cannot_give_ends_delivery_failed_with_a_record_not_a_crash(repo, forge, tmp_path, fault):
+    """The helper refusing `forge.token` (its issuer sealed: `forge-fault`), or a fault of a kind no step names, is
+    `delivery_failed`: the entry writes its record whatever the delivery raised, and nothing is opened. (A3: a fixed
+    reason for anything else)"""
+    from defender.job_socket import Refused
+
+    def refuse(fields):
+        raise Refused("the forge token could not be minted", "forge-fault")
+
+    def crash(fields):
+        raise LookupError("nothing the delivery names")
+
+    record = _enter(repo, forge, tmp_path, token=refuse if fault == "refused" else crash)
+    assert record == {"outcome": "failed", "reason": "delivery_failed"}
+    assert forge.creates == []
 
 
 def test_an_unprotected_main_is_delivery_failed_and_nothing_is_pushed_or_opened(repo, forge, tmp_path):

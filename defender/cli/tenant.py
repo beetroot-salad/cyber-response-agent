@@ -30,7 +30,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 # Hand-rolled rather than `venv_guard.reexec_into_venv`, matching `run.py`: this must run
 # BEFORE any `defender.*` import resolves, and reaching that helper is itself such an import.
@@ -102,17 +101,16 @@ def check_folder(folder: Path) -> int:
     return _report(_findings(folder))
 
 
-def _findings(knowledge: Path, *, systems: Any = None) -> list[str]:
+def _findings(knowledge: Path) -> list[str]:
     """Everything `check --folder` reports about a folder acceptance (or the folder rules) passed: the
     settings files load, the grant table loads, the grant census both ways against the running checkout, and the committed
     `.tenant-id`. A census that cannot be taken costs only the census: its finding says the
     table went unchecked and why, and every other rule still runs."""
     settings = knowledge / SETTINGS_HALF
     findings: list[str] = []
-    from defender.cli._tenant_records_check import census_findings, leftover_findings
+    from defender.cli._tenant_records_check import leftover_findings
     findings += leftover_findings(knowledge)
-    # Here, not at the top: the census reaches the lead-author's whole extraction stack, which
-    # only `check` uses — `update` and `propose` start without paying for it.
+    # Here, not at the top: the census reaches the lead-author's whole extraction stack, which only `check` uses.
     from defender.cli import _tenant_census
 
     table = dispositions_path(settings)
@@ -129,7 +127,7 @@ def _findings(knowledge: Path, *, systems: Any = None) -> list[str]:
     findings += _tenant_findings(knowledge)
     try:
         if census is not None:
-            findings += census_findings(_tenant_census.table_findings(settings, census), systems).lines(table)
+            findings += _tenant_census.table_findings(settings, census).lines(table)
         else:
             _tenant_census.folder_findings(settings)  # the table still loads, or its refusal is the finding
     except DispositionError as unloadable:

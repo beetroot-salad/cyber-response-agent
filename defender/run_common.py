@@ -528,9 +528,10 @@ def read_alert_mapping(records: Any, tenant_id: Any) -> AlertMapping:
 
 class PublishLaunch(Protocol):
     """The launch-time publish run start calls (`publish_launch.launch_publish`, or an in-process
-    caller's stand-in): typed, so the tenant id reaches the records it writes as a `TenantId`."""
+    caller's stand-in): typed, so the tenant id reaches the records it writes as a `TenantId`. `trigger` is who asked
+    for the publish (`publish_report` hands it whenever a job's helper names one, #1471); a stand-in takes it too."""
 
-    def __call__(self, tenant_id: TenantId, *, data_root: Path) -> object: ...
+    def __call__(self, tenant_id: TenantId, *, data_root: Path, trigger: str = ...) -> object: ...
 
 
 class KnowledgeExit(SystemExit):

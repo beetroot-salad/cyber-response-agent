@@ -18,26 +18,24 @@ collision on the shared clone is `repository_busy`.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from defender import _git
-from defender.records.formats import TenantRefused
 from defender.records.job_lane import AdoptionRecord
 from defender.system_rules import base_files
-from defender.tenancy import DeliveryRefused
 
-from .auth import ForgejoAuthError
 from .forgejo import ForgeError, PullRequest
 from .model import AgentChange, ChangeSet
 from .repository import GitRepository
+
+_logger = logging.getLogger(__name__)
 
 #: The fixed reasons `adopt` answers (`job_lane.ADOPTION_CONTAINER_REASONS`).
 REPOSITORY_BUSY = "repository_busy"
 DELIVERY_FAILED = "delivery_failed"
 #: How many times a pull-request create is made (a refused or lost first one is read back, then made once more).
 _CREATE_ATTEMPTS = 2
-#: The faults a step below may meet; each ends the adoption as `delivery_failed` (A3: a fixed reason for anything else).
-_FAULTS = (_git.GitError, _git.GitTimeout, ForgeError, ForgejoAuthError, DeliveryRefused, TenantRefused, OSError, ValueError)
 
 
 @dataclass(frozen=True)
@@ -62,7 +60,8 @@ def adopt(repository: GitRepository, *, system: str, rendering: dict[str, bytes]
         main = repository.revision("refs/remotes/origin/main")
         commit, _after = repository.make_commit(main, _change_set(rendering), _commit_message(system, digest))
         return _push_and_open(repository, system, branch, rendering, commit, digest)
-    except _FAULTS:
+    except Exception:  # noqa: BLE001 — A3: whatever a step raised, a fixed reason; the cause goes to the log
+        _logger.exception("adoption of %s: the delivery failed", system)
         return AdoptionRecord.failed(DELIVERY_FAILED)
 
 
@@ -73,7 +72,8 @@ def _fetch(repository: GitRepository) -> AdoptionRecord | None:
         repository.fetch()
     except _git.GitError as fault:
         return AdoptionRecord.failed(REPOSITORY_BUSY if _ref_lock_collision(fault) else DELIVERY_FAILED)
-    except _FAULTS:
+    except Exception:  # noqa: BLE001 — A3: any other fetch fault, the forge token's refusal included, is a fixed reason
+        _logger.exception("adoption: the fetch of origin failed")
         return AdoptionRecord.failed(DELIVERY_FAILED)
     return None
 

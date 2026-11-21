@@ -31,9 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 from defender import job_socket, tenancy
 from defender._paths import process_defender_dir
-from defender.learning.author.version_control import DeliveryRefused, ForgejoAuthError
 from defender.learning.author.version_control.adoption import DELIVERY_FAILED, adopt
-from defender.learning.author.version_control.forgejo import ForgeError
 from defender.learning.author.version_control.repository import GitRepository
 from defender.learning.branch.container import JobContainer, NotInContainer
 from defender.records import job_lane
@@ -48,8 +46,6 @@ HANDOVER = "handover"
 TENANT_NOT_ACTIVE = "tenant_not_active"
 _DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 _DIGEST = re.compile(r"[0-9a-f]{64}")
-#: What opening the repository or the folder may refuse with: each is the adoption's `delivery_failed`.
-_OPEN_FAULTS = (TenantRefused, DeliveryRefused, ForgejoAuthError, ForgeError, OSError, ValueError)
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -87,7 +83,9 @@ def _is_this_requests(facts: Mapping[str, Any], ns: argparse.Namespace) -> bool:
 
 
 def _deliver(container: JobContainer, ns: argparse.Namespace, root: Any, client: httpx.Client | None) -> job_lane.AdoptionRecord:
-    """The tenant's repository opened and `adopt()` run over it; a refusal to open is `delivery_failed`."""
+    """The tenant's repository opened and `adopt()` run over it. The boundary is total (A3: a fixed reason for anything
+    else): a refusal to open, or any fault the delivery raises (the helper refusing `forge.token` among them), is
+    `delivery_failed`, logged, so the entry always writes a record."""
     facts = container.launch
     rendering = _decoded_rendering(facts)
     assert rendering is not None  # `_is_this_requests` held
@@ -100,10 +98,10 @@ def _deliver(container: JobContainer, ns: argparse.Namespace, root: Any, client:
                 client = owned.enter_context(httpx.Client())
             repository = GitRepository.open(tenant.knowledge, tenant_id=str(tenant.id), origin=str(facts["forge_origin"]),
                                             identity=container.forge_credential(), client=client)
-        except _OPEN_FAULTS as refused:
-            _logger.error("adoption %s: the tenant's repository cannot be opened: %s", ns.job, refused)
+            return adopt(repository, system=str(facts["system"]), rendering=rendering, digest=str(facts["digest"]))
+        except Exception:  # noqa: BLE001 — A3: whatever the opening or the delivery raised, a fixed reason and a record
+            _logger.exception("adoption %s: the delivery failed", ns.job)
             return job_lane.AdoptionRecord.failed(DELIVERY_FAILED)
-        return adopt(repository, system=str(facts["system"]), rendering=rendering, digest=str(facts["digest"]))
 
 
 def _outcome(ns: argparse.Namespace, environ: Mapping[str, str], root: Any, client: httpx.Client | None) -> job_lane.AdoptionRecord:

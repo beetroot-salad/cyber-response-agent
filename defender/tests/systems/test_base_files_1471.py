@@ -54,6 +54,20 @@ def test_render_places_the_files_under_the_system_name_and_fills_only_the_system
     }
 
 
+@pytest.mark.parametrize("state", ["missing", "empty", "a file"])
+def test_a_declared_base_files_folder_that_is_missing_empty_or_not_a_folder_is_refused_not_rendered_as_nothing(
+        tmp_path, state):
+    """A release whose declared folder is gone, holds nothing, or is a file renders no empty set: `render` raises, so an
+    adoption is refused rather than completed as `nothing_to_adopt` over an empty rendering. (P-8, A3)"""
+    folder = tmp_path / "base"
+    if state == "empty":
+        folder.mkdir()
+    elif state == "a file":
+        folder.write_bytes(b"x")
+    with pytest.raises(ValueError):
+        _base().render(_entry_over(folder), "acme-cmdb")
+
+
 def test_two_systems_of_one_adapter_get_their_own_folders_and_ids(tmp_path):
     """The same entry rendered for two system names gives two disjoint path sets, each id naming its own system. (P-8, G-A7)"""
     folder = _plant(tmp_path / "base", {"skills/{system}/SKILL.md": b"name: defender-{system}\n"})

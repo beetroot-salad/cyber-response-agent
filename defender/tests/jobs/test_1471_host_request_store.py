@@ -198,16 +198,15 @@ async def test_the_database_refuses_an_unknown_stage_and_a_running_row_without_a
 # --- R13-6: one claim, oldest first across kinds ------------------------------------------------------------------------
 
 async def test_r13_6_claim_takes_the_oldest_queued_row_of_any_kind_and_marks_it_running_with_a_lease(world, caplog):
-    """Claims go oldest first across both kinds; the claim carries the kind and the tenant's state, sets stage, start and
-    lease, and is announced; nothing queued answers None. (R13-6)"""
+    """Claims go oldest first across both kinds; the claim carries the kind, sets stage, start and lease, and is
+    announced; nothing queued answers None. (R13-6)"""
     audit = JobsAudit(caplog)
     older = plant(world, T1, "adoption", system=SYSTEM, created=NOW - dt.timedelta(minutes=3))
     middle = plant(world, T2, "readiness", created=NOW - dt.timedelta(minutes=2))
     newest = plant(world, T1, "readiness", created=NOW - dt.timedelta(minutes=1))
     async with job_store(world) as store:
         first = await store.claim_host_request()
-        assert (first.record.request_id, first.record.kind, first.record.system_id, first.tenant_state) == (
-            older, "adoption", SYSTEM, "active")
+        assert (first.record.request_id, first.record.kind, first.record.system_id) == (older, "adoption", SYSTEM)
         assert [(await store.claim_host_request()).record.request_id for _ in range(2)] == [middle, newest]
         assert await store.claim_host_request() is None
     row = host_row(world, older)

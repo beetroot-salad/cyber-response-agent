@@ -27,13 +27,17 @@ _LENGTH = struct.Struct(">I")
 
 def render(entry: CatalogEntry, system: str) -> dict[str, bytes]:
     """`{agent/<path>: bytes}` for every file of `entry`'s base files, with `system` filled into each path and each file's
-    bytes (unfiltered: no newline translation, no decoding). A folder holding anything but regular files and directories, or
-    an entry shipping none, raises `ValueError`; so does a system name that is not one safe path segment."""
+    bytes (unfiltered: no newline translation, no decoding). A folder holding anything but regular files and directories, a
+    declared folder that is not a folder or holds no file (a release missing its set: never an empty rendering, which an
+    adoption would read as nothing to offer), or an entry shipping none, raises `ValueError`; so does a system name that
+    is not one safe path segment."""
     if entry.base_files is None:
         raise ValueError(f"adapter {entry.adapter_id!r} ships no base files")
     if not system or system in {".", ".."} or any(c in system for c in "/\\\0{}"):
         raise ValueError(f"{system!r} is not a system name that can stand as one path segment")
     root = Path(entry.base_files)
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError(f"adapter {entry.adapter_id!r} declares base files at {root}, which is not a folder")
     name = system.encode("utf-8")
     placeholder = SYSTEM_PLACEHOLDER.encode("utf-8")
     rendered: dict[str, bytes] = {}
@@ -48,6 +52,8 @@ def render(entry: CatalogEntry, system: str) -> dict[str, bytes]:
         for sub in dirs:
             if (Path(folder) / sub).is_symlink():
                 raise ValueError(f"{Path(folder) / sub} is a link: base files are plain files only")
+    if not rendered:
+        raise ValueError(f"adapter {entry.adapter_id!r} declares base files at {root}, which holds none")
     return rendered
 
 

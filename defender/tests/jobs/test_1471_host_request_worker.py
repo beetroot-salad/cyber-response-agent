@@ -531,6 +531,48 @@ async def test_r13_6_host_requests_run_outside_the_total_slots_in_both_direction
             await asyncio.wait_for(serving, timeout=60)
 
 
+class _HostClaimFails:
+    """The world's store, except that claiming a host request raises, as a lock or a schema fault on that table would."""
+
+    def __init__(self, store: Any) -> None:
+        self._store = store
+        self.host_claims = 0
+
+    async def claim_host_request(self) -> Any:
+        self.host_claims += 1
+        raise RuntimeError("the host-request table cannot be read")
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._store, name)
+
+
+async def test_r13_6_a_serving_worker_whose_host_request_claim_fails_still_claims_investigations(world):
+    """Host requests are a pool beside the jobs, never a gate on them: a fault claiming a host request is logged and the
+    oldest investigation is still claimed in the same poll. (R13-6)"""
+    dsn = world["dsn"]
+    child = _child(world, files={})
+    async with job_store(dsn) as store:
+        inv = await _queued(store)
+        failing = _HostClaimFails(store)
+        serving = asyncio.create_task(host_worker(world, failing, investigation=child, **_FAST).serve())
+        try:
+            await _until(lambda: child.seen(inv), "the investigation's child despite the failing host claim")
+            assert failing.host_claims >= 1, "premise: the host-request claim was tried"
+        finally:
+            await _until(lambda: row(dsn, inv)["stage"] != "running", "the investigation to end")
+            if not serving.done():
+                os.kill(os.getpid(), signal.SIGTERM)
+            await asyncio.wait_for(serving, timeout=60)
+
+
+async def test_r13_6_a_draining_worker_whose_host_request_claim_fails_raises(world):
+    """A drain has no retry: the host-request claim's fault ends it, as any store fault does. (R13-6)"""
+    async with job_store(world["dsn"]) as store:
+        await _queued(store)
+        with pytest.raises(RuntimeError, match="host-request table"):
+            await host_worker(world, _HostClaimFails(store), **_FAST).drain()
+
+
 @pytest.mark.parametrize("bad", [0, -1])
 async def test_r13_6_a_worker_with_a_host_request_cap_below_one_is_refused(world, bad):
     """`Worker(host_request_slots=<1)` raises `ValueError` naming the setting; 1 builds. (R13-6)"""
