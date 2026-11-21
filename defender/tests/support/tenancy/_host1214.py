@@ -77,10 +77,11 @@ ENTRY_POINT_MODULES = (
     # #1170 (H7, P-C, A6): the per-job host helper admits each job's tenant; the post-step (#1344) runs in its job
     # container under the helper's hold and opens no acceptance of its own. #1471 (P-1 "same code"): the investigation's
     # admission moved into the shared launch steps (`_common.tenant_launch_steps`), which readiness runs too; adoption
-    # admits its own tenant, its container (`defender.adoption`) taking it by the folder rules only.
+    # admits its tenant through the host-request kinds' shared lifecycle (`_host_request.admit_host_tenant`), its
+    # container (`defender.adoption`) taking it by the folder rules only.
     "job_host/_common.py",
     "job_host/_learning.py",
-    "job_host/_adoption.py",
+    "job_host/_host_request.py",
 )
 
 #: #1170 (H7, P-C): the per-job host helper's host half, which enters the acceptance on the hold its run owns until the
@@ -88,7 +89,7 @@ ENTRY_POINT_MODULES = (
 HELPER_HOST_HALVES: dict[str, frozenset[str]] = {
     "job_host/_common.py": frozenset({"tenant_launch_steps"}),  # #1471: the investigation's and readiness's shared steps
     "job_host/_learning.py": frozenset({"_admit_tenant"}),
-    "job_host/_adoption.py": frozenset({"_admit_adoption_tenant"}),  # #1471
+    "job_host/_host_request.py": frozenset({"admit_host_tenant"}),  # #1471: a host request's admission, on its hold
 }
 
 #: #1170 (P-C, "In-box entries", C19): the entries that run inside a job container, covered by the helper's hold as the
