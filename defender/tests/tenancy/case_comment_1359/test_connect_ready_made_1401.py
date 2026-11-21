@@ -226,3 +226,60 @@ def test_1401_a_staged_half_given_for_a_no_tools_adapter_is_still_judged(tmp_pat
 
     assert rc != 0, out
     assert any("SKILL.md" in line for line in failed), out
+
+
+# --- #1504 O3: the handoff's non-GET reads are exactly the adapter's list ----------------------------------------------------
+
+ELASTIC_CONFIG = 'ELASTIC_EVENTS_INDEX="logs-*"\nELASTIC_ALERTS_INDEX="alerts-*"\n'
+SEARCH, QUERY, DELETE_ALL = ("POST", "/*/_search"), ("POST", "/_query"), ("DELETE", "/*")
+
+
+def _with_reads(base: str, reads: tuple[tuple[str, str], ...], writes: tuple[tuple[str, str], ...] = ()) -> str:
+    doc = json.loads(_access(base, writes))
+    doc["reads"] = [{"method": m, "path": p} for m, p in reads]
+    return json.dumps(doc) + "\n"
+
+
+def _rows_naming(failed: list[str], route: tuple[str, str], word: str) -> list[str]:
+    return [line for line in failed if f"{route[0]} {route[1]}" in line and word in line]
+
+
+@pytest.mark.parametrize(("reads", "route", "word"), [
+    pytest.param((SEARCH,), QUERY, "missing", id="a-declared-read-missing"),
+    pytest.param((SEARCH, QUERY, DELETE_ALL), DELETE_ALL, "extra", id="an-extra-read"),
+])
+def test_1504_o3_the_handoff_of_an_adapter_with_declared_reads_must_list_exactly_them(tmp_path, reads, route, word):
+    """`--handoff` over Elastic: a failure row names the missing or the extra route; the handoff listing both searches,
+    and a GET or HEAD beside them, has no row naming a route. (O3)"""
+    from defender.tests.systems import _reads1504 as X
+
+    base = "https://elasticsearch.example:9200"
+    bad = _handoff(tmp_path / "bad", "elastic", ELASTIC_CONFIG, _with_reads(base, reads))
+    _rc, failed, out = _validate("elastic", "--handoff", str(bad))
+    assert _rows_naming(failed, route, {"missing": X.MISSING_WORD, "extra": X.EXTRA_WORD}[word]), out
+
+    good = _handoff(tmp_path / "good", "elastic", ELASTIC_CONFIG,
+                    _with_reads(base, (SEARCH, QUERY, ("GET", "/_cluster/health"), ("HEAD", "/logs-*"))))
+    _rc, failed, out = _validate("elastic", "--handoff", str(good))
+    assert not [line for line in failed if "POST" in line or "DELETE" in line or "/_cluster/health" in line], out
+
+
+@pytest.mark.parametrize("system", ["jira", "servicenow"])
+def test_1504_o3_a_case_only_adapters_handoff_listing_a_non_get_read_is_refused_naming_the_route(tmp_path, system):
+    """Jira and ServiceNow declare no non-GET read: their handoff listing `POST /search` fails naming it as extra; the
+    same handoff listing none passes. (O3)"""
+    from defender.tests.systems import _reads1504 as X
+
+    config, base, writes = (('JIRA_TIMEOUT_SEC="30"\nJIRA_SERVICE_DESK="no"\n', "https://example.atlassian.net",
+                             (JIRA_CLOUD,)) if system == "jira" else
+                            ('SERVICENOW_TIMEOUT_SEC="30"\nSERVICENOW_TABLE="incident"\n',
+                             "https://example.service-now.com", (SERVICENOW,)))
+    search = ("POST", "/search")
+    bad = _handoff(tmp_path / "bad", system, config, _with_reads(base, (search,), writes))
+    rc, failed, out = _validate(system, "--handoff", str(bad))
+    assert rc != 0, out
+    assert _rows_naming(failed, search, X.EXTRA_WORD), out
+
+    good = _handoff(tmp_path / "good", system, config, _with_reads(base, (), writes))
+    rc, failed, out = _validate(system, "--handoff", str(good))
+    assert (rc, failed) == (0, []), out

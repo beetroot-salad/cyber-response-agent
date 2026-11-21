@@ -155,8 +155,10 @@ give a falsifiable answer, say the check is weak and why; do not invent one.
   of `VerbContext`-taking functions that raise `faults` — on the shared transport module, runs
   the Haiku alignment loop, and **pauses at a human review checkpoint** (generated code is read
   by a human before it runs anywhere). Dropping the module under `integrations/` is the whole
-  registration; there is no shim. It then writes the handoff's `config.env` and `access.yaml` as
-  below.
+  registration; there is no shim. It declares the module's `READ_ROUTES` (every non-GET request its
+  tools send, `()` for none) and writes its reference beside it, `{system}_adapter.md`, from
+  `examples/example_adapter.md`. It then writes the handoff's `config.env` and `access.yaml` as
+  below, the `access.yaml` `reads` being exactly `READ_ROUTES`.
 
 The handoff is a folder outside both repos that you give the tenant admin, never a file in the
 tenant's repo or in this one:
@@ -262,7 +264,7 @@ tree isn't under version control, leave the files in place for review:
 
 ```bash
 git checkout -b connect/{system}
-git add defender/integrations/{system}_adapter.py \
+git add defender/integrations/{system}_adapter.py defender/integrations/{system}_adapter.md \
         knowledge/tenant-template/settings/verb-grants.yaml \
         defender/tests/fixtures/tenant-fixture/settings/verb-grants.yaml
 # add pyproject.toml / uv.lock only if a dependency was added

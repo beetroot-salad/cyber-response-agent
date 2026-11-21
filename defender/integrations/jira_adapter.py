@@ -43,6 +43,8 @@ REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "SERVICE_DESK"
 SAMPLE_SETTINGS = {"JIRA_TIMEOUT_SEC": "10", "JIRA_SERVICE_DESK": "no"}
 #: No setting goes in a request path.
 PATH_KEYS: tuple[str, ...] = ()
+#: The non-GET routes this adapter's tools send, read cold (#1504 O1): none, every request it makes is a GET.
+READ_ROUTES: tuple[tuple[str, str], ...] = ()
 
 _SERVICE_DESK_VALUES = ("yes", "no")
 #: The comment route of each API, relative to the base: Service Management's request comment, and

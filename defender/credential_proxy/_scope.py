@@ -12,15 +12,15 @@ import re
 from dataclasses import dataclass
 from urllib.parse import unquote, urlsplit
 
-from defender.kit.access import AccessDeclaration, Route, ticket_write_fault
+from defender.kit.access import AccessDeclaration, Route, is_read_method, ticket_write_fault
 from defender.kit.paths import holds_separator, url_form_fault, url_path_fault
 from defender.credential_proxy._refusal import CONFIG, CONFINEMENT, Refused
 from defender.kit.faults import ORIGIN_REQUEST, ORIGIN_SETUP
 from defender.credential_proxy._tokens import READ_WRITE
 
-#: Methods that are reads under any base (O3).
-READ_METHODS = ("GET", "HEAD")
+#: An incoming request's method: the request line's shape, not a declared route's (`kit.access.route_shape_fault`).
 _METHOD = re.compile(r"[A-Z]{1,16}")
+
 _DEFAULT_PORT = {"http": 80, "https": 443}
 #: What a segment is split on once decoded: a server may read either as a separator.
 _SEPARATOR = re.compile(r"[/\\]")
@@ -77,7 +77,7 @@ def check_route(declaration: AccessDeclaration, system: str, method: str, path: 
     other method is judged by `_ticket_write` alone: there is no write without a ticket."""
     if not _METHOD.fullmatch(method):
         raise Refused(CONFIG, f"{method[:20]!r} is not an upper-case HTTP method", origin=ORIGIN_REQUEST)
-    if method in READ_METHODS:
+    if is_read_method(method):
         return
     if mode == READ_WRITE:
         if ticket is None:
@@ -129,4 +129,4 @@ def _route_pattern_matches(pattern: str, path: str) -> bool:
     return True
 
 
-__all__ = ["READ_METHODS", "Target", "check_route", "locate"]
+__all__ = ["is_read_method", "Target", "check_route", "locate"]

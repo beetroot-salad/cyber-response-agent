@@ -186,6 +186,24 @@ def test_1366_r12_check_reports_a_record_an_upgrade_made_unusable(tenants):
     _exits_for_its_own_finding(found)
 
 
+@pytest.mark.parametrize(("system", "access", "word", "route"), [
+    pytest.param("elastic", R.declaration("https://elasticsearch.example:9200", scheme="basic",
+                                         reads=(("POST", "/*/_search"),)), "missing", "POST /_query", id="a-read-missing"),
+    pytest.param("threat-intel", R.declaration("https://ti.example", reads=(("POST", "/lookup"), ("DELETE", "/*"))),
+                 "extra", "DELETE /*", id="a-read-extra"),
+])
+def test_1504_o3_check_reports_a_record_whose_non_get_reads_differ_from_its_adapters_naming_the_route(
+        tenants, system, access, word, route):
+    """The stored declaration lists too few or too many non-GET reads for its adapter: `check` reports the system at its
+    access part naming the route and exits nonzero; the sound tenant gets no such line. (O3)"""
+    sound = _findings(tenants())
+    found = _findings(tenants(R.edited(R.fixture_records(), system, access=access)))
+
+    named = _only_in(found, sound, f"system {system} access", route, word)
+    assert named, found
+    _exits_for_its_own_finding(found)
+
+
 def test_1366_r12_check_reports_each_system_without_credentials_at_its_current_generation(tenants):
     """No credentials yet: every system is reported. After credentials for cmdb at its version only cmdb stops being
     reported; after the operator moves cmdb (generation 2) it is reported again. (#1366 R12, O8, P5, A4)"""
@@ -465,7 +483,7 @@ CASE_ROUTE = ("POST", "/rest/*/comment")
 CASE_ADAPTER = (
     "from defender.kit import transport\n\n"
     "PREFIX = 'HELPDESK'\nREQUIRED_CONFIG_KEYS = ('TIMEOUT_SEC',)\nPATH_KEYS = ()\n"
-    "DISPLAY_NAME = 'Help desk'\nEXAMPLE = {}\n\n\n"
+    "DISPLAY_NAME = 'Help desk'\nEXAMPLE = {}\nREAD_ROUTES = ()\n\n\n"
     "def check_settings(tenant):\n"
     "    transport.check_settings_of(tenant, 'helpdesk', 'HELPDESK')\n\n\n"
     "def comment_route(settings):\n    return ('POST', '/rest/*/comment')\n\n\n"

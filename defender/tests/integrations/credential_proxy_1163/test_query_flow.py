@@ -74,27 +74,29 @@ def test_q1_a_query_reaches_the_upstream_with_the_key_and_returns_the_echo_unalt
 
 def test_q1b_the_transport_functions_are_called_as_today_and_routes_are_relative_to_the_base(
         tmp_path, data_root):
-    """`transport.request` sends a GET and a declared POST read relative to the base; an
-    undeclared POST is refused unsent. A5, O3, A2; #1391 r5 T1."""
-    with H.upstream() as up, _published(
-            tmp_path, data_root, up, reads=(("POST", "/search"),)) as t:
-        tok = T.token(t.tenant_id, GRANT)
-        with A.proxy_for(t, _store(t)) as (url, _tap):
+    """`transport.request` sends a GET and a declared POST read relative to the base; an undeclared POST is refused unsent.
+    A5, O3, A2; #1391 r5 T1; #1504 conflict update: the POST is threat-intel's `/lookup` (O3)."""
+    with H.upstream() as up, A.published(
+            tmp_path / "forge", data_root,
+            {"threat-intel": H.declaration(up.url + API, reads=(("POST", "/lookup"),))}) as t:
+        tok = T.token(t.tenant_id, {("threat-intel", "r")})
+        store = H.FakeStore({(t.tenant_id, "threat-intel"): T.static_set()})
+        with A.proxy_for(t, store) as (url, _tap):
             ctx = A.ctx_for(tmp_path, T.run_record(t), url, tok)
-            config = transport.load_config(ctx, "identity", "IDENTITY")
-            got = transport.request(ctx, "identity", "GET", "/users/{user}", {"user": "dev.dana"},
+            config = transport.load_config(ctx, "threat-intel", "THREAT_INTEL")
+            got = transport.request(ctx, "threat-intel", "GET", "/users/{user}", {"user": "dev.dana"},
                                     timeout_sec=10)
-            posted = transport.request(ctx, "identity", "POST", "/search", body={"q": 1},
+            posted = transport.request(ctx, "threat-intel", "POST", "/lookup", body={"q": 1},
                                        timeout_sec=10)
             with pytest.raises(ConfinementFault) as refused:
-                transport.request(ctx, "identity", "POST", "/users/dev.dana", body={},
+                transport.request(ctx, "threat-intel", "POST", "/users/dev.dana", body={},
                                   timeout_sec=10)
 
     assert got["path"] == f"{API}/users/dev.dana"
     assert "path" in posted
     assert refused.value.exit_code == 1
     assert [(s.method, s.path) for s in up.seen] == [
-        ("GET", f"{API}/users/dev.dana"), ("POST", f"{API}/search")]
+        ("GET", f"{API}/users/dev.dana"), ("POST", f"{API}/lookup")]
     assert H.CANARY_KEY not in json.dumps(config), "the config handed to adapters holds a key"
 
 
@@ -519,8 +521,8 @@ def test_1391_o3_each_elastic_request_is_captured_once_and_reaches_the_proxy_onc
     sent = [urlsplit(r.url)[:3] for r in capture.requests]
     assert sent == [urlsplit(up.url)._replace(path=s.path.split("?")[0])[:3] for s in up.seen], (
         "a capture names a URL other than the one sent")
-    for request in capture.requests:
-        confine_read_endpoint(request.system, request.url, method=request.method)
+    for request in capture.requests:  # #1504 (conflict update): in-process, a GET/HEAD is judged and every other method passes on
+        assert confine_read_endpoint(request.system, request.url, method=request.method) == request.url
 
 
 @pytest.mark.parametrize(("verb", "kw", "timeout"), [

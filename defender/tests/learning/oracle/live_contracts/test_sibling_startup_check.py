@@ -75,8 +75,10 @@ def _sibling(tmp_path: Path, label: str, *, accepted: Any, spec: Any, source_dir
     run_py = S.mod("run")
     ep = _episode(tmp_path / f"ep-{label}", spec, source_dir)
     world = S.load_world(ep, "a")
+    # #1504 O3: run start builds the tenant over a catalog of the run's one roster read (no default).
+    catalog = S.mod("system_rules").Catalog(run_py._run_roster(S.DEFENDER))
     tenant = run_py._resolve_run_tenant(accepted, defender_dir=S.DEFENDER,
-                                        dispatches_lead_zero=False, records=R.value_of(records))
+                                        dispatches_lead_zero=False, records=R.value_of(records), catalog=catalog)
     source = Run.under(fixture_runs_base(source_dir.parent), source_dir.name)
     sibling_dir = LZ.materialize_alert(tmp_path / f"sibling-{label}", LZ.alert_doc())
     main = H.ReplayFn([

@@ -47,6 +47,9 @@ if TYPE_CHECKING:
         PostgresSystemRecords as PostgresSystemRecords,
         SystemRecordsPort as SystemRecordsPort,
     )
+    from defender.credential_proxy._scope import (
+        is_read_method as is_read_method,
+    )
     from defender.credential_proxy._tokens import (
         PASS_LIFETIME_SEC as PASS_LIFETIME_SEC,
         mint_request_token as mint_request_token,
@@ -63,6 +66,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("TenantRequestSigner", "request_signer", "signing_access",), "_launcher"),
     **dict.fromkeys(("OpenBaoSecrets", "OpenBaoStore", "SecretStoreFault", "SecretStoreRefused",
                      "SecretSettings", "SecretStoreUnavailable", "TransitVerifier", "store_policies", "transit_key_for",), "_openbao"),
+    **dict.fromkeys(("is_read_method",), "_scope"),
     **dict.fromkeys(("PostgresSystemRecords", "SystemRecordsPort",), "_records"),
     **dict.fromkeys(("PASS_LIFETIME_SEC", "mint_request_token", "request_access",
                      "run_token_mint",), "_tokens"),

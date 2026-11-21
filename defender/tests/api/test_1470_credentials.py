@@ -38,6 +38,7 @@ from defender.tests.support.api._openbao1470 import (
 )
 from defender.tests.support.api._server1083 import ANN, A
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
+from defender.tests.systems import _reads1504 as X
 
 ELASTIC_SET = {"username": "defender-reader", "password": PASSWORD}
 MARKER_UNUSED = "stored for an unused generation"
@@ -361,7 +362,7 @@ def _scheme_systems() -> dict[str, tuple[str, dict[str, str], str, tuple[str, ..
     table = {
         "bearer": ("ticket", ("api_key",), {}),
         "header": ("identity", ("api_key",), {}),
-        "basic": ("elastic", ("username", "password"), {}),
+        "basic": ("elastic", ("username", "password"), {"reads": X.ELASTIC_READS}),  # #1504 O3 (conflict update): its declared reads
         R.OAUTH: ("cmdb", ("client_id", "client_secret"), {"token_url": "https://cmdb.test/token"}),
     }
     assert set(table) == set(DECLARED), "premise: every scheme the kit declares"
