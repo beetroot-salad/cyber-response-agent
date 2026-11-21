@@ -127,8 +127,12 @@ UNUSABLE_LISTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("a-number", "73519", ("73519",)),
 )
 #: Lists the module does not hold readably (absent, or computed): (id, source, None for no declaration).
+#: The last two are modules that do not load: one that does not parse (no list can be read from it), one that raises when
+#: imported (its list is computed, so not readable without running it). A record of either is still refused naming why (A6.2).
 UNREADABLE_LISTS: tuple[tuple[str, str | None], ...] = (
-    ("absent", None), ("computed", "tuple([('POST', '/widgets/_find')])"))
+    ("absent", None), ("computed", "tuple([('POST', '/widgets/_find')])"),
+    ("module-does-not-parse", "(('POST', '/widgets/_find')"),
+    ("module-raises-on-import", "tuple([('POST', '/widgets/_find')]); raise RuntimeError('never 1504')"))
 
 #: Pools the route-shape agreement test (A6.1) crosses: every pair is judged by the access parser, the lint and the catalog
 #: reader, each against the A6.1 oracle written in the test. Empty parts, case, digits and underscore, lengths 2/3/10/11, whitespace, control
