@@ -83,28 +83,36 @@ def test_the_read_endpoint_allowlist_cannot_be_built_with_a_methodless_entry():
     confine_read_endpoint("elastic", "http://es:9200/_cluster/health", method="GET")
 
 
-def test_the_two_post_with_body_reads_still_pass_the_endpoint_check():
-    confine_read_endpoint("elastic", "http://es:9200/logs-*/_search", method="POST")
-    confine_read_endpoint("elastic", "http://es:9200/_query?format=json", method="POST")
-    confine_read_endpoint("elastic", "http://es:9200/_cluster/health", method="GET")
+def test_the_endpoint_check_judges_only_get_and_head_and_passes_every_other_method_to_the_proxy():
+    """Elastic's in-process check refuses a GET/HEAD outside its one read endpoint and passes any other method on, as
+    the proxy's declared-reads check owns it (a POST to a search or to an undeclared route alike). #1504 (design r4,
+    "Elastic's in-process check"; conflict update of the two POST-confinement arms)"""
+    assert confine_read_endpoint("elastic", "http://es:9200/_cluster/health", method="GET")  # control: the one GET read
+    for method in ("GET", "HEAD"):
+        with pytest.raises(ConfinementFault):
+            confine_read_endpoint("elastic", "http://es:9200/_cat/indices", method=method)
 
-    with pytest.raises(ConfinementFault):
-        confine_read_endpoint("elastic", "http://es:9200/logs-*/_update/1", method="POST")  # lint-stale-ref: ok — an Elasticsearch URL path, not the removed function
-    with pytest.raises(ConfinementFault):
-        confine_read_endpoint("elastic", "http://es:9200/logs-*/_search", method="DELETE")
+    for method, url in [("POST", "http://es:9200/logs-*/_search"), ("POST", "http://es:9200/_query?format=json"),
+                        ("POST", "http://es:9200/logs-*/_update/1"),  # lint-stale-ref: ok — an Elasticsearch URL path, not the removed function
+                        ("DELETE", "http://es:9200/logs-*/_search"),
+                        ("PUT", "http://es:9200/_bulk")]:
+        assert confine_read_endpoint("elastic", url, method=method) == url, (method, url)
 
 
-def test_the_endpoint_check_binds_on_the_resolved_normalized_path_without_the_query_string():
+def test_the_endpoint_check_binds_a_get_on_the_resolved_normalized_path_without_the_query_string():
+    """A GET is judged on its percent-decoded, dot-resolved path with the query dropped; a `..` that leads out of the
+    read endpoint is refused, the same path as a POST is the proxy's to refuse. #1504 (conflict update: the POST arms)"""
     assert normalize_endpoint("http://es:9200/logs-*/_search?pretty=true&x=1") == "/logs-*/_search"
     assert normalize_endpoint("http://es:9200//logs-*//_search/") == "/logs-*/_search"
 
-    confine_read_endpoint("elastic", "http://es:9200/logs-*/_search?pretty=true", method="POST")
+    confine_read_endpoint("elastic", "http://es:9200/_cluster/health?pretty=true", method="GET")
 
     with pytest.raises(ConfinementFault):
-        confine_read_endpoint("elastic", "http://es:9200/logs-*/_search/../../_update/1",  # lint-stale-ref: ok — an Elasticsearch URL path, not the removed function
-                              method="POST")
+        confine_read_endpoint("elastic", "http://es:9200/_cluster/health/../../_cat/indices", method="GET")
     with pytest.raises(ConfinementFault):
-        confine_read_endpoint("elastic", "http://es:9200/%5Flogs/../_update/1", method="POST")  # lint-stale-ref: ok — an Elasticsearch URL path, not the removed function
+        confine_read_endpoint("elastic", "http://es:9200/%5Fcluster/../_cat/indices", method="GET")
+    url = "http://es:9200/logs-*/_search/../../_update/1"  # lint-stale-ref: ok — an Elasticsearch URL path, not the removed function
+    assert confine_read_endpoint("elastic", url, method="POST") == url
 
 
 # ---- the host write entry (#1359 D-6) ----------------------------------------------------------

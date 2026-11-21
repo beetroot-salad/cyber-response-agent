@@ -44,6 +44,8 @@ REQUIRED_CONFIG_KEYS: tuple[str, ...] = ()
 SAMPLE_SETTINGS = {}  # type: dict[str, str]
 #: No setting goes in a request path.
 PATH_KEYS: tuple[str, ...] = ()
+#: The non-GET routes this adapter's tools send, read cold (#1504 O1): none, every request it makes is a GET.
+READ_ROUTES: tuple[tuple[str, str], ...] = ()
 #: The system's name in the catalog listing (#1366 O2).
 DISPLAY_NAME = "Host state (lab)"
 #: A lab stub (#1366 O2): an example adapter, not a real system's.

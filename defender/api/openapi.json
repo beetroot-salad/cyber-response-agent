@@ -531,6 +531,45 @@
             "title": "Lab Example",
             "type": "boolean"
           },
+          "reads": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogRead"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The non-GET routes this adapter's tools send: a record's `reads` holds exactly these (#1504 O3); empty when every request is a GET; null when the adapter has no usable list (`reads_unusable` says why).",
+            "title": "Reads"
+          },
+          "reads_unusable": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the adapter has no usable list of non-GET routes (none declared, one not readable without running its module, or one naming a route that is not usable); null when `reads` is its list (#1504 A6.3).",
+            "title": "Reads Unusable"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The adapter's configuration reference (Markdown: what its credential needs and the known configuration mistakes), verbatim; null when none can be read.",
+            "title": "Reference"
+          },
           "sample_settings": {
             "anyOf": [
               {
@@ -560,9 +599,31 @@
           "display_name",
           "settings_keys",
           "sample_settings",
-          "lab_example"
+          "lab_example",
+          "reads",
+          "reads_unusable",
+          "reference"
         ],
         "title": "CatalogAdapter",
+        "type": "object"
+      },
+      "CatalogRead": {
+        "description": "One non-GET read route of an adapter, in the access declaration's own shape (`method`, `path`, `*` = one segment),\nso an admin copies it into a record's `reads` as it is (#1504 O4).",
+        "properties": {
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method",
+          "path"
+        ],
+        "title": "CatalogRead",
         "type": "object"
       },
       "Credential": {

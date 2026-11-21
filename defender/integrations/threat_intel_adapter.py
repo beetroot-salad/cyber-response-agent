@@ -29,6 +29,8 @@ REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE,)
 SAMPLE_SETTINGS = {"THREAT_INTEL_TIMEOUT_SEC": "10"}
 #: No setting goes in a request path.
 PATH_KEYS: tuple[str, ...] = ()
+#: The non-GET routes this adapter's tools send, read cold (#1504 O1): a record's `reads` holds exactly these.
+READ_ROUTES = (("POST", "/lookup"),)
 VERDICTS = ("benign", "suspicious", "malicious", "unknown")
 
 

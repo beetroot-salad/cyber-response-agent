@@ -41,6 +41,20 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade from before #1504
+
+A catalog system record's non-GET reads must now be exactly the routes its adapter sends (`READ_ROUTES` in the adapter
+module; `GET /adapters` carries them as `reads`, null beside a `reads_unusable` reason for an adapter with no usable
+list, and the adapter's reference as `reference`): Elastic's `POST /*/_search` <!-- lint-shippable: ok — the vendor-specific product integration. -->
+and `POST /_query`, threat-intel's `POST /lookup`, none for the others. A record with a missing route, an extra one
+(`DELETE /*` listed as a read, or a search narrowed to `POST /logs-*/_search`) is refused by `PUT /systems/<id>`, and
+at run start the system is down with that reason (no read pass names it, so a case system among them cannot take the
+comment), which the readiness check reports. Stop the API and the workers and start the new code together, request the
+readiness check (`POST /api/tenants/<tenant-id>/readiness`, then its GET) for each tenant, and re-save each system it
+reports down for its reads with `PUT /systems/<id>` and the reads `GET /adapters` shows. Until then those
+systems are down, and a tenant whose only query system is one of them has its runs refused. Elastic's in-process <!-- lint-shippable: ok — the vendor-specific product integration. -->
+endpoint check now judges only GET and HEAD; the proxy alone refuses any other undeclared route.
+
 ## Upgrade from before #1581
 
 Stop the API and the workers first, as in "Upgrading" above: an old worker would complete investigations without

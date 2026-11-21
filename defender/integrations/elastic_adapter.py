@@ -40,6 +40,9 @@ SAMPLE_SETTINGS = {
 BASE_FILES = "base-files/elastic"
 #: The keys whose values go in a request path (a search's index), so each is one segment (T4).
 PATH_KEYS = REQUIRED_CONFIG_KEYS
+#: The non-GET routes this adapter's tools send, read cold (#1504 O1): a record's `reads` holds exactly these (a search
+#: is a POST). The proxy admits a GET with no declaration; any other method only when the record lists it.
+READ_ROUTES = (("POST", "/*/_search"), ("POST", "/_query"))
 
 RETURNED_DOC_CAP = 20
 DEFAULT_LIMIT = RETURNED_DOC_CAP

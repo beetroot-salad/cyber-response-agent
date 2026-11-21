@@ -70,6 +70,24 @@ def proxied_records(proxied: tuple[str, ...]) -> Any:
     return spec
 
 
+def cmdb_listing(reads: tuple[tuple[str, str], ...]) -> Any:
+    """The fixture's records with `identity` and `cmdb` proxied, `cmdb` holding `reads` (its adapter declares no non-GET read)."""
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    return R.edited(proxied_records(("identity", "cmdb")), "cmdb",
+                    access=R.declaration("http://soc-playground:8003", reads=reads))
+
+
+#: (reads cmdb's record lists, id, the systems a pass grants) for #1504 O3: a non-GET read cmdb's adapter does not declare
+#: leaves it out of every pass; GET and HEAD reads are not judged.
+GRANT_ROWS_1504 = [
+    pytest.param((), [("cmdb", "r"), ("identity", "r")], id="exact"),
+    pytest.param((("POST", "/hosts/_find"),), [("identity", "r")], id="extra-non-get-read"),
+    pytest.param((("GET", "/hosts/*"), ("HEAD", "/hosts/*")), [("cmdb", "r"), ("identity", "r")],
+                 id="get-and-head-are-not-judged"),
+]
+
+
 def no_proxy_records() -> Any:
     """`register_tenant`'s `records=` for a tenant none of whose systems is `http-proxy`: an empty grant, so nothing is
     signed."""
@@ -572,15 +590,17 @@ class HelperScene:
 
 
 @contextlib.contextmanager
-def helper_scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, proxied: tuple[str, ...] = ("identity",),
-                 files: dict[str, Any] | None = None, alert_mapping: Any = FIXTURE_ALERT_MAPPING, root_pad: int = 0,
-                 tenant_id: str | None = None) -> Iterator[HelperScene]:
+def helper_scene(  # noqa: PLR0913 — one knob per way a case plants its tenant (#1471 a second id, #1504 exact records)
+        tmp_path: Path, monkeypatch: Any, dsn: str, *, proxied: tuple[str, ...] = ("identity",),
+        files: dict[str, Any] | None = None, alert_mapping: Any = FIXTURE_ALERT_MAPPING, root_pad: int = 0,
+        tenant_id: str | None = None, records: Any = None) -> Iterator[HelperScene]:
     """The fixture tenant published with `proxied` (default `identity`) its only `http-proxy` systems (none: an empty
     grant) and `files` written over it (a `None` value deletes the file), registered active in `dsn` with `alert_mapping`
     saved (`None`: none, for a test of absence) and a live generation whose sign login and forge secret files exist under
     `tmp_path/secrets`, the worker's claim in the environment, and a second tenant's folder beside it holding a canary.
     `root_pad`: the data root sits that many characters deeper (a job socket's path that cannot fit). `tenant_id`: another
-    id than the fixture's, for a second scene registered in the same database (#1471)."""
+    id than the fixture's, for a second scene registered in the same database (#1471). `records`: the tenant's records
+    exactly (a `RecordsSpec`), in place of `proxied_records(proxied)` (#1504: a record whose reads differ)."""
     from defender.box import CLAIM_ENV
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
     from defender.tests.support.tenancy._active1214 import insert_generation
@@ -602,7 +622,7 @@ def helper_scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, proxied: tuple[s
         t = cleanup.enter_context(B.run_tenant(tmp_path, root, files=over, tenant_id=tenant_id))
         # The forge wiring names the fixture's served origin, so the post-step's drain publish reaches it (C23).
         register_tenant(dsn, t.tenant_id, data_root=root, generations=(), alert_mapping=alert_mapping, origin=t.origin,
-                        records=proxied_records(proxied))
+                        records=proxied_records(proxied) if records is None else records)
         fields = A.generation(t.tenant_id, tmp_path / "secrets", sign_role_id="role-1170-sign",
                               sign_secret="secret-1170-sign")
         insert_generation(dsn, t.tenant_id, fields)

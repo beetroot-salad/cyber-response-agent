@@ -1,10 +1,10 @@
 ---
 title: Deployment, service architecture, and identity
 status: >-
-  2026-11-14 revision: deployment boundaries decided (#1491): k3s, interchangeable hosts, a job that holds only its
-  pass. Target shape, not yet implemented; the #1170 shape below is current until the work order lands. Sequenced
-  after the API checkpoint.
-date: 2026-11-14
+  2026-11-14 revision: deployment boundaries decided (#1491): k3s, interchangeable hosts, a job that holds its pass
+  and the deployment's provider key (2026-11-21 amendment: model calls go direct). Target shape, not yet
+  implemented; the #1170 shape below is current until the work order lands. Sequenced after the API checkpoint.
+date: 2026-11-21
 supersedes: 2026-10-22b revision (Compose per host, one execution machine)
 ---
 
@@ -28,8 +28,9 @@ The selected direction is:
   never on a host.
 - **More than one worker per machine, workers in containers, more than one API replica** (owner, 2026-11-14).
 - **Node pools:** control nodes run services and workers; job nodes run jobs and their boxes.
-- **A job holds only its pass and reaches only the credential proxy** (B3). Model and forge calls go through the
-  proxy too (#1491).
+- **A job holds its pass and the provider key, and reaches the credential proxy and any public address** (B3), for its
+  model calls. Model calls go direct from the job; every other outbound call goes through the proxy (2026-11-21
+  amendment, #1491).
 - **Tenants are separated by credential first and by network second** (B6): pod-to-pod traffic is denied by
   default.
 - Serve static frontend assets behind Cloudflare and a TLS ingress.
@@ -61,7 +62,12 @@ Model output and writable run files are untrusted. Arbitrary model-written code 
 not trusted** although it is deterministic product code: it parses attacker text (alert payloads, tool output, model
 replies) through large parsing libraries and loads AI-written tenant adapters, so the threat model counts it as
 hijackable (class 2: "a box around the brain reduces blast radius, not probability"). The credential proxy, not the
-job, holds the model-provider key and every forge and customer-system credential (#1163, #1491). A run reaches a
+job, holds every forge and customer-system credential (#1163). **The model-provider key is the one exception (owner,
+2026-11-21):** the job holds it and calls the provider directly. The premise is that tenant adapters run in their own
+box (#1172), so model-chosen tools never run in the job's process and cannot read its environment; what remains is a
+code-execution bug in a library the job parses attacker text with, judged unlikely. That accepts the loss
+`threat-model.md` names for class 2 ("the org's key, valid indefinitely"), bounded by provider-side spend limits on
+the deployment key and by rotation (Accepted trade-offs). A run reaches a
 credentialed system through the proxy with a signed pass, and the proxy obeys only the access declaration merged to the
 tenant repository's protected `main`. Separate logical roles do not imply a security boundary unless their
 credentials, processes, network access, and filesystem access are actually restricted.
@@ -77,8 +83,10 @@ and failures visible. Budget constraints do not weaken tenant authorization or i
   host means its in-flight jobs fail and retry.
 - **B2. Every workload belongs to one zone, and a zone's reach is a short list enforced by the credentials it holds
   and by the network.** Zones: edge, application, control services, launcher, job, box (section 1).
-- **B3. A job holds only its pass and reaches only the credential proxy.** It listens on nothing and dials nothing
-  else. The pass is signed per tenant, names the job's claim, lasts at most 600 s, and is honoured only while that
+- **B3. A job holds its pass and the provider key, and reaches the credential proxy and any public address.** It
+  listens on nothing. It dials the proxy, and public addresses for its model calls; nothing inside the deployment
+  except what the deployment itself publishes (its public edge), and no other pod, node, cluster service or private
+  address. The pass is signed per tenant, names the job's claim, lasts at most 600 s, and is honoured only while that
   claim is the job row's live claim.
 - **B4. The power to start workloads is an allow-list enforced by the orchestrator.** The launcher may create only
   pods whose security-relevant fields match the deployment's job or box templates: image digest (this deploy's and
@@ -129,17 +137,23 @@ Boundary obligations (#1491), each with its observable check:
   "refused for good", the lost rows lapse and retry by today's rules.
 - **O3 — many workers, anywhere.** Two or more worker replicas on one node or several, with no host lock, data-root
   lock or shared host path.
-- **O4 — a job dials only the proxy.** From a job pod the proxy connects; another job or box pod, a worker pod,
-  PostgreSQL, OpenBao, blob, the forge, the cluster API server, cluster DNS, the node's own address (kubelet, API
-  server port, node ports), cloud metadata and an outside address do not, and no name resolves. Run on the production
-  runtime.
+- **O4 — a job dials the proxy and the outside world, nothing else inside.** From a job pod the proxy connects and a
+  model provider answers by name (resolved through the public resolvers its pod names, not cluster DNS); another job or
+  box pod, a worker pod, PostgreSQL, OpenBao, blob, the forge at its in-cluster address, the cluster API server, cluster
+  DNS, the node's own address (kubelet, API server port, node ports), another node's address, the tailnet range, cloud
+  metadata and every private, loopback and link-local address do not, and no cluster name resolves. Run on the
+  production runtime.
 - **O5 — a box reaches nothing.** The same test, with the proxy refused too.
-- **O6 — a job holds nothing but its pass:** no provider key, forge token, database, OpenBao or orchestrator
-  credential, no service-account token, nothing of another tenant.
+- **O6 — a job holds nothing but its pass and the provider key:** no forge token, database, OpenBao or orchestrator
+  credential, no service-account token, nothing of another tenant. The provider key reaches it only as a read-only
+  Secret volume (section 3, bootstrap); a box never gets it.
 - **O7 — the launcher cannot step outside the templates.** Any change to a security-relevant template field (B4's
   list) submitted with the launcher's identity is refused by the orchestrator; so are pod updates, ephemeral
   containers, PersistentVolume creation and any Secret read.
-- **O8 — one audit trail, written before send,** in PostgreSQL, by every proxy replica, through an insert-only role.
+- **O8 — one audit trail of every proxied call, written before send,** in PostgreSQL, by every proxy replica, through
+  an insert-only role. Model calls are not in it: they are recorded by the job in its run's model-call records
+  (#1549, not yet built), which a compromised job could falsify; the provider's own usage records are the check on
+  total spend.
 - **O9 — dev and CI have the production shape** on one node (k3d), with the same templates, policies and runtime
   classes.
 - **O10 — a pass dies with its claim.** A pass presented after its claim stopped being the row's live claim is
@@ -196,9 +210,9 @@ flowchart LR
         Box[Box pods]
     end
     Job -->|pass| Proxy
+    Job -->|provider key| Models[AI providers]
     Proxy -->|job route, to the claim's worker| Worker
     Worker -->|create pods, exec into boxes| K3s
-    Proxy --> Models[AI providers]
     Proxy --> Systems[Customer systems]
     Proxy --> Forge
     API -->|write-only credential role| Bao
@@ -212,9 +226,9 @@ flowchart LR
 | Application | API database role (row-level security keyed on the minter's token; it cannot mint), identity-provider client secret, blob signing key, page-grant signing key, OpenBao write-only role for system credentials (create and update a set, read metadata, look its own token up, never read a value; #1470, #1532) | PostgreSQL, blob, identity provider, OpenBao |
 | Token minter (#1547) | session store, program-credential hashes, minter database role (identity tables only), the tenant-token signing keys | PostgreSQL |
 | Artifact server | page-grant verifier, its own page-cookie key, blob read | blob |
-| Credential proxy | per-tenant pass verification, system secrets, provider keys, forge logins (from OpenBao) | OpenBao, PostgreSQL, forge, providers, customer systems, worker pods (job route only) |
+| Credential proxy | per-tenant pass verification, system secrets, forge logins (from OpenBao) | OpenBao, PostgreSQL, forge, customer systems, worker pods (job route only) |
 | Launcher (workers) | worker database role; OpenBao role reading every tenant's sign login; the orchestrator role below | PostgreSQL, OpenBao, blob, proxy, API server; accepts connections from proxy pods only |
-| Job | its pass | proxy |
+| Job | its pass, the deployment's provider key | proxy, any public address (for model calls) |
 | Box | nothing | nothing |
 
 **The launcher's orchestrator rights**, in the jobs namespace only: create, delete, get, list and watch pods; exec
@@ -237,14 +251,23 @@ them: `nodeName` refused, selector and tolerations fixed.
 | Blob service | Run and episode evidence, transcripts, reports, HTML and assets; private storage with authorized artifact delivery. |
 | Forgejo | Git storage with access control, branches, pull requests, review, and protected publication. |
 | OpenBao, proposed | Workload authentication, pass signing, tenant login secrets and customer system credentials. |
-| Credential proxy | Every outbound call a job makes: customer systems, model providers, the forge, and the job route to its helper. |
+| Credential proxy | Every outbound call a job makes except model calls: customer systems, the forge, and the job route to its helper. |
 | Worker | Claims, the per-job helper, pod lifecycle, evidence publication and terminal status. |
-| Job | The brain: LLM loop, provider client through the proxy, typed tool dispatch. |
+| Job | The brain: LLM loop, provider client (direct, with the deployment key), typed tool dispatch. |
 | Box | Model-written commands in a gVisor sandbox with no network. |
 
 Use authenticated connections and explicit network policy between services; database roles, issuer policies and
 artifact grants constrain each zone. Private networking alone is insufficient. No workload but the k3s server holds
 cluster administration.
+
+**Two layers of network policy (2026-11-21).** Each pod's outgoing rules (B3, O4) are matched by incoming rules on
+the services: PostgreSQL, OpenBao, the forge, blob and the worker pods each accept connections only from the pods that
+section 1's table says reach them, so a gap in a job pod's outgoing policy alone opens nothing. Incoming rules see
+the connecting pod only for traffic inside the cluster; a connection that leaves and comes back through the public
+edge arrives from the ingress controller. So **the public edge publishes only the frontend, the API's public routes
+and artifact serving.** Forgejo, OpenBao, Keycloak's administration and the cluster API have no public route; they
+are reached inside the cluster and, by operators, over the tailnet. A job that leaves for the internet and comes back
+in therefore finds only what any anonymous caller finds, behind the same authentication.
 
 ### 2. Human identity and backend-held sessions
 
@@ -290,8 +313,8 @@ origin access.
 
 ### 3. Brain, executor, and system access
 
-The job runs the brain: trusted product code that calls the AI provider (through the proxy) and dispatches a fixed
-tool surface. Model-selected shell commands go into the job's box, never into the job or an adapter process. A
+The job runs the brain: trusted product code that calls the AI provider directly and dispatches a fixed tool
+surface. Model-selected shell commands go into the job's box, never into the job or an adapter process. A
 compromised job can still use its own pass until its claim ends; the typed tool table limits normal model influence,
 not code execution inside the job.
 
@@ -299,9 +322,9 @@ The box provides the working directory and bash and file tools. Approve its moun
 and disk budgets; exclude credentials, runtime sockets, and network access. gVisor is the backend; a microVM backend
 remains possible behind the same template rule.
 
-Adapters expose typed operations over an accepted tenant and configured system. Trusted code chooses endpoint,
-identity, executable, and permitted operations, and every credentialed call goes through the proxy. MCP clients
-connect only to approved servers. Learning receives only the integrations its workload needs.
+Adapters expose typed operations over an accepted tenant and configured system. Trusted code chooses endpoint, identity,
+executable, and permitted operations, and every credentialed call except the job's model call goes through the proxy.
+MCP clients connect only to approved servers. Learning receives only the integrations its workload needs.
 
 #### Current shape: brain confinement as specified by #1170
 
@@ -333,16 +356,18 @@ facts, passes, boxes, records and hand-ins, with its per-claim state in memory. 
   helper of the claim the pass names, and that helper accepts only a pass it minted (it keeps their hashes) for a claim
   it holds live. A reused worker address, a policy gap or a compromised proxy then reaches nothing but replays of
   passes it has already seen.
-- **Job-route limits:** per claim, a cap on concurrent requests and on bytes, so one job cannot starve other tenants'
-  model calls; a deadline per request of its stated timeout plus a margin, under a hard ceiling; size caps enforced by
+- **Job-route limits:** per claim, a cap on concurrent requests and on bytes, so one job cannot starve other jobs'
+  requests; a deadline per request of its stated timeout plus a margin, under a hard ceiling; size caps enforced by
   counting bytes.
 - **Lost answers:** a request that acts (box start, batch start, records, store writes) carries an id, and the helper
   answers a repeat with its first answer.
 - **The proxy stays dumb on this route:** it checks the pass and claim, takes the destination from the row (never
   from the job), and passes bytes through unread (B8). Typed parsing happens in the helper.
-- **Bootstrap:** the first pass is in a Secret named after the claim, mounted into the job pod; admission pins a job
-  pod's secret volume to its own claim's name and refuses secret volumes on boxes. Later passes come from the helper on
-  request. Leftover Secrets are deleted by name by the row-based sweep.
+- **Bootstrap:** the first pass is in a Secret named after the claim, mounted into the job pod. The provider key is one
+  deployment Secret in the jobs namespace, written by the deploy, mounted read-only into every job pod and read by no
+  workload identity (the launcher's role cannot read Secrets). Admission allows a job pod exactly those two secret
+  volumes, its own claim's and the provider key's, and refuses secret volumes on boxes. Later passes come from the
+  helper on request. Leftover Secrets are deleted by name by the row-based sweep.
 - **The job ends when its claim does.** The job renews its pass every minute; a refused renewal, or a few failed ones
   in a row, ends it. A starting worker fails the rows it held before (its helpers' state was in memory), so their
   passes are refused at once. This replaces "dies with its starter" and needs nothing from the API server.
@@ -415,9 +440,11 @@ the helper's staged facts and uploads are keyed on it. The worker's address on t
 
 The worker reports progress, validates collected outputs, transfers artifacts, and commits terminal state. The job
 cannot declare its own success beyond its typed outcome record. Fenced writes reject stale claims, and the claim check
-at the proxy stops a stale job's model spend and system calls at its next request. A stopping worker hands its rows
-back so they are retried within seconds; each redeploy during an investigation uses one of its three attempts. A worker
-restart ends its jobs, which retry.
+at the proxy stops a stale job's system calls at its next request. Its model calls go direct: an honest stale job stops
+within about a minute, when its pass renewal is refused; a compromised one keeps the key and spends with it from
+anywhere, pod or not, until the key is revoked. A stopping worker hands its rows back so they are retried within
+seconds; each redeploy during an investigation uses one of its three attempts. A worker restart ends its jobs, which
+retry.
 
 **Worker stop timeout: 45 s.** A stopping worker gives its jobs `stop_grace` (30 s) to end, then writes each row's last
 figures. The worker pod sets `terminationGracePeriodSeconds: 45` (more than `stop_grace` plus the writes); a shorter
@@ -435,7 +462,8 @@ guarantee.
 | Human login, sessions, membership used for token issuance | Product identity provider; exact enrollment ownership remains to settle |
 | Published lessons, queries, agent knowledge, reviews, retained branches | Tenant repositories in Forgejo |
 | Run and episode outputs and large immutable evidence | Blob storage, under claim-scoped keys |
-| Provider and system secrets, tenant login secrets, workload grants | OpenBao |
+| System secrets, tenant login secrets, workload grants | OpenBao |
+| The deployment's provider key | A cluster Secret in the jobs namespace (encrypted at rest), written by the deploy |
 | Job scratch | The job's ephemeral volume, deleted with its pod |
 
 What moves off hosts, item by item (B1, B8; #1082 owns the move to blob):
@@ -499,16 +527,17 @@ before deployment.
 - **Stateless replicas behind one Service.** Network policies select the proxy pods (policies match after address
   translation); jobs reach the Service's cluster address with no DNS, and the proxy's certificate names that address.
 - **Claim check (O10).** In the transaction that writes the audit line before sending, the proxy checks that the
-  pass's claim is the row's live claim. The check runs once per request, at its start: a model call already streaming
-  runs to its upstream timeout after the claim dies. The proxy's role gains read on claim rows.
+  pass's claim is the row's live claim. The check runs once per request, at its start. The proxy's role gains read on
+  claim rows.
 - **Database outage.** Audit is fail-closed, so with audit and the claim check both in PostgreSQL an outage stops
-  every proxied call, model calls included, and a stolen pass gains nothing then. Those failures end as provider
-  failures (#1491 decision 3). An outage longer than a few renewal periods ends every job.
+  every proxied call, and a stolen pass gains nothing then. Model calls go direct and continue. An outage longer than
+  a few renewal periods ends every job.
 - **Egress, decided per route (#1501).** Tenant-declared system routes refuse private, loopback, link-local, metadata
   and cluster addresses, judged on the address actually connected, on every leg, with no redirects. Forge and provider
-  targets come from proxy configuration only. An egress policy on proxy pods allows the named OpenBao, PostgreSQL and
-  forge and denies other cluster and node addresses.
-- **Model and forge calls** go through the proxy (#1491); the post-step's raw forge token is retired.
+  targets come from proxy configuration only (providers are no longer proxy targets). An egress policy on proxy pods
+  allows the named OpenBao, PostgreSQL and forge and denies other cluster and node addresses.
+- **Forge calls** go through the proxy (#1491); the post-step's raw forge token is retired. **Model calls do not**
+  (2026-11-21 amendment): the job calls the provider with the deployment key.
 - The lab and playground-v2's frozen proxy run as a second named proxy deployment in their own namespace, with their
   own policies; frozen runs start no job pods.
 
@@ -550,9 +579,9 @@ claim is live (O10). Automation may create knowledge branches and pull requests;
 | Box | Nothing: no network, no credentials, no token. |
 | Operator to nodes | Tailscale SSH identity and least-privilege host policy, separate from product tenant membership. |
 
-**What a compromised node reaches (decision B).** A compromised job node yields the passes and run data of the jobs on
-it at that moment (passes die with their claims), plus the ids and tenant labels of pods cluster-wide (a kubelet may
-list pods). A compromised control node, or launcher, reaches every tenant.
+**What a compromised node reaches (decision B).** A compromised job node yields the provider key and the passes and run
+data of the jobs on it at that moment (passes die with their claims), plus the ids and tenant labels of pods cluster-
+wide (a kubelet may list pods). A compromised control node, or launcher, reaches every tenant.
 
 ### 8. Tenant lifecycle and operator commands
 
@@ -631,8 +660,10 @@ claim-scoped keys with confined readers.
    run: several nodes and a k3s server restart. It is a one-time check, not kept; the lasting checks of
    O4, O5 and O7, in CI as well, are the launcher's own tests in work item 7.
 2. The claim on the row; passes name their claim; the proxy's claim check and audit in PostgreSQL.
-3. #1491: model and forge calls through the proxy, the raw forge token retired, proxy replicas, per-route egress
-   (#1501).
+3. #1491: forge calls through the proxy, the raw forge token retired, proxy replicas, per-route egress (#1501). Model
+   calls stay direct from the job; the job pod's egress policy (proxy, plus outside addresses with every private,
+   cluster, node, tailnet, metadata and link-local range refused) and its provider-key Secret land with work item 7's
+   templates. #1172 (adapters in their own box) is the premise of the direct key and lands before production traffic.
 4. Tenant login secrets into OpenBao; the OpenBao address as a setting; a lifecycle with no host steps.
 5. The job route through the proxy (#1469 dissolved; #1381 is folded into #1082 instead, as #1546's staged rows).
 6. Operator commands as jobs, for whatever #1471 did not cover.
@@ -657,11 +688,19 @@ claim-scoped keys with confined readers.
 
 - A job node compromise reveals in-flight jobs' data on that node.
 - A worker restart ends its jobs (they retry).
-- A database outage stops every proxied call, model calls included, and one longer than a few renewal periods ends
-  every job. This retires #1170's O6 ("a database outage stops no pass").
+- A database outage stops every proxied call (model calls continue: they go direct), and one longer than a few renewal
+  periods ends every job. This retires #1170's O6 ("a database outage stops no pass").
 - A proxy restart or rollout fails in-flight helper requests of every job (box faults the run already handles).
 - Box commands in flight fail when the k3s server restarts.
 - Singletons, the k3s server included, are single points of failure; downtime accepted.
+- **Every job pod holds the deployment's provider key** (2026-11-21). A code-execution bug in the job (threat model
+  class 2) yields a key that spends from anywhere until it is revoked at the provider, across every tenant at once. The
+  intended bound is a provider-side spend limit on that key, not yet set (Remaining decisions), and rotation: revoke the
+  key at the provider and replace the Secret (running jobs keep the old key until it is revoked). Taking the key back
+  out of the job is the earlier proxy design (#1491 r5), kept on the issue.
+- **A job can reach the internet.** A compromised job can send its run's data out directly; with the proxy as its only
+  exit it could not. Accepted with the key, on the same premise (#1172).
+- **Model calls are not in the proxy's audit trail,** and the claim check does not stop a job's model calls.
 
 ## Remaining decisions
 
@@ -671,6 +710,15 @@ claim-scoped keys with confined readers.
 - Issuer bootstrap and live Forgejo integration; when to adopt automatic unsealing.
 - Exact artifact CSP values and the complete inventory of HTML-producing paths.
 - Blob and observability backends, retention, privacy settings, and spending limits.
+- The provider-side bound on the deployment key (2026-11-21): a hard cap where the provider offers one per key, and
+  whether keys are per deployment, per tenant or per provider workspace (one deployment key cannot attribute spend
+  to a tenant). Whether provider caps are hard and per key is unprobed.
+- One namespace for every tenant's jobs, or one per tenant (2026-11-21). Per tenant buys orchestrator-enforced
+  resource limits and network rules per tenant; it costs the launcher rights across namespaces and a namespace per
+  tenant to create and delete. Revisit when there are several live tenants.
+- How tenant reviewers reach the forge, if they need its web pages: Forgejo has no public route (section 1).
+- The adapter boundary (#1172) must keep adapters off the job pod's network: a sidecar in the job pod would share its
+  internet egress (the same ground as decision E's rejected alternative).
 - Resumable learning episodes, needed to pause between siblings or to survive restarts.
 
 ## Related architecture
@@ -682,7 +730,11 @@ ordered checklist. #1502 (containerisation) is rewritten as work item 7; #1491 i
 
 ## Grounding and review
 
-Revision 2026-11-14, at source base `a8143a4bc`. The boundaries design went through four independent reviews (general,
+Amendment 2026-11-21, at source base `cf470b403` (owner, #1491): model calls go direct from the job with the
+deployment key; the job's egress gains outside addresses. The #1509 spike probed only the proxy-only policy: the new
+egress shape (an `ipBlock` with exceptions under k3s's bundled policy controller, on runsc) and name resolution
+through public resolvers with `dnsPolicy: None` are unprobed (B-G12). Revision 2026-11-14, at source base
+`a8143a4bc`. The boundaries design went through four independent reviews (general,
 trust boundaries, and two on the helper channel), each sorted by a fresh reader before revision. Kubernetes and gVisor
 behaviour was then probed by the spike in the dev container's own Docker daemon (B-G7: the dev leg holds; several nodes and a
 k3s restart stay unprobed).
@@ -779,6 +831,14 @@ claims:
     probe_kind: read
     observed: "as claimed"
     verdict: holds
+  # 2026-11-21 amendment (model calls direct), base cf470b403
+  - id: B-G12
+    kind: reachability
+    claim: "Under k3s's bundled policy controller and runsc, a job pod whose egress policy allows the proxy pods and 0.0.0.0/0 except the cluster, node, tailnet (100.64.0.0/10), private, loopback, link-local and metadata ranges reaches a model provider by name through the public resolvers its dnsPolicy None names, and none of O4's refused targets."
+    probe: "not run: owed to work item 7's launcher tests (O4)"
+    probe_kind: executed
+    observed: "-"
+    verdict: deferred
   # 2026-10-22 and 2026-10-22b revisions
   - id: AUTH-C1
     kind: referential

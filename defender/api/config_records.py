@@ -30,7 +30,7 @@ from defender.tenancy import TenantRepository
 from defender.tenancy.record_refusals import NoSuchTenant, TenantNotActive
 from defender.tenancy.record_values import SystemRecord
 
-from .models import CaseRecord, CaseRecordPut, CatalogAdapter, SavedSystem, System, SystemPut
+from .models import CaseRecord, CaseRecordPut, CatalogAdapter, CatalogRead, SavedSystem, System, SystemPut
 from .ports import CredentialsUnused, Principal, SecretStoreRefused, SecretStoreUnavailable
 
 _logger = logging.getLogger(__name__)
@@ -93,7 +93,9 @@ class ConfigRecords:
 
     async def list_adapters(self) -> list[CatalogAdapter]:
         return [CatalogAdapter(adapter_id=e.adapter_id, display_name=e.display_name, settings_keys=list(e.stored_keys),
-                               sample_settings=None if e.sample_settings is None else dict(e.sample_settings), lab_example=e.example)
+                               sample_settings=None if e.sample_settings is None else dict(e.sample_settings), lab_example=e.example,
+                               reads=None if e.reads is None else [CatalogRead(method=m, path=p) for m, p in e.reads],
+                               reads_unusable=e.reads_unusable, reference=e.reference)
                 for e in self._catalog.entries()]
 
     async def list_systems(self, tenant_id: TenantId, *, after: str | None, limit: int) -> list[SystemRecord]:

@@ -2,7 +2,7 @@
 // address, the server and the shell's actions. A screen has no other way to the network, storage or the address (PR2);
 // the screens' own compile and the source check enforce it (F8).
 import { useInfiniteQuery, useQuery, type QueryClient } from "@tanstack/react-query";
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
 import { valuesOf, type ShapeName, type ShapeValues } from "../addresses";
 import { isPageOf } from "./page";
 import type { AcceptResult, Gone, Person, ReadBody, ReadKey, ReadParams, ReadResult } from "./types";
@@ -170,6 +170,10 @@ class LaterPageFailed extends Error {}
  */
 export function usePagedRead<K extends PagedKey>(key: K, params: ReadParams<K>): PagedRead<K> {
   const { read, queryClient } = useShell();
+  const shown = useRef<readonly unknown[]>([key, params]); // the read the hook shows, once it is drawn
+  useEffect(() => {
+    shown.current = [key, params];
+  });
   const result = useInfiniteQuery(
     {
       queryKey: [key, params],
@@ -205,6 +209,9 @@ export function usePagedRead<K extends PagedKey>(key: K, params: ReadParams<K>):
   const more =
     first.kind === "ok" && result.hasNextPage && later === null
       ? () => {
+          // a press drawn before the shown read's later page failed does nothing: that page stays failed for the load
+          // (#1604). The shown read's, not this render's: `fetchNextPage` acts on the read the hook shows now
+          if (queryClient.getQueryState(shown.current)?.status === "error") return;
           void result.fetchNextPage({ cancelRefetch: false });
         }
       : null;

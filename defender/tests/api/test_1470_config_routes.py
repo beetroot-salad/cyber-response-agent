@@ -32,12 +32,16 @@ from defender.tests.support.api._config1470 import (
 from defender.tests.support.api._openbao1470 import ScriptedOpenBao
 from defender.tests.support.api._server1083 import ANN, REPO, A, B
 from defender.tests.support.tenancy import _systems1366 as R
+from defender.tests.systems import _reads1504 as X
 from defender.tests.systems._rules1470 import write_broken_adapter
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
 LAB = {"ticket", "cmdb", "change-mgmt", "identity", "threat-intel", "host-state"}
 REAL = {"jira", "servicenow", "elastic"}
+#: FORCED (#1504 O4; the design names no field for the reference text): the item field carrying the adapter's reference
+#: file text. Requested for `_reads1504`; mirrored here until it lands.
+REFERENCE_FIELD = "reference"
 
 
 def _served(version: int, *, has_credentials: bool = False, settings: dict[str, str] | None = None,
@@ -74,14 +78,20 @@ def _judged(response: httpx.Response) -> list[str]:
 # --- O2: the catalog -------------------------------------------------------------------------------------------------
 
 async def test_o2_the_catalog_lists_every_adapter_with_what_a_record_of_it_stores(scripted):
-    """`GET /adapters`: every catalog adapter with display name, settings keys, sample settings and the lab flag. (O2)"""
+    """`GET /adapters`: every catalog adapter with display name, settings keys, sample settings, the lab flag, its declared
+    non-GET reads (`{method, path}`, `[]` for none), `reads_unusable` (null for each) and its reference text. (O2; A6.3)"""
     got = await scripted.get("/adapters")
     assert got.status_code == 200, got.text
     items = {i["adapter_id"]: i for i in got.json()["items"]}
     assert set(items) == LAB | REAL
     assert {a for a, i in items.items() if i["lab_example"]} == LAB
-    assert all(set(i) == {"adapter_id", "display_name", "settings_keys", "sample_settings", "lab_example"}
-               for i in items.values())
+    assert all(set(i) == {"adapter_id", "display_name", "settings_keys", "sample_settings", "lab_example",
+                          X.API_FIELD, X.UNUSABLE_FIELD, REFERENCE_FIELD} for i in items.values())
+    assert all(i[X.UNUSABLE_FIELD] is None for i in items.values())  # every checkout adapter has a usable list (A6.3)
+    shown = {a: [(r["method"], r["path"]) for r in i[X.API_FIELD]] for a, i in items.items()}
+    assert shown == {a: list(X.ELASTIC_READS if a == "elastic" else X.THREAT_INTEL_READS if a == "threat-intel" else ())
+                     for a in items}
+    assert all(all(f"## {s}" in i[REFERENCE_FIELD] for s in X.SECTIONS) for i in items.values())
     assert items[TICKET]["display_name"] == TICKET_NAME
     assert sorted(items[TICKET]["settings_keys"]) == sorted(TICKET_SETTINGS)
     assert items["host-state"]["settings_keys"] == []
@@ -125,8 +135,8 @@ async def test_o2_the_served_catalog_is_exactly_the_checkouts_adapters(scripted)
 
 @pytest.mark.parametrize("adapter", sorted(CATALOG_KEYS))
 async def test_o2_each_adapters_served_entry_is_what_its_module_declares(scripted, adapter):
-    """Per adapter: `display_name` is its module's `DISPLAY_NAME`, `settings_keys` exactly the keys its module requires
-    (`<PREFIX>_<key>`, none missing, none extra), `lab_example` its `EXAMPLE` flag. (O2; base
+    """Per adapter: `display_name`, `settings_keys` (`<PREFIX>_<key>`, none missing, none extra) and `lab_example` are its
+    module's declarations; `reads` its declared list; `reference` its `<module stem>.md` text. (O2; #1504 O4; base
     `test_1366_o2_the_catalog_lists_every_adapter_with_its_display_name_exact_required_keys_and_example_mark`)"""
     module = _declared(adapter)
     declared = {f"{module.PREFIX}_{k}" for k in module.REQUIRED_CONFIG_KEYS}
@@ -136,6 +146,9 @@ async def test_o2_each_adapters_served_entry_is_what_its_module_declares(scripte
     assert set(item["settings_keys"]) == declared, (adapter, item)
     assert len(item["settings_keys"]) == len(declared), (adapter, item)
     assert item["lab_example"] is bool(module.EXAMPLE), (adapter, item)
+    assert [(r["method"], r["path"]) for r in item[X.API_FIELD]] == list(X.declared_reads(adapter)), (adapter, item)
+    assert item[X.UNUSABLE_FIELD] is None, (adapter, item)  # a usable list carries no reason (A6.3)
+    assert item[REFERENCE_FIELD] == (REPO / "defender/integrations" / f"{module.__name__.rsplit('.', 1)[-1]}.md").read_text("utf-8")
 
 
 #: Every adapter module the checkout carries (the catalog's members, by what is on disk).
@@ -311,6 +324,7 @@ async def test_d8_a_write_is_judged_over_the_catalog_built_at_start_reading_no_a
     folder = checkout / "integrations"
     write_broken_adapter(folder, counter)
     shutil.copy(REPO / "defender/integrations/ticket_adapter.py", folder / "ticket_adapter.py")
+    (folder / "ticket_adapter.md").write_text("## Credential\n\nNone known.\n\n## Pitfalls\n\nNone known.\n")  # #1504 O5
     monkeypatch.setenv("DEFENDER_DIR", str(checkout))
     saved_path = list(sys.path)  # the copied adapter puts its checkout's parent on sys.path when imported
     try:

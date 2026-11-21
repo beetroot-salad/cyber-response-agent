@@ -41,6 +41,8 @@ IDP_ADAPTER = '''\
 from defender.kit import transport
 from defender.kit.verbs import VerbContext, verb
 
+READ_ROUTES = ()  # #1504 O1: its records carry a declaration, judged against this list
+
 
 def check_settings(*_a, **_k):
     return None

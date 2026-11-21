@@ -21,6 +21,7 @@ import pytest
 from defender.tests.support.jobs._jobs1342 import fixed_clock, register_tenant
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — the fixture
 from defender.tests.support.tenancy import _systems1366 as R
+from defender.tests.systems import _reads1504 as X
 from defender.tests.tenancy.tenant_1108_p4._support import published_tenant, second_tenant
 
 REPO = Path(__file__).resolve().parents[4]
@@ -482,6 +483,8 @@ def test_1366_c2_a_write_to_the_case_system_is_stored_only_if_a_write_route_cove
         assert not R.lines_naming(said, "system ticket settings"), said
         if name in COVER_CAUSE:
             assert R.lines_naming(said, "system ticket access", COVER_CAUSE[name]), said
+        for _method, path in (r for r in reads if r[0] not in ("GET", "HEAD")):  # #1504 O3: the read check's sentence
+            assert R.lines_naming(said, "system ticket access", path, X.EXTRA_WORD), said
 
 
 @pytest.mark.postgres
@@ -845,6 +848,33 @@ def test_1366_p5_a_delete_carries_the_generation_and_a_re_create_takes_the_next_
     assert op.kv.written() == [f"{op.tid}/identity/g1"]
     # #1471 B3: `check <id>`'s "no credentials at the current generation" line retired with it (stale, updated); the
     # credentials stay at g1 while identity is at g5, which the line above and `numbers` pin.
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize(("access", "stored"), [
+    pytest.param(R.declaration("https://elasticsearch.example:9200", scheme="basic", reads=(("POST", "/*/_search"),)),
+                 True, id="reads-differ-from-the-adapters"),
+    pytest.param("access: [http-proxy\nbase: {\n", False, id="control-unparseable-declaration"),
+])
+def test_1504_o3_a_credential_is_stored_for_a_record_whose_reads_differ_but_not_for_one_that_does_not_parse(
+        access, stored, fixture_tenant, migrated_database, tmp_path, capsys, monkeypatch):  # noqa: F811 — the fixture
+    """The credential slot parses the stored declaration raw: a record the reads rule refuses (an upgrade changed the
+    adapter's list) still takes its credential, so the admin can fix the record in either order; an unparseable one does
+    not. The write of that same record is refused, so the record is mismatched, not sound. (O3, design: raw parses stay raw)"""
+    monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
+    config = R.FIXTURE_FOLDERS["elastic"][0]
+    register_tenant(migrated_database, fixture_tenant.tenant_id, data_root=fixture_tenant.data_root,
+                    records=R.edited(R.fixture_records(), "elastic", settings=config, access=access))
+    op = R.Admin(fixture_tenant.tenant_id, migrated_database, tmp_path / "op", capsys)
+
+    rc, said = op.set_credentials("elastic", {"username": "u", "password": "p"}, for_version=1)
+
+    assert (rc == 0) is stored, said
+    assert op.kv.written() == ([f"{op.tid}/elastic/g1"] if stored else []), op.kv.written()
+    if stored:
+        refused, why = op.set_system("elastic", replaces=1, config=config, access=access)
+        assert refused != 0, why
+        assert R.lines_naming(why, "system elastic access", "POST /_query", X.MISSING_WORD), why
 
 
 # --- DC8: disable and set-case via the store ---------------------------------------------------------------------------

@@ -302,6 +302,7 @@ RESIDUE = {
     ("system_rules.registry", "read_roster", "read_bytes_capped"): (1, "nonrecord", ('path',)),
     ("system_rules.catalog", "_cold_declarations", "read_bytes_capped"): (1, "nonrecord", ('path',)),
     ("system_rules.base_files", "render", "read_bytes_capped"): (1, "nonrecord", ('path',)),
+    ("system_rules.catalog", "_reference_text", "read_bytes_capped"): (1, "nonrecord", ('path',)),
 }
 
 

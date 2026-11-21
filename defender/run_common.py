@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from defender.records.formats import AlertMapping
     from defender.records.job_lane import Launched
     from defender.records.formats import ResumeWorld
+    from defender.systems.catalog import Catalog
     from defender.systems.run_tenant import RunTenant, TenantVerdict
     from defender.systems.verbs import RosterRead
     from defender.tenancy.record_values import TenantRecords
@@ -640,7 +641,7 @@ def copy_knowledge(tenant: tenancy.Tenant, source: KnowledgeSource, run_id: str)
 
 def run_tenant_or_exit(
     tenant: tenancy.Tenant, *, defender_dir: Path | None = None, dispatches_lead_zero: bool,
-    records: TenantRecords, copy: RunCopy | None = None,
+    records: TenantRecords, catalog: Catalog, copy: RunCopy | None = None,
 ) -> RunTenant:
     """The accepted tenant ready to run — its grants and lead-zero dispatch from run start's
     readiness function, over the run's own copy of its knowledge (#1108 P4, O-B: settings,
@@ -651,7 +652,9 @@ def run_tenant_or_exit(
     lead. Without `copy` (a direct caller), the grants are resolved over the tenant's own
     folder. Its systems, access and case record are the tenant's current `records` (#1366 O6),
     read once at setup (`read_records`; inside a job container, the ones its host helper read and
-    handed over). `defender_dir` is not read: the code tree holds no tenant knowledge (O1)."""
+    handed over). `catalog` is the one the caller built over the run's single roster read: a record's
+    reads are judged against its adapters' lists (#1504 O3). `defender_dir` is not read: the code tree
+    holds no tenant knowledge (O1)."""
     from defender.systems import run_tenant as run_tenant_mod
 
     del defender_dir
@@ -660,7 +663,7 @@ def run_tenant_or_exit(
               "stage_token": copy.token})
     try:
         return run_tenant_mod.run_tenant_for(
-            tenant, dispatches_lead_zero=dispatches_lead_zero, records=records, **roots)
+            tenant, dispatches_lead_zero=dispatches_lead_zero, records=records, catalog=catalog, **roots)
     except run_tenant_mod.TenantRefused as refusal:
         sys.exit(f"[run.py] this run's tenant {tenant.id!r} cannot be used: {refusal}")
 

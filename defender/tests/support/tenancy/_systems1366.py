@@ -571,11 +571,18 @@ class ExportRecords(RecordsPort):
         return None if folder is None else derive(folder)
 
 
-def run_tenant_for(tenant: Any, *, records: Any = DERIVED, settings_root: Path | str | None = None, **kwargs: Any) -> Any:
-    """Production's `run_tenant_for(tenant, ..., records=TenantRecords)` (the run's tenant is built from records, no
-    folder read for systems, access or case; grants still come from `settings_root`). `records` defaults to DERIVED over
-    `settings_root` (else the tenant's own `settings`); `None` is a tenant not imported; a `RecordsSpec` is exactly that."""
+def run_tenant_for(tenant: Any, *, records: Any = DERIVED, settings_root: Path | str | None = None,
+                   catalog: Any = None, **kwargs: Any) -> Any:
+    """Production's `run_tenant_for(tenant, ..., records=TenantRecords, catalog=Catalog)` (the run's tenant is built from
+    records, no folder read for systems, access or case; grants still come from `settings_root`). `records` defaults to
+    DERIVED over `settings_root` (else the tenant's own `settings`); `None` is a tenant not imported; a `RecordsSpec` is
+    exactly that. `catalog` is the one the caller holds (#1504 O3: the builder takes the adapter's list from it); with none
+    the wrapper builds one over the checkout's roster, once per call, as a run's caller does. Test support only: it passes a
+    catalog, the rule that reads it is production's."""
+    from defender.system_rules import Catalog
     from defender.systems.run_tenant import run_tenant_for as production
+
+    kwargs["catalog"] = catalog if catalog is not None else Catalog.of_checkout()
 
     if records is DERIVED:
         records = derive(Path(settings_root) if settings_root is not None else Path(tenant.settings))

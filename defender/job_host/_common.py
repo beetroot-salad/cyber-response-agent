@@ -377,17 +377,20 @@ def _copied_steps(session: Session, facts: LaunchFacts, copy_id: str) -> None:
     """`tenant_launch_steps` from the run copy on (P-1 steps 6-12), the copy's removal on `facts.cleanup`."""
     from defender import run_common
     from defender.records.formats import TenantRefused
+    from defender.systems.catalog import Catalog
 
     facts.copy = _launch_step("knowledge_copy", run_common.copy_knowledge, facts.accepted, facts.source, copy_id)
     facts.cleanup.callback(facts.copy.remove)
+    # The catalog's roster, read once and cold (no adapter code runs here, N7): the records' reads are judged against
+    # its adapters' lists (#1504 O3), then the tenant's systems are narrowed to it.
+    facts.roster = _launch_step("roster", run_common.run_roster, session.defender_dir)
     try:
         facts.run_tenant = _launch_step("run_tenant", run_common.run_tenant_or_exit, facts.accepted, dispatches_lead_zero=True,
-                               records=facts.current, copy=facts.copy)
+                               records=facts.current, copy=facts.copy, catalog=Catalog(facts.roster))
     except TenantRefused as refused:
         raise StepRefused("run_tenant", f"this job's tenant cannot be used: {refused}") from None
-    # The tenant's systems over the catalog (read cold: no adapter code runs here, N7), its grants narrowed to the
-    # systems it has enabled records of (#1366 R12), so the pass names none it has not; the container warns.
-    facts.roster = _launch_step("roster", run_common.run_roster, session.defender_dir)
+    # Its grants narrowed to the systems it has enabled records of (#1366 R12), so the pass names none it has not; the
+    # container warns.
     facts.verdict = _launch_step("tenant_verdict", run_common.tenant_verdict, facts.run_tenant, facts.roster, warn=False)
     facts.reads = grant(facts.verdict.tenant)
     facts.signing = set_up_signing(session, facts.accepted, facts.records)  # every job, whatever its grant (W-D8)

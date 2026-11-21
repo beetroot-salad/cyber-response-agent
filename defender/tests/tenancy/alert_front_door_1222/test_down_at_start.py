@@ -37,6 +37,7 @@ from defender.tests.tenancy.alert_front_door_1222.test_correlation_endings impor
 )
 from defender.tests.e2e import _lead_zero_808 as LZ
 from defender.tests.e2e import _replay_harness as RH
+from defender.tests.systems import _reads1504 as X1504
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S7
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H20
 
@@ -274,7 +275,9 @@ def _planted_tree(root: Path, adapters: dict[str, str]) -> Path:
     folder = tree / "integrations"
     folder.mkdir()
     for system, source in adapters.items():
-        (folder / f"{system.replace('-', '_')}_adapter.py").write_text(source, encoding="utf-8")
+        # #1504 (conflict update, O1/O3): a stand-in for a catalog adapter declares the reads its real adapter does, since the
+        # run's tenant is built over this tree's catalog and the fixture's records carry those reads (appended: cold AST read).
+        (folder / f"{system.replace('-', '_')}_adapter.py").write_text(source + X1504.reads_declaration(system), encoding="utf-8")
     return tree
 
 

@@ -73,6 +73,7 @@ from defender.investigation import ticket_writer as _default_ticket_writer  # no
 from defender.records import run_end  # noqa: E402
 from defender.tenancy import run_knowledge  # noqa: E402
 from defender.systems import case_system, system_status  # noqa: E402
+from defender.systems.catalog import Catalog as _Catalog  # noqa: E402
 from defender._agent_role import AgentRole  # noqa: E402
 from defender.systems.run_tenant import Admitted, RunTenant, host_tenant  # noqa: E402
 from defender.tenancy.record_values import TenantRecords  # noqa: E402
@@ -1045,8 +1046,12 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
         pin = _family_pin(ns, pin, episode)
         # One readiness check, shared by the old-manifest judge (only for a manifest recording
         # no corpus patterns) and the run; resolved over the run's own copy of its knowledge.
+        # The adapters roster this run reads (the injected one, or the checkout's), read once, on first ask; the one
+        # catalog over it judges the tenant's records (#1504 O3) and its systems (R12) alike.
+        roster_of = functools.cache(lambda: roster if roster is not None else _run_roster(DEFENDER_DIR))
         tenant_of = functools.cache(lambda: _resolve_run_tenant(
-            accepted, dispatches_lead_zero=ns.episode is None, records=current, copy=copy))
+            accepted, dispatches_lead_zero=ns.episode is None, records=current, copy=copy,
+            catalog=_Catalog(roster_of())))
         world = _resume_target(ns, episode=episode, tenant=lambda: tenant_of(),
                                arm_ids=(lambda: None) if episode_runs is None
                                else episode_runs.arm_ids)
@@ -1082,8 +1087,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
             # The tenant's systems over the catalog this run reads (the injected roster, or the
             # checkout's, read once here): R12's grants x records verdict (#1366), the grants
             # narrowed to the systems the tenant has records for.
-            verdict = _tenant_verdict(
-                tenant_of(), roster if roster is not None else _run_roster(DEFENDER_DIR))
+            verdict = _tenant_verdict(tenant_of(), roster_of())
             tenant = verdict.tenant
             # The run's one judgement of its systems (#1256), before the run is made: the roster
             # this run reads (the injected one, or the checkout's, read once here), judged by the
@@ -1580,9 +1584,10 @@ def _container_verdict(  # noqa: PLR0913 — `_container_systems`' inputs, the c
     """`_container_systems` with the whole grants x records verdict (its ignored grants too, #1471 R4),
     over the code tree `defender_dir` (`DEFENDER_DIR`); `warn` logs each ignored grant."""
     tree = defender_dir if defender_dir is not None else DEFENDER_DIR
+    read = roster if roster is not None else _run_roster(tree)
     tenant = _resolve_run_tenant(accepted, dispatches_lead_zero=dispatches_lead_zero, records=records,
-                                 copy=copy)
-    verdict = _tenant_verdict(tenant, roster if roster is not None else _run_roster(tree), warn=warn)
+                                 copy=copy, catalog=_Catalog(read))
+    verdict = _tenant_verdict(tenant, read, warn=warn)
     systems = _judge_start(verdict.tenant, defender_dir=tree, roster=verdict.systems.roster,
                            known_ids=known_ids, catalog=verdict.systems.catalog.roster)
     return verdict, systems

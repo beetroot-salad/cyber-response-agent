@@ -177,6 +177,7 @@ def _shared(scratch: Path) -> Path:
 def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     from defender import run_common
     from defender.records.formats import TenantRefused
+    from defender.systems.catalog import Catalog
     from defender.systems.run_tenant import run_tenant_for
     from defender.investigation.publish_launch import LAUNCH_TRIGGER
     from defender.tenancy import run_knowledge
@@ -189,15 +190,17 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     # container, which reads no database, is handed them in the launch facts, and so is each sibling's run.
     current = setup_step(run_common.read_records, records, accepted.id)
     source = settle_knowledge(session, accepted, records, trigger=LAUNCH_TRIGGER)
+    # The catalog's roster, read cold (no adapter code, N7) once: the records' reads are judged against it (#1504 O3)
+    # and the tenant's systems are narrowed to it (#1366 R12).
+    roster = setup_step(run_common.run_roster, session.defender_dir)
     try:
         export = session.inside_tenant(accepted.export_folder(source.commit))
-        ready = run_tenant_for(accepted, dispatches_lead_zero=False, records=current,
+        ready = run_tenant_for(accepted, dispatches_lead_zero=False, records=current, catalog=Catalog(roster),
                                agent_root=export / run_knowledge.AGENT_HALF,
                                settings_root=export / run_knowledge.SETTINGS_HALF)
     except (TenantRefused, Refused) as refused:
         raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
-    # Narrowed to the systems the tenant has enabled records of (#1366 R12), read cold (no adapter code, N7).
-    roster = setup_step(run_common.run_roster, session.defender_dir)
+    # Narrowed to the systems the tenant has enabled records of (#1366 R12), over the same roster.
     ready = setup_step(run_common.tenant_verdict, ready, roster, warn=False).tenant
     # The grant is the launch export's, not the family's pinned commit (which the container settles later): the proxy
     # serves a system only by its declaration in the tenant's `current` export, and this helper holds the tenant's

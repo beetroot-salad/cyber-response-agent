@@ -167,6 +167,10 @@ def test_flow6_connect_never_tells_the_model_to_write_tenant_knowledge_into_the_
     assert hits == [], "connect still homes tenant knowledge in the product repo:\n" + "\n".join(hits)
 
 
+#: #1504 O4: the reads-printing form, the validator given the system and no flag after it.
+_READS_ONLY_CALL = re.compile(r"validate_scaffold\.py\s+\{system\}(?!\s+--)")
+
+
 def test_flow6_connect_no_longer_routes_the_tenant_half_through_propose_and_keeps_the_adapter_in_product():
     """Connect's main page and its tacit route name no `tenant.py propose` (A6; the banned-command scan in
     `test_tenant_cli.py` covers every shipped page), every scaffold-validator call for a system with a tenant half passes
@@ -180,7 +184,9 @@ def test_flow6_connect_no_longer_routes_the_tenant_half_through_propose_and_keep
     assert calls, "control: connect runs the scaffold validator"
     staged = [line for line in calls if "--staged" in line]
     assert staged, "control: connect validates a staged tenant half for a system with investigator tools"
-    unstaged = [line for line in calls if "--staged" not in line]
+    # #1504 O4 exemption: `validate_scaffold.py {system}` with no flag at all prints the adapter's declared reads
+    # before any `access.yaml` exists; it judges nothing, so it is the one form that needs no handoff.
+    unstaged = [line for line in calls if "--staged" not in line and not _READS_ONLY_CALL.search(line)]
     # #1401: an adapter offering no tool beyond health-check has no tenant half; its only
     # validator form is the handoff-and-case-record pre-check, never a product-tree read.
     assert all("--handoff" in line and "--case" in line for line in unstaged), unstaged
