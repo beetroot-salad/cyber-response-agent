@@ -9,7 +9,11 @@ identity's tenant and alert admission, and nothing of the runtime, so the API ca
 Learning jobs (#1344) live beside the investigations: the transaction that ends an investigation
 `completed` queues its auto job, a claim of a job is the investigations' claim on its own table
 (with the age limit for a first attempt, D4), take-over covers both tables, and the investigation
-delete removes its jobs."""
+delete removes its jobs.
+
+Host requests (#1471, readiness checks and adoptions) are one table of their own: one queued row per kind and dedupe key,
+a claim of the oldest queued row of any kind, a fenced finish, renewal beside the jobs', and a take-over and an offboard
+that end a live row `failed` and never retry it (B1, B2)."""
 
 from __future__ import annotations
 
@@ -34,6 +38,7 @@ from defender.records.formats import (
     MAPPING_KEYS,
     AlertId,
     AlertMapping,
+    HostRequestId,
     InvestigationId,
     LearningJobId,
     TenantId,
@@ -43,7 +48,15 @@ from defender.records.formats import (
     derive_facts,
 )
 
-from defender.records.job_facts import EXPIRED, LEASE_LAPSED, OFFBOARD_MESSAGE, RETRY_CAP, TENANT_OFFBOARDED
+from defender.records.job_facts import (
+    EXPIRED,
+    LEASE_LAPSED,
+    OFFBOARD_MESSAGE,
+    RETRY_CAP,
+    TENANT_OFFBOARDED,
+    WORKER_LOST,
+    WORKER_LOST_MESSAGE,
+)
 
 from .audit import SYSTEM, announce
 from .errors import Conflict, NotFound, OffboardNotSettled, UnknownReference, UnstorableText
@@ -53,14 +66,20 @@ from defender.tenancy.models import offboard as _tenancy_offboard
 from defender.tenancy.models import share_tenant
 
 from .models import (
+    ADOPTION,
     ALERT_LISTING_COLUMNS,
+    HOST_REQUEST_LIVE,
     LEARNING_TERMINAL,
+    READINESS,
     LIVE,
     TERMINAL,
     is_terminal,
     AlertListing,
     AlertRow,
     Claim,
+    HostRequestClaim,
+    HostRequestRecord,
+    HostRequestRow,
     InvestigationRecord,
     InvestigationRow,
     LearningCheckRow,
@@ -70,6 +89,7 @@ from .models import (
     LearningProgress,
     StoredAlert,
     alert_listing,
+    host_request_record,
     investigation_record,
     learning_job_record,
     stored_alert,
@@ -90,6 +110,10 @@ OFFBOARD_MAX_PASSES = 5
 _LEARNING_LIVE = ("queued", "running")
 #: The tenant states that take no new job and start nothing new (#1360 D7).
 _BEING_REMOVED = ("offboarding", "offboarded")
+#: A host request's two ends (#1471 R2).
+_HOST_REQUEST_ENDS = ("completed", "failed")
+#: How often a host request's create tries again when the queued row its insert met was claimed before it was read.
+_HOST_CREATE_TRIES = 3
 
 _logger = logging.getLogger(__name__)
 
@@ -106,7 +130,8 @@ class _TakeOver:
     reason: str
     retry_id: str | None
     refused: bool = False
-    of_learning: bool = False
+    #: The audit family of the row: `investigation`, `learning_job`, or a host request's kind (#1471).
+    kind: str = "investigation"
 
 
 class _Refused(Exception):
@@ -495,7 +520,10 @@ class JobStore:
         have inserted a retry or an auto job it could not see. Investigations are ended until none are left, then
         learning jobs (investigations derive only from investigations, so the first phase is never repeated after a
         learning job is locked); rows are locked in id order (D9). `OffboardNotSettled`, with nothing changed, when rows keep
-        appearing past the cap (D8), counted over both phases. Each ended job is audited after the commit, by `actor`."""
+        appearing past the cap (D8), counted over both phases. Then the tenant's live host requests (#1471 B1) end
+        `failed`/`tenant_offboarded`, in one uncounted pass: no host request is inserted for a tenant once its row is
+        offboarding (a create shares the tenant's row lock first and refuses that state; a take-over never queues one).
+        Each ended job is audited after the commit, by `actor`."""
         investigations: list[str] = []
         learning: list[str] = []
         phases = (
@@ -517,13 +545,29 @@ class JobStore:
                     ended += await self._end_live(s, row, tenant_id, live=live, **ending)
                     if not (await s.execute(select(row.id).where(row.tenant_id == tenant_id, live).limit(1))).first():
                         break
+            hosted = await self._end_live_host_requests(s, tenant_id)
         for job_id in sorted(investigations):
             announce("investigation.cancel", actor=actor, tenant_id=tenant_id, target=job_id,
                      detail=f"reason={TENANT_OFFBOARDED}")
         for job_id in sorted(learning):
             announce("learning_job.finish", actor=actor, tenant_id=tenant_id, target=job_id,
                      detail=f"status=skipped reason={TENANT_OFFBOARDED}")
+        for request_id, kind in hosted:
+            announce(f"{kind}.finish", actor=actor, tenant_id=tenant_id, target=request_id,  # type: ignore[arg-type]
+                     detail=f"status=failed reason={TENANT_OFFBOARDED}")
         return record
+
+    async def _end_live_host_requests(self, s: AsyncSession, tenant_id: TenantId) -> list[tuple[str, str]]:
+        """The offboard's host-request phase (#1471 B1): the tenant's queued and running rows end `failed` /
+        `tenant_offboarded` with the offboard's words, none deleted. Returns `(id, kind)` of each, in id order."""
+        live = HostRequestRow.stage.in_(HOST_REQUEST_LIVE)
+        ended = set(await self._end_live(s, HostRequestRow, tenant_id, live=live, stage="failed",
+                                         failure_reason=TENANT_OFFBOARDED, failure_message=OFFBOARD_MESSAGE))
+        if not ended:
+            return []
+        kinds = (await s.execute(select(HostRequestRow.id, HostRequestRow.kind)
+                                 .where(HostRequestRow.id.in_(ended)))).all()
+        return sorted((str(i), kind) for i, kind in kinds)
 
     async def _end_live(self, s: AsyncSession, row: Any, tenant_id: TenantId, *, live: Any, **ending: Any) -> list[str]:
         """End the tenant's live rows of one table: lock them in id order, then update exactly those. Returns their ids."""
@@ -622,7 +666,7 @@ class JobStore:
         self, held: Collection[str], *, costs: Mapping[str, float] | None = None,
         progress: Mapping[str, LearningProgress] | None = None, checks: Collection[str] = (),
     ) -> list[str]:
-        """Extend the lease of every held row, investigation or learning job, that is still
+        """Extend the lease of every held row, investigation, learning job or host request (#1471), that is still
         `running` and not yet handed back, in one transaction, and return the ids it covered. A
         held row missing from the answer was cancelled, taken over or deleted (B3). `costs` copies
         a cost-so-far figure onto the investigations it names (B2), `progress` the job entry's
@@ -661,12 +705,26 @@ class JobStore:
                     .values(lease_expires_at=self._lease_end(),
                             **_progress_values({i: p for i, p in (progress or {}).items() if i in rest}))
                     .returning(LearningJobRow.id).execution_options(synchronize_session=False))).scalars().all()]
+            rest = ids - set(found)
+            if rest:
+                found += await self._renew_host_requests(s, rest)
             if holders:
                 found += [str(h) for h in (await s.execute(
                     update(LearningCheckRow).where(LearningCheckRow.holder.in_(holders))
                     .values(checking_until=self._lease_end())
                     .returning(LearningCheckRow.holder).execution_options(synchronize_session=False))).scalars().all()]
         return found
+
+    async def _renew_host_requests(self, s: AsyncSession, ids: Collection[str]) -> list[str]:
+        """The running host requests among `ids` given a fresh lease, locked in id order (#1360 D9); their ids."""
+        renewed = (await s.execute(
+            update(HostRequestRow).where(
+                HostRequestRow.id.in_(_locked_in_id_order(HostRequestRow.id, HostRequestRow.id.in_(ids),
+                                                          HostRequestRow.stage == "running")),
+                HostRequestRow.stage == "running")
+            .values(lease_expires_at=self._lease_end())
+            .returning(HostRequestRow.id).execution_options(synchronize_session=False))).scalars().all()
+        return [str(i) for i in renewed]
 
     async def write_accounting(
         self, tenant_id: str, investigation_id: str, *, cost_usd: float | None, cost_is_lower_limit: bool = False,
@@ -707,11 +765,12 @@ class JobStore:
         every `running` row whose lease has lapsed and that the caller does not hold (B-P3) is
         failed (`lease_lapsed`) and, below the third attempt, retried (a new `queued` row, attempt
         + 1; a learning job's retry keeps its original's `created_at`); the third attempt ends
-        `retry_cap`. One transaction per row, `SKIP LOCKED`; no accounting and no host read.
+        `retry_cap`. A lapsed host request (#1471) ends `failed`/`worker_lost` and is never retried (B2).
+        One transaction per row, `SKIP LOCKED`; no accounting and no host read.
         Returns the ids taken over. A row whose take-over the schema refuses rolls back whole and
         is left for the next pass."""
         taken: list[str] = []
-        for take_one in (self._take_over_one, self._take_over_learning_one):
+        for take_one in (self._take_over_one, self._take_over_learning_one, self._take_over_host_one):
             passed_over: set[str] = set(held)
             while (outcome := await take_one(passed_over)) is not None:
                 passed_over.add(outcome.old_id)
@@ -720,7 +779,7 @@ class JobStore:
                                     outcome.old_id)
                     continue
                 taken.append(outcome.old_id)
-                kind = "learning_job" if outcome.of_learning else "investigation"
+                kind = outcome.kind
                 announce(f"{kind}.takeover", actor=SYSTEM, tenant_id=outcome.tenant_id,  # type: ignore[arg-type]
                          target=outcome.old_id, detail=f"reason={outcome.reason}")
                 if outcome.retry_id is not None:
@@ -798,8 +857,30 @@ class JobStore:
                         created_at=lapsed.created_at))
                     await arm_learning_check(s, lapsed.tenant_id)
         except _Refused:
-            return _TakeOver(old_id, tenant, "", None, refused=True, of_learning=True)
-        return _TakeOver(old_id, tenant, reason, retry_id, of_learning=True)
+            return _TakeOver(old_id, tenant, "", None, refused=True, kind="learning_job")
+        return _TakeOver(old_id, tenant, reason, retry_id, kind="learning_job")
+
+    async def _take_over_host_one(self, passed_over: Collection[str]) -> _TakeOver | None:
+        """`_take_over_one` for a host request (#1471 B2, R13-5): the lapsed row ends `failed`/`worker_lost` with its
+        lease cleared, and is never retried: no row is queued in its place."""
+        old_id = tenant = kind = ""
+        try:
+            async with self._tx() as s:
+                lapsed = (await s.execute(
+                    select(HostRequestRow).where(
+                        HostRequestRow.stage == "running", HostRequestRow.lease_expires_at < func.now(),
+                        HostRequestRow.id.notin_(passed_over))
+                    .order_by(HostRequestRow.lease_expires_at, HostRequestRow.id).limit(1)
+                    .with_for_update(skip_locked=True))).scalars().first()
+                if lapsed is None:
+                    return None
+                old_id, tenant, kind = lapsed.id, lapsed.tenant_id, lapsed.kind
+                lapsed.stage, lapsed.failure_reason, lapsed.failure_message = "failed", WORKER_LOST, WORKER_LOST_MESSAGE
+                lapsed.finished_at = self._clock()
+                lapsed.lease_expires_at = None
+        except _Refused:
+            return _TakeOver(old_id, tenant, "", None, refused=True, kind=kind)
+        return _TakeOver(old_id, tenant, WORKER_LOST, None, kind=kind)
 
     # --- learning jobs (#1344) ------------------------------------------------------------------
 
@@ -982,6 +1063,124 @@ class JobStore:
                 .values(**values).returning(LearningJobRow).execution_options(synchronize_session=False))
             ).scalars().first()
             return None if row is None else learning_job_record(row)
+
+    # --- host requests (#1471): readiness checks and adoptions ------------------------------------
+
+    async def create_readiness(
+        self, tenant_id: TenantId, *, actor: str, credential_id: str | None = None,
+    ) -> tuple[HostRequestRecord, bool]:
+        """Queue a readiness check of the tenant, or answer the one already queued for it (R1): `created` only when this
+        call inserted the row. See `_create_host_request`."""
+        return await self._create_host_request(tenant_id, READINESS, None, actor=actor, credential_id=credential_id)
+
+    async def create_adoption(
+        self, tenant_id: TenantId, system_id: str, *, actor: str, credential_id: str | None = None,
+    ) -> tuple[HostRequestRecord, bool]:
+        """Queue an adoption of the system's base files, or answer the one already queued for this tenant and system
+        (A1). The caller has checked the system's record and catalog entry. See `_create_host_request`."""
+        return await self._create_host_request(tenant_id, ADOPTION, system_id, actor=actor, credential_id=credential_id)
+
+    async def _create_host_request(
+        self, tenant_id: TenantId, kind: str, system_id: str | None, *, actor: str, credential_id: str | None,
+    ) -> tuple[HostRequestRecord, bool]:
+        """One request of `kind`, deduped on its key while queued: the tenant (readiness) or `<tenant>/<system>`
+        (adoption; `/` is no record id's character). The tenant's row is share-locked first (#1360 Flow 2), so an
+        offboard that wrote first is seen here and refused with `Conflict` naming the state, and an offboard after it
+        ends the row this made. The insert decides `created` (the queued-only unique index): of two racing starts one
+        inserts and the other answers its row. A running or ended row dedupes nothing (R1, B2). `UnknownReference` for a
+        tenant with no row; `UnstorableText` for text PostgreSQL cannot hold. Announced `<kind>.start` after the commit,
+        an adoption's naming its system; a replay announces nothing."""
+        _refuse_unstorable_text(requester=actor, **({} if system_id is None else {"system_id": system_id}))
+        key = str(tenant_id) if system_id is None else f"{tenant_id}/{system_id}"
+        for _ in range(_HOST_CREATE_TRIES):
+            async with self._tx() as s:
+                state = await share_tenant(s, tenant_id)
+                if state is None:
+                    raise UnknownReference(f"no tenant {tenant_id!r}")
+                _refuse_removed(state, tenant_id)
+                made = (await s.execute(
+                    pg_insert(HostRequestRow).values(
+                        id=HostRequestId.mint(), tenant_id=tenant_id, kind=kind, dedupe_key=key, system_id=system_id,
+                        requester=actor, created_at=self._clock(), stage="queued")
+                    .on_conflict_do_nothing(index_elements=[HostRequestRow.kind, HostRequestRow.dedupe_key],
+                                            index_where=HostRequestRow.stage == "queued")
+                    .returning(HostRequestRow.id))).scalar()
+                picked = made if made is not None else (await s.execute(select(HostRequestRow.id).where(
+                    HostRequestRow.kind == kind, HostRequestRow.dedupe_key == key,
+                    HostRequestRow.stage == "queued"))).scalar()
+                row = None if picked is None else (await s.execute(
+                    select(HostRequestRow).where(HostRequestRow.id == picked))).scalars().one()
+            if row is None:  # the queued row the insert met was claimed before it could be read: try again
+                continue
+            record = host_request_record(row)
+            if made is None:
+                return record, False
+            announce(f"{kind}.start", actor=actor, tenant_id=tenant_id, target=record.request_id,  # type: ignore[arg-type]
+                     detail=None if system_id is None else f"system {system_id}", credential_id=credential_id)
+            return record, True
+        raise Conflict(f"the {kind} request could not be queued: the queued one kept being claimed; try again")
+
+    async def get_host_request(self, tenant_id: TenantId, request_id: str, *, kind: str) -> HostRequestRecord | None:
+        """The tenant's host request of `kind`; `None` for an unknown id, another tenant's or the other kind's (R2)."""
+        async with self._tx() as s:
+            row = (await s.execute(select(HostRequestRow).where(
+                HostRequestRow.tenant_id == tenant_id, HostRequestRow.id == request_id,
+                HostRequestRow.kind == kind))).scalars().first()
+        return None if row is None else host_request_record(row)
+
+    async def claim_host_request(self) -> HostRequestClaim | None:
+        """Move the oldest queued host request of any kind (by `created_at`, ties by id; R13-6) to `running` with a
+        lease, with its tenant's state read in the same transaction, as `claim` does, or `None`. A row another
+        transaction holds is skipped, never waited for. Announced `<kind>.claim`."""
+        async with self._tx() as s:
+            # The id only, never the row as an entity: the UPDATE ... RETURNING below must hand back the row as it now
+            # stands (see `claim_learning_job`).
+            picked = (await s.execute(
+                select(HostRequestRow.id).where(HostRequestRow.stage == "queued")
+                .order_by(HostRequestRow.created_at, HostRequestRow.id).limit(1)
+                .with_for_update(skip_locked=True))).scalar()
+            if picked is None:
+                return None
+            row = (await s.execute(
+                update(HostRequestRow).where(HostRequestRow.id == picked, HostRequestRow.stage == "queued")
+                .values(stage="running", started_at=self._clock(), lease_expires_at=self._lease_end())
+                .returning(HostRequestRow).execution_options(synchronize_session=False))).scalars().first()
+            if row is None:  # not reachable while this transaction holds the row; the compare-and-set is the contract
+                return None
+            record = host_request_record(row)
+            state = (await s.execute(select(TenantRecord.state).where(TenantRecord.id == record.tenant_id))).scalar_one()
+        announce(f"{record.kind}.claim", actor=SYSTEM, tenant_id=record.tenant_id,  # type: ignore[arg-type]
+                 target=record.request_id)
+        return HostRequestClaim(record=record, tenant_state=state)
+
+    async def finish_host_request(  # noqa: PLR0913 — the one terminal write: stage, result and failure detail
+        self, tenant_id: str, request_id: str, *, stage: str, result: Mapping[str, Any] | None = None,
+        failure_reason: str | None = None, failure_message: str | None = None,
+    ) -> HostRequestRecord | None:
+        """Record the one end of a running host request (the fence, as `finish`): `completed` with its kind's `result`
+        (the worker validated it), or `failed` with a fixed `failure_reason` and the worker's own words; the lease is
+        cleared. `None` when it changed nothing (the row moved: ended by an offboard or a take-over, or never claimed).
+        A `result` is set exactly on `completed`, a reason exactly on `failed` (`ValueError`). Announced
+        `<kind>.finish`."""
+        if stage not in _HOST_REQUEST_ENDS:
+            raise ValueError(f"{stage!r} is not a host request's end")
+        if (result is not None) != (stage == "completed") or (failure_reason is not None) != (stage == "failed"):
+            raise ValueError(f"a {stage} host request carries a result exactly when completed, a reason exactly when failed")
+        async with self._tx() as s:
+            row = (await s.execute(
+                update(HostRequestRow).where(
+                    HostRequestRow.tenant_id == tenant_id, HostRequestRow.id == request_id,
+                    HostRequestRow.stage == "running")
+                .values(stage=stage, finished_at=self._clock(), lease_expires_at=None,
+                        result=None if result is None else dict(result), failure_reason=failure_reason,
+                        failure_message=failure_message)
+                .returning(HostRequestRow).execution_options(synchronize_session=False))).scalars().first()
+            if row is None:
+                return None
+            record = host_request_record(row)
+        announce(f"{record.kind}.finish", actor=SYSTEM, tenant_id=tenant_id, target=request_id,  # type: ignore[arg-type]
+                 detail=f"status={stage}" + (f" reason={failure_reason}" if failure_reason else ""))
+        return record
 
     # --- the family-less check clock (#1344 amendment 3) ---------------------------------------
 

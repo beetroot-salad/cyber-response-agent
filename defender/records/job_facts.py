@@ -17,3 +17,11 @@ EXPIRED, EXITED_WITHOUT_RESULT, WORKER_ERROR, LEASE_LAPSED, RETRY_CAP = (
 #: distinct from a user's cancel and from a worker fault. One place, so the store and the API's dev fake agree.
 TENANT_OFFBOARDED = "tenant_offboarded"
 OFFBOARD_MESSAGE = "its tenant was offboarded"
+
+#: The reasons only the worker or the store records on a host request (#1471 surface §6; no record a helper or container
+#: writes carries them): a record present but not of its shape, or no record from a helper that exited 0; the stopping
+#: worker's end; the take-over's end of a lapsed one, which is never retried (B2: not `lease_lapsed`, whose words promise
+#: a retry).
+BAD_RECORD, NO_RECORD, WORKER_STOPPED, WORKER_LOST = "bad_record", "no_record", "worker_stopped", "worker_lost"
+#: The words of a lapsed host request's take-over.
+WORKER_LOST_MESSAGE = "its worker stopped renewing its lease; a host request is never retried"
