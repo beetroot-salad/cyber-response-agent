@@ -3,7 +3,7 @@ grounding, and one write per (world, draw)."""
 
 from __future__ import annotations
 
-from defender._model import model
+from defender._model import complete, model
 from pathlib import Path
 from typing import Any, TypeGuard
 
@@ -202,34 +202,93 @@ class JudgeReply:
     systems: list[str] | None = None
 
 
-def _require_list(doc: dict[str, Any], key: str, where: str = "the judge's reply") -> list[Any]:
-    if key not in doc:
-        raise JudgeRefused(f"{where} is missing {key!r}")
-    value = doc[key]
-    if not isinstance(value, list):
-        raise JudgeRefused(f"{where}'s {key!r} must be a list")
-    return value
+# ------------------------------------------------------------------------------------------
+# The reply's shape, declared once (#1607): each reply's fields, in the order they are checked,
+# from which both the output tool's schema and the shape check are built. The provider decodes
+# to the schema it is sent, so a field the two describe differently is either a re-ask (the
+# check refuses what the schema let through) or a reply the model cannot send. What a schema
+# cannot state stays a named check-only rule: a system name's shape and its repeats
+# (`_systems`), and whether a `lead-set` world's systems were reached (`_refuse_unreached`).
+# ------------------------------------------------------------------------------------------
+
+_REPLY = "the judge's reply"
+TEXT, TEXTS, FLAG, WORDS, SYSTEMS, TABLE, ITEMS = (
+    "text", "texts", "flag", "words", "systems", "table", "items")
 
 
-def _reply_text(raw: dict[str, Any], key: str, where: str) -> str:
-    """A required text field: present and text. Anything else is refused, never stringified: what
-    the host files is what the model wrote."""
-    if key not in raw:
-        raise JudgeRefused(f"{where} is missing {key!r}")
-    value = raw[key]
-    if not isinstance(value, str):
-        raise JudgeRefused(f"{where}.{key} must be text, not {value!r}")
-    return value
+@model(frozen=True)
+class _Field:
+    """One key of a reply or a finding: its kind, and what that kind needs."""
+
+    kind: str
+    required: bool = True
+    #: WORDS: the allowed words, the refusal's reason, and whether a world never shown its facts
+    #: loses the discipline buckets (A5).
+    words: frozenset[str] = frozenset()
+    why: str = ""
+    narrowed: bool = False
+    #: SYSTEMS: whether an empty list is allowed.
+    empty_ok: bool = True
+    #: ITEMS: each entry's shape.
+    item: _Shape | None = None
+    #: The refusal for a missing key, when it is not the generic one.
+    missing: str | None = None
 
 
-def _pointers(raw: dict[str, Any], key: str, where: str) -> list[str]:
-    """A required pointer list: a list of text entries (an unresolvable one costs only itself at
-    routing — never the reply)."""
-    pointers = _require_list(raw, key, where)
-    bad = [p for p in pointers if not isinstance(p, str)]
-    if bad:
-        raise JudgeRefused(f"{where}.{key} must hold text pointers, not {bad[0]!r}")
-    return list(pointers)
+@model(frozen=True)
+class _Shape:
+    """A mapping's keys, in check order; `before` refuses what the shape cannot name."""
+
+    fields: tuple[tuple[str, _Field], ...]
+    before: Any = None
+
+    def names(self) -> tuple[str, ...]:
+        return tuple(key for key, _field in self.fields)
+
+
+complete(_Field)
+
+
+def _offered(spec: _Field, shown_its_facts: bool | None) -> list[str]:
+    words = spec.words - DISCIPLINE_BUCKETS if spec.narrowed and shown_its_facts is False \
+        else spec.words
+    return sorted(words)
+
+
+def _field_schema(spec: _Field, shown_its_facts: bool | None) -> dict[str, Any]:
+    if spec.kind == TEXT:
+        return {"type": "string"}
+    if spec.kind in (TEXTS, SYSTEMS):
+        return {"type": "array", "items": {"type": "string"}}
+    if spec.kind == FLAG:
+        return {"type": "boolean"}
+    if spec.kind == WORDS:
+        return {"type": "string", "enum": _offered(spec, shown_its_facts)}
+    if spec.kind == TABLE:
+        return {"type": "array"}
+    assert spec.item is not None
+    return {"type": "array", "items": _shape_schema(spec.item, shown_its_facts)}
+
+
+def _shape_schema(shape: _Shape, shown_its_facts: bool | None) -> dict[str, Any]:
+    """The shape as JSON Schema, closed: exactly its keys, the required ones required."""
+    return {"type": "object",
+            "properties": {k: _field_schema(f, shown_its_facts) for k, f in shape.fields},
+            "required": [k for k, f in shape.fields if f.required],
+            "additionalProperties": False}
+
+
+def _key_where(where: str, key: str) -> str:
+    return f"{where}'s {key}" if where == _REPLY else f"{where}.{key}"
+
+
+def _closed_to_keys(raw: dict[str, Any], allowed: tuple[str, ...], where: str) -> None:
+    """Every key of `raw` is one `allowed` names: a reply is closed at every level, so a key the
+    prompt never asks for is refused here, not dropped later."""
+    extra = [str(k) for k in raw if k not in allowed]
+    if extra:
+        raise JudgeRefused(f"{where} carries {extra}, which the judge's reply does not take — "
+                           f"it takes only {list(allowed)}")
 
 
 def _systems(value: Any, where: str, *, empty_ok: bool) -> list[str]:
@@ -261,45 +320,120 @@ def _refuse_discipline(bucket: str, where: str, shown_its_facts: bool | None) ->
             f"{' and '.join(sorted(DISCIPLINE_BUCKETS))} are unavailable to it")
 
 
-def _closed_to_keys(raw: dict[str, Any], allowed: tuple[str, ...], where: str) -> None:
-    """Every key of `raw` is one `allowed` names: a reply is closed at every level, so a key the
-    prompt never asks for is refused here, not dropped later."""
-    extra = [str(k) for k in raw if k not in allowed]
-    if extra:
-        raise JudgeRefused(f"{where} carries {extra}, which the judge's reply does not take — "
-                           f"it takes only {list(allowed)}")
+def _parse_field(spec: _Field, value: Any, key: str, where: str,
+                 shown_its_facts: bool | None) -> Any:
+    """One present key's value exactly as written, or `JudgeRefused`: never coerced."""
+    at = _key_where(where, key)
+    if spec.kind == TEXT:
+        if not isinstance(value, str):
+            raise JudgeRefused(f"{at} must be text, not {value!r}")
+        return value
+    if spec.kind == FLAG:
+        if not isinstance(value, bool):
+            raise JudgeRefused(f"{at}={value!r} must be a boolean")
+        return value
+    if spec.kind == WORDS:
+        if not isinstance(value, str) or value not in spec.words:
+            raise JudgeRefused(f"{at}={value!r} is not one of {sorted(spec.words)} — {spec.why}")
+        if spec.narrowed:
+            _refuse_discipline(value, where, shown_its_facts)
+        return value
+    if spec.kind == SYSTEMS:
+        return _systems(value, where, empty_ok=spec.empty_ok)
+    return _parse_list(spec, value, key, where, shown_its_facts)
 
 
-_INVESTIGATOR_KEYS = ("bucket", "claim", "root_cause", "anchor", "topic", CONTRAST_EVIDENCE,
-                      ON_VERDICT_PATH)
-_WORLD_FINDING_KEYS = ("bucket", "systems", "claim", "root_cause", "anchor", "topic", EVIDENCE)
-_GAP_KEYS = (GAP_WHAT, GAP_HOW, EVIDENCE, KEPT_FACTS)
+def _parse_list(spec: _Field, value: Any, key: str, where: str,
+                shown_its_facts: bool | None) -> list[Any]:
+    """A TEXTS, TABLE or ITEMS value: a list, its entries as their kind needs."""
+    at = _key_where(where, key)
+    if not isinstance(value, list):
+        raise JudgeRefused(f"{where}'s {key!r} must be a list")
+    if spec.kind == TEXTS:
+        bad = [p for p in value if not isinstance(p, str)]
+        if bad:
+            raise JudgeRefused(f"{at} must hold text pointers, not {bad[0]!r}")
+        return list(value)
+    if spec.kind == TABLE:
+        return value
+    assert spec.item is not None
+    return [_parse_shape(spec.item, entry, f"{key}[{i}]", shown_its_facts)
+            for i, entry in enumerate(value)]
 
 
-def _parse_investigator(raw: Any, index: int, *, shown_its_facts: bool | None,
-                        ) -> InvestigatorFinding:
-    where = f"{INVESTIGATOR_FINDINGS}[{index}]"
+def _parse_shape(shape: _Shape, raw: Any, where: str,
+                 shown_its_facts: bool | None) -> dict[str, Any]:
+    """A mapping checked against its shape, in field order; the values exactly as written. An
+    absent optional key is absent from the result."""
     if not isinstance(raw, dict):
         raise JudgeRefused(f"{where} is not a mapping")
+    if shape.before is not None:
+        shape.before(raw, where)
+    _closed_to_keys(raw, shape.names(), where)
+    parsed: dict[str, Any] = {}
+    for key, spec in shape.fields:
+        if key not in raw:
+            if spec.required:
+                raise JudgeRefused(spec.missing or f"{where} is missing {key!r}")
+            continue
+        parsed[key] = _parse_field(spec, raw[key], key, where, shown_its_facts)
+    return parsed
+
+
+def _refuse_retired_field(raw: dict[str, Any], where: str) -> None:
     if RETIRED_INVESTIGATOR_FIELD in raw:
         raise JudgeRefused(
             f"{where} carries the retired {RETIRED_INVESTIGATOR_FIELD!r} list — an "
             f"investigator finding's pointers are {CONTRAST_EVIDENCE!r} alone (A1)")
-    _closed_to_keys(raw, _INVESTIGATOR_KEYS, where)
-    bucket = raw.get("bucket")
-    if not isinstance(bucket, str) or bucket not in INVESTIGATOR_BUCKETS:
-        raise JudgeRefused(
-            f"{where}.bucket={bucket!r} is not one of {sorted(INVESTIGATOR_BUCKETS)} — a "
-            "lookalike is rejected, never coerced to the nearest member")
-    _refuse_discipline(bucket, where, shown_its_facts)
-    if not isinstance(raw.get(ON_VERDICT_PATH), bool):
-        raise JudgeRefused(f"{where}.{ON_VERDICT_PATH}={raw.get(ON_VERDICT_PATH)!r} must be a "
-                           "boolean")
-    return InvestigatorFinding(
-        bucket=bucket, claim=_reply_text(raw, "claim", where), root_cause=_reply_text(raw, "root_cause", where),
-        anchor=_reply_text(raw, "anchor", where), topic=_reply_text(raw, "topic", where),
-        contrast_evidence=_pointers(raw, CONTRAST_EVIDENCE, where),
-        on_verdict_path=raw[ON_VERDICT_PATH])
+
+
+_LOOKALIKE = "a lookalike is rejected, never coerced to the nearest member"
+_TEXT_FIELDS = tuple((key, _Field(TEXT)) for key in ("claim", "root_cause", "anchor", "topic"))
+
+_INVESTIGATOR_SHAPE = _Shape(fields=(
+    ("bucket", _Field(WORDS, words=INVESTIGATOR_BUCKETS, why=_LOOKALIKE, narrowed=True)),
+    (ON_VERDICT_PATH, _Field(FLAG)),
+    *_TEXT_FIELDS,
+    (CONTRAST_EVIDENCE, _Field(TEXTS)),
+), before=_refuse_retired_field)
+_WORLD_FINDING_SHAPE = _Shape(fields=(
+    ("bucket", _Field(WORDS, words=WORLD_FINDING_BUCKETS,
+                      why="a world finding names one of the three ways a world can be wrong")),
+    ("systems", _Field(SYSTEMS, empty_ok=False)),
+    *_TEXT_FIELDS,
+    (EVIDENCE, _Field(TEXTS)),
+))
+_GAP_SHAPE = _Shape(fields=(
+    (KEPT_FACTS, _Field(FLAG)),
+    (GAP_WHAT, _Field(TEXT)),
+    (GAP_HOW, _Field(TEXT)),
+    (EVIDENCE, _Field(TEXTS)),
+))
+
+_FAMILY_FIELDS: tuple[tuple[str, _Field], ...] = (
+    *((key, _Field(TABLE)) for key in PASS_TABLES),
+    ("noise_floor_note", _Field(TEXT, required=False)),
+    (WORLD_FINDINGS, _Field(ITEMS, item=_WORLD_FINDING_SHAPE)),
+)
+#: The reply of each scope: a family reply files family-scope world findings only.
+_REPLY_SHAPES = {
+    "family": _Shape(fields=_FAMILY_FIELDS),
+    "world": _Shape(fields=(
+        *_FAMILY_FIELDS,
+        ("bucket", _Field(WORDS, words=WORLD_BUCKETS, why=_LOOKALIKE, narrowed=True,
+                          missing="the judge's reply carries no bucket for its world")),
+        ("systems", _Field(SYSTEMS)),
+        (INVESTIGATOR_FINDINGS, _Field(ITEMS, item=_INVESTIGATOR_SHAPE)),
+        (GAPS, _Field(ITEMS, item=_GAP_SHAPE)),
+    )),
+}
+#: The top-level keys only a world reply carries; a family reply carrying one is refused.
+_WORLD_ONLY_KEYS = tuple(k for k in _REPLY_SHAPES["world"].names()
+                         if k not in _REPLY_SHAPES["family"].names())
+
+
+def _shape_of(scope: str) -> _Shape:
+    return _REPLY_SHAPES["family" if scope == "family" else "world"]
 
 
 def is_world_finding_bucket(value: Any) -> TypeGuard[str]:
@@ -308,75 +442,27 @@ def is_world_finding_bucket(value: Any) -> TypeGuard[str]:
     return isinstance(value, str) and value in WORLD_FINDING_BUCKETS
 
 
-def _parse_world_finding(raw: Any, index: int) -> WorldFinding:
-    where = f"{WORLD_FINDINGS}[{index}]"
-    if not isinstance(raw, dict):
-        raise JudgeRefused(f"{where} is not a mapping")
-    _closed_to_keys(raw, _WORLD_FINDING_KEYS, where)
-    bucket = raw.get("bucket")
-    if not is_world_finding_bucket(bucket):
-        raise JudgeRefused(
-            f"{where}.bucket={bucket!r} is not one of {sorted(WORLD_FINDING_BUCKETS)} — a "
-            "world finding names one of the three ways a world can be wrong")
-    return WorldFinding(
-        bucket=bucket, systems=_systems(raw.get("systems"), where, empty_ok=False),
-        claim=_reply_text(raw, "claim", where), root_cause=_reply_text(raw, "root_cause", where),
-        anchor=_reply_text(raw, "anchor", where), topic=_reply_text(raw, "topic", where),
-        evidence=_pointers(raw, EVIDENCE, where))
-
-
-def _parse_gap(raw: Any, index: int) -> Gap:
-    where = f"{GAPS}[{index}]"
-    if not isinstance(raw, dict):
-        raise JudgeRefused(f"{where} is not a mapping")
-    _closed_to_keys(raw, _GAP_KEYS, where)
-    if not isinstance(raw.get(KEPT_FACTS), bool):
-        raise JudgeRefused(f"{where}.{KEPT_FACTS}={raw.get(KEPT_FACTS)!r} must be a boolean")
-    return Gap(what=_reply_text(raw, GAP_WHAT, where), how=_reply_text(raw, GAP_HOW, where),
-               evidence=_pointers(raw, EVIDENCE, where),
-               kept_facts_from_investigator=raw[KEPT_FACTS])
-
-
-def _world_verdict(doc: dict[str, Any], *, reachable_systems: Any,
-                   shown_its_facts: bool | None) -> tuple[str, list[str]]:
-    """A world reply's own `bucket` and `systems`, exactly as written, or `JudgeRefused`.
-
-    The host's rules on the bucket refuse; they never substitute one: `lead-set` when the
-    systems share nothing with `reachable_systems` (M20=A), a discipline bucket when the world was
-    never shown its facts (A5). `None` for either input (a bare validation) skips its rule."""
-    if "bucket" not in doc:
-        raise JudgeRefused("the judge's reply carries no bucket for its world")
-    bucket = doc["bucket"]
-    if not isinstance(bucket, str) or bucket not in WORLD_BUCKETS:
-        raise JudgeRefused(
-            f"the judge's reply's bucket={bucket!r} is not one of {sorted(WORLD_BUCKETS)} — a "
-            "lookalike is rejected, never coerced to the nearest member")
-    systems = _systems(doc.get("systems"), "the judge's reply", empty_ok=True)
+def _refuse_unreached(bucket: str, systems: list[str], reachable_systems: Any) -> None:
+    """M20=A: `lead-set` when the systems share nothing with `reachable_systems` is refused, never
+    replaced by another bucket. `None` (a bare validation) skips the rule."""
     if bucket == LEAD_SET and reachable_systems is not None \
             and not set(systems) & {str(s) for s in reachable_systems}:
         raise JudgeRefused(
             f"the judge's reply says bucket={LEAD_SET!r} for a world whose systems {systems!r} "
             f"share nothing with the systems its grant reached {sorted(reachable_systems)!r} — the "
             "investigator could not have looked, so the lead set cannot have missed it (M20)")
-    _refuse_discipline(bucket, "the judge's reply", shown_its_facts)
-    return bucket, systems
-
-
-#: The top-level keys only a world reply carries; a family reply carrying one is refused.
-_WORLD_ONLY_KEYS = ("bucket", "systems", INVESTIGATOR_FINDINGS, GAPS)
 
 
 def validate_reply(doc: Any, *, scope: str = "world", reachable_systems: Any = None,
                    shown_its_facts: bool | None = None) -> JudgeReply:
     """Validate the judge's reply, the arguments of its output tool as one mapping, strictly and
     closed at every level — the one enforcement point (A5): nothing is read off the reply before
-    this returns. Run inside the call, so a refusal goes back to the model with its reason."""
+    this returns. Run inside the call, so a refusal goes back to the model with its reason.
+    `shown_its_facts=False` refuses a discipline bucket (A5); `None` for it or for
+    `reachable_systems` (a bare validation) skips that rule."""
     if not isinstance(doc, dict):
         raise JudgeRefused(
             f"the judge's reply must be a mapping (got {type(doc).__name__})")
-    top: tuple[str, ...] = ("noise_floor_note", *PASS_TABLES, WORLD_FINDINGS)
-    if scope != "family":
-        top = (*top, *_WORLD_ONLY_KEYS)
     unwritable = unwritable_value(doc)
     if unwritable is not None:
         # Refused here, named, and asked again: a draw document carrying it could not be
@@ -391,47 +477,26 @@ def validate_reply(doc: Any, *, scope: str = "world", reachable_systems: Any = N
         if carried:
             raise JudgeRefused(f"the family reply carries {carried} — the family call files "
                                "family-scope world findings only")
-    _closed_to_keys(doc, top, "the judge's reply")
-    tables = [_require_list(doc, key) for key in PASS_TABLES]
-    noise = doc.get("noise_floor_note", "")
-    if not isinstance(noise, str):
-        raise JudgeRefused(f"the judge's reply's noise_floor_note must be text, not {noise!r}")
-    world = [_parse_world_finding(f, i)
-             for i, f in enumerate(_require_list(doc, WORLD_FINDINGS))]
+    parsed = _parse_shape(_shape_of(scope), doc, _REPLY, shown_its_facts)
+    tables = {key: parsed[key] for key in PASS_TABLES}
+    world = [WorldFinding(**f) for f in parsed[WORLD_FINDINGS]]
+    noise = parsed.get("noise_floor_note", "")
     if scope == "family":
-        return JudgeReply(
-            noise_floor_note=noise, correlations=tables[0],
-            scope_checks=tables[1], derivations=tables[2], investigator_findings=[],
-            world_findings=world, gaps=[])
-    bucket, systems = _world_verdict(doc, reachable_systems=reachable_systems,
-                                     shown_its_facts=shown_its_facts)
-    investigator = [_parse_investigator(f, i, shown_its_facts=shown_its_facts)
-                    for i, f in enumerate(_require_list(doc, INVESTIGATOR_FINDINGS))]
-    gaps = [_parse_gap(f, i) for i, f in enumerate(_require_list(doc, GAPS))]
+        return JudgeReply(noise_floor_note=noise, **tables, investigator_findings=[],
+                          world_findings=world, gaps=[])
+    _refuse_unreached(parsed["bucket"], parsed["systems"], reachable_systems)
     return JudgeReply(
-        noise_floor_note=noise, correlations=tables[0],
-        scope_checks=tables[1], derivations=tables[2], investigator_findings=investigator,
-        world_findings=world, gaps=gaps, bucket=bucket, systems=systems)
+        noise_floor_note=noise, **tables,
+        investigator_findings=[InvestigatorFinding(**f) for f in parsed[INVESTIGATOR_FINDINGS]],
+        world_findings=world, gaps=[Gap(**g) for g in parsed[GAPS]],
+        bucket=parsed["bucket"], systems=parsed["systems"])
 
 
-#: The shape of the judge's reply as its output tool describes it. A description only: the check
-#: (`validate_reply`) is the owner of validity.
-_REPLY_PROPERTIES: dict[str, Any] = {
-    "bucket": {"type": "string"}, "systems": {"type": "array", "items": {"type": "string"}},
-    "noise_floor_note": {"type": "string"},
-    "correlations": {"type": "array"}, "scope_checks": {"type": "array"},
-    "derivations": {"type": "array"},
-    INVESTIGATOR_FINDINGS: {"type": "array", "items": {"type": "object"}},
-    WORLD_FINDINGS: {"type": "array", "items": {"type": "object"}},
-    GAPS: {"type": "array", "items": {"type": "object"}},
-}
-
-
-def reply_schema(scope: str) -> dict[str, Any]:
-    """The reply's shape for `scope`: a family reply is never offered the world-only keys its
-    check refuses (`_WORLD_ONLY_KEYS`)."""
-    keys = [k for k in _REPLY_PROPERTIES if scope != "family" or k not in _WORLD_ONLY_KEYS]
-    return {"type": "object", "properties": {k: _REPLY_PROPERTIES[k] for k in keys}}
+def reply_schema(scope: str, *, shown_its_facts: bool | None = None) -> dict[str, Any]:
+    """The output tool's schema for `scope`, built from the same shape the check reads: a family
+    reply is never offered the world-only keys, and a world never shown its facts is never
+    offered the discipline buckets its check refuses."""
+    return _shape_schema(_shape_of(scope), shown_its_facts)
 
 
 def reply_check(*, scope: str, reachable_systems: Any, shown_its_facts: bool | None) -> Any:
@@ -446,6 +511,7 @@ def reply_check(*, scope: str, reachable_systems: Any, shown_its_facts: bool | N
         except JudgeRefused as refused:
             raise ModelRetry(str(refused)) from refused
     return check
+
 
 
 def draw_document(reply: JudgeReply, *, scope: str) -> dict[str, Any]:
