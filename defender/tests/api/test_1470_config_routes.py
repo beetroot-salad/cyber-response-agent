@@ -79,14 +79,15 @@ def _judged(response: httpx.Response) -> list[str]:
 
 async def test_o2_the_catalog_lists_every_adapter_with_what_a_record_of_it_stores(scripted):
     """`GET /adapters`: every catalog adapter with display name, settings keys, sample settings, the lab flag, its declared
-    non-GET reads (`{method, path}`, `[]` for none) and its reference text. (O2; #1504 O4)"""
+    non-GET reads (`{method, path}`, `[]` for none), `reads_unusable` (null for each) and its reference text. (O2; A6.3)"""
     got = await scripted.get("/adapters")
     assert got.status_code == 200, got.text
     items = {i["adapter_id"]: i for i in got.json()["items"]}
     assert set(items) == LAB | REAL
     assert {a for a, i in items.items() if i["lab_example"]} == LAB
     assert all(set(i) == {"adapter_id", "display_name", "settings_keys", "sample_settings", "lab_example",
-                          X.API_FIELD, REFERENCE_FIELD} for i in items.values())
+                          X.API_FIELD, X.UNUSABLE_FIELD, REFERENCE_FIELD} for i in items.values())
+    assert all(i[X.UNUSABLE_FIELD] is None for i in items.values())  # every checkout adapter has a usable list (A6.3)
     shown = {a: [(r["method"], r["path"]) for r in i[X.API_FIELD]] for a, i in items.items()}
     assert shown == {a: list(X.ELASTIC_READS if a == "elastic" else X.THREAT_INTEL_READS if a == "threat-intel" else ())
                      for a in items}
@@ -146,6 +147,7 @@ async def test_o2_each_adapters_served_entry_is_what_its_module_declares(scripte
     assert len(item["settings_keys"]) == len(declared), (adapter, item)
     assert item["lab_example"] is bool(module.EXAMPLE), (adapter, item)
     assert [(r["method"], r["path"]) for r in item[X.API_FIELD]] == list(X.declared_reads(adapter)), (adapter, item)
+    assert item[X.UNUSABLE_FIELD] is None, (adapter, item)  # a usable list carries no reason (A6.3)
     assert item[REFERENCE_FIELD] == (REPO / "defender/integrations" / f"{module.__name__.rsplit('.', 1)[-1]}.md").read_text("utf-8")
 
 

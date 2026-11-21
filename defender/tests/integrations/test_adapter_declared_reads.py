@@ -13,9 +13,10 @@ from typing import Any
 import pytest
 
 from defender.credential_proxy._refusal import Refused
-from defender.credential_proxy._scope import READ_METHODS, check_route, locate
+from defender.credential_proxy._scope import check_route, locate
 from defender.credential_proxy._tokens import READ
 from defender.integrations.confinement import CapturedRequest, TransportCapture
+from defender.kit.access import READ_METHODS
 from defender.kit.faults import AdapterFault, ConfigFault, ConfinementFault
 from defender.kit.proxy_client import REPLY_CONTENT_TYPE, FinalRecord, encode_body, encode_final
 from defender.kit.settings import SystemConfig

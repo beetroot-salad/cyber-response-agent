@@ -15,7 +15,8 @@ READS_CONSTANT = "READ_ROUTES"
 #: The `CatalogEntry` attribute the catalog reads it into, cold (O1). FORCED: name; a tuple of `(method, path)`.
 ENTRY_FIELD = "reads"
 #: The `GET /adapters` item field (O3). FORCED: name; each element `{"method", "path"}` (the access declaration's own
-#: shape, so an admin copies it into `reads:` as is); `[]`, never null, for an adapter with none.
+#: shape, so an admin copies it into `reads:` as is); `[]` for an adapter declaring none, and null (beside the item's
+#: `reads_unusable` reason, A6.3) for an adapter with no usable list.
 API_FIELD = "reads"
 #: The `GET /adapters` item field holding the reference file's text verbatim (O5). FORCED: name and verbatim.
 API_REFERENCE_FIELD = "reference"
@@ -70,7 +71,7 @@ def plant_adapter(root: Path, name: str, *, reads: str | None, check: str = "ret
     """A checkout holding `<name>_adapter.py`: cold declarations, `reads` spelled as the source of its list constant (None:
     no list declared) and a `check_settings` whose body is `check`. Test data for a catalog the caller holds."""
     folder = root / "integrations"
-    folder.mkdir(parents=True)
+    folder.mkdir(parents=True, exist_ok=True)
     prefix = name.upper()
     (folder / f"{name}_adapter.py").write_text(textwrap.dedent(f'''\
         PREFIX = "{prefix}"
@@ -109,23 +110,21 @@ UNUSABLE_LISTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("triple-entry", "(('POST', '/widgets/_gone', 'x'),)", ("/widgets/_gone",)),
     ("good-route-beside-a-bad-one", "(('POST', '/widgets/_fine'), ('GET', '/widgets/_gone'))", ("/widgets/_gone",)),
     ("two-bad-entries", "(('GET', '/widgets/_one'), ('post', '/widgets/_two'))", ("/widgets/_one", "/widgets/_two")),
+    # A readable literal that is not a list of pairs is unusable (not unreadable); its reason names the value (A6.2).
+    ("whole-string", "'POST /widgets/_gone'", ("/widgets/_gone",)),
+    ("bare-pair-not-a-tuple-of-pairs", "('POST', '/widgets/_gone')", ("/widgets/_gone",)),
+    ("path-not-text", "(('POST', 7),)", ("7",)),
+    ("a-number", "7", ("7",)),
 )
 #: Lists the module does not hold readably (absent, or computed): (id, source, None for no declaration).
 UNREADABLE_LISTS: tuple[tuple[str, str | None], ...] = (
     ("absent", None), ("computed", "tuple([('POST', '/widgets/_find')])"))
 
-#: Route shapes (A6.1) as the tenant access parser, the lint and the catalog reader must each judge them.
-SHAPE_BAD: tuple[tuple[str, tuple[str, str]], ...] = (
-    ("lower-case-method", ("post", "/x/_a")), ("mixed-case-method", ("Post", "/x/_a")),
-    ("two-letter-method", ("PO", "/x/_a")), ("eleven-letter-method", ("ABCDEFGHIJK", "/x/_a")),
-    ("digit-in-method", ("PO5T", "/x/_a")), ("underscore-in-method", ("PO_ST", "/x/_a")),
-    ("empty-method", ("", "/x/_a")), ("no-leading-slash", ("POST", "x/_a")), ("empty-path", ("POST", "")),
-    ("query-in-path", ("POST", "/x/_a?y=1")), ("fragment-in-path", ("POST", "/x/_a#y")),
-)
-SHAPE_GOOD: tuple[tuple[str, tuple[str, str]], ...] = (
-    ("post", ("POST", "/x/_a")), ("star-segment", ("PUT", "/x/*/b")), ("root", ("DELETE", "/")),
-    ("three-letter-method", ("ABC", "/x")), ("ten-letter-method", ("ABCDEFGHIJ", "/x")),
-    ("encoded-space", ("POST", "/x/a%20b")), ("trailing-slash", ("OPTIONS", "/x/")),
-)
+#: Pools the route-shape agreement test (A6.1) crosses: every pair is judged by the access parser, the lint and the catalog
+#: reader, none by a verdict written here. Empty parts, case, digits and underscore, lengths 2/3/10/11, whitespace, control
+#: characters, `?` and `#`. (GET and HEAD are not here: the parser takes them, the list refuses them, tested apart.)
+SHAPE_METHODS = ("", "post", "Post", "PO", "POS", "POST", "PO5T", "PO_ST", "POST ", "POST\n", "ABCDEFGHIJ", "ABCDEFGHIJK")
+SHAPE_PATHS = ("", "/", "/x/_a", "x/_a", "/x/*/b", "/x/a%20b", "/x/", "/x y", "/x\t", "/x\x00", " /x", "/x?y=1", "/x#y", "?", "#")
+
 #: Methods the readers of the read-method list are asked about (all fit every reader's own method pattern).
 METHOD_POOL = ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT", "ABC")

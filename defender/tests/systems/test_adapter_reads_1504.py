@@ -2,6 +2,8 @@
 validator prints them given only the system (O4). The record judgement's cases are folded into their neighbours."""
 from __future__ import annotations
 
+import ast
+import itertools
 import os
 import subprocess
 import sys
@@ -143,14 +145,19 @@ def _usable_catalog_and_tree(tmp_path: Path, source: str | None) -> tuple[Path, 
     return root, rules("Catalog").of_checkout(checkout)
 
 
-def _lint_names_reads(root: Path) -> bool:
-    """Whether the catalog declarations lint, run over `root`, reports a finding naming the list constant."""
+def _lint_lines(root: Path) -> list[str]:
+    """The catalog declarations lint's output lines over `root`."""
     done = subprocess.run([sys.executable, str(REPO / "tooling/lint/lint_catalog_declarations.py"), "--root", str(root)],
                           cwd=REPO, env={**os.environ, "PYTHONPATH": str(REPO)}, capture_output=True, text=True,
-                          timeout=120, check=False)
+                          timeout=300, check=False)
     out = done.stdout + done.stderr
     assert "Traceback" not in out, out
-    return any(X.READS_CONSTANT in line and "widget_adapter.py" in line for line in out.splitlines())
+    return out.splitlines()
+
+
+def _lint_names_reads(root: Path, adapter: str = "widget") -> bool:
+    """Whether the lint, run over `root`, reports a finding naming the list constant in `adapter`'s module."""
+    return any(X.READS_CONSTANT in line and f"{adapter}_adapter.py" in line for line in _lint_lines(root))
 
 
 def _parser_takes(route: tuple[str, str], where: str) -> bool:
@@ -166,32 +173,41 @@ def _parser_takes(route: tuple[str, str], where: str) -> bool:
     return True
 
 
-@pytest.mark.parametrize("route", [pytest.param(r, id=name) for name, r in X.SHAPE_BAD])
-def test_1504_a61_a_route_of_the_wrong_shape_is_refused_alike_by_the_lint_the_catalog_and_the_access_parser(
-        tmp_path, route):
-    """One shape rule: a route the access parser refuses (in reads and in writes) is a lint finding naming `READ_ROUTES`
-    and makes the catalog entry unusable, naming the route. (A6.1)"""
-    root, catalog = _usable_catalog_and_tree(tmp_path, repr((route,)))
-    entry = catalog.entry("widget")
-    assert (_parser_takes(route, "reads"), _parser_takes(route, "writes")) == (False, False)
-    assert _lint_names_reads(root)
-    assert getattr(entry, X.ENTRY_FIELD) is None
-    assert isinstance(getattr(entry, X.UNUSABLE_FIELD), str)
-    assert route[1] in getattr(entry, X.UNUSABLE_FIELD) or route[0] in getattr(entry, X.UNUSABLE_FIELD)
-
-
-@pytest.mark.parametrize("route", [pytest.param(r, id=name) for name, r in X.SHAPE_GOOD])
-def test_1504_a61_a_route_of_the_right_shape_is_taken_alike_by_the_lint_the_catalog_and_the_access_parser(
-        tmp_path, route):
-    """Control: a well-shaped non-read route is no lint finding, reads as the entry's list with no reason, and the
-    access parser takes it in reads and in writes. (A6.1)"""
-    root, catalog = _usable_catalog_and_tree(tmp_path, repr((route,)))
-    entry = catalog.entry("widget")
-    assert _parser_takes(route, "reads")
-    assert _parser_takes(route, "writes")
-    assert not _lint_names_reads(root)
-    assert tuple(getattr(entry, X.ENTRY_FIELD)) == (route,)
-    assert getattr(entry, X.UNUSABLE_FIELD) is None
+def test_1504_a61_the_access_parser_the_lint_and_the_catalog_judge_every_generated_route_alike(tmp_path):
+    """Over method x path pools (empty, case, digits, lengths 2/3/10/11, whitespace, control characters, `?`, `#`), one
+    adapter per pair with its own path: the parser's verdict (in reads and in writes) is the lint's and the catalog's, and a
+    refused route's reason names each non-empty part. (A6.1)"""
+    pairs = [(m, f"{p}_{i}" if p else p) for i, (m, p) in enumerate(itertools.product(X.SHAPE_METHODS, X.SHAPE_PATHS))]
+    checkout = tmp_path / "tree" / "defender"
+    for i, pair in enumerate(pairs):
+        X.plant_adapter(checkout, f"w{i}", reads=repr((pair,)))
+        (checkout / "integrations" / f"w{i}_adapter.md").write_text(
+            "## Credential\n\nNone known.\n\n## Pitfalls\n\nNone known.\n", encoding="utf-8")
+    catalog = rules("Catalog").of_checkout(checkout)
+    lines = _lint_lines(tmp_path / "tree")  # the one lint run
+    taken_count = 0
+    disagree: list[str] = []
+    for i, pair in enumerate(pairs):
+        taken = {_parser_takes(pair, "reads"), _parser_takes(pair, "writes")}
+        entry = catalog.entry(f"w{i}")
+        flagged = any(X.READS_CONSTANT in line and f"w{i}_adapter.py" in line for line in lines)
+        reason = getattr(entry, X.UNUSABLE_FIELD)
+        if len(taken) != 1:
+            disagree.append(f"{pair!r}: the parser takes it in only one of reads and writes")
+        accepted = taken == {True}
+        taken_count += accepted
+        if flagged is accepted or (getattr(entry, X.ENTRY_FIELD) is None) is accepted:
+            disagree.append(f"{pair!r}: parser accepts={accepted}, lint flags={flagged}, "
+                            f"catalog reads={getattr(entry, X.ENTRY_FIELD)!r}")
+        elif accepted:
+            if tuple(getattr(entry, X.ENTRY_FIELD)) != (pair,) or reason is not None:
+                disagree.append(f"{pair!r}: an accepted route is not the entry's list ({reason!r})")
+        else:
+            parts = [part for part in pair if part]
+            if not isinstance(reason, str) or not all(part in reason or repr(part)[1:-1] in reason for part in parts):
+                disagree.append(f"{pair!r}: the reason does not name each part: {reason!r}")
+    assert 0 < taken_count < len(pairs), "premise: the pools hold routes the parser takes and routes it refuses"
+    assert not disagree, "\n".join(disagree)
 
 
 @pytest.mark.parametrize("method", ["GET", "HEAD"])
@@ -221,11 +237,10 @@ def test_1504_a61_the_lint_and_the_catalog_judge_a_whole_list_usable_alike(tmp_p
     assert (getattr(entry, X.UNUSABLE_FIELD) is None) is usable
 
 
-def test_1504_a61_one_list_of_the_methods_that_need_no_declaration_is_judged_alike_by_every_reader(tmp_path):
+def test_1504_a61_each_reader_of_the_methods_that_need_no_declaration_judges_exactly_them(tmp_path):
     """`defender.kit.access.READ_METHODS` is GET and HEAD, and each reader judges exactly them: the proxy's route check
     admits a method with no declared route, Elastic's in-process confinement judges (refuses an undeclared path) and passes
     any other to the proxy, and the lint and the catalog refuse them in `READ_ROUTES`. (A6.1)"""
-    from defender.credential_proxy import _scope
     from defender.credential_proxy._refusal import Refused
     from defender.credential_proxy._scope import check_route
     from defender.credential_proxy._tokens import READ
@@ -236,7 +251,6 @@ def test_1504_a61_one_list_of_the_methods_that_need_no_declaration_is_judged_ali
     from defender.tests.support.tenancy import _systems1366 as R
 
     assert set(READ_METHODS) == {"GET", "HEAD"}
-    assert _scope.READ_METHODS is READ_METHODS  # the proxy keeps no copy
     declaration = parse_access(R.declaration("https://widget.example"), system="widget")
     for method in X.METHOD_POOL:
         reads = method in READ_METHODS
@@ -257,21 +271,104 @@ def test_1504_a61_one_list_of_the_methods_that_need_no_declaration_is_judged_ali
         assert (getattr(catalog.entry("widget"), X.ENTRY_FIELD) is None) is reads, ("catalog", method)
 
 
-# --- A6.3: GET /adapters and the validator say honestly when there is no usable list -------------------------------------
+# --- A6.1 one owner: no second copy of the method list or the route shape, and each reader takes them from the kit --------
 
-def _catalogs_by_kind(tmp_path: Path) -> dict[str, tuple[Path, Any]]:
-    """One planted checkout per kind of list: usable, unusable (a good route beside a GET), computed and absent."""
-    usable = "(('POST', '/widgets/_good'), ('PUT', '/widgets/*/mark'))"
-    unusable = "(('POST', '/widgets/_good'), ('GET', '/widgets/_gone'))"
-    sources = {"usable": usable, "unusable": unusable, "unreadable": "tuple([('POST', '/widgets/_good')])",
-               "absent": None}
-    out = {}
-    for kind, source in sources.items():
-        checkout = X.plant_adapter(tmp_path / kind, "widget", reads=source)
-        (checkout / "integrations" / "widget_adapter.md").write_text(
-            "## Credential\n\nNone known.\n\n## Pitfalls\n\nNone known.\n", encoding="utf-8")
-        out[kind] = (checkout, rules("Catalog").of_checkout(checkout))
-    return out
+#: Python source the scan below reads: the product tree and the lint scripts, not the tests that exercise them.
+SCANNED = ("defender", "tooling/lint")
+KIT_ACCESS = "defender/kit/access.py"
+#: Where each reader of the rule lives. The route checker's name is the code stage's; a reader need only import from the kit.
+PROXY, CONFINEMENT = "defender/credential_proxy/_scope.py", "defender/integrations/confinement.py"
+LINT, CATALOG, PARSER = ("tooling/lint/lint_catalog_declarations.py", "defender/system_rules/catalog.py",
+                         "defender/tenancy/_access.py")
+#: The route method's shape as the access parser spells it (A6.1). The proxy's own incoming-request pattern `[A-Z]{1,16}`
+#: is another rule (a request line, not a declared route) and is not this.
+ROUTE_METHOD_SHAPE = "[A-Z]{3,10}"
+
+
+def _source_trees() -> dict[str, ast.Module]:
+    skipped = {"tests", ".venv", "__pycache__", "node_modules"}
+    return {path.relative_to(REPO).as_posix(): ast.parse(path.read_text(encoding="utf-8"))
+            for top in SCANNED for path in sorted((REPO / top).rglob("*.py")) if not skipped & set(path.parts)}
+
+
+def _is_read_method_literal(node: ast.AST) -> bool:
+    """Whether `node` is a tuple, list or set literal of exactly the strings GET and HEAD (any case, any order)."""
+    if not isinstance(node, (ast.Tuple, ast.List, ast.Set)) or not node.elts:
+        return False
+    texts = {e.value.upper() for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+    return len(texts) == len(node.elts) == 2 and texts == {"GET", "HEAD"}
+
+
+def test_1504_a61_no_module_but_the_kit_binds_its_own_read_method_list_or_route_method_shape():
+    """Repo-wide AST scan: outside `defender/kit/access.py` no collection literal equals {GET, HEAD} and no string holds
+    the route method shape, so the list and the shape each have the one owner. (A6.1)"""
+    methods, shape = [], []
+    for rel, tree in _source_trees().items():
+        if rel == KIT_ACCESS:
+            continue
+        for node in ast.walk(tree):
+            if _is_read_method_literal(node):
+                methods.append(f"{rel}:{node.lineno}")
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and ROUTE_METHOD_SHAPE in node.value:
+                shape.append(f"{rel}:{node.lineno}")
+    assert not methods, f"a second list of the methods that need no declaration: {methods}"
+    assert not shape, f"a second copy of the route method shape: {shape}"
+
+
+def _kit_access_use(tree: ast.Module) -> tuple[bool, bool]:
+    """(whether `tree` imports from `defender.kit.access` (a name, or the module), whether it takes `READ_METHODS` from it)."""
+    imported = takes_methods = False
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "defender.kit.access":
+            imported = True
+            takes_methods |= any(alias.name == "READ_METHODS" for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "defender.kit":
+            modules |= {alias.asname or alias.name for alias in node.names if alias.name == "access"}
+        elif isinstance(node, ast.Import):
+            modules |= {alias.asname or alias.name for alias in node.names if alias.name == "defender.kit.access"}
+    imported |= bool(modules)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr == "READ_METHODS":
+            takes_methods |= _dotted(node.value) in {*modules, "defender.kit.access"}
+    return imported, takes_methods
+
+
+def _dotted(node: ast.expr) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    return f"{_dotted(node.value)}.{node.attr}" if isinstance(node, ast.Attribute) else ""
+
+
+def test_1504_a61_each_reader_of_the_rule_imports_it_from_the_kit_and_binds_no_literal_of_its_own():
+    """The proxy's route check, Elastic's confinement and the lint take `READ_METHODS` from `defender.kit.access`; those and
+    the access parser and the catalog reader import the route rule from it, and none binds a {GET, HEAD} literal. (A6.1)"""
+    trees = _source_trees()
+    for rel in (PROXY, CONFINEMENT, LINT, CATALOG, PARSER):
+        assert rel in trees, f"premise: {rel} is scanned"
+        imported, takes_methods = _kit_access_use(trees[rel])
+        assert imported, f"{rel} does not import from defender.kit.access"
+        if rel in (PROXY, CONFINEMENT, LINT):
+            assert takes_methods, f"{rel} does not take READ_METHODS from defender.kit.access"
+        own = [n.lineno for n in ast.walk(trees[rel]) if _is_read_method_literal(n)]
+        assert not own, f"{rel} binds a {{GET, HEAD}} literal of its own at {own}"
+
+
+# --- A6.2 / A6.3: a list that is not usable is "no usable list", with its reason, in every reader ------------------------
+
+#: Every source of "no usable list": readable-but-unusable (tagged with the text the reason names) and unreadable or absent.
+NO_USABLE_LIST = [pytest.param(source, needles, id=f"unusable-{name}") for name, source, needles in X.UNUSABLE_LISTS] + [
+    pytest.param(source, (), id=f"unreadable-{name}") for name, source in X.UNREADABLE_LISTS]
+COMPUTED = "tuple([('POST', '/widgets/_find')])"
+
+
+def _record(reads: tuple[tuple[str, str], ...]) -> Any:
+    from defender.tenancy.models import SystemRecord, TenantRecords
+    from defender.tests.support.tenancy import _systems1366 as R
+
+    record = SystemRecord(system_id="widget", version=1, adapter_id="widget", settings={"WIDGET_TIMEOUT_SEC": "10"},
+                          access=R.declaration("https://widget.example", reads=reads))
+    return TenantRecords(systems={"widget": record})
 
 
 def _served(catalog: Any) -> dict[str, dict[str, Any]]:
@@ -283,23 +380,64 @@ def _served(catalog: Any) -> dict[str, dict[str, Any]]:
     return {i.adapter_id: i.model_dump(mode="json") for i in items}
 
 
-def test_1504_a63_the_adapters_listing_serves_null_reads_and_a_reason_when_the_list_is_not_usable(tmp_path):
-    """`GET /adapters`' item: `reads: null` and the entry's non-empty `reads_unusable` for an unusable, a computed and an
-    absent list; the routes and `reads_unusable: null` for a usable one, and for each of the checkout's own adapters. (A6.3)"""
-    kinds = _catalogs_by_kind(tmp_path)
-    for kind, (_checkout, catalog) in kinds.items():
-        item = _served(catalog)["widget"]
-        if kind == "usable":
-            assert item[X.API_FIELD] == [{"method": "POST", "path": "/widgets/_good"},
-                                         {"method": "PUT", "path": "/widgets/*/mark"}], item
-            assert item[X.UNUSABLE_FIELD] is None, item
-            continue
-        assert item[X.API_FIELD] is None, (kind, item)
-        reason = item[X.UNUSABLE_FIELD]
-        assert isinstance(reason, str), (kind, item)
-        assert reason.strip(), (kind, item)
-        assert reason == getattr(catalog.entry("widget"), X.UNUSABLE_FIELD), (kind, item)
-    assert "/widgets/_gone" in _served(kinds["unusable"][1])["widget"][X.UNUSABLE_FIELD]
+@pytest.mark.parametrize(("source", "needles"), NO_USABLE_LIST)
+def test_1504_a62_a_list_that_is_not_usable_has_no_reads_and_one_reason_in_the_catalog_lint_judgement_api_and_validator(
+        tmp_path, source, needles):
+    """Whatever makes `READ_ROUTES` no usable list: the entry has `reads None` and a reason naming each offending entry;
+    the lint names the list; a record is refused at its access part and held as a fault carrying that reason (not another
+    adapter's); the API serves it; the validator fails a row with it and prints no route to copy. (A6.2, A6.3, O3, O4)"""
+    from defender.kit.faults import ConfigFault
+    from defender.kit.settings import RECORDS
+    from defender.systems.run_tenant import record_settings
+
+    root, catalog = _usable_catalog_and_tree(tmp_path / "list", source)
+    entry = catalog.entry("widget")
+    reason = getattr(entry, X.UNUSABLE_FIELD)
+    assert getattr(entry, X.ENTRY_FIELD) is None
+    assert isinstance(reason, str), reason
+    assert reason.strip()
+    for needle in needles:
+        assert needle in reason, (needle, reason)
+    assert _lint_names_reads(root)
+    # a computed list is another cause of no usable list: its reason is not this one's, nor is this one's "unreadable"
+    computed = getattr(_usable_catalog_and_tree(tmp_path / "computed", COMPUTED)[1].entry("widget"), X.UNUSABLE_FIELD)
+    unusable = bool(needles)
+    if unusable:
+        assert reason != computed, reason
+    for reads in ((), (("POST", "/widgets/_fine_one"),)):
+        records = _record(reads)
+        faults = list(rules("judge_records")(records, None, catalog=catalog))
+        assert [f for f in faults if reason in f and RECORDS.part("widget", "access") in f], (reads, reason, faults)
+        held = record_settings(records, catalog=catalog)["access"]["widget"]
+        assert isinstance(held, ConfigFault), held
+        assert reason in str(held), (reason, str(held))
+        if unusable:
+            assert not [f for f in faults if computed in f or "without running" in f], (computed, faults)
+            assert computed not in str(held), str(held)
+            assert "without running" not in str(held), str(held)
+    item = _served(catalog)["widget"]
+    assert item[X.API_FIELD] is None, item
+    assert item[X.UNUSABLE_FIELD] == reason, item
+    out = _validate_over(root / "defender", "widget")
+    first = reason.splitlines()[0].strip()
+    assert [line for line in out.splitlines() if "[✗]" in line and X.READS_CONSTANT in line and first in line], out
+    try:
+        listed = [r for r in ast.literal_eval(source or "()") if isinstance(r, tuple) and len(r) == 2] if source else []
+    except (ValueError, TypeError, SyntaxError):
+        listed = []
+    for route in listed:
+        assert X.shown(route) not in out.replace(reason, ""), (route, out)
+    assert not [line for line in out.splitlines() if "[✓]" in line and X.READS_ROW_WORD in line], out
+
+
+def test_1504_a63_the_adapters_listing_serves_a_usable_list_with_no_reason_for_each_planted_and_checkout_adapter(tmp_path):
+    """`GET /adapters`' item for a usable list: the routes as `{method, path}` and `reads_unusable: null`, for a planted
+    adapter and for each of the checkout's own. (A6.3)"""
+    _root, catalog = _usable_catalog_and_tree(tmp_path, "(('POST', '/widgets/_good'), ('PUT', '/widgets/*/mark'))")
+    item = _served(catalog)["widget"]
+    assert item[X.API_FIELD] == [{"method": "POST", "path": "/widgets/_good"},
+                                 {"method": "PUT", "path": "/widgets/*/mark"}], item
+    assert item[X.UNUSABLE_FIELD] is None, item
     own = _served(rules("Catalog").of_checkout())
     assert {a: i[X.UNUSABLE_FIELD] for a, i in own.items()} == dict.fromkeys(own)
     assert all(isinstance(i[X.API_FIELD], list) for i in own.values()), own
@@ -316,20 +454,3 @@ def test_1504_a63_the_openapi_document_declares_reads_nullable_and_reads_unusabl
     assert any(branch.get("type") == "array" for branch in reads), reads
     reason = props[X.UNUSABLE_FIELD]["anyOf"]
     assert sorted(branch.get("type") for branch in reason) == ["null", "string"], reason
-
-
-def test_1504_a63_the_validator_given_only_the_system_prints_the_reason_and_no_routes_for_a_list_that_is_not_usable(
-        tmp_path):
-    """For an unusable, a computed and an absent list the validator prints the entry's reason, no reads row and none of
-    the list's routes to copy; a usable list still prints its routes. (A6.3, O4)"""
-    kinds = _catalogs_by_kind(tmp_path)
-    out = _validate_over(kinds["usable"][0], "widget")
-    assert {r for r in (("POST", "/widgets/_good"), ("PUT", "/widgets/*/mark")) if X.shown(r) in out} == {
-        ("POST", "/widgets/_good"), ("PUT", "/widgets/*/mark")}, out
-    for kind in ("unusable", "unreadable", "absent"):
-        checkout, catalog = kinds[kind]
-        reason = getattr(catalog.entry("widget"), X.UNUSABLE_FIELD)
-        out = _validate_over(checkout, "widget")
-        assert reason in out, (kind, reason, out)
-        assert "/widgets/_good" not in out.replace(reason, ""), (kind, out)
-        assert not [line for line in out.splitlines() if "[✓]" in line and X.READS_ROW_WORD in line], (kind, out)
