@@ -41,6 +41,13 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade from before #1620
+
+No migration. The API now refuses to start when the sign-in realm does not accept its sign-in request: before
+upgrading, check that the realm's sign-in client lists `<frontend origin>/api/auth/callback` among its valid redirect
+URIs (a realm imported from an older realm file may still list only the old callback). A refused start names the
+client and the redirect URI. Each start leaves one unfinished login session in the realm until its login timeout.
+
 ## Upgrade from before #1565
 
 No migration. The learning store now refuses an item that arrives at a key it already holds with other content

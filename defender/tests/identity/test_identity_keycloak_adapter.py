@@ -10,6 +10,7 @@ import datetime as dt
 import hashlib
 import hmac
 import json
+import re
 import urllib.parse
 from collections.abc import AsyncIterator, Callable
 from typing import Any, cast
@@ -29,6 +30,7 @@ from defender.tests.support.api._server1083 import (
     FAULTS,
     FRONT,
     PROGRAMS_REALM,
+    REALM_STEPS,
     REALMS,
     SIGNIN_REALM,
     STEP_KINDS,
@@ -738,7 +740,8 @@ async def test_1083_o3_a_healthy_realm_passes_the_probe_with_reads_only(realm):
         ("GET", f"realms/{realm}/.well-known/openid-configuration"),
         ("GET", f"realms/{realm}/protocol/openid-connect/certs"),
         ("POST", f"realms/{realm}/protocol/openid-connect/token"),
-        ("GET", f"admin/realms/{realm}/{ADMIN_READ[realm]}")])
+        ("GET", f"admin/realms/{realm}/{ADMIN_READ[realm]}"),
+        *([("GET", f"realms/{realm}/protocol/openid-connect/auth")] if "redirect" in REALM_STEPS[realm] else [])])
     assert fake.unmodelled == []
 
 
@@ -825,7 +828,7 @@ async def test_1083_o3_every_failure_of_every_step_refuses_naming_the_realm_alon
 async def test_1083_o3_a_key_set_with_no_usable_key_refuses_apart_from_the_other_steps(realm):
     """A keys answer that fails or holds no signing key refuses with a message no other step's failure gives. (O3, FC-6)"""
     other_steps = {await refusal_of(realm, FakeKeycloak([Fail(realm, step, kind)]))
-                   for step in STEP_KINDS if step != "keys" for kind in STEP_KINDS[step]}
+                   for step in REALM_STEPS[realm] if step != "keys" for kind in STEP_KINDS[step]}
     assert await probe_of(realm, FakeKeycloak()) is None  # positive control: the intact set passes
     for kind in STEP_KINDS["keys"]:
         message = await refusal_of(realm, FakeKeycloak([Fail(realm, "keys", kind)]))
@@ -1000,3 +1003,141 @@ async def test_1083_o3_every_member_of_each_steps_failure_space_refuses_naming_t
     # FC-6 names only the first step; the others are told apart: no message is given by two steps.
     shared = {(a, b): messages[a] & messages[b] for a in STEPS for b in STEPS if a < b}
     assert all(not both for both in shared.values()), shared
+
+
+# --- the sign-in realm's redirect step (#1620 r2) --------------------------------------------------------------------
+# The probe's last sign-in step sends the browser's sign-in request on the back channel: the sign-in page (200) holds;
+# a 400 refuses naming the client and the redirect URI; a redirect to the callback with `error` refuses with Keycloak's
+# error; anything else refuses as the other steps do. The programs realm has no such step (its paths are pinned above).
+
+_AUTH_PATH = f"realms/{SIGNIN_REALM}/protocol/openid-connect/auth"
+
+
+def _sign_in_requests(fake: FakeKeycloak) -> list[httpx.Request]:
+    """Every sign-in request the fake was sent, answered as the fake answers it."""
+    sent: list[httpx.Request] = []
+
+    def keep(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, html="<html>sign in</html>")
+
+    fake.answers[(SIGNIN_REALM, "redirect")] = keep
+    return sent
+
+
+async def test_1620_the_sign_in_probe_sends_the_browsers_sign_in_request_on_the_back_channel():
+    fake = FakeKeycloak()
+    sent = _sign_in_requests(fake)
+    assert await probe_of(SIGNIN_REALM, fake) is None
+    assert await probe_of(SIGNIN_REALM, fake) is None
+    assert len(sent) == 2
+    first, second = (dict(request.url.params) for request in sent)
+    assert {request.url.netloc.decode() for request in sent} == {urllib.parse.urlsplit(BACK).netloc}
+    assert {request.method for request in sent} == {"GET"}
+    for query in (first, second):
+        assert {k: query.pop(k) for k in ("state", "nonce", "code_challenge")}.keys() == {"state", "nonce",
+                                                                                         "code_challenge"}
+        assert query == {"response_type": "code", "client_id": CLIENT_ID, "redirect_uri": REDIRECT_URI,
+                         "scope": "openid profile", "prompt": "login", "code_challenge_method": "S256"}
+    challenges = [request.url.params["code_challenge"] for request in sent]
+    assert all(re.fullmatch(r"[A-Za-z0-9_-]{43}", c) for c in challenges), challenges
+    assert challenges[0] != challenges[1]
+    assert sent[0].url.params["state"] != sent[1].url.params["state"]
+
+
+async def test_1620_the_sign_in_request_has_the_parameters_the_browser_is_sent():
+    """The probe's request and `begin_signin`'s URL carry the same parameters (P1: one owner of the request)."""
+    fake = FakeKeycloak()
+    sent = _sign_in_requests(fake)
+    port = probed(SIGNIN_REALM, transport=fake)
+    try:
+        await port.probe()
+        browser = await port.begin_signin(state="s", nonce="n", code_challenge="c" * 43)
+    finally:
+        await port.close()
+    browser_query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(browser).query))
+    assert sorted(sent[0].url.params.keys()) == sorted(browser_query)
+    assert urllib.parse.urlsplit(browser).path == "/" + _AUTH_PATH
+
+
+@pytest.mark.parametrize("refusing", ["unlisted redirect URI", "another client"])
+async def test_1620_a_400_to_the_sign_in_request_refuses_naming_the_client_the_redirect_uri_and_both_causes(refusing):
+    fake = (FakeKeycloak(redirect_uris=["https://elsewhere.test/api/auth/callback"]) if refusing == "unlisted redirect URI"
+            else FakeKeycloak(signin_client=("another-client", "x")))
+    message = await refusal_of(SIGNIN_REALM, fake)
+    assert realms_named(message) == {SIGNIN_REALM}, message
+    for named in ("redirect", CLIENT_ID, REDIRECT_URI, "unknown or disabled client", "valid redirect URI"):
+        assert named in message, (named, message)
+    listed = FakeKeycloak(redirect_uris=[REDIRECT_URI])
+    assert await probe_of(SIGNIN_REALM, listed) is None  # positive control: the listed URI passes
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+async def test_1620_a_redirect_to_the_callback_with_an_error_refuses_with_keycloaks_error(status):
+    fake = FakeKeycloak()
+    query = urllib.parse.urlencode({"error": "invalid_request", "error_description": "Missing parameter: code_challenge",
+                                    "state": "s", "iss": f"{FRONT}/realms/{SIGNIN_REALM}"})
+    fake.answers[(SIGNIN_REALM, "redirect")] = lambda request: httpx.Response(
+        status, headers={"location": f"{REDIRECT_URI}?{query}"})
+    message = await refusal_of(SIGNIN_REALM, fake)
+    assert "invalid_request" in message, message
+    assert "Missing parameter: code_challenge" in message, message
+    assert "unknown or disabled client" not in message, message
+
+
+@pytest.mark.parametrize("location", [
+    f"{REDIRECT_URI}x?error=invalid_request", REDIRECT_URI.replace("https://", "http://") + "?error=invalid_request",
+    REDIRECT_URI.replace("api.defender.test", "api.defender.test:8443") + "?error=invalid_request",
+    REDIRECT_URI.replace("api.defender.test", "other.test") + "?error=invalid_request",
+    f"{REDIRECT_URI}?code=abc", f"{REDIRECT_URI}#error=invalid_request", f"{FRONT}/realms/{SIGNIN_REALM}/broker/x/login"])
+async def test_1620_any_other_redirect_refuses_without_claiming_a_keycloak_error(location):
+    """Only a redirect to the redirect URI itself (scheme, host, port, path) carrying `error` in its query is
+    Keycloak's error for this request; any other redirect refuses as an answer the step cannot read."""
+    fake = FakeKeycloak()
+    fake.answers[(SIGNIN_REALM, "redirect")] = lambda request: httpx.Response(302, headers={"location": location})
+    message = await refusal_of(SIGNIN_REALM, fake)
+    assert realms_named(message) == {SIGNIN_REALM}, message
+    assert "redirect" in message, message
+    assert "invalid_request" not in message, message
+    assert "unknown or disabled client" not in message, message
+
+
+async def test_1620_every_member_of_the_redirect_steps_failure_space_refuses_naming_the_realm_and_the_step():
+    """Every 3xx-5xx status and transport error refuses, naming the realm, the step and (unreached) the address."""
+    wrong = []
+    for label, answer in _failure_space(FakeKeycloak(), SIGNIN_REALM, "redirect"):
+        fake = FakeKeycloak(answers={(SIGNIN_REALM, "redirect"): answer})
+        try:
+            message = await refusal_of(SIGNIN_REALM, fake)
+        except pytest.fail.Exception:
+            wrong.append(f"{label}: passed")
+            continue
+        if realms_named(message) != {SIGNIN_REALM} or "redirect" not in message:
+            wrong.append(f"{label}: {message}")
+        if label.startswith("raises") and urllib.parse.urlsplit(BACK).netloc not in message:
+            wrong.append(f"{label}: does not name the address: {message}")
+    assert wrong == [], "\n".join(wrong)
+
+
+async def test_1620_the_adapter_sends_no_cookie_keycloak_set():
+    """Keycloak sets three cookies on the sign-in page; no later request of the adapter carries one (R7)."""
+    fake = FakeKeycloak()
+    port = probed(SIGNIN_REALM, transport=fake)
+    try:
+        await port.probe()
+        await port.probe()
+    finally:
+        await port.close()
+    assert [path for method, path in paths(fake) if path == _AUTH_PATH] == [_AUTH_PATH, _AUTH_PATH]
+    assert fake.cookies_sent == []
+
+
+async def test_1620_the_stand_in_sets_cookies_a_cookie_keeping_client_would_send():
+    """Positive control for the cookie check: a client that keeps cookies sends the stand-in's back."""
+    fake = FakeKeycloak()
+    async with httpx.AsyncClient(transport=fake, base_url=BACK) as client:
+        await client.get(f"/{_AUTH_PATH}", params={"client_id": CLIENT_ID, "redirect_uri": REDIRECT_URI,
+                                                   "code_challenge_method": "S256", "code_challenge": "c" * 43})
+        await client.post(f"/realms/{SIGNIN_REALM}/protocol/openid-connect/token", data={"grant_type": "x"})
+    assert len(fake.cookies_sent) == 1, fake.cookies_sent
+    assert "AUTH_SESSION_ID=" in fake.cookies_sent[0], fake.cookies_sent

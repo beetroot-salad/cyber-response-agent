@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import hmac
+import http.cookiejar
 import json
 import logging
 import urllib.parse
@@ -23,11 +24,28 @@ from defender._url import split_http_url
 from defender.identity import SignInRefused, SignInUnavailable, VerifiedProgramToken, VerifiedSignIn
 from defender.records.formats import CredentialId, IdRefused
 
+from . import pkce
+
 _log = logging.getLogger(__name__)
 
 #: Our names for what an account must still do, and Keycloak's for the same.
 _REQUIRED_ACTIONS = {"set_password": "UPDATE_PASSWORD", "set_up_otp": "CONFIGURE_TOTP"}
 _TIMEOUT_SECONDS = 10.0
+
+
+def _cookieless_client(transport: httpx.AsyncBaseTransport | None) -> httpx.AsyncClient:
+    """An adapter's HTTP client: it keeps no cookie. None of its calls needs one, and Keycloak sets three on the
+    sign-in page the start check asks for (#1620), which a kept jar would send with every later call."""
+    jar = http.cookiejar.CookieJar(policy=http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
+    return httpx.AsyncClient(transport=transport, timeout=_TIMEOUT_SECONDS, cookies=jar)
+
+
+def _same_endpoint(url: str, endpoint: str) -> bool:
+    """Whether `url` is `endpoint` on scheme, host, port (a default one spelled or not) and path."""
+    a, b = urllib.parse.urlsplit(url), urllib.parse.urlsplit(endpoint)
+    defaults = {"http": 80, "https": 443}
+    return ((a.scheme, a.hostname, a.port or defaults.get(a.scheme), a.path)
+            == (b.scheme, b.hostname, b.port or defaults.get(b.scheme), b.path))
 _ALGORITHM = "RS256"
 #: An admin token is dropped this long before its stated expiry, so a call never carries a dead one.
 _ADMIN_TOKEN_MARGIN = _dt.timedelta(seconds=30)
@@ -293,7 +311,7 @@ class KeycloakSignIn(_RealmAdmin):
         self._redirect_uri = check_redirect_uri(redirect_uri)
         self._admin_client = (admin_client_id, admin_client_secret)
         self._clock = clock
-        self._http = httpx.AsyncClient(transport=transport, timeout=_TIMEOUT_SECONDS)
+        self._http = _cookieless_client(transport)
         # Keycloak serves every realm under <base>/realms/<name>; the admin API sits beside it. The
         # admin client's `manage-users` role reaches only its own realm, which is the sign-in realm.
         # `server_url`, when the API reaches Keycloak at another address than the browser does
@@ -317,7 +335,43 @@ class KeycloakSignIn(_RealmAdmin):
 
     async def begin_signin(self, *, state: str, nonce: str, code_challenge: str) -> str:
         """The URL to send the browser to: password prompt forced, PKCE S256."""
-        query = urllib.parse.urlencode({
+        return f"{self._signin_url}?{self._signin_query(state=state, nonce=nonce, code_challenge=code_challenge)}"
+
+    async def probe(self) -> None:
+        """The shared steps, then one of the sign-in realm's own: it accepts the browser's sign-in request."""
+        await super().probe()
+        await self._probe_step("redirect", self._probe_redirect())
+
+    async def _probe_redirect(self) -> None:
+        """The realm accepts the browser's sign-in request (#1620): the request `begin_signin` builds, with fresh
+        values, sent on the back channel and not followed. The sign-in page (200) holds. A 400 is the realm refusing
+        the client or its redirect URI, which Keycloak answers alike; a redirect to the redirect URI with `error` is
+        Keycloak refusing a request whose redirect it trusts, so every browser sign-in would end so; anything else is
+        an answer this check cannot read."""
+        query = self._signin_query(state=pkce.new_secret(), nonce=pkce.new_secret(),
+                                   code_challenge=pkce.challenge(pkce.new_secret()))
+        try:
+            response = await self._http.get(f"{self._server}/realms/{self._realm}/protocol/openid-connect/auth?{query}")
+        except httpx.HTTPError as error:
+            raise SignInUnavailable("the sign-in request cannot be sent") from error
+        if response.status_code == httpx.codes.OK:
+            return
+        if response.status_code == httpx.codes.BAD_REQUEST:
+            raise SignInUnavailable(
+                f"the realm refused client {self._client_id} with redirect URI {self._redirect_uri} (an unknown or "
+                "disabled client, or that URI not among its valid redirect URIs)")
+        location = response.headers.get("location", "")
+        if response.is_redirect and _same_endpoint(location, self._redirect_uri):
+            sent = urllib.parse.parse_qs(urllib.parse.urlsplit(location).query)
+            if "error" in sent:
+                described = sent.get("error_description", [""])[0]
+                raise SignInUnavailable(f"the realm sends the sign-in request back to {self._redirect_uri} with error "
+                                        f"{sent['error'][0]}" + (f" ({described})" if described else ""))
+        raise SignInUnavailable(f"the sign-in request was answered {response.status_code}, not the sign-in page")
+
+    def _signin_query(self, *, state: str, nonce: str, code_challenge: str) -> str:
+        """The browser sign-in request's query: one owner for the browser's URL and the start check's (#1620)."""
+        return urllib.parse.urlencode({
             "response_type": "code",
             "client_id": self._client_id,
             "redirect_uri": self._redirect_uri,
@@ -328,7 +382,6 @@ class KeycloakSignIn(_RealmAdmin):
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
         })
-        return f"{self._signin_url}?{query}"
 
     async def finish_signin(self, *, code: str, code_verifier: str, nonce: str) -> VerifiedSignIn:
         """Exchange the code, verify the ID token, and return who signed in and how."""
@@ -483,7 +536,7 @@ class KeycloakPrograms(_RealmAdmin):
         self._audience = audience
         self._admin_client = (admin_client_id, admin_client_secret)
         self._clock = clock
-        self._http = httpx.AsyncClient(transport=transport, timeout=_TIMEOUT_SECONDS)
+        self._http = _cookieless_client(transport)
         server = self._server = base if server_url is None else _server_base(server_url)
         self._oidc = f"{server}/realms/{realm}/protocol/openid-connect"
         self._clients_url = f"{server}/admin/realms/{realm}/clients"
