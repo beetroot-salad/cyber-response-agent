@@ -136,7 +136,7 @@ def changes_of(*paths: str) -> list[tuple[str, str | None, str | None]]:
 async def publish(store: Any, tenant: str, *ids: str, kind: str = FINDING, run: str = "run-1") -> Any:
     """Publish one row per id as `kind`, in one call."""
     make = world_finding if kind == QUESTIONER else finding
-    return await store.publish_findings(tenant, run, [make(i) for i in ids], kind=kind)
+    return (await store.publish_finding_channels(tenant, run, {kind: [make(i) for i in ids]}))[kind]
 
 
 async def claim(store: Any, tenant: str, *, owner: str = "host-a", thresholds: Mapping[str, int] = ONE) -> Any:

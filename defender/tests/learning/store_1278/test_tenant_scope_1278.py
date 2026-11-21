@@ -63,7 +63,7 @@ def _pitfall(pid: str) -> dict:
 
 
 async def _publish(store, tenant, *ids, run="run-1"):
-    return await store.publish_findings(tenant, run, [finding(i) for i in ids], kind="finding")
+    return (await store.publish_finding_channels(tenant, run, {"finding": [finding(i) for i in ids]}))["finding"]
 
 
 def snapshot(dsn: str, tenant: str) -> dict[str, list[str]]:
@@ -95,14 +95,14 @@ async def _green_world(store, dsn):
     await store.record_commit(g.review, oid(11), oid(12), oid(13), changes_of("agent/lessons/g.md"))
     await store.in_review(g.review, 7, {})
     g.revert = await store.claim_revert(GREEN, owner="cli")
-    await store.add_pitfall(GREEN, _pitfall("g-pit-1"))
+    bool(await store.add_pitfalls(GREEN, [_pitfall("g-pit-1")]))
     await store.enqueue_request(GREEN, "run-g1", "case-1", {"case": "g"})
     g.lead = await store.claim(GREEN, LEAD_LANE, owner="host-g", thresholds=ONE)
     await store.record_commit(g.lead, oid(21), oid(22), oid(23), changes_of("agent/pitfalls/g.md"))
     await store.in_review(g.lead, 8, {})
     assert await store.end_review(GREEN, g.lead.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[])
     await _publish(store, GREEN, "g-only-waiting-1", "g-only-waiting-2")
-    await store.add_pitfall(GREEN, _pitfall("g-pit-2"))
+    bool(await store.add_pitfalls(GREEN, [_pitfall("g-pit-2")]))
     await store.enqueue_request(GREEN, "run-g2", "case-1", {"case": "g2"})
     g.ids = [str(b.id) for b in await store.batches(GREEN)]
     assert len(g.ids) == 4, "premise: GREEN has four batches"
@@ -119,7 +119,7 @@ async def _blue_world(store):
     await store.end_review(BLUE, spent.batch_id, expect_phase="in_review", outcome="closed", published=[], held=[("finding", "h1")],
                            items_why=why("closed_without_feedback", "the PR closed without feedback"))
     await _publish(store, BLUE, "a1")
-    await store.add_pitfall(BLUE, _pitfall("a-pit"))
+    bool(await store.add_pitfalls(BLUE, [_pitfall("a-pit")]))
     await store.enqueue_request(BLUE, "run-a1", "case-1", {"case": "a"})
     return spent
 

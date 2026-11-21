@@ -20,7 +20,7 @@ ONE = {"finding": 1, "questioner_finding": 1, "pitfall": 1, "curation_request": 
 
 
 def _publish(store, key: str, text: str) -> None:
-    store.publish_findings(TENANT, "run-1", [dict(finding(key), finding=text)], kind="finding")
+    store.publish_finding_channels(TENANT, "run-1", {"finding": [dict(finding(key), finding=text)]})["finding"]
 
 
 def _reset(dsn: str) -> None:

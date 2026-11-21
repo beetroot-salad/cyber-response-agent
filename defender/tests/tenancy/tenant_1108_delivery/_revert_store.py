@@ -53,7 +53,7 @@ def claimed_batch(repo, store, d, name):
     """An author batch as the tick starts one: a finding published, the batch claimed in the store, and the delivery's
     batch started on the claim's branch with each commit recorded before its branch moves. `(batch, held)`."""
     tenant = str(repo[0].id)
-    store.publish_findings(tenant, f"run-{name}", [finding(name)], kind="finding")
+    store.publish_finding_channels(tenant, f"run-{name}", {"finding": [finding(name)]})["finding"]
     held = store.claim(tenant, "author", owner=OWNER, thresholds=ONE)
     assert held is not None, "premise: the finding is due"
     return d.start_batch(str(held.batch_id), lanes=LANES, branch=held.branch, recorder=_recorder(store, held)), held
