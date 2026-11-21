@@ -29,6 +29,8 @@ CODE_LIFESPAN_DEFAULT = 60  # Keycloak's accessCodeLifespan when the realm does 
 #: #1540 F5: the login theme's name, and its folder (D2: Keycloak's `<theme dir>/login/theme.properties`, the folder
 #: compose mounts as `/opt/keycloak/themes/defender`).
 THEME_NAME = "defender"
+#: The product's name, as the sign-in screens show it.
+PRODUCT = "Sluice"
 THEME = REPO_ROOT / "defender" / "frontend" / "keycloak-theme"
 PARENT_STYLES = "css/styles.css"
 
@@ -117,6 +119,17 @@ def check_login_client_redirects_to_the_api_callback(realm: dict) -> None:
     assert client["redirectUris"] == [client["rootUrl"] + "/api/auth/callback"]
 
 
+def check_realm_names_the_product(realm: dict) -> None:
+    """The sign-in screens name the product, not the realm's id: Keycloak shows `displayName` in the page title and
+    `displayNameHtml` in the header, and falls back to the realm's name (`defender`) for either one left unset."""
+    assert (realm.get("displayName"), realm.get("displayNameHtml")) == (PRODUCT, PRODUCT)
+
+
+def check_login_client_is_named_for_the_product(realm: dict) -> None:
+    """Keycloak shows the sign-in client's name to the person (the consent and device pages): it is the product's."""
+    assert _clients(realm)[LOGIN_CLIENT].get("name") == PRODUCT
+
+
 def check_realm_names_the_theme(realm: dict) -> None:
     """#1540 F5: the dev realm's sign-in screens use the `defender` login theme."""
     assert realm.get("loginTheme") == THEME_NAME
@@ -153,6 +166,8 @@ def check_theme_extends_keycloak_v2_and_lists_both_stylesheets(theme: Path) -> N
 
 
 CHECKS = [
+    check_realm_names_the_product,
+    check_login_client_is_named_for_the_product,
     check_realm_names_the_theme,
     check_login_client_redirects_to_the_api_callback,
     check_realm_switches,
@@ -220,13 +235,13 @@ def test_keycloaks_own_email_is_sent_through_mailpit():
 def _good_realm() -> dict:
     profile = {"attributes": [{"name": "email", "permissions": {"edit": ["admin"], "view": ["admin", "user"]}}]}
     return {
-        "realm": REALM, "loginTheme": THEME_NAME, "registrationAllowed": False, "duplicateEmailsAllowed": False,
+        "realm": REALM, "displayName": PRODUCT, "displayNameHtml": PRODUCT, "loginTheme": THEME_NAME, "registrationAllowed": False, "duplicateEmailsAllowed": False,
         "editUsernameAllowed": False, "bruteForceProtected": True, "browserFlow": "browser",
         "smtpServer": {"host": "mailpit", "port": "1025"},
         "components": {"org.keycloak.userprofile.UserProfileProvider": [
             {"providerId": "declarative-user-profile", "config": {USER_PROFILE: [json.dumps(profile)]}}]},
         "clients": [
-            {"clientId": LOGIN_CLIENT, "rootUrl": "http://localhost:8000",
+            {"clientId": LOGIN_CLIENT, "name": PRODUCT, "rootUrl": "http://localhost:8000",
              "redirectUris": ["http://localhost:8000/api/auth/callback"], "protocolMappers": [
                 {"name": "amr", "protocolMapper": AMR_MAPPER, "config": {"id.token.claim": "true"}}]},
             {"clientId": ADMIN_CLIENT, "serviceAccountsEnabled": True}],
@@ -261,6 +276,10 @@ def test_every_check_accepts_a_good_realm():
 
 
 @pytest.mark.parametrize(("check", "bad"), [
+    pytest.param(check_realm_names_the_product, _mutate(["displayName"], None), id="no-display-name"),
+    pytest.param(check_realm_names_the_product, _mutate(["displayNameHtml"], "defender"), id="header-names-the-realm"),
+    pytest.param(check_login_client_is_named_for_the_product, _mutate(["clients", 0, "name"], "Defender API (sign-in)"),
+                 id="sign-in-client-says-defender"),
     pytest.param(check_realm_names_the_theme, _mutate(["loginTheme"], "keycloak.v2"), id="other-login-theme"),
     pytest.param(check_realm_switches, _mutate(["registrationAllowed"], True), id="registration"),
     pytest.param(check_realm_switches, _mutate(["duplicateEmailsAllowed"], True), id="duplicate-emails"),
@@ -299,6 +318,16 @@ def test_a_check_rejects_the_setting_it_guards(check, bad):
     """Each single-field change is caught by its own check."""
     with pytest.raises(AssertionError):
         check(bad)
+
+
+def test_the_sign_in_screens_name_the_product():
+    """The committed realm's display name, in the title and the header, is the product's."""
+    check_realm_names_the_product(_committed_realm())
+
+
+def test_the_sign_in_client_is_named_for_the_product():
+    """The committed realm names the sign-in client for the product, as a person may read it."""
+    check_login_client_is_named_for_the_product(_committed_realm())
 
 
 def test_1540_f5_the_realm_names_the_defender_login_theme():

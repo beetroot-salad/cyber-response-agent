@@ -248,6 +248,32 @@ def test_1161_b8_an_otp_sign_in_lists_pwd_and_otp_in_amr_and_a_password_one_only
         live.delete_user(without)
 
 
+def _sign_in_page_says(page: Any) -> dict[str, Any]:
+    """What the product's sign-in form shows: the title, the header, the invite-only line, the username field's label,
+    and whether Keycloak's re-authenticate banner is on the page."""
+    return {"title": page.title(), "header": page.inner_text("#kc-header-wrapper").strip().casefold(),
+            "invite-only": page.locator("#kc-invite-only").count() == 1,
+            "label": page.inner_text("label[for=username]").strip() if page.locator("label[for=username]").count() else None,
+            "banner": "re-authenticate" in page.inner_text("body").casefold()}
+
+
+def test_the_sign_in_form_names_the_product_says_invite_only_and_never_asks_to_re_authenticate(live, person, browser):
+    """The realm's display name and the theme's `login.ftl` and messages: the form is titled for Sluice, asks for an
+    email, says Sluice is invite-only, and a second sign-in of one browser (Keycloak's own session from the first one
+    still open, the API's `prompt=login`) shows no "Please re-authenticate" banner. The stock theme shows it there."""
+    _, name = person
+    page, _, _ = browser.open("first")
+    first = _sign_in_page_says(page)
+    assert first == {"title": "Sign in to Sluice", "header": "sluice", "invite-only": True, "label": "Email",
+                     "banner": False}, first
+    browser.submit(page, name)
+    again, _, _ = browser.open("second")
+    second = _sign_in_page_says(again)
+    assert again.locator("#kc-attempted-username").count() == 1, "the second sign-in did not find the first's session"
+    assert {k: second[k] for k in ("title", "invite-only", "banner")} == {
+        "title": "Sign in to Sluice", "invite-only": True, "banner": False}, second
+
+
 def test_1161_the_credential_list_and_user_record_have_the_shapes_the_fake_models(live, person):
     """What `has_otp` and `require_otp_setup` rely on, and what `FakeKeycloak` answers: the credential list is a list of
     `{id, type, createdDate}`; the user record has `requiredActions`; a `PUT` of it back with one more action is a 204 and reads back. (R11)"""
