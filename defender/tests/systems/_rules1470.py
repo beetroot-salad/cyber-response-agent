@@ -18,7 +18,7 @@ def rules(name: str) -> Any:
 
 def write_broken_adapter(folder: Path, counter: Path) -> None:
     """`broken_adapter.py` in `folder` (an `integrations/`): it declares itself cold and fails when imported, noting each
-    import as one `x` in `counter` (#1470 D8)."""
+    import as one `x` in `counter` (#1470 D8); it carries the #1504 list and reference, so only its load fails."""
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "broken_adapter.py").write_text(textwrap.dedent(f'''\
         """An adapter whose import fails."""
@@ -26,7 +26,9 @@ def write_broken_adapter(folder: Path, counter: Path) -> None:
         REQUIRED_CONFIG_KEYS = ("TIMEOUT_SEC",)
         DISPLAY_NAME = "Broken"
         EXAMPLE = False
+        READ_ROUTES = ()
         with open({str(counter)!r}, "a") as noted:
             noted.write("x")
         raise RuntimeError("the adapter failed on import 1470")
         '''))
+    (folder / "broken_adapter.md").write_text("## Credential\n\nNone known.\n\n## Pitfalls\n\nNone known.\n")

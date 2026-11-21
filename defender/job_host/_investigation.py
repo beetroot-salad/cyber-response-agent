@@ -107,6 +107,7 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
     from defender import run_common
     from defender.records import job_lane
     from defender.records.formats import TenantRefused
+    from defender.systems.catalog import Catalog
     from defender.systems.run_tenant import host_tenant
 
     inv = str(session.job_id)
@@ -140,14 +141,16 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
     try:
         copy = setup_step(run_common.copy_knowledge, accepted, source, inv)
         cleanup.callback(copy.remove)
+        # The catalog's roster, read once and cold (no adapter code runs here, N7): the records' reads are judged
+        # against its adapters' lists (#1504 O3), then the tenant's systems are narrowed to it.
+        roster = setup_step(run_common.run_roster, session.defender_dir)
         try:
             run_tenant = setup_step(run_common.run_tenant_or_exit, accepted, dispatches_lead_zero=True,
-                                 records=current, copy=copy)
+                                    records=current, copy=copy, catalog=Catalog(roster))
         except TenantRefused as refused:
             raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
-        # The tenant's systems over the catalog (read cold: no adapter code runs here, N7), its grants narrowed to the
-        # systems it has enabled records of (#1366 R12), so the pass names none it has not; the container warns.
-        roster = setup_step(run_common.run_roster, session.defender_dir)
+        # Its grants narrowed to the systems it has enabled records of (#1366 R12), so the pass names none it has not;
+        # the container warns.
         verdict = setup_step(run_common.tenant_verdict, run_tenant, roster, warn=False)
         reads = grant(verdict.tenant)
         signing = set_up_signing(session, accepted, records)  # every investigation, whatever its grant (W-D8)

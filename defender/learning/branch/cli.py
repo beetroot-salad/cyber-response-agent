@@ -809,9 +809,10 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
             # the job's start come in the launch facts (#1170 A6).
             records = (admitted.directory.current_records(admitted.tenant.id) if container is None
                        else _handed_records(container))
+            catalog = Catalog(roster)
             verdict = run_tenant_mod.tenant_systems(
-                run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False, records=records),
-                Catalog(roster))
+                run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False, records=records,
+                                              catalog=catalog), catalog)
         except TenantRefused as refusal:
             raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
                          brief=f"the job's tenant was refused ({type(refusal).__name__})",

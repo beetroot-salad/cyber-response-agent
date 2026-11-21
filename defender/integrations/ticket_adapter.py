@@ -42,6 +42,8 @@ REQUIRED_CONFIG_KEYS = (*transport.REQUIRED_CONFIG_KEYS_TEMPLATE, "KEY_PATTERN")
 SAMPLE_SETTINGS = {"TICKET_TIMEOUT_SEC": "10", "TICKET_KEY_PATTERN": "[A-Za-z0-9][A-Za-z0-9._-]*"}
 #: No setting goes in a request path.
 PATH_KEYS: tuple[str, ...] = ()
+#: The non-GET routes this adapter's tools send, read cold (#1504 O1): none, every request it makes is a GET.
+READ_ROUTES: tuple[tuple[str, str], ...] = ()
 #: The route `add_case_comment` sends (#1366 C1): a comment on the ticket, whatever the settings.
 COMMENT_ROUTE = ("POST", "/tickets/*/comments")
 

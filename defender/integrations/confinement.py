@@ -19,6 +19,7 @@ if (_root := str(_Path(__file__).resolve().parents[2])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender._model import model
+from defender.kit.access import is_read_method
 from defender.kit.faults import ConfinementFault
 
 
@@ -79,19 +80,21 @@ def normalize_endpoint(url: str) -> str:
     return "/" + "/".join(resolved)
 
 
+#: The GET reads a system may make in-process. A request of any other method is not judged here: the proxy enforces
+#: exactly the non-GET routes the system's record declares (#1504 O3), tied to the adapter's own list by a test (O2).
 READ_ENDPOINT_ALLOWLIST = ReadEndpointAllowlist({
     "elastic": (
-        ("/*/_search", "POST"),
-        ("/_query", "POST"),
         ("/_cluster/health", "GET"),
     ),
 })
 
 
 def confine_read_endpoint(system: str, url: str, *, method: str) -> str:
-    """Refuse a request whose resolved, normalized target is not a declared read endpoint for
-    `system` under `method`. Checked against REAL requests via the capture seam, never against
-    the allowlist's own entries."""
+    """Refuse a GET or HEAD whose resolved, normalized target is not a declared read endpoint for `system` under
+    `method`. Any other method passes: the credential proxy judges it against the record's declared reads (#1504).
+    Checked against REAL requests via the capture seam, never against the allowlist's own entries."""
+    if not is_read_method(method):  # the methods the proxy admits with no declared route: the only ones judged here
+        return url
     path = normalize_endpoint(url)
     entries = READ_ENDPOINT_ALLOWLIST.get(system, ())
     if not any(m == method and fnmatch.fnmatchcase(path, pattern) for pattern, m in entries):
