@@ -255,7 +255,7 @@ function clientOver(api: Readonly<Record<On401, Api>>, exit: Exit, effects: Effe
 
 /** Each read is sent at most once per load: retries off, no refetch on focus or reconnect, data that never goes stale
  * and entries kept for the load's life. A query function throws only for a fault, which `useRead` rethrows. */
-function onceQueryClient(): QueryClient {
+export function onceQueryClient(): QueryClient {
   const once = { retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false, refetchOnMount: false } as const;
   return new QueryClient({ defaultOptions: { queries: { ...once, staleTime: Infinity, gcTime: Infinity } } });
 }
