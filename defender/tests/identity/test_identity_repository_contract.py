@@ -860,14 +860,119 @@ async def test_purging_also_removes_the_sessions_sign_in_would_refuse_as_idle(se
     assert (await seeded.session_by_value("at-cutoff")).user_id == user.id
 
 
-async def test_sign_out_deletes_that_session_only(seeded):
-    """O6/flow 7: delete the session row; other devices stay signed in."""
+def _recorded(backend, tenants):
+    """The people requests recorded after the caller's `mark()`: by SQL on PostgreSQL, through the port on the twin."""
+    from defender.tests.tenancy.people_1592._spec1592 import RequestLog, requests_port, sql_reader
+
+    return RequestLog(sql_reader(backend)) if backend is not None else RequestLog(lambda: requests_port(tenants))
+
+
+def _pair(user, tenant=None):
+    import collections
+
+    return collections.Counter({(str(user.id) if user else None, tenant): 1})
+
+
+async def test_sign_out_deletes_that_session_only_and_stamps_and_records_either_way(seeded, backend, tenants):
+    """S1-13 (O6, OD-10): `sign_out` deletes the user's session with that value, keeps others, stamps `signed_out_at`
+    with or without a match, and records (U, none); another user's value is not deleted."""
     user, _ = await _session(seeded, "device-1")
     await _session(seeded, "device-2", user=user)
-    assert await seeded.delete_session("device-1") is True
+    other, _ = await _session(seeded, "other-device", user=await _user(seeded, "bob@x.org"))
+    assert (await seeded.user(user.id)).signed_out_at is None
+    log = _recorded(backend, tenants)
+    await log.mark()
+    before = dt.datetime.now(dt.UTC)
+
+    await seeded.sign_out(user.id, "device-1")
     assert await seeded.session_by_value("device-1") is None
     assert (await seeded.session_by_value("device-2")).user_id == user.id
-    assert await seeded.delete_session("device-1") is False
+    first = (await seeded.user(user.id)).signed_out_at
+    assert first is not None
+    assert abs(first - before) < dt.timedelta(minutes=1), "database time, now"
+    assert await log.since() == _pair(user)
+
+    await seeded.sign_out(user.id, "no-such-session")  # no session: still stamped and recorded
+    assert (await seeded.user(user.id)).signed_out_at > first
+    assert (await seeded.session_by_value("device-2")).user_id == user.id
+    assert await log.since() == _pair(user) + _pair(user)
+
+    await seeded.sign_out(user.id, "other-device")  # another user's value: that session stays
+    assert (await seeded.session_by_value("other-device")).user_id == other.id
+    assert (await seeded.user(other.id)).signed_out_at is None
+    assert (await log.since())[(str(user.id), None)] == 3
+
+
+async def test_sign_out_replaces_delete_session_in_the_port_and_both_twins(backend, tenants):
+    """S1-14 (OD-10): `sign_out` is there and `delete_session` is gone, on the protocol and on each repository."""
+    from defender.identity import ports
+
+    repositories = [InMemoryIdentityRepository]
+    if backend is not None:
+        from defender.identity.postgres import PostgresIdentityRepository
+
+        repositories.append(PostgresIdentityRepository)
+    for owner in (ports.IdentityRepository, *repositories):
+        assert hasattr(owner, "sign_out"), owner
+        assert not hasattr(owner, "delete_session"), owner
+
+
+async def test_the_session_purge_is_not_a_sign_out(seeded, backend, tenants):
+    """S1-12 (OD-10): the purge of expired and idle sessions records no request and leaves `signed_out_at` as it was."""
+    user = await _user(seeded)
+    await seeded.add_session("old", user.id, now=NOW - 2 * WEEK, expires_at=NOW - WEEK)
+    log = _recorded(backend, tenants)
+    await log.mark()
+    assert await seeded.purge_expired_sessions(now=NOW, idle_since=NOW - HOUR) == 1
+    assert await seeded.session_by_value("old") is None
+    assert (await seeded.user(user.id)).signed_out_at is None
+    assert await log.new() == []
+
+
+async def test_the_wanted_rule_is_an_active_membership_of_an_active_tenant_and_nothing_else(seeded, backend, tenants):
+    """S1-16 (design, Model): `wanted_tenants(U)` and `wanted_users(T)` agree on (active membership, active tenant);
+    user status, the admin flag, invitations, ended rows, and an unknown user do not make anyone wanted."""
+    from defender.tests.support.tenancy._active1214 import offboard_on_database
+
+    creating = TenantId(fixture_uuid("tenant:wanted-creating"))
+    offboarding = TenantId(fixture_uuid("tenant:wanted-offboarding"))
+    await _seed_tenant(backend, tenants, creating, state="creating")
+    await _seed_tenant(backend, tenants, offboarding)
+    if backend is None:
+        from defender.tests.support.tenancy._twin1496 import offboard_twin
+
+        await offboard_twin(tenants, str(offboarding))
+    else:
+        await offboard_on_database(backend, str(offboarding))
+    users = {}
+    for status in ("invited", "active", "revoked", "ended"):
+        users[status] = await _user(seeded, f"{status}@x.org", status="active")
+        for tenant in (T1, creating, offboarding):
+            await seed_membership(seeded, users[status].id, tenant, status=status, invited_by=None, created_at=NOW,
+                                  accepted_at=NOW if status in ("active", "ended") else None,
+                                  ended_at=NOW if status == "ended" else None)
+    newcomer = await _user(seeded, "new@x.org", status="invited")  # the user's own status is not an input
+    await seed_membership(seeded, newcomer.id, T2, status="active", invited_by=None, created_at=NOW, accepted_at=NOW)
+    admin = await _user(seeded, "adm@x.org", is_platform_admin=True)  # nor is the admin flag
+    await seed_membership(seeded, admin.id, T1, status="ended", invited_by=None, created_at=NOW, ended_at=NOW)
+
+    async def tenants_of(user):
+        return {str(t) for t in await seeded.wanted_tenants(user.id)}
+
+    async def users_of(tenant):
+        return {str(u) for u in await seeded.wanted_users(tenant)}
+
+    assert await tenants_of(users["active"]) == {str(T1)}
+    for status in ("invited", "revoked", "ended"):
+        assert await tenants_of(users[status]) == set(), status
+    assert await tenants_of(newcomer) == {str(T2)}
+    assert await tenants_of(admin) == set()
+    assert await users_of(T1) == {str(users["active"].id)}
+    assert await users_of(T2) == {str(newcomer.id)}
+    assert await users_of(creating) == set()
+    assert await users_of(offboarding) == set()
+    assert {str(t) for t in await seeded.wanted_tenants(NO_SUCH_USER)} == set()
+    assert {str(u) for u in await seeded.wanted_users(T_UNREGISTERED)} == set()
 
 
 async def test_last_seen_is_written_only_when_older_than_five_minutes(seeded):

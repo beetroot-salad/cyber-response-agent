@@ -198,7 +198,7 @@ Files are under `tenant_1108_p4/` unless a path is given.
 - O-TEXT model-facing spellings → `test_model_text.py`, `test_connect_propose.py`
 - O5 lesson load recorded → `test_lesson_load.py`, `learning/retrieval/test_record_lesson_load.py`
 - O6 judge pre/post-move, unreadable → `test_judge_bodies.py`, `learning/judge/test_render.py`
-- O7 all corpus writes via TenantDelivery, legacy delivery deleted → `test_writers.py`, `test_drains.py`, `test_revert_cli.py`, `test_connect_propose.py`, lane suites (#773/#869/#870/#1134/lead author/pitfalls)
+- O7 all corpus writes via TenantDelivery, legacy delivery deleted → `test_writers.py`, `test_drains.py`, `test_connect_propose.py`, lane suites (#773/#869/#870/#1134/lead author/pitfalls)
 - O7b merged PR read or recorded stale → `test_publish_child.py`
 - O-STALE child classification → `test_publish_child.py`, `test_run_start.py`, `learning/branch/test_family_knowledge.py`
 - O-WARN page/ticket/API → `test_stale_visibility.py`, `test_run_page.py`
@@ -217,7 +217,6 @@ Files are under `tenant_1108_p4/` unless a path is given.
 - Flow 2 materialise → `test_materialise.py`
 - Flow 3 run start → `test_run_start.py`, `test_run_copy.py`, `tests/tenancy/test_tenant_settings_location.py`, `e2e/test_tenant_run_start_e2e.py`
 - Flow 4 drain → `test_drains.py`, `test_refused_claims.py`
-- Flow 5 revert → `test_revert_cli.py`
 - Flow 6 connect → `test_connect_propose.py`, `e2e/test_consumers_e2e.py`
 - Flow 7 branch replay → `test_branch_replay.py`
 - A-ID drain AppRole login → `test_drain_credentials.py`, `test_live_dev_issuer.py`

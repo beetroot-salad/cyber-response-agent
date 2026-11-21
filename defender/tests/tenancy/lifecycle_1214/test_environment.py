@@ -2,6 +2,8 @@
 box or bash-executor environment carries it; only the publish child is handed it back."""
 from __future__ import annotations
 
+import pytest
+
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.tenancy.tenant_1108_p4.test_publish_child import _RecordingSpawn
 
@@ -95,3 +97,52 @@ def test_the_publish_child_is_not_handed_an_address_the_launcher_does_not_have(m
     publish_launch.launch_publish("some-tenant", data_root=tmp_path, budget=5.0, spawn=spawn)
     (_argv, env), = spawn.calls
     assert DSN_ENV not in env
+
+
+# --- #1592 S3-23: the people worker's settings --------------------------------------------------------------------------
+
+def _config(tmp_path, **fields):
+    from defender.lifecycle.config import LifecycleConfig
+    from defender.tenancy import template_dir
+    from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, ISSUER_URL, OPENBAO_URL
+    from defender.tests.tenancy.lifecycle_1214._support import REPO_ROOT
+
+    base = {"issuer_url": ISSUER_URL, "forge_url": FORGE_URL, "forge_admin_token": "t", "openbao_url": OPENBAO_URL,
+            "openbao_login": "l", "integration_command": "x", "template_dir": template_dir(REPO_ROOT),
+            "secrets_dir": tmp_path / "secrets", "data_root": tmp_path / "data"}
+    return LifecycleConfig(**{**base, **fields})
+
+
+def test_1592_the_people_settings_default_to_the_designs_values(tmp_path):
+    """S3-23: `people_poll` 2 s, `people_concurrency` 4, `people_call_timeout` 5 s, `forge_session_cap` 1 h and
+    `forge_cap_every` 1 min, and the two required fields are kept as given."""
+    config = _config(tmp_path, keycloak_source_id=7, forge_sessions_dsn="postgresql://fs@db.test/forgejo_sessions")
+    assert config.people_poll == 2.0
+    assert config.people_concurrency == 4
+    assert config.people_call_timeout == 5.0
+    assert config.forge_session_cap == 3600.0
+    assert config.forge_cap_every == 60.0
+    assert config.keycloak_source_id == 7
+    assert config.forge_sessions_dsn == "postgresql://fs@db.test/forgejo_sessions"
+
+
+def test_1592_a_config_without_the_keycloak_source_or_the_sessions_login_is_refused(tmp_path):
+    """S3-23: neither `keycloak_source_id` nor `forge_sessions_dsn` has a default; each missing is refused."""
+    from defender.lifecycle.config import ConfigRefused
+
+    both = {"keycloak_source_id": 7, "forge_sessions_dsn": "postgresql://fs@db.test/forgejo_sessions"}
+    _config(tmp_path, **both)  # control: complete
+    for left_out in both:
+        with pytest.raises((TypeError, ConfigRefused)):
+            _config(tmp_path, **{k: v for k, v in both.items() if k != left_out})
+    with pytest.raises((TypeError, ConfigRefused)):
+        _config(tmp_path)
+
+
+def test_1592_the_tests_one_config_carries_the_required_fields(tmp_path):
+    """S3-23: `_support.lifecycle_config` (every lifecycle test's config) passes both required fields."""
+    from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config
+
+    config = lifecycle_config(tmp_path, tmp_path / "data")
+    assert config.keycloak_source_id == 7
+    assert config.forge_sessions_dsn

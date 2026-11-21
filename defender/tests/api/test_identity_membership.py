@@ -241,6 +241,23 @@ def test_sign_out_ends_this_session_and_leaves_other_devices_signed_in() -> None
     assert phone.get(API + "/me").status_code == 200
 
 
+def test_sign_out_stamps_the_user_and_records_the_person_while_other_devices_stay_signed_in() -> None:
+    """S1-15 (#1592 F11, OD-10): the real logout calls the repository's `sign_out`: `signed_out_at` is set, one (U, none)
+    request is recorded, and the other device's session is kept."""
+    world = World(tenants={T1: [ANN]})
+    laptop, phone = world.sign_in(ANN), world.sign_in(ANN)
+    uid = user_id(laptop)
+    assert world.call(world.repo.user, uid).signed_out_at is None
+    seen = {str(r.id) for r in world.call(world.tenants.open_people_requests)}
+
+    assert laptop.post(API + "/auth/logout").status_code == 204
+
+    assert world.call(world.repo.user, uid).signed_out_at is not None
+    new = [r for r in world.call(world.tenants.open_people_requests) if str(r.id) not in seen]
+    assert [(str(r.user_id), r.tenant_id) for r in new] == [(uid, None)]
+    assert phone.get(API + "/me").status_code == 200
+
+
 def test_one_session_reaches_every_tenant_a_person_belongs_to() -> None:
     """The SOC analyst: invited to a second tenant, accepts, uses both; removal from one leaves the other (O3)."""
     world, ann, bob = two_tenants()

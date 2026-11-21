@@ -257,6 +257,126 @@ jobs:
         if: failure()
         run: docker compose -f .devcontainer/docker-compose.yml logs keycloak | tail -200
 
+  # #1592 F10: the `live` Forgejo hardening cases (`tests/tenancy/people_1592/test_1592_live.py`) against what ships:
+  # the dev compose Forgejo with its settings file (`.devcontainer/forgejo/settings.env`, the service's `env_file`),
+  # the dev compose Keycloak with the shipped realm, the sessions database built by the shipped script, the ingress's
+  # Forgejo site (the launcher with Caddy), and the lifecycle's request worker, which the cases run in-process. A fresh
+  # volume every run: `FORGEJO__` values persist in `app.ini`. Once the URL names a Forgejo these cases fail rather
+  # than skip, and under `CI` an unset input fails (the module's guard), so this job cannot pass by skipping.
+  forgejo-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Sync defender venv
+        working-directory: defender
+        run: uv sync --extra dev --extra api --locked
+
+      # The site's name and port come from the shipped settings file, not from this job.
+      - name: Read the Forgejo site from the shipped settings
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          from urllib.parse import urlsplit
+          env = dict(line.split("=", 1) for line in open(".devcontainer/forgejo/settings.env") if "=" in line and not line.startswith("#"))
+          root = urlsplit(env["FORGEJO__server__ROOT_URL"].strip())
+          print(f"FORGE_DOMAIN={env['FORGEJO__server__DOMAIN'].strip()}")
+          print(f"EDGE_PORT={root.port}")
+          PY
+
+      - name: Install Caddy 2.11.9
+        env:
+          CADDY_VERSION: 2.11.9
+          CADDY_SHA256: 5b8cb7faf8726a2028ad96a66e54e6e81e8f361bc6175e5d22bbd997cc5177fb
+        run: |
+          curl -fsSL -o /tmp/caddy.tgz \
+            "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_amd64.tar.gz"
+          echo "${CADDY_SHA256}  /tmp/caddy.tgz" | sha256sum -c -
+          sudo tar -xzf /tmp/caddy.tgz -C /usr/local/bin caddy
+
+      # S4-10 loads model-written files in Chromium.
+      - name: Install Chromium for Playwright
+        working-directory: defender
+        run: uv run --locked playwright install --with-deps chromium
+
+      # The test databases the cases create and drop (the `test` job's own server), apart from compose's PostgreSQL,
+      # which holds Keycloak's database and the sessions database (published on loopback by the override file).
+      - name: Start PostgreSQL for the product databases
+        run: |
+          docker run -d --name defender-postgres -e POSTGRES_PASSWORD=postgres -p 127.0.0.1:5432:5432 postgres:17.11
+          timeout 60 sh -c 'until docker exec defender-postgres pg_isready -h 127.0.0.1 -q; do sleep 1; done'
+
+      - name: Start the dev compose Keycloak and Forgejo
+        run: |
+          touch .env
+          mkdir -p playground-knowledge
+          cat > "$RUNNER_TEMP/live-override.yml" <<'YAML'
+          services:
+            postgres:
+              ports: ["127.0.0.1:5433:5432"]
+          YAML
+          COMPOSE="docker compose -f .devcontainer/docker-compose.yml -f $RUNNER_TEMP/live-override.yml"
+          # The shipped dev setup script: the sessions database and its two logins before Forgejo starts, then the
+          # Keycloak login source. Run as the dev setup runs it, on a fresh volume.
+          COMPOSE="$COMPOSE" .devcontainer/forgejo/setup.sh
+          # S4-11's non-superuser product login (the script's own logins are Forgejo's and the lifecycle's).
+          $COMPOSE exec -T postgres psql -U defender -d postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE defender_product LOGIN PASSWORD 'live-product'"
+          for realm in defender; do
+            timeout 180 sh -c "until curl -sf -o /dev/null http://localhost:8080/realms/$realm/.well-known/openid-configuration; do sleep 2; done"
+          done
+          timeout 180 sh -c 'until curl -sf -o /dev/null http://localhost:3000/api/v1/version; do sleep 2; done'
+          # The lifecycle's DSN is the script's login that is a member of `fs_lifecycle`.
+          LOGIN=$($COMPOSE exec -T postgres psql -U defender -d postgres -Atc "SELECT m.rolname FROM pg_auth_members a JOIN pg_roles r ON r.oid = a.roleid JOIN pg_roles m ON m.oid = a.member WHERE r.rolname = 'fs_lifecycle' AND m.rolcanlogin")
+          echo "LIFECYCLE_DSN=postgresql://$LOGIN:dev-only-change-me@127.0.0.1:5433/forgejo_sessions" >> "$GITHUB_ENV"
+
+      - name: Create the live tokens
+        run: |
+          COMPOSE="docker compose -f .devcontainer/docker-compose.yml -f $RUNNER_TEMP/live-override.yml"
+          FORGEJO="$COMPOSE exec -T -u git forgejo forgejo"
+          $FORGEJO admin user create --admin --username live-admin --password "$(openssl rand -hex 16)" --email live-admin@live.example --must-change-password=false
+          $FORGEJO admin user create --username live-bot --password "$(openssl rand -hex 16)" --email live-bot@live.example --must-change-password=false
+          echo "ADMIN_TOKEN=$($FORGEJO admin user generate-access-token --username live-admin --scopes all --raw)" >> "$GITHUB_ENV"
+          echo "BOT_TOKEN=$($FORGEJO admin user generate-access-token --username live-bot --scopes all --raw)" >> "$GITHUB_ENV"
+          echo "SOURCE_ID=$($FORGEJO admin auth list | awk '$2=="product"{print $1}')" >> "$GITHUB_ENV"
+
+      - name: Start the ingress with the Forgejo site
+        run: |
+          mkdir -p "$RUNNER_TEMP/frontend" && echo ok > "$RUNNER_TEMP/frontend/index.html"
+          env DEFENDER_INGRESS_LISTEN=127.0.0.1:$EDGE_PORT DEFENDER_ARTIFACT_DOMAIN=artifacts.defender.test \
+            DEFENDER_INGRESS_API_UPSTREAM=127.0.0.1:9 DEFENDER_INGRESS_FRONTEND_DIR="$RUNNER_TEMP/frontend" \
+            DEFENDER_FORGE_DOMAIN=$FORGE_DOMAIN DEFENDER_INGRESS_FORGE_UPSTREAM=127.0.0.1:3000 \
+            defender/.venv/bin/python -m defender.api_server.ingress > "$RUNNER_TEMP/ingress.log" 2>&1 &
+          timeout 30 sh -c "until curl -s -o /dev/null http://$FORGE_DOMAIN:$EDGE_PORT/; do sleep 1; done"
+
+      - name: Run the live Forgejo checks
+        working-directory: defender
+        env:
+          DEFENDER_BUDGET_ENFORCE: "1"
+          DEFENDER_LIVE_FORGEJO_URL: http://${{ env.FORGE_DOMAIN }}:${{ env.EDGE_PORT }}
+          DEFENDER_LIVE_FORGEJO_PRIVATE_URL: http://localhost:3000
+          DEFENDER_LIVE_FORGEJO_ADMIN_TOKEN: ${{ env.ADMIN_TOKEN }}
+          DEFENDER_LIVE_FORGEJO_BOT_TOKEN: ${{ env.BOT_TOKEN }}
+          DEFENDER_LIVE_FORGEJO_SOURCE_ID: ${{ env.SOURCE_ID }}
+          DEFENDER_LIVE_KEYCLOAK_URL: http://localhost:8080
+          DEFENDER_LIVE_SESSIONS_DSN: postgresql://defender:dev-only-change-me@127.0.0.1:5433/forgejo_sessions
+          DEFENDER_LIVE_SESSIONS_LIFECYCLE_DSN: ${{ env.LIFECYCLE_DSN }}
+          DEFENDER_LIVE_SESSIONS_PRODUCT_DSN: postgresql://defender_product:live-product@127.0.0.1:5433/forgejo_sessions
+          DEFENDER_TEST_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: uv run pytest -m live -v -rs tests/tenancy/people_1592/test_1592_live.py
+
+      - name: Forgejo's, Keycloak's and the ingress's logs
+        if: failure()
+        run: |
+          docker compose -f .devcontainer/docker-compose.yml logs forgejo keycloak | tail -300
+          tail -100 "$RUNNER_TEMP/ingress.log"
+
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to
   # carry inline. It moved out here for wall clock alone: 27 tests that each start a real
   # gVisor box cost 61s, the largest single file in the suite, and pytest-xdist cannot shrink

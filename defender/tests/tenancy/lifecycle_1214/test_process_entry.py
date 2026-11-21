@@ -25,6 +25,7 @@ from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.shared._postgres1339 import empty_database  # noqa: E402,F401 — fixture
 from defender.tests.support.tenancy._active1214 import DSN_ENV, insert_active_tenant  # noqa: E402
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import org_of  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import openbao_failing  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import REPO_WINDOW, LifecycleWorld  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214.test_host_entry import (  # noqa: E402
@@ -94,7 +95,7 @@ def test_serve_runs_both_actors_every_round_until_stopped(world):
     world.call(serve, world.service_actor, world.host_actor, config=world.config, stop=stop)
     assert len(rounds) == 30
     assert world.item(tenant)["state"] == "active"
-    assert world.forge.made("POST", "/api/v1/orgs/tenants/repos"), "control: the service's steps ran"
+    assert world.forge.made("POST", f"/api/v1/orgs/{org_of(tenant)}/repos"), "control: the service's steps ran"
     assert world.publish.calls, "control: the host's prepare ran"
 
 

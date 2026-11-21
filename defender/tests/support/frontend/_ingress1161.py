@@ -3,7 +3,7 @@ launcher (B9, S5, B11).
 
 The launcher is `python -m defender.api_server.ingress` (the record's chosen name), which finds `caddy` on PATH. Its
 four inputs are `DEFENDER_INGRESS_LISTEN`, `DEFENDER_ARTIFACT_DOMAIN`, `DEFENDER_INGRESS_API_UPSTREAM`
-(`host:port`) and `DEFENDER_INGRESS_FRONTEND_DIR`; nothing else is passed. Missing tools and a missing frontend or
+(`host:port`) and `DEFENDER_INGRESS_FRONTEND_DIR`, plus #1592's Forgejo domain and upstream; nothing else is passed. Missing tools and a missing frontend or
 launcher fail loudly (B11), never skip.
 
 - `require_tools()`: fails naming every missing tool (bun, caddy, playwright and its Chromium).
@@ -48,6 +48,12 @@ from defender.tests.support.api._server1083 import REPO, free_port
 
 FRONTEND = REPO / "defender" / "frontend"
 ARTIFACT_DOMAIN = "artifacts.defender.test"
+#: #1592 OD-1: the Forgejo site's two required inputs (design, Edge): `DEFENDER_FORGE_DOMAIN`, the API's own setting,
+#: and `DEFENDER_INGRESS_FORGE_UPSTREAM`.
+FORGE_DOMAIN = "forge.defender.test"
+FORGE_UPSTREAM_ENV = "DEFENDER_INGRESS_FORGE_UPSTREAM"
+#: Where a launcher with no Forgejo test of its own points the site: nothing listens there.
+NO_FORGE_UPSTREAM = "127.0.0.1:1"
 LAUNCHER = [sys.executable, "-m", "defender.api_server.ingress"]
 START_TIMEOUT = 30.0
 
@@ -193,13 +199,15 @@ def build_frontend(frontend: Path = FRONTEND) -> Path:
 
 
 def launcher_env(listen: str, upstream: str, frontend_dir: Path, *, artifact_domain: str = ARTIFACT_DOMAIN,
-                 work: Path | None = None) -> dict[str, str]:
-    """The launcher's environment: its four inputs, the process's PATH and HOME-like basics (so Caddy runs), and
+                 work: Path | None = None, forge_domain: str = FORGE_DOMAIN,
+                 forge_upstream: str = NO_FORGE_UPSTREAM) -> dict[str, str]:
+    """The launcher's environment: its six inputs (the Forgejo site's two included, #1592), the process's PATH and HOME-like basics (so Caddy runs), and
     `XDG_*` under `work` so instances keep no shared state."""
     env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/root"),
            "PYTHONPATH": os.pathsep.join(p for p in (str(REPO), os.environ.get("PYTHONPATH", "")) if p),
            "DEFENDER_INGRESS_LISTEN": listen, "DEFENDER_ARTIFACT_DOMAIN": artifact_domain,
-           "DEFENDER_INGRESS_API_UPSTREAM": upstream, "DEFENDER_INGRESS_FRONTEND_DIR": str(frontend_dir)}
+           "DEFENDER_INGRESS_API_UPSTREAM": upstream, "DEFENDER_INGRESS_FRONTEND_DIR": str(frontend_dir),
+           "DEFENDER_FORGE_DOMAIN": forge_domain, FORGE_UPSTREAM_ENV: forge_upstream}
     if work is not None:
         env |= {"XDG_DATA_HOME": str(work / "xdg-data"), "XDG_CONFIG_HOME": str(work / "xdg-config")}
     return env
@@ -227,7 +235,7 @@ def run_launcher_pid(env: Mapping[str, str], timeout: float = 20.0, *,
 
 @contextlib.contextmanager
 def ingress(upstream: str, frontend_dir: Path, work: Path, *, port: int | None = None,
-            artifact_domain: str = ARTIFACT_DOMAIN) -> Iterator[str]:
+            artifact_domain: str = ARTIFACT_DOMAIN, forge_upstream: str = NO_FORGE_UPSTREAM) -> Iterator[str]:
     """The launcher running, serving `frontend_dir` and sending `/api` to `upstream` (`host:port`); yields its origin,
     `http://localhost:<port>` (Chromium treats localhost as secure, so `__Host-` cookies work over http). The
     launcher runs in its own session, so teardown kills whatever it started."""
@@ -237,7 +245,7 @@ def ingress(upstream: str, frontend_dir: Path, work: Path, *, port: int | None =
     log = (work / "ingress.log").open("w+")
     process = subprocess.Popen(LAUNCHER, cwd=REPO, text=True, stdout=log, stderr=subprocess.STDOUT,
                                env=launcher_env(f"127.0.0.1:{port}", upstream, frontend_dir, artifact_domain=artifact_domain,
-                                                work=work), start_new_session=True)
+                                                work=work, forge_upstream=forge_upstream), start_new_session=True)
     try:
         deadline = time.monotonic() + START_TIMEOUT
         while True:

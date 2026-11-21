@@ -195,15 +195,15 @@ def test_the_backfilled_lab_resumed_with_its_wiring_is_made_active_on_its_own_re
         await seed_tenant(stack.tenants, 
             lab, created_at=NOW, state="creating", pending_action="create", step="names", step_actor="service",
             failure="registered before #1214: record its forge wiring if it has a repository, then resume",
-            repo="tenants/playground", origin=f"{live.forge_url}/tenants/playground.git")
+            repo=f"t-{lab}/knowledge", origin=f"{live.forge_url}/t-{lab}/knowledge.git")
         await stack.tenants.request_resume(lab)
         await stack.drive()
         assert (await stack.tenants.tenant(lab)).state == "active"
-        assert (await stack.tenants.forge_wiring(lab)).repo == "tenants/playground"
+        assert (await stack.tenants.forge_wiring(lab)).repo == f"t-{lab}/knowledge"
         [live_gen] = [g for g in await stack.tenants.generations(lab) if g.status == "live"]
         headers = {"Authorization": f"token {live.forge_token}"}
         async with httpx.AsyncClient(base_url=live.forge_url, headers=headers) as forge:
-            collaborators = {c["login"] for c in (await forge.get("/api/v1/repos/tenants/playground/collaborators")).json()}
+            collaborators = {c["login"] for c in (await forge.get(f"/api/v1/repos/t-{lab}/knowledge/collaborators")).json()}
         assert collaborators == {live_gen.bot_login}
     asyncio.run(scenario())
 

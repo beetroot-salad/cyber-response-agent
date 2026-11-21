@@ -289,7 +289,7 @@ def test_a_closed_batch_answers_closed_and_is_never_delivered_again(repo, delete
     assert d.finish(batch).status == "closed"
     assert d.finish(batch).status == "closed"
     # retired here: the same answer from a later process by the on-disk record (a closed PR is a rejection the store
-    # keeps, design D7: test_1278_revert.py::test_reverts_a_revert_pr_closed_unmerged_ends_its_batch_and_refuses_the_next_revert_of_that_lesson).
+    # keeps, design D7).
     assert len(http.creates) == 1
     assert remote_refs(repo[1]) == refs
 
@@ -354,4 +354,3 @@ def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo)
     assert {"finish"} <= sent <= {"finish", "finish-again"}, events
     assert not [e for e in events if _worktree_made(e[1], e[2])], "a git worktree was made"
     assert _checkouts(events) <= {"publish", "start_batch"}, events
-    # the revert's census is in test_revert.py (a revert is `revert_lesson` over the store, #1278 Reverts)

@@ -264,19 +264,7 @@ class PeopleForge(FakeForge):
         return super().handle(request)
 
 
-# --- the Forgejo sessions database -----------------------------------------------------------------
-
-#: The design's setup script, minus roles and grants (the test login is the server's superuser): Forgejo's table with
-#: `signed_in_at`, the re-key trigger that alone stamps it, and its index. The shipped script's path is not given
-#: (gap); S2's script row asserts the shipped script makes this same table and trigger.
-SESSIONS_SCHEMA = """
-CREATE TABLE session (key CHAR(16) PRIMARY KEY, data BYTEA, expiry INTEGER NOT NULL, signed_in_at timestamptz NULL);
-CREATE FUNCTION stamp_sign_in() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN NEW.signed_in_at := now(); RETURN NEW; END $$;
-CREATE TRIGGER stamp_sign_in BEFORE UPDATE OF key ON session FOR EACH ROW EXECUTE FUNCTION stamp_sign_in();
-CREATE INDEX session_signed_in_at ON session (signed_in_at);
-"""
-
+# --- the Forgejo sessions database (built from the shipped SQL: `_sessions1592.shipped_sessions_database`) ---
 
 def session_key(name: str) -> str:
     """A 16-character session key (Forgejo's cookie value) from a short name."""
@@ -310,15 +298,6 @@ class Sessions:
         from defender.tests.support.shared._postgres1339 import execute
 
         execute(self.dsn, "DELETE FROM session")
-
-
-@contextlib.contextmanager
-def sessions_database() -> Iterator[Sessions]:
-    from defender.tests.support.shared._postgres1339 import database, execute
-
-    with database(migrated=False) as dsn:
-        execute(dsn, SESSIONS_SCHEMA)
-        yield Sessions(dsn)
 
 
 #: A DSN nothing listens on: a real connection-refused fault for the sessions port (cache: closed local port).
@@ -380,10 +359,11 @@ def people_lock_namespace() -> int:
 
 
 def people_lock_holders(dsn: str) -> list[int]:
-    """The backend pids holding `(PEOPLE_LOCK_NAMESPACE, 0)`, as `pg_locks` shows a two-key advisory lock."""
+    """The backend pids holding `(PEOPLE_LOCK_NAMESPACE, 0)`, in this database, as `pg_locks` shows a two-key advisory lock."""
     from defender.tests.support.shared._postgres1339 import execute
 
     rows = execute(dsn, """SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted
+                           AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
                            AND classid = %s AND objid = 0 AND objsubid = 2""", (people_lock_namespace(),))
     return [pid for (pid,) in rows]
 

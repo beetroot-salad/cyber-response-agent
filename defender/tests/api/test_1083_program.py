@@ -78,6 +78,14 @@ def _refused(child: Child, *, mentions: tuple[str, ...]):
 
 # --- settings and the probe, as classes ----------------------------------------------------------------
 
+def _forge_domain_violations() -> list[tuple[str, str]]:
+    """#1592 S3-8: values that are not a bare lowercase hostname; each one the program must refuse."""
+    return [("a scheme", "https://forge.defender.test"), ("a port", "forge.defender.test:3000"),
+            ("a path", "forge.defender.test/t"), ("a wildcard", "*.defender.test"),
+            ("upper case", "Forge.Defender.Test"), ("an empty label", "forge..defender.test"),
+            ("a leading dot", ".forge.defender.test"), ("a trailing dot", "forge.defender.test.")]
+
+
 def _shape_violations(name: str, tmp_path: Path) -> list[tuple[str, str]]:
     """Bad values of the setting's own type, with a label; each one the program must refuse (Am-7, FC-3)."""
     cases: list[tuple[str, str]] = []
@@ -94,6 +102,8 @@ def _shape_violations(name: str, tmp_path: Path) -> list[tuple[str, str]]:
                   ("origin with a non-ASCII host", "http://bücher.example:8000")]
     if name.endswith("_ISSUER"):
         cases += [("issuer without a realm", f"{FRONT}/elsewhere"), ("issuer with no realm name", f"{FRONT}/realms/")]
+    if name == "DEFENDER_FORGE_DOMAIN":
+        cases += _forge_domain_violations()
     if name == "DEFENDER_OPENBAO_ADDR":
         cases += [("openbao address not a url", "not a url"), ("openbao address not http", "ftp://127.0.0.1:8200")]
     if name == "DEFENDER_KEYCLOAK_SERVER_URL":
@@ -705,6 +715,9 @@ def _generated(name: str, healthy: str, tmp_path: Path) -> list[tuple[str, str, 
     """(label, environment value, expected) for one setting, from its type's generated space."""
     if name in _URL_SHAPES:
         return _url_variants(healthy, _URL_SHAPES[name])
+    if name == "DEFENDER_FORGE_DOMAIN":
+        return [(label, value, REFUSE) for label, value in _forge_domain_violations()] + [
+            ("a bare hostname", healthy, ACCEPT), ("a single label", "forge", ACCEPT)]
     if name.endswith("_FILE"):
         variants = _administrators_variants() if name == "DEFENDER_API_ADMINISTRATORS_FILE" else _secret_variants()
         cases = []
@@ -725,7 +738,7 @@ async def test_every_url_and_file_setting_takes_each_generated_value_as_its_stat
     healthy = environment(tmp_path, dsn=migrated_database)
     Settings.from_environ(healthy)  # positive control: the healthy environment parses
     covered = {name for name in SETTING_NAMES if _generated(name, healthy[name], tmp_path)}
-    assert covered == set(_URL_SHAPES) | {n for n in SETTING_NAMES if n.endswith("_FILE")}, covered
+    assert covered == set(_URL_SHAPES) | {"DEFENDER_FORGE_DOMAIN"} | {n for n in SETTING_NAMES if n.endswith("_FILE")}, covered
     wrong, started = [], []
     for name in sorted(covered):
         for label, value, expected in _generated(name, healthy[name], tmp_path):

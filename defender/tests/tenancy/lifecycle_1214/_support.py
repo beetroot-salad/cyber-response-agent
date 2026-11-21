@@ -54,6 +54,10 @@ CREATE, RESUME, OFFBOARD, ROTATE, REPO_DELETE = (
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
+KEYCLOAK_SOURCE_ID = 7
+FORGE_SESSIONS_DSN = "postgresql://fs_lifecycle_login@sessions.test:5432/forgejo_sessions"
+
+
 def lifecycle_config(tmp_path: Path, data_root: Path, **overrides: Any) -> Any:
     """The one `LifecycleConfig` of the tests (DC-13): https issuer, forge and OpenBao addresses of the fakes,
     the real template directory, a per-test secrets directory OUTSIDE `<data root>/<T>/`, a short poll, and the two
@@ -64,6 +68,9 @@ def lifecycle_config(tmp_path: Path, data_root: Path, **overrides: Any) -> Any:
         "openbao_url": OPENBAO_URL, "openbao_login": "bao-management-token",
         "integration_command": "forgejo-test", "template_dir": template_dir(REPO_ROOT),
         "secrets_dir": tmp_path / "secrets", "data_root": data_root, "poll_interval": 0.01, "lock_keepalive": 30, "teardown_wait": 5.0,
+        # #1592: the two required fields of the people worker (OD-4, OD-12): the Keycloak login source's id and the
+        # login of a member of `fs_lifecycle` on the sessions database (no test reaches it unless it says so).
+        "keycloak_source_id": KEYCLOAK_SOURCE_ID, "forge_sessions_dsn": FORGE_SESSIONS_DSN,
     }
     return LifecycleConfig(**{**fields, **overrides})
 

@@ -3,9 +3,7 @@
 """
 from __future__ import annotations
 
-import asyncio
 import contextlib
-import datetime as dt
 import json
 import logging
 import re
@@ -227,8 +225,7 @@ def test_1414_a_comment_is_framed_by_its_issues_run(fb):
 # ---------------------------------------------------------------- F2 step 2: read (O3, O4, D12, D13)
 
 def test_1414_only_eligible_non_bot_authors_are_decided_in_order(fb, caplog):
-    """Comments by the record's two logins are decided in order; an outsider's, the bot's (even if recorded) and the forge-whitelisted outsider's are skipped and logged. O3/F2.2/D13."""
-    fb.eligible(OWNER, NAMED, fb.bot)
+    """Comments by the two wanted people's logins are decided in order; an unwanted `p-` login's and the bot's are skipped and logged. O3/F2.2, #1592 OD-6."""
     number = fb.opened("case-who")
     ann = fb.forge.add_comment(number, user=OWNER, body="expected")
     fb.forge.add_comment(number, user=OUTSIDER, body="approved, add it")
@@ -241,13 +238,13 @@ def test_1414_only_eligible_non_bot_authors_are_decided_in_order(fb, caplog):
     assert decider.decided == [ann["id"], bea["id"]]
     assert decider.item(ann["id"])["author"] == OWNER
     assert any(OUTSIDER in r.getMessage() for r in caplog.records), "the skipped outsider is not in the tick's log"
-    assert fb.requests_to("branch_protections", "/teams", "/orgs/") == [], "the tick read the forge's own whitelist (D13)"
+    assert fb.requests_to("branch_protections", "/teams", "/orgs/") == [], "the tick read the forge's own teams (#1592 OD-6)"
 
 
-def test_1414_a_login_dropped_from_the_record_stops_counting_at_the_next_tick(fb):
-    """After the service rewrites its record without an account, that account's comments are not read; the account still on it is. O3/D13."""
+def test_1414_a_login_no_longer_wanted_stops_counting_at_the_next_tick(fb):
+    """After the membership read stops answering an account, that account's comments are not read; the account still wanted is. O3, #1592 OD-6."""
     number = fb.opened("case-removed")
-    fb.eligible(OWNER)
+    fb.wanted(OWNER)
     fb.forge.add_comment(number, user=NAMED, body="expected")
     kept = fb.forge.add_comment(number, user=OWNER, body="expected too")
 
@@ -256,40 +253,10 @@ def test_1414_a_login_dropped_from_the_record_stops_counting_at_the_next_tick(fb
     assert decider.decided == [kept["id"]]
 
 
-@pytest.mark.parametrize(("age", "bound", "env", "fresh"), [
-    (dt.timedelta(seconds=50), None, None, True),       # inside the default bound (60 s, D15), env unset
-    (dt.timedelta(seconds=70), None, None, False),      # past it
-    (dt.timedelta(seconds=50), None, "30", False),      # the env bound (30 s) governs when no seam is given
-    (dt.timedelta(seconds=50), None, "100", True),      # and a larger env bound admits it
-    (dt.timedelta(seconds=30), dt.timedelta(seconds=60), None, True),
-    (dt.timedelta(seconds=120), dt.timedelta(seconds=60), None, False),
-    (dt.timedelta(seconds=30), dt.timedelta(seconds=60), "10", True),   # the seam wins over the env
-])
-def test_1414_a_stale_record_reads_no_comments_and_a_fresh_one_reads_them(fb, caplog, monkeypatch, age, bound, env, fresh):
-    """A record older than the bound (the seam, else `LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE`, else 60 s) makes the tick read nothing and log why; the comment is read once it is fresh. D13/D15."""
-    if env is None:
-        monkeypatch.delenv(S.ELIGIBILITY_MAX_AGE_ENV, raising=False)
-    else:
-        monkeypatch.setenv(S.ELIGIBILITY_MAX_AGE_ENV, env)
-    number = fb.opened("case-stale")
-    comment = fb.forge.add_comment(number, user=OWNER, body="expected")
-    fb.eligible(OWNER, NAMED, age=age)
-    seams = {} if bound is None else {"eligibility_max_age": bound}
+def test_1414_a_failed_membership_read_reads_no_comments_and_counts_no_attempt(fb, caplog):
+    """A tick whose membership read fails reads nothing and is not counted against a comment two attempts into its ceiling; once the read answers, it is decided normally. A4, #1592 OD-6."""
+    from defender.tenancy import RecordsUnreachable
 
-    decider = S.Decider()
-    with caplog.at_level(logging.INFO):
-        assert fb.tick(decider, **seams) == 0
-    assert decider.decided == ([comment["id"]] if fresh else [])
-    if not fresh:
-        assert _loud(caplog, "eligib"), "a stale record is not logged"
-        fb.eligible(OWNER, NAMED)
-        assert fb.tick(decider, **seams) == 0
-        assert decider.decided == [comment["id"]], "the position moved past a comment read under a stale record"
-        assert fb.replies(number, comment["id"]), "the comment's outcome was not delivered once fresh"
-
-
-def test_1414_an_absent_record_reads_no_comments_and_counts_nothing(fb, caplog):
-    """A tenant whose row holds no eligibility record is read as stale: nothing decided, logged, and a comment two attempts into its ceiling is still decided normally once fresh. D13/A4."""
     number = fb.opened("case-absent")
     comment = fb.forge.add_comment(number, user=OWNER, body="expected")
     decider = S.Decider({comment["id"]: [S.answer(approve=(9,)), S.answer(approve=(9,)),
@@ -297,20 +264,19 @@ def test_1414_an_absent_record_reads_no_comments_and_counts_nothing(fb, caplog):
     for _ in range(2):  # two refused answers: the comment stands at 2 of 3
         assert fb.tick(decider) == 0
     assert decider.decided == [comment["id"]] * 2
-    bare = fb.t.directory_with()  # a tenant row the service never wrote a record to
+    down = S.People(S._OWNER_ID)
+    down.error = RecordsUnreachable("the database is down")
 
     with caplog.at_level(logging.INFO):
         for _ in range(5):
-            assert fb.tick(decider, directory=bare) == 0
-    assert decider.decided == [comment["id"]] * 2, "a comment was read under an absent record"
-    assert _loud(caplog, "eligib")
+            assert fb.tick(decider, people=down) == 0
+    assert decider.decided == [comment["id"]] * 2, "a comment was read while the membership read failed"
     assert fb.replies(number, comment["id"]) == []
 
-    assert fb.tick(decider) == 0  # the scene's directory holds a fresh record
+    assert fb.tick(decider) == 0
     assert decider.decided == [comment["id"]] * 3
     [reply] = fb.replies(number, comment["id"])
-    assert "could not be processed" not in reply["body"], "stale ticks were counted as attempts"
-    assert "nothing to learn" in reply["body"]
+    assert "could not be processed" not in reply["body"], "failed reads were counted as attempts"
 
 
 def test_1414_a_comment_is_decided_once_across_ticks(fb):
@@ -442,8 +408,6 @@ def _rotated(fb):
     new = with_sign_login(tid, generation_fields(tid, fb.tmp / "secrets", salt="g1"))
     assert new["bot_login"] == fb.bot, "premise: the live generation is the forge's login"
     twin = fb.t.repository_with(generations=[old, new])
-    asyncio.run(twin.record_merge_eligibility(
-        tid, logins=frozenset({OWNER, NAMED, old["bot_login"]}), read_at=dt.datetime.now(dt.UTC)))
     return TenantDirectory(lambda: twin), old["bot_login"]
 
 
@@ -725,22 +689,6 @@ def test_1414_a_newer_request_filed_while_the_older_is_served_survives_the_tick(
     assert S.open_issue_requests(fb) == {}
 
 
-@pytest.mark.parametrize(("ahead", "fresh"), [
-    (dt.timedelta(seconds=2), True), (dt.timedelta(seconds=10), False), (dt.timedelta(seconds=60), False), (dt.timedelta(hours=1), False)])
-def test_1414_an_eligibility_record_dated_in_the_future_is_stale_beyond_the_clock_skew(fb, caplog, ahead, fresh):
-    """A record dated more than 5 s ahead of the host's clock (10 s, 60 s, an hour) reads no comments and is logged; one 2 s ahead is fresh. D13."""
-    number = fb.opened("case-future")
-    comment = fb.forge.add_comment(number, user=OWNER, body="expected")
-    fb.eligible(OWNER, NAMED, age=-ahead)
-
-    decider = S.Decider()
-    with caplog.at_level(logging.INFO):
-        assert fb.tick(decider) == 0
-    assert decider.decided == ([comment["id"]] if fresh else [])
-    if not fresh:
-        assert _loud(caplog, "eligib"), "a record from the future is not logged"
-
-
 def test_1414_on_a_closed_issue_a_comment_in_the_same_second_as_the_close_is_read_and_a_later_one_is_not(fb):
     """Comments created at or before closed_at are decided (same second included); one a second after is not. D12."""
     number = fb.opened("case-second")
@@ -867,7 +815,7 @@ def test_1414_a_records_outage_skips_the_tick(fb, caplog):
         def __getattr__(self, name):
             return getattr(self._inner, name)
 
-        def merge_eligibility(self, _tenant):
+        def generations(self, _tenant):
             raise RecordsUnreachable("the database is down")
 
     fb.request("case-outage")

@@ -10,8 +10,8 @@ Interface:
   a directory over a fresh in-memory tenant repository holding `tenant` in `state` with forge wiring.
   Hand it to the host entry point as `directory=` (`run.main(argv, directory=d)`,
   `learning.core.cli.main(argv, directory=d)`). `origin` defaults to the folder's own `git remote get-url
-  origin` when `<data_root>/<tenant>` is a clone, else `http://forge.test/tenants/<tenant>.git`; `repo` defaults to
-  `tenants/<tenant>`. Pass `state="offboarding"` etc. for the refusal side; `repo=None, origin=None` is NOT
+  origin` when `<data_root>/<tenant>` is a clone, else `http://forge.test/t-<tenant>/knowledge.git`; `repo` defaults to
+  `t-<tenant>/knowledge`. Pass `state="offboarding"` etc. for the refusal side; `repo=None, origin=None` is NOT
   "no wiring" -- use `wiring=False` for a row without forge wiring.
 - fixture `active_tenant_directory`: a factory `make(tenant, **same_keywords) -> TenantDirectory` bound to the
   test's `data_root`; import it into a test module or conftest to use it.
@@ -84,7 +84,7 @@ def _origin_of(data_root: Path, tenant: str, origin: str | None) -> str:
             got = None
         if got is not None and got.returncode == 0 and got.stdout.strip():
             return got.stdout.strip()
-    return f"{FORGE_ORIGIN}/tenants/{tenant}.git"
+    return f"{FORGE_ORIGIN}/t-{tenant}/knowledge.git"
 
 
 def active_directory(data_root: Path, tenant: str, **keywords: Any) -> TenantDirectory:
@@ -112,7 +112,7 @@ def active_repository(  # noqa: PLR0913 — one twin's whole seeding, each part 
     twin: Any = InMemoryTenantRepository()
     extra: dict[str, Any] = {}
     if wiring:
-        extra = {"repo": repo or f"tenants/{tenant}", "origin": _origin_of(data_root, tenant, origin)}
+        extra = {"repo": repo or f"t-{tenant}/knowledge", "origin": _origin_of(data_root, tenant, origin)}
     added = seed_tenant(twin, str(tenant), created_at=CREATED, state=state, **extra)
     if inspect.isawaitable(added):  # GAP-0-1: the seeder's sync/async shape is not pinned
         run_sync(_await(added))
@@ -175,7 +175,7 @@ def insert_active_tenant(dsn: str, tenant: str, *, state: str = "active", repo: 
                     VALUES (%s, %s, %s, %s, %s, %s)""", (tenant, CREATED, state, action, step, actor))
     if wiring:
         execute(dsn, "INSERT INTO tenancy.forge_wiring (tenant_id, repo, origin) VALUES (%s, %s, %s)",
-                (tenant, repo or f"tenants/{tenant}", _origin_of(data_root or Path("/nonexistent"), tenant, origin)))
+                (tenant, repo or f"t-{tenant}/knowledge", _origin_of(data_root or Path("/nonexistent"), tenant, origin)))
     for fields in generations:
         insert_generation(dsn, tenant, fields)
     seed_postgres(dsn, tenant, alert_mapping)

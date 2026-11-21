@@ -18,6 +18,7 @@ pytest.importorskip("fastapi")
 from defender.tests.support.api._identity1306 import ANN, T1, World  # noqa: E402
 from defender.tests.support.frontend._ingress1161 import (  # noqa: E402
     ARTIFACT_DOMAIN,
+    FORGE_UPSTREAM_ENV,
     REPO,
     launcher_env,
     run_launcher,
@@ -177,6 +178,8 @@ INPUTS = {
     "DEFENDER_INGRESS_LISTEN": ["localhost", "localhost:abc", "localhost:99999", ":8000", "http://localhost:8000"],
     "DEFENDER_ARTIFACT_DOMAIN": ["https://artifacts.defender.test", "*.defender.test", "Artifacts.Test", "a.test:8443"],
     "DEFENDER_INGRESS_API_UPSTREAM": ["localhost", "localhost:abc", "localhost:99999", ":8001", "http://localhost:8001"],
+    "DEFENDER_FORGE_DOMAIN": ["https://forge.defender.test", "*.defender.test", "Forge.Test", "f.test:8443", "f.test/x"],
+    FORGE_UPSTREAM_ENV: ["localhost", "localhost:abc", "localhost:99999", ":3000", "http://localhost:3000"],
     "DEFENDER_INGRESS_FRONTEND_DIR": ["{tmp}/no-such-dir", "{tmp}/a-file", "{tmp}/my dist", "{tmp}/a}}b", "{tmp}/a{{b",
                                       "{tmp}/a\nb", "{tmp}/a#b", '{tmp}/a"b', "{tmp}/a\tb"],
 }

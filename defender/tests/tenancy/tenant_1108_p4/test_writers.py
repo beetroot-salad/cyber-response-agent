@@ -5,10 +5,9 @@ rows in the tenant's commit record in the learning store (O7-PATH; #1278 moved t
 
 The two lesson authors and the curators' corpus repair run through the real `author_drain`, the
 lead author, draft synthesis and pitfalls through the real `lead_author_drain`, each with only the
-model spawn (and a run's extraction) faked by `_drain_support`. A composed case drives drain ->
-human merge -> `revert_lesson.main`; a census shows no production module keeps the legacy commit
-and delivery machinery; and `evaluations/harness.py` is tested from here. Revert itself is
-`test_revert_cli.py`, connect's tenant half `test_connect_propose.py`.
+model spawn (and a run's extraction) faked by `_drain_support`. A census shows no production module keeps the legacy commit
+and delivery machinery; and `evaluations/harness.py` is tested from here. Connect's tenant half is
+`test_connect_propose.py`. (#1592 F9 removed the revert path and its composed case.)
 """
 from __future__ import annotations
 
@@ -415,52 +414,6 @@ def test_o7_flead_pitfalls_curation_lands_on_the_tenant_add_on_page_only(
     assert [c["head"] for c in t.forge.creates] == [branch]
     _assert_recorded(paths, recorded, branch, tip, [PITFALLS_ADDON])
     assert product_state(product) == before
-
-
-# ---------------------------------------------------------------------------------------------
-# O7-PATH composed: drain -> human merge -> revert, on the record the drain wrote
-# ---------------------------------------------------------------------------------------------
-
-
-@postgres
-def test_o7_path_a_drained_lesson_a_human_merged_is_reverted_by_the_cli_on_the_tenant(
-        world, caplog, capsys):  # noqa: F811 — the imported fixture
-    """`revert_lesson.main` reverts the drain's recorded commit once a human merged it: one new
-    branch off the merged `main` deleting only the lesson, with its PR. The revert reads the
-    delivery record the drain left, so this is the path a writer's record row must serve.
-    Control: before the merge the same revert refuses."""
-    import importlib
-
-    t, paths = world.t, world.paths
-    queue(paths, [S.finding_row("f1", run_id="f1")])
-    lesson_path = "agent/lessons/p4-composed.md"
-    curator = S.FakeCurator(writes={"p4-composed.md": S.lesson("f1")})
-    recorded = _record_rows(paths)
-    revert = importlib.import_module("defender.cli.learning.revert_lesson")
-
-    def cli() -> int:
-        return revert.main(["--tenant", t.tenant_id, "p4-composed"], client=t.forge.client,
-                           identity=t.vault.identity(), directory=t.directory)
-
-    assert author_drain(t, paths, trigger=CuratorTrigger(author=curator), box=BoxSpy()) == 0, \
-        critical_text(caplog)
-    (branch, tip), = remote_branches(t.remote).items()
-    _assert_recorded(paths, recorded, branch, tip, [lesson_path])
-    assert cli() != 0, "control: an unmerged lesson was reverted"
-    merged = merge_on_remote(t.p3, t.scratch, branch)
-    before = set(remote_branches(t.remote, prefix=""))
-    caplog.clear()
-
-    with caplog.at_level(logging.INFO):
-        rc = cli()
-
-    assert rc == 0, critical_text(caplog)
-    new = {b: tip for b, tip in remote_branches(t.remote, prefix="").items() if b not in before}
-    (revert_branch, revert_tip), = new.items()
-    assert touched(t.remote, merged, revert_tip) == [lesson_path]
-    assert git(t.remote, "ls-tree", "--name-only", revert_tip, "--", lesson_path) == ""
-    assert [row["head"]["ref"] for row in t.forge.prs
-            if row["state"] == "open" and row["head"]["ref"] == revert_branch] == [revert_branch]
 
 
 # ---------------------------------------------------------------------------------------------

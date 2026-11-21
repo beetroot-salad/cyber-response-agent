@@ -20,6 +20,7 @@ import pytest
 from defender.tests.support.identity._seed1496 import seed_membership, seed_user
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy._twin1496 import seed_tenant
+from defender.tests.tenancy.people_1592._sessions1592 import shipped_sessions_database
 from defender.tests.tenancy.people_1592._spec1592 import (
     Clock,
     PeopleForge,
@@ -34,7 +35,6 @@ from defender.tests.tenancy.people_1592._spec1592 import (
     repo_of,
     requests_port,
     session_key,
-    sessions_database,
     sessions_port,
     signed_in_data,
 )
@@ -138,7 +138,7 @@ class People:
 
 @pytest.fixture
 def sessions() -> Iterator[Sessions]:
-    with sessions_database() as s:
+    with shipped_sessions_database() as s:
         yield s
 
 

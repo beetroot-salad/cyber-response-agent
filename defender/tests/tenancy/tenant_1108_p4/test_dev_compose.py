@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import yaml  # tests may load YAML raw (tooling/lint/lint_raw_yaml.py excludes tests); a
@@ -59,8 +60,23 @@ def _environment(service: dict) -> dict[str, str]:
     """A service's `environment`, mapping or `KEY=value` list form."""
     env = service.get("environment") or {}
     if isinstance(env, list):
-        return dict(item.split("=", 1) if "=" in item else (item, "") for item in env)
-    return {str(k): "" if v is None else str(v) for k, v in env.items()}
+        env = dict(item.split("=", 1) if "=" in item else (item, "") for item in env)
+    from_files: dict[str, str] = {}
+    files = service.get("env_file") or []
+    for name in [files] if isinstance(files, str) else files:  # #1592: Forgejo's settings live in an `env_file`
+        from_files |= _env_file(COMPOSE_DIR / (name["path"] if isinstance(name, dict) else name))
+    return from_files | {str(k): "" if v is None else str(v) for k, v in env.items()}
+
+
+def _env_file(path: Path) -> dict[str, str]:
+    """`KEY=value` lines of an env file (blank lines and `#` comments skipped), as compose reads them."""
+    out = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()  # noqa: PLW2901
+        if line and not line.startswith("#"):
+            key, _, value = line.partition("=")
+            out[key.strip()] = value.strip().strip("\"'")
+    return out
 
 
 def _mounts(service: dict) -> list[tuple[str, str, str]]:
@@ -231,7 +247,8 @@ def test_the_dev_container_environment_names_no_issuer_or_forge_fact_P4_O8():
     compose environment names none. Control: the reader sees the data root it does carry."""
     env = _environment(_services()["devcontainer"])
     assert "DEFENDER_DATA_ROOT" in env, "control: the devcontainer environment is read"
-    leaked = sorted(k for k in env if _DEPLOYMENT_FACT.search(k))
+    # #1592: the Forgejo site's public hostname is a public name, not a deployment secret or a path to one.
+    leaked = sorted(k for k in env if _DEPLOYMENT_FACT.search(k) and k != "DEFENDER_FORGE_DOMAIN")
     assert not leaked, f"deployment facts in the devcontainer environment: {leaked}"
 
 
@@ -462,3 +479,134 @@ def test_1540_pr5_the_tokens_are_declared_once():
         if again:
             declared_again.append(f"{other.relative_to(FRONTEND)}: {again}")
     assert declared_again == [], f"PR5: the tokens are declared again outside their one file: {declared_again}"
+
+
+# ---------------------------------------------------------------------------------------------
+# #1592 S4-0: CI's `forgejo-live` job runs the live module and cannot pass by skipping
+# ---------------------------------------------------------------------------------------------
+
+def test_s4_0_the_forgejo_live_job_runs_the_module_and_the_guard_fails_under_ci():
+    """S4-0 / F10: ci.yml's forgejo-live job runs test_1592_live.py under `-m live`; unset inputs fail under CI."""
+    from defender.tests.tenancy.people_1592._live1592 import require_environment
+
+    job = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))["jobs"]["forgejo-live"]
+    steps = job["steps"]
+    command = next(s for s in steps if "test_1592_live.py" in s.get("run", ""))["run"]
+    assert "-m live" in command
+    assert "-k " not in command
+    assert "--deselect" not in command
+    assert "||" not in command
+    assert not any(s.get("continue-on-error") for s in steps)
+    text = "\n".join(s.get("run", "") for s in steps)
+    for needed in ("forgejo", "keycloak", ".devcontainer/forgejo/setup.sh", "defender.api_server.ingress"):
+        assert needed in text, needed
+    assert "SESSIONS_SCRIPT" not in text, "the job builds the sessions database through setup.sh, not its own script path"
+    assert "INGRESS_FORGE_UPSTREAM_INPUT" not in text
+    assert "defender_product" in text, "S4-11's non-superuser login"
+    with pytest.raises(pytest.fail.Exception):
+        require_environment({"CI": "true"})
+    with pytest.raises(pytest.skip.Exception):
+        require_environment({})
+
+
+# ---------------------------------------------------------------------------------------------
+# #1592 S3-14: Forgejo's shipped settings file agrees with the site's domain and says what the design lists
+# ---------------------------------------------------------------------------------------------
+
+FORGEJO_SETTINGS = COMPOSE_DIR / "forgejo" / "settings.env"
+
+#: The design's "Forgejo configuration", key by key (`FORGEJO__section__KEY`), as listed.
+_SETTINGS = {
+    "FORGEJO__oauth2_client__ENABLE_AUTO_REGISTRATION": "false",
+    "FORGEJO__oauth2_client__ACCOUNT_LINKING": "disabled",
+    "FORGEJO__service__DISABLE_REGISTRATION": "true",
+    "FORGEJO__service__ENABLE_INTERNAL_SIGNIN": "false",
+    "FORGEJO__service__ENABLE_BASIC_AUTHENTICATION": "false",
+    "FORGEJO__service__DEFAULT_ALLOW_CREATE_ORGANIZATION": "false",
+    "FORGEJO__service__REQUIRE_SIGNIN_VIEW": "true",
+    "FORGEJO__service__ENABLE_NOTIFY_MAIL": "false",
+    "FORGEJO__admin__EXTERNAL_USER_DISABLE_FEATURES": "manage_password",
+    "FORGEJO__security__LOGIN_REMEMBER_DAYS": "0",
+    "FORGEJO__session__PROVIDER": "postgres",
+    "FORGEJO__session__SESSION_LIFE_TIME": "3600",
+    "FORGEJO__repository__MAX_CREATION_LIMIT": "0",
+    "FORGEJO__repository__DISABLE_MIGRATIONS": "true",
+    "FORGEJO__mailer__ENABLED": "false",
+}
+
+
+def _forge_domains() -> set[str]:
+    """Every value the dev compose file gives `DEFENDER_FORGE_DOMAIN`, in any service's environment."""
+    return {_default(_environment(service)["DEFENDER_FORGE_DOMAIN"]) for service in _services().values()
+            if "DEFENDER_FORGE_DOMAIN" in _environment(service)}
+
+
+def test_the_forgejo_service_takes_its_settings_from_the_shipped_file_S3_14():
+    """S3-14 / F10: compose's `forgejo` service reads `.devcontainer/forgejo/settings.env` as its `env_file`, and the
+    file exists with `FORGEJO__section__KEY` lines only."""
+    forgejo = _services()["forgejo"]
+    files = forgejo.get("env_file") or []
+    files = [files] if isinstance(files, str) else files
+    assert [f["path"] if isinstance(f, dict) else f for f in files] == ["forgejo/settings.env"], files
+    assert FORGEJO_SETTINGS.is_file(), f"{FORGEJO_SETTINGS} is not shipped"
+    names = _env_file(FORGEJO_SETTINGS)
+    assert names, "control: the settings file is read"
+    assert [n for n in names if not re.fullmatch(r"FORGEJO__[a-z_0-9]+__[A-Z_0-9]+", n)] == []
+
+
+def test_the_settings_file_names_the_sites_domain_and_the_api_is_given_the_same_one_S3_14():
+    """S3-14 / OD-3: `DOMAIN` equals the dev compose file's `DEFENDER_FORGE_DOMAIN` and `ROOT_URL` is that host's
+    origin, so the site, Forgejo's links and the adoption address agree."""
+    domains = _forge_domains()
+    assert len(domains) == 1, f"dev compose must give DEFENDER_FORGE_DOMAIN exactly one value: {domains}"
+    [domain] = domains
+    settings = _env_file(FORGEJO_SETTINGS)
+    assert settings["FORGEJO__server__DOMAIN"] == domain
+    root = urlsplit(settings["FORGEJO__server__ROOT_URL"])
+    assert root.hostname == domain, root
+    assert root.path in ("", "/"), root
+    assert root.scheme in ("http", "https"), root
+
+
+@pytest.mark.parametrize(("key", "value"), sorted(_SETTINGS.items()))
+def test_the_settings_file_holds_each_listed_value_S3_14(key, value):
+    """S3-14 / PP-3: each key of the design's list is set, to the listed value, in the shipped file and so in the
+    service's environment as compose resolves it."""
+    assert _env_file(FORGEJO_SETTINGS).get(key) == value
+    assert _environment(_services()["forgejo"]).get(key) == value
+
+
+def test_the_sessions_provider_config_is_set_and_names_no_default_login_S3_14():
+    """S3-14 / PP-5: `[session] PROVIDER_CONFIG` is set (the DSN of a login that is a member of `fs_forgejo`)."""
+    assert _env_file(FORGEJO_SETTINGS).get("FORGEJO__session__PROVIDER_CONFIG"), "no sessions database for Forgejo"
+
+
+def test_the_settings_the_compose_file_had_survive_in_the_file_S3_14():
+    """The entries the compose file carried before #1592 (data, port, authorized integrations) moved, not vanished: the
+    `forgejo` service still resolves them (the reads above keep working)."""
+    env = _environment(_services()["forgejo"])
+    for key in ("FORGEJO__security__INSTALL_LOCK", "FORGEJO__server__HTTP_PORT",
+                "FORGEJO__authorized_integration__ALLOWED_DOMAINS"):
+        assert key in env, key
+
+
+# ---------------------------------------------------------------------------------------------
+# #1592 S3-14: the sessions SQL is mounted outside initdb; no SSH, fork or mirror key before its probe (V6)
+# ---------------------------------------------------------------------------------------------
+
+def test_the_postgres_service_mounts_the_sessions_sql_outside_initdb_S3_14():
+    """S3-14 / PP-5: `./postgres` is mounted read-only at `/defender-postgres`; no initdb entry names the sessions files."""
+    volumes = _services()["postgres"]["volumes"]
+    mounts = [v for v in volumes if isinstance(v, str)]
+    assert any(re.match(r"\./postgres/?:/defender-postgres:ro$", v) for v in mounts), mounts
+    initdb = [v for v in mounts if "docker-entrypoint-initdb.d" in v]
+    assert initdb, "control: the application database's initdb entry is still mounted"
+    assert not [v for v in initdb if "forgejo-sessions" in v], initdb
+
+
+def test_no_ssh_fork_or_mirror_key_is_set_until_its_probe_V6():
+    """S3-14 / V6: the settings file and the `forgejo` service name no SSH, fork or mirror key, and compose's SSH_DOMAIN
+    and SSH_PORT are dropped, not moved."""
+    env = _environment(_services()["forgejo"])
+    named = [k for k in env if k.startswith("FORGEJO__") and any(w in k.upper() for w in ("SSH", "FORK", "MIRROR"))]
+    assert named == [], named

@@ -60,7 +60,7 @@ def test_the_lifecycle_process_refuses_a_database_behind_naming_both_revisions(e
 
 @pytest.mark.postgres
 def test_serve_gives_the_host_the_credentialless_clients_and_the_service_the_credentialed_ones(  # noqa: F811
-        empty_database, tmp_path, data_root, monkeypatch):  # noqa: F811
+        empty_database, tmp_path, data_root, monkeypatch, sessions_dsn):  # noqa: F811
     """`python -m defender.lifecycle serve` builds the host actor over a login client with no token and a forge client with
     no authorization, and the service over the management and admin clients (DC-12, F-1).
 
@@ -84,7 +84,7 @@ def test_serve_gives_the_host_the_credentialless_clients_and_the_service_the_cre
                         (settings.OPENBAO_LOGIN_FILE_ENV, str(tmp_path / "bao-login")),
                         (settings.INTEGRATION_ENV, expected.integration_command),
                         (settings.SECRETS_DIR_ENV, str(expected.secrets_dir)), (settings.DATA_ROOT_ENV, str(data_root)),
-                        (settings.POLL_ENV, "0.05")):
+                        (settings.POLL_ENV, "0.05"), *_people_settings(settings, sessions_dsn)):
         monkeypatch.setenv(name, value)
 
     constructors = {HostActor.__init__.__code__: "host", ManagementService.__init__.__code__: "service"}
@@ -123,3 +123,76 @@ def test_serve_gives_the_host_the_credentialless_clients_and_the_service_the_cre
     from defender.tenancy import TenantDirectory
 
     assert isinstance(getattr(built["host"]["publish"], "keywords", {}).get("directory"), TenantDirectory)
+
+
+# --- #1592: the people worker beside the actors (S2-40) --------------------------------------------------------
+
+def _people_settings(settings: Any, sessions_dsn: str) -> list[tuple[str, str]]:
+    """The two settings #1592 makes required (r15: `keycloak_source_id`, `forge_sessions_dsn`). The names of their
+    environment variables are `KEYCLOAK_SOURCE_ID_ENV` and `FORGE_SESSIONS_DSN_ENV` (design, Settings)."""
+    return [(settings.KEYCLOAK_SOURCE_ID_ENV, "7"), (settings.FORGE_SESSIONS_DSN_ENV, sessions_dsn)]
+
+
+@pytest.fixture
+def sessions_dsn():
+    from defender.tests.tenancy.people_1592._sessions1592 import shipped_sessions_database
+
+    with shipped_sessions_database() as sessions:
+        yield sessions.dsn
+
+
+@pytest.mark.postgres
+def test_serve_starts_the_people_worker_beside_the_actors(  # noqa: F811
+        empty_database, tmp_path, data_root, monkeypatch, sessions_dsn):  # noqa: F811
+    """S2-40: `_serve` builds a `PeopleWorker` over the sessions port and its own admin forge client, and its poll loop
+    runs. Observed by a profile hook as the existing case does: nothing is replaced."""
+    from defender.lifecycle import PeopleWorker
+    from defender.lifecycle import __main__ as entry
+    from defender.lifecycle import config as settings
+    from defender.migrations import upgrade
+
+    upgrade(empty_database)
+    expected = lifecycle_config(tmp_path, data_root)
+    for name, value in (("forge-token", expected.forge_admin_token), ("bao-login", expected.openbao_login)):
+        (tmp_path / name).write_text(value + "\n", encoding="utf-8")
+    for name in [k for k in os.environ if k.startswith(("DEFENDER_LIFECYCLE_", "LIFECYCLE_"))]:
+        monkeypatch.delenv(name)
+    for name, value in ((DSN_ENV, empty_database), (settings.FORGE_URL_ENV, expected.forge_url),
+                        (settings.FORGE_TOKEN_FILE_ENV, str(tmp_path / "forge-token")),
+                        (settings.OPENBAO_LOGIN_FILE_ENV, str(tmp_path / "bao-login")),
+                        (settings.INTEGRATION_ENV, expected.integration_command),
+                        (settings.SECRETS_DIR_ENV, str(expected.secrets_dir)), (settings.DATA_ROOT_ENV, str(data_root)),
+                        (settings.POLL_ENV, "0.05"), *_people_settings(settings, sessions_dsn)):
+        monkeypatch.setenv(name, value)
+
+    built: dict[str, Any] = {}
+    polled: list[bool] = []
+    handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    before = handlers[signal.SIGTERM]
+    stopped: list[bool] = []
+
+    def watch(frame: Any, event: str, _arg: Any) -> None:
+        if event != "call":
+            return
+        if frame.f_code is PeopleWorker.__init__.__code__ and "people" not in built:
+            built["people"] = dict(frame.f_locals)
+        if frame.f_code is PeopleWorker.poll.__code__:
+            polled.append(True)
+        if polled and not stopped and signal.getsignal(signal.SIGTERM) is not before:
+            stopped.append(True)
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    sys.setprofile(watch)
+    try:
+        code = asyncio.run(asyncio.wait_for(entry._serve(), 30))
+    finally:
+        sys.setprofile(None)
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
+    assert code == 0 and stopped and "people" in built, (code, sorted(built))
+    from defender.lifecycle import PostgresForgeSessions
+
+    assert isinstance(built["people"]["sessions"], PostgresForgeSessions)
+    forge = built["people"]["forge"]
+    assert forge.headers["authorization"] == f"token {expected.forge_admin_token}"
+    assert forge.timeout.read == 5.0  # `people_call_timeout`'s default

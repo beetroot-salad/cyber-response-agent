@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from defender.tests.support.api._config1470 import TICKET, TOKEN, ScriptedOpenBao, problem_text, served_config
-from defender.tests.support.api._server1083 import ORIGIN, A, B, person
+from defender.tests.support.api._server1083 import FORGE_DOMAIN, ORIGIN, A, B, person
 from defender.tests.support.jobs._host_requests1471 import (
     ADOPTION,
     FRESH,
@@ -88,6 +88,12 @@ def carried_without_base_files() -> str:
 
 def forge_origin(dsn: str, tenant: str) -> str:
     return execute(dsn, "SELECT origin FROM tenancy.forge_wiring WHERE tenant_id = %s", (tenant,))[0][0]
+
+
+def pr_page(tenant: str, number: int) -> str:
+    """#1592 (amends #1471 A3): the pull request's page on the public Forgejo site, in the tenant's repository
+    `t-<T>/knowledge` (the wiring's CHECK), never on the wiring's private origin."""
+    return f"https://{FORGE_DOMAIN}/t-{tenant}/knowledge/pulls/{number}"
 
 
 # --- R1: start ------------------------------------------------------------------------------------------------------
@@ -360,8 +366,8 @@ async def test_r13_2_once_the_tenant_is_not_active_a_completed_poll_serves_the_k
 
 
 async def test_a2_an_adoption_poll_never_asks_the_secret_store_and_builds_pr_url_from_the_wiring_and_the_number(scripted):
-    """`pr_url` is `<origin>/pulls/<n>` for an outcome with a number, null for `nothing_to_adopt`; the sealed store changes
-    nothing. (A2, A3, R13-2)"""
+    """`pr_url` is `https://<DEFENDER_FORGE_DOMAIN>/t-<T>/knowledge/pulls/<n>` for an outcome with a number, null for
+    `nothing_to_adopt`; the sealed store changes nothing. (A2, A3, R13-2, #1592)"""
     origin = forge_origin(scripted.dsn, A).removesuffix(".git")
     opened = plant(scripted.dsn, A, "adoption", system=TICKET, stage="completed", result={"outcome": "opened", "pr_number": 17})
     nothing = plant(scripted.dsn, A, "adoption", system="elastic", stage="completed",
@@ -370,14 +376,15 @@ async def test_a2_an_adoption_poll_never_asks_the_secret_store_and_builds_pr_url
     scripted.scripted.calls.clear()
     got = (await poll(scripted, "adoption", opened)).json()
     assert (got["result"], got["pr_url"], got["system_id"]) == ({"outcome": "opened", "pr_number": 17},
-                                                               f"{origin}/pulls/17", TICKET)
+                                                               pr_page(A, 17), TICKET)
+    assert origin not in got["pr_url"], "the address was built from the wiring's private origin"
     none = (await poll(scripted, "adoption", nothing)).json()
     assert (none["result"]["outcome"], none["pr_url"]) == ("nothing_to_adopt", None)
     assert scripted.scripted.calls == []
     for outcome in ("already_open", "rejected"):
         rid = plant(scripted.dsn, A, "adoption", system=f"s-{outcome}".replace("_", "-"), stage="completed",
                     result={"outcome": outcome, "pr_number": 5})
-        assert (await poll(scripted, "adoption", rid)).json()["pr_url"] == f"{origin}/pulls/5"
+        assert (await poll(scripted, "adoption", rid)).json()["pr_url"] == pr_page(A, 5)
 
 
 async def test_r13_2_an_adoption_poll_for_a_tenant_with_no_forge_wiring_serves_pr_url_null_and_never_fails(scripted):
@@ -391,10 +398,9 @@ async def test_r13_2_an_adoption_poll_for_a_tenant_with_no_forge_wiring_serves_p
 
 async def test_a3_the_pr_address_comes_from_wiring_never_from_the_job_record(scripted):
     """A stored result carrying its own `pr_url` is not served as the address. (A3)"""
-    origin = forge_origin(scripted.dsn, A).removesuffix(".git")
     rid = plant(scripted.dsn, A, "adoption", system=TICKET, stage="completed",
                 result={"outcome": "opened", "pr_number": 3, "pr_url": "https://evil.example/pulls/3"})
-    assert (await poll(scripted, "adoption", rid)).json()["pr_url"] == f"{origin}/pulls/3"
+    assert (await poll(scripted, "adoption", rid)).json()["pr_url"] == pr_page(A, 3)
 
 
 # --- the worker's result, served on poll ------------------------------------------------------------------------------
@@ -415,7 +421,6 @@ async def test_the_result_a_worker_stores_is_what_the_poll_serves_for_both_kinds
                                      ADOPTION: adopted("opened", 12)})
     async with job_store(scripted.dsn) as store:
         await host_worker(world, store, child).drain()
-    origin = forge_origin(scripted.dsn, A).removesuffix(".git")
     got_r = (await poll(scripted, "readiness", r)).json()
     assert got_r["status"] == "completed"
     assert got_r["result"] == {"outcome": "refused", "step": "systems", "sentence": "no usable system",
@@ -425,7 +430,7 @@ async def test_the_result_a_worker_stores_is_what_the_poll_serves_for_both_kinds
     assert got_r["systems_without_credentials"] == sorted([TICKET, system])
     got_a = (await poll(scripted, "adoption", a)).json()
     assert (got_a["status"], got_a["result"], got_a["pr_url"]) == (
-        "completed", {"outcome": "opened", "pr_number": 12}, f"{origin}/pulls/12")
+        "completed", {"outcome": "opened", "pr_number": 12}, pr_page(A, 12))
 
 
 async def test_b1_the_admin_reads_the_rows_an_offboard_ended_and_a_tenant_member_no_longer_can(scripted):

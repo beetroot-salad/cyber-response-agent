@@ -20,7 +20,7 @@ from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.tenancy import _host1214 as H  # noqa: E402
 from defender.tests.support.tenancy._active1214 import active_directory  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._atk2_fakes import DockerStub, GitStub, host_answering_accessor  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import org_of  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import REPO_ROOT, LifecycleWorld, lifecycle_config  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214.test_host_entry import (  # noqa: E402
     TENANT,
@@ -159,7 +159,7 @@ def test_the_integration_runner_runs_only_the_fixed_command_as_the_git_user(tmp_
 
     stub = DockerStub(tmp_path / "docker-stub")
     monkeypatch.setenv("PATH", stub.path())
-    args = ["--username", "bot-x", "--scope", "write:repository", "--repo", f"{ORG}/t"]
+    args = ["--username", "bot-x", "--scope", "write:repository", "--repo", f"{org_of('t')}/knowledge"]
     done = integration_runner("forge-c")(args)
     assert done.returncode == 0, done.stderr
     assert stub.calls() == [["exec", "-u", "git", "forge-c", "forgejo", "admin", "user",

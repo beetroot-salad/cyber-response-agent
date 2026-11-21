@@ -50,7 +50,6 @@ BANNED: dict[str, str] = {
     "defender.learning.leads.path_validation.SKILLS_DIR": "path_validation.SKILLS_DIR",
     "defender.learning.leads.path_validation.SKILLS_REL": "path_validation.SKILLS_REL",
     "defender.learning.leads.declared_systems.SKILLS_REL": "declared_systems.SKILLS_REL",
-    "defender.cli.learning.revert_lesson.LESSONS_REL": "revert_lesson.LESSONS_REL",
     "defender.cli.learning.trace_lesson.LESSONS_DIR": "trace_lesson.LESSONS_DIR",
     "defender.presentation.visualize_runtime._LESSONS_PATHSPEC": "visualize_runtime._LESSONS_PATHSPEC",
     # The stamp is the copied export's commit, never the clone's HEAD, so both clone-HEAD

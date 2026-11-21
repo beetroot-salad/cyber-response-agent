@@ -121,7 +121,7 @@ def test_the_revision_moves_tenants_and_adds_the_lifecycle_tables(migrated_datab
     """At head `tenancy` holds tenants and the new tables, `identity` no tenants, and memberships reference `tenancy.tenants` (O11)."""
     assert _tables(migrated_database, "tenancy") == {"tenants", "forge_wiring", "generations", "publish_status",
                                                      "alert_mappings", "system_versions", "case_versions",  # #1345 r5: the mapping is a tenant record; #1366: the records tables
-                                                     "merge_eligibility"}  # #1414 D13: the service's eligibility record
+                                                     "forge_people_requests"}  # #1592: the people requests; `merge_eligibility` is dropped there (OD-6)
     assert "tenants" not in _tables(migrated_database, "identity")
     assert [target for _, target in _fk_to_tenants(migrated_database)] == ["tenancy.tenants"]
 
@@ -244,7 +244,7 @@ def test_the_upgrade_keeps_every_row_of_every_tenancy_table_and_only_adds_the_si
     _upgrade_to(empty_database, TENANCY)
     for tenant in (OTHER, THIRD):
         fill_row(empty_database, "tenants", id=tenant, state="active")
-        fill_row(empty_database, "forge_wiring", tenant_id=tenant)
+        fill_row(empty_database, "forge_wiring", tenant_id=tenant, repo=f"t-{tenant}/knowledge")  # #1592: 0027 refuses any other
         fill_row(empty_database, "publish_status", tenant_id=tenant)
     for tenant, statuses in ((OTHER, ("live", "pending", "retiring", "destroyed")), (THIRD, ("live", "pending"))):
         for status in statuses:
@@ -254,7 +254,7 @@ def test_the_upgrade_keeps_every_row_of_every_tenancy_table_and_only_adds_the_si
     def rows() -> dict[str, list[dict[str, object]]]:
         tables = sorted(_tables(empty_database, "tenancy") - {"alembic_version", "alert_mappings", "system_versions",  # #1345, #1366: tables the head adds
                                                               "case_versions",
-                                                              "merge_eligibility"})  # #1414 D13: so is this
+                                                              "forge_people_requests"})  # #1592: so is this; `merge_eligibility` is gone
         return {t: sorted((r[0] for r in execute(empty_database, f"SELECT to_jsonb(x) FROM tenancy.{t} x")),  # noqa: S608
                           key=lambda row: json.dumps(row, sort_keys=True)) for t in tables}
     before = rows()
@@ -352,6 +352,12 @@ def test_each_lifecycle_table_belongs_to_a_tenant(table, migrated_database):
 
     execute(migrated_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES ('aa000000-0000-4000-8000-00000000000a', now(), 'active')")
     extra = {"salt": "s1", "status": "pending"} if table == "generations" else {}
-    fill_row(migrated_database, table, tenant_id="aa000000-0000-4000-8000-00000000000a", **extra)  # control
+
+    def wiring(tenant: str) -> dict[str, str]:  # #1592 OD-5: the CHECK refuses any other repo (before the key is looked at)
+        return {"repo": f"t-{tenant}/knowledge"} if table == "forge_wiring" else {}
+
+    fill_row(migrated_database, table, tenant_id="aa000000-0000-4000-8000-00000000000a", **extra,
+             **wiring("aa000000-0000-4000-8000-00000000000a"))  # control
     with pytest.raises(psycopg.errors.ForeignKeyViolation):
-        fill_row(migrated_database, table, tenant_id="f3000000-0000-4000-8000-000000000000", **(extra | {"salt": "s2"} if extra else {}))
+        fill_row(migrated_database, table, tenant_id="f3000000-0000-4000-8000-000000000000",
+                 **(extra | {"salt": "s2"} if extra else {}), **wiring("f3000000-0000-4000-8000-000000000000"))

@@ -107,7 +107,7 @@ def directory_for_root(root: Path | str | None = None, *, also: Any = ()) -> Any
     twin: Any = InMemoryTenantRepository()
     placed = sorted(p.name for p in root.iterdir() if (p / "knowledge").is_dir()) if root.is_dir() else []
     for tenant in dict.fromkeys([*placed, *map(str, also)]):
-        added = seed_tenant(twin, tenant, created_at=_active1214.CREATED, state="active", repo=f"tenants/{tenant}",
+        added = seed_tenant(twin, tenant, created_at=_active1214.CREATED, state="active", repo=f"t-{tenant}/knowledge",
                                 origin=_active1214._origin_of(root, tenant, None))
         if inspect.isawaitable(added):
             _active1214.run_sync(_active1214._await(added))
