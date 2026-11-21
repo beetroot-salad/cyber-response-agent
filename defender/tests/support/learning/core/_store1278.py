@@ -47,11 +47,27 @@ def store_mod() -> Any:
     return importlib.import_module("defender.learning_store")
 
 
+def test_store_class() -> Any:
+    """`LearningStore` with the tests' one-item conveniences: one kind's findings (`publish_findings`) and one
+    pitfall (`add_pitfall`), each the store's one batch verb with one entry (#1565: no producer files less than its
+    batch, so the store itself has none)."""
+    base = store_mod().LearningStore
+
+    class TestStore(base):  # type: ignore[misc,valid-type]
+        async def publish_findings(self, tenant: str, run_id: str, rows: Any, *, kind: str) -> tuple[int, int]:
+            return (await self.publish_finding_channels(tenant, run_id, {kind: rows}))[kind]
+
+        async def add_pitfall(self, tenant: str, row: Any) -> bool:
+            return bool(await self.add_pitfalls(tenant, [row]))
+
+    return TestStore
+
+
 @asynccontextmanager
 async def learning_store(dsn: str, **knobs: Any) -> AsyncIterator[Any]:
-    """The store under test on `dsn`, closed after. `knobs` (sketch): `lease`, seconds a claim or
-    renewal holds a batch, counted by the database's clock."""
-    store = store_mod().LearningStore(dsn, **knobs)
+    """The store under test on `dsn` (with the tests' one-item conveniences, `test_store_class`), closed after.
+    `knobs` (sketch): `lease`, seconds a claim or renewal holds a batch, counted by the database's clock."""
+    store = test_store_class()(dsn, **knobs)
     try:
         yield store
     finally:

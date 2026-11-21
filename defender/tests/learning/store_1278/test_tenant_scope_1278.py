@@ -170,17 +170,6 @@ class Case:
         return dataclasses.replace(held, tenant_id=type(held.tenant_id)(BLUE))
 
 
-async def _publish_findings(c):
-    c.freeze()
-    assert c.seen(await c.store.publish_findings(BLUE, "run-9", [finding("k1"), finding("a1")], kind="finding")) == (1, 1), (
-        "GREEN's k1 made BLUE's k1 a duplicate, or BLUE's a1 was added twice")
-
-
-async def _add_pitfall(c):
-    c.freeze()
-    assert c.seen(await c.store.add_pitfall(BLUE, _pitfall("g-pit-1"))) is True, "GREEN's pitfall id made BLUE's a repeat"
-
-
 async def _publish_finding_channels(c):
     c.freeze()
     assert c.seen(await c.store.publish_finding_channels(BLUE, "run-9", {"finding": [finding("k1"), finding("a1")]})) == {
@@ -421,8 +410,8 @@ async def _purge(c):
 
 #: Every public verb of the store and how BLUE calls it. `close` takes no tenant.
 ENTRIES = {
-    "publish_findings": _publish_findings, "publish_finding_channels": _publish_finding_channels,
-    "add_pitfall": _add_pitfall, "add_pitfalls": _add_pitfalls, "enqueue_request": _enqueue_request,
+    "publish_finding_channels": _publish_finding_channels, "add_pitfalls": _add_pitfalls,
+    "enqueue_request": _enqueue_request,
     "work": _work, "set_aside": _set_aside, "parked": _parked, "item_keys": _item_keys, "lane_work": _lane_work, "batches": _batches,
     "commit_record": _commit_record,
     "claim": _claim, "claim_revert": _claim_revert, "take_over": _take_over,

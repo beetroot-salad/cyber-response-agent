@@ -484,11 +484,6 @@ class LearningStore(FeedbackVerbs):
 
     # -- items arrive ------------------------------------------------------------------------------------------
 
-    async def publish_findings(self, tenant: str, run_id: str, rows: Sequence[Mapping[str, Any]], *,
-                               kind: str) -> tuple[int, int]:
-        """Queue `rows` as `kind`: `(added, duplicates)`. `publish_finding_channels` with one channel."""
-        return (await self.publish_finding_channels(tenant, run_id, {kind: rows}))[kind]
-
     async def publish_finding_channels(self, tenant: str, run_id: str,
                                        channels: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, tuple[int, int]]:
         """Queue each channel's rows (`{kind: rows}`, author-lane kinds) in one call: `(added, duplicates)` per kind.
@@ -508,10 +503,6 @@ class LearningStore(FeedbackVerbs):
                 raise ItemRefused(inserted.why or "the store refused a finding")
         return {kind: (inserted.added_by_kind[kind], len(rows) - inserted.added_by_kind[kind])
                 for kind, rows in channels.items()}
-
-    async def add_pitfall(self, tenant: str, row: Mapping[str, Any]) -> bool:
-        """Queue one pitfall occurrence: `add_pitfalls` with one row; whether it was new."""
-        return bool(await self.add_pitfalls(tenant, [row]))
 
     async def add_pitfalls(self, tenant: str, rows: Sequence[Mapping[str, Any]]) -> int:
         """Queue a run's pitfall occurrences in one call; how many were new. A keyless row is keyed by its digest. The
