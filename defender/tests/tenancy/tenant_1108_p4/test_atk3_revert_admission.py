@@ -153,9 +153,11 @@ def test_the_census_lists_every_credential_caller_and_every_admission_site():
     function does it is the implementer's); the by-hand revert admits; a new admitting module fails here."""
     credential = {"learning/author/version_control/delivery.py": "forge_credential",
                   "learning/author/version_control/publish.py": "forge_credential",
-                  "learning/core/drains.py": "opened_delivery", "cli/tenant.py": "opened_delivery"}
+                  "learning/core/drains.py": "opened_delivery"}
     for rel, call in credential.items():
         assert _calling(rel, call), f"{rel} no longer reaches the credential through {call}"
+    # #1471 B3: `update` and `propose` retired, so the connect command opens no delivery (stale, updated)
+    assert not _calling("cli/tenant.py", "opened_delivery"), "the connect command still opens a delivery"
     # r10 A1 (conflict with r9's by-hand sites, updated): only the host acceptance step admits; run, the drain CLI,
     # `revert_delivery` and the connect command no longer call `admit_tenant` themselves.
     from defender.tests.support.tenancy._host1214 import HOST_ACCEPTANCE, HOST_MODULE_PATH

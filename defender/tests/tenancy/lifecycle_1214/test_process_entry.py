@@ -31,7 +31,6 @@ from defender.tests.tenancy.lifecycle_1214.test_host_entry import (  # noqa: E40
     TENANT,
     _tenant_placed,  # noqa: F401 — FR-1: the autouse fixture places TENANT complete here too
     _admits,
-    _connect,
     _drain_start,
     _has,
     _run_start,
@@ -50,7 +49,9 @@ def world(tmp_path, data_root):
 # --- the version check at start (O11) ----------------------------------------------------------------
 
 @pytest.mark.postgres
-@pytest.mark.parametrize("entry", ["run start", "drain start", "connect command"])
+# #1471 B3 (stale, updated): the connect command keeps only `check --folder`, which opens no database, so it is no
+# longer a host entry point here.
+@pytest.mark.parametrize("entry", ["run start", "drain start"])
 def test_a_host_process_refuses_a_database_behind_naming_both_revisions(entry, empty_database, data_root, tmp_path,  # noqa: F811
                                                                          monkeypatch):
     """Built from the address, each host entry point runs the light version check first: a baseline database is refused
@@ -58,8 +59,7 @@ def test_a_host_process_refuses_a_database_behind_naming_both_revisions(entry, e
     from defender.migrations import head, upgrade
     from defender.tests.migrations.test_1214_migrations import BASELINE, _upgrade_to
 
-    start = {"run start": lambda: _run_start(TENANT, tmp_path), "drain start": lambda: _drain_start(TENANT),
-             "connect command": lambda: _connect(["check", TENANT])}[entry]
+    start = {"run start": lambda: _run_start(TENANT, tmp_path), "drain start": lambda: _drain_start(TENANT)}[entry]
     _upgrade_to(empty_database, BASELINE)
     monkeypatch.setenv(DSN_ENV, empty_database)
     _has(start(), BASELINE, head())

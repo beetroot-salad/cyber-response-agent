@@ -35,6 +35,9 @@ SAMPLE_SETTINGS = {
     "ELASTIC_EVENTS_INDEX": "logs-*",
     "ELASTIC_ALERTS_INDEX": ".internal.alerts-security.alerts-default-*",
 }
+#: The folder of the base files this adapter ships (#1471 P-8), relative to `integrations/`, read cold by the catalog: a
+#: per-system skill and seed query templates, rendered under a system's name and offered to a tenant by an adoption request.
+BASE_FILES = "base-files/elastic"
 #: The keys whose values go in a request path (a search's index), so each is one segment (T4).
 PATH_KEYS = REQUIRED_CONFIG_KEYS
 

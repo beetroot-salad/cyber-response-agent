@@ -6,9 +6,9 @@ Loads SQLAlchemy and nothing of the runtime, so the API can load it. The tables 
 from __future__ import annotations
 
 from .errors import Conflict, FindingsNotStored, NotFound, OffboardNotSettled, UnknownReference, UnstorableText
-from .models import AlertListing, Claim, InvestigationRecord, LearningClaim, LearningJobRecord, LearningProgress, StoredAlert
+from .models import AlertListing, Claim, HostRequestClaim, HostRequestRecord, InvestigationRecord, LearningClaim, LearningJobRecord, LearningProgress, StoredAlert
 from .store import JobStore, is_outage, is_refusal
 
-__all__ = ["AlertListing", "Claim", "Conflict", "FindingsNotStored", "InvestigationRecord", "JobStore", "LearningClaim",
+__all__ = ["AlertListing", "Claim", "Conflict", "FindingsNotStored", "HostRequestClaim", "HostRequestRecord", "InvestigationRecord", "JobStore", "LearningClaim",
            "LearningJobRecord", "LearningProgress", "NotFound", "OffboardNotSettled", "StoredAlert", "UnknownReference", "UnstorableText", "is_outage",
            "is_refusal"]

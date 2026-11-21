@@ -415,7 +415,7 @@ def test_1120_accept_tenant_refuses_a_knowledge_entry_outside_the_allow_list(
     entry = plant(H.knowledge_dir(root))
     text = H.accept_refusal(_tenant, root)
     assert str(entry) in text, f"the refusal does not name {entry}: {text!r}"
-    H.assert_refused(H.check(tenant_py, root, H.TID), str(entry))
+    # #1471 B3: `check <id>` retired; its `--folder` half stands (stale, updated)
     H.assert_refused(H.check(tenant_py, None, "--folder", str(H.knowledge_dir(root))),
                      str(entry))
 
@@ -476,11 +476,12 @@ def test_1120_accept_tenant_reads_the_tenant_id_file_bounded_and_admits_only_the
             text = H.accept_refusal(_tenant, root)
             if tid_file not in text:
                 misjudged.append(f"accept_tenant[{token}] did not name {tid_file}: {text!r}")
-        proc = H.check(tenant_py, root, H.TID)
+        # #1471 B3: over `--folder` (the placed copy is no git work tree), `check <id>` retired (stale, updated)
+        proc = H.check(tenant_py, None, "--folder", str(H.knowledge_dir(root)))
         H.assert_ran(proc)
         want = 0 if accepted else 1
         if proc.returncode != want or (not accepted and tid_file not in H.output(proc)):
-            misjudged.append(f"check {H.TID} [{token}] exited {proc.returncode}, want {want}:\n"
+            misjudged.append(f"check --folder [{token}] exited {proc.returncode}, want {want}:\n"
                              f"{H.output(proc)}")
     assert not misjudged, "\n".join(misjudged)
 
@@ -609,7 +610,7 @@ def test_1120_accept_tenant_names_an_unreadable_entry_as_a_refusal_never_a_trace
         assert str(target) in text, f"the refusal does not name the unreadable path: {text!r}"
         assert any(e in text for e in ("Permission denied", "EACCES", "Errno 13")), (
             f"the refusal does not name the errno: {text!r}")
-        H.assert_refused(H.check(tenant_py, root, H.TID), "[tenant.py]", str(target))
+        # #1471 B3: the `check <id>` half retired with it (stale, updated; skipped as root, so CI-only)
     finally:
         target.chmod(0o755 if target.is_dir() else 0o644)
     assert H.accept(_tenant, root).id == H.TID

@@ -46,6 +46,7 @@ from defender.tests.support.api._programs1307 import (  # noqa: E402
 from defender.tests.support.api._routes1307a import (  # noqa: E402
     authenticating_routes,
     concrete,
+    prime_start,
     route_id,
 )
 from defender.tests.support.api._server1083 import ORIGIN
@@ -232,6 +233,7 @@ def test_a_valueless_bearer_header_beside_a_session_cookie_is_401_and_another_sc
     every route that authenticates, the cookie not tried instead; an empty, whitespace or other-scheme header (a staging
     proxy's Basic login) is not ours, so the cookie authenticates as if it were absent (O1, P-F, A4; #1450 review)."""
     s = soar()
+    prime_start(s.ann, route)  # #1471: a start's 201 then 200 is not the header's doing (stale, updated)
 
     def status(headers: dict[str, str]) -> int:
         """On a session of its own, since the route may be the one that signs out."""

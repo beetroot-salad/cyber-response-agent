@@ -551,7 +551,7 @@ jobs:
       # `indeterminate`, the run escalates a case somebody had already sanctioned. Silent, and
       # silent in the direction that looks like ordinary operation.
       #
-      # Blocking rather than advisory, because the commit is the only review this file gets:
+      # Required rather than advisory, because the commit is the only review this file gets:
       # a dropped entry has to fail the PR that introduced it, not an investigation weeks
       # later. `check` reports exactly the loader's own drops (it is a second CONSUMER of that
       # walk, never a second implementation), so a green gate here means the runtime reads

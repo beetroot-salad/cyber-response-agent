@@ -162,20 +162,11 @@ def test_a_venv_without_pyvenv_cfg_is_exec_d_once_not_forever(tmp_path: Path) ->
         raise AssertionError("tenant.py re-exec'd itself in a loop") from None
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason='root reads a mode-000 directory')
-def test_check_over_an_unreadable_tenant_folder_refuses(tmp_path: Path) -> None:
-    """`<root>/<T>` at mode 000: `check <T>` (the tenant active in the directory) refuses naming the data root."""
-    root = tmp_path / "data"
-    H.place_knowledge(root)
-    folder = H.tenant_folder(root)
-    folder.chmod(0)
-    try:
-        H.assert_refused(H.check(tenant_py, root, H.TID, seed=[H.TID]), "[tenant.py]", str(root))
-    finally:
-        folder.chmod(0o755)
+# Retired (#1471 B3, stale): `test_check_over_an_unreadable_tenant_folder_refuses` pinned `check <T>` over the data root,
+# which retired with `check <id>`; `check --folder` takes no data root.
 
 
 # Retired (#1366 O9/DC8, P2): `test_an_unreadable_case_record_is_named_by_check`. The case-record file is retired, never read:
-# `check` reports a leftover as retired and ignored whatever its mode (`test_check_records_1366.py::test_1366_o9_check_reports_
-# a_tenant_repos_leftover_system_folders_and_case_file_as_retired_and_ignored`), so there is no unreadable-file finding, and
+# `check` reported a leftover as retired and ignored whatever its mode (its records test retired with `check <id>`, #1471
+# B3; readiness warns `retired_file` now), so there is no unreadable-file finding, and
 # its "mode restored, check is clean" control is now a finding (a leftover). The case record's judgement is over records.

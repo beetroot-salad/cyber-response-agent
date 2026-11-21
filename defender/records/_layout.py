@@ -142,6 +142,11 @@ _JOB_END_SUFFIX = ".job-end.json"
 #: worker's hand-over to it retired with the pending set (#1487).
 _LEARNING_PROGRESS_SUFFIX = ".learning-progress.json"
 _LEARNING_END_SUFFIX = ".learning-end.json"
+#: A host request's result record (#1471 R13-1), beside the runs, keyed by the request id: written create-only by the
+#: request's helper or its container (one writer per request), read by the worker. The readiness check's knowledge
+#: record is the knowledge source suffix's, keyed by the same id.
+_READINESS_SUFFIX = ".readiness.json"
+_ADOPTION_SUFFIX = ".adoption.json"
 #: The sidecar names that mean "this id was used" (#1279 O8): run setup refuses an id with any of
 #: them beside its folder (`sidecar_names`). The accounting-failures name reserved, see above.
 USED_SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
@@ -153,7 +158,7 @@ USED_SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTIN
 #: written before the run folder exists and do not mean "used": the child's setup goes on over
 #: them. `USED_SIDECAR_SUFFIXES` is a subset (#1342).
 ACCEPTED_SIDECAR_SUFFIXES = (*USED_SIDECAR_SUFFIXES, _LAUNCH_SUFFIX, _LAUNCH_ALERT_SUFFIX,
-                             _LEARNING_PROGRESS_SUFFIX, _LEARNING_END_SUFFIX)
+                             _LEARNING_PROGRESS_SUFFIX, _LEARNING_END_SUFFIX, _READINESS_SUFFIX, _ADOPTION_SUFFIX)
 #: The tail a sidecar write's staged file carries before its rename (`_io.staged_leaf`:
 #: `.staged-` and lowercase hex digits; one or more, #1105 DV-5).
 _STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
@@ -512,6 +517,14 @@ class RunPaths:
     def learning_end(self, runs_base: RunsBase | None = None) -> Path:
         """A learning job's end record (#1344): how the job entry ended, written create-only."""
         return self._container(runs_base) / f"{self.run_dir.name}{_LEARNING_END_SUFFIX}"
+
+    def readiness_record(self, runs_base: RunsBase | None = None) -> Path:
+        """A readiness check's result record (#1471), when this name is its request id: written create-only."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_READINESS_SUFFIX}"
+
+    def adoption_record(self, runs_base: RunsBase | None = None) -> Path:
+        """An adoption's result record (#1471), when this name is its request id: written create-only."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_ADOPTION_SUFFIX}"
 
     def session_pointer(self, runs_base: RunsBase | None = None) -> Path:
         """The run -> case link: which case's session store this run belongs to. Beside the

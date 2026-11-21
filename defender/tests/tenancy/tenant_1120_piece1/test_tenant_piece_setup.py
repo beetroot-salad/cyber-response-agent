@@ -194,7 +194,7 @@ def test_1214_accepting_a_finished_tenant_writes_nothing_and_leaves_grant_gaps_t
     gapped = H.tree_census(root)
     assert H.accept(_tenant, root).id == H.TID
     assert H.census_diff(gapped, H.tree_census(root)) == [], "the gapped acceptance wrote something"
-    H.assert_refused(H.check(tenant_py, root, H.TID), GAP_PAIR)
+    H.assert_refused(H.check(tenant_py, None, "--folder", str(H.knowledge_dir(root))), GAP_PAIR)  # #1471 B3: over `--folder` (stale, updated)
 
 
 def _emptied(root: Path) -> str:
@@ -267,7 +267,7 @@ def test_1214_a_placed_folder_that_fails_acceptance_is_refused_and_grant_gaps_ar
     H.place_knowledge(gapped)
     _gap_table(H.settings_dir(gapped))
     assert H.accept(_tenant, gapped).id == H.TID
-    H.assert_refused(H.check(tenant_py, gapped, H.TID), GAP_PAIR)
+    H.assert_refused(H.check(tenant_py, None, "--folder", str(H.knowledge_dir(gapped))), GAP_PAIR)  # #1471 B3: over `--folder` (stale, updated)
 
 
 def _outside_file(tmp: Path) -> Path:

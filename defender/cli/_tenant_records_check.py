@@ -1,6 +1,6 @@
-"""What `tenant.py check <id>` reports about a tenant's records (#1366 R8, R12, O1, C3, C5, O9 leftovers).
+"""What the readiness check reports about a tenant's records (#1366 R8, R12, O1, C3, C5, O9 leftovers).
 
-The CLI's `check_tenant` asks this module and prints what it returns beside its other findings (the repo, the publish,
+The readiness worker asks this module and reports what it returns beside its other findings (the repo, the publish,
 the alert mapping, the registry). One finding per line; `[]` is clean. Every judgement here is one run start or the
 record store already makes, asked again over the tenant's current records:
 
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -33,20 +33,24 @@ from defender.systems.run_tenant import record_settings
 from defender.systems.verb_dispositions import DispositionError, dispositions_path, load_dispositions
 from defender.systems.verbs import RegistryError, is_platform_served
 from defender.tenancy import AGENT_HALF, SETTINGS_HALF
-from defender.tenancy.case_record import CASE_RECORD_REL
 from defender.tenancy.models import TenantRecords
+from defender.learning.leads.tenant_census import (
+    RETIRED_CASE_RECORD,
+    RETIRED_LEAD_ZERO,
+    RETIRED_SYSTEMS,
+    census_findings,
+    feedback_findings,
+    readiness_census,
+    registry_findings,
+    registry_grant_findings,
+    retired_findings,
+)
 
 if TYPE_CHECKING:
-    from defender.cli._tenant_census import TableFindings
     from defender.kit.settings import SystemConfig
     from defender.tenancy import TenantDirectory
     from defender.records.formats import TenantId
 
-#: The retired parts of a tenant repo's `settings/` (O9): read by nothing since #1366.
-RETIRED_SYSTEMS = "systems"
-RETIRED_CASE_RECORD = CASE_RECORD_REL
-#: Retired by #1503: the step-zero lead binds no saved query, so nothing names one.
-RETIRED_LEAD_ZERO = "lead-zero.yaml"
 
 #: THE words of R13's finding (a record holds no credential; they are set for its generation through the API).
 NO_CREDENTIALS = "no credentials at the current generation"
@@ -161,46 +165,25 @@ def credential_findings(tenant_id: object, records: TenantRecords, secrets: Any)
     return asyncio.run(asked())
 
 
-def census_findings(table: TableFindings, systems: Collection[str] | None) -> TableFindings:
-    """`table` (the grants table judged against the whole checkout's census) narrowed to the tenant's systems (O1):
-    a verb of a system the tenant has no record of, decided by nobody or withheld with no reason, is not the tenant's
-    finding (R12 'ungranted rows for unrecorded systems: silent'). A row no adapter declares stays a phantom whatever
-    the records say. `systems` None (a folder with no records: `check --folder`, the census lint): unchanged."""
-    if systems is None:
-        return table
-    mine = set(systems)
-
-    def kept(pairs: tuple[tuple[str, str], ...]) -> tuple[tuple[str, str], ...]:
-        return tuple(p for p in pairs if p[0] in mine or is_platform_served(p[0]))
-
-    gaps = dataclasses.replace(table.gaps, undecided=kept(table.gaps.undecided), unreasoned=kept(table.gaps.unreasoned))
-    return dataclasses.replace(table, gaps=gaps)
-
-
 def leftover_findings(knowledge: Path) -> list[str]:
-    """O9: the retired `settings/systems/` folder, `settings/case-record.yaml` and (#1503) `settings/lead-zero.yaml`
-    a tenant repo still holds. Each is
-    reported as retired and ignored; neither is opened, so an unreadable one is reported the same."""
-    settings = Path(knowledge) / SETTINGS_HALF
-    lines: list[str] = []
-    if (settings / RETIRED_SYSTEMS).is_symlink() or (settings / RETIRED_SYSTEMS).exists():
-        lines.append(f"settings/{RETIRED_SYSTEMS}/ is retired and ignored: the tenant's systems are records "
-                     "(`GET /systems` lists them); remove the folder from the repo")
-    if (settings / RETIRED_CASE_RECORD).is_symlink() or (settings / RETIRED_CASE_RECORD).exists():
-        lines.append(f"settings/{RETIRED_CASE_RECORD} is retired and ignored: the case record is a record "
-                     "(`PUT /case-record` replaces it); remove the file from the repo")
-    if (settings / RETIRED_LEAD_ZERO).is_symlink() or (settings / RETIRED_LEAD_ZERO).exists():
-        lines.append(f"settings/{RETIRED_LEAD_ZERO} is retired and ignored: the step-zero lead writes its own "
-                     "correlation query; remove the file from the repo")
-    return lines
+    """O9: the retired parts a tenant repo's `settings/` still holds (`retired_findings`)."""
+    return retired_findings(Path(knowledge) / SETTINGS_HALF)
 
 
 __all__ = [
     "NO_CREDENTIALS",
+    "RETIRED_CASE_RECORD",
+    "RETIRED_LEAD_ZERO",
+    "RETIRED_SYSTEMS",
     "RecordsCheck",
     "census_findings",
     "credential_findings",
+    "feedback_findings",
     "grant_findings",
     "leftover_findings",
+    "readiness_census",
     "records_check",
+    "registry_findings",
+    "registry_grant_findings",
+    "retired_findings",
 ]

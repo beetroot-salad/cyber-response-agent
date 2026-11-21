@@ -10,8 +10,6 @@ from defender.tests.support.learning.core import _state1135
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S1224
 
 import inspect
-import subprocess
-import sys
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,7 +23,6 @@ from defender import run as run_py
 from defender.learning.branch import cli as branch_cli
 from defender.cli.learning import branch as branch_entry
 from defender.cli import policy_cli
-from defender.cli import tenant as tenant_py
 from defender.tests.support.invlang.validation import _dispositions995 as D995
 from defender.tests.support.shared.contracts import _spec1077 as S1077
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -49,34 +46,6 @@ def _never_created_root() -> Path:
 def _assert_never_created(root: Path) -> None:
     assert not root.parent.exists(), (
         f"a refused entry created {root.parent} inside the checkout's defender/ tree")
-
-
-def _owner_in_checkout(checkout: Path, root: Path) -> str:
-    """`accept_tenant`'s refusal as the tmp checkout's own code raises it (its defender-tree
-    guard is keyed to its own `defender/`), from a child interpreter that imports the copy."""
-    code = (
-        "import sys\n"
-        "from pathlib import Path\n"
-        "sys.path.insert(0, sys.argv[1])\n"
-        "from defender.tenancy import _tenant\n"
-        "from defender.records._tenant_id import TenantRefused\n"
-        "assert Path(_tenant.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve()), "
-        "_tenant.__file__\n"
-        "try:\n"
-        "    _tenant.accept_tenant(_tenant.data_root_from_path(Path(sys.argv[2])), sys.argv[3],\n"
-        "                          defender_dir=Path(sys.argv[1]) / 'defender', box_mounted=())\n"
-        "except TenantRefused as refused:\n"
-        "    print(refused, end='')\n"
-        "    raise SystemExit(0)\n"
-        "raise SystemExit('ACCEPTED')\n")
-    proc = subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
-        [sys.executable, "-c", code, str(checkout), str(root), H.TID],
-        env=H.tenant_env(root), cwd=str(checkout), capture_output=True, text=True,
-        timeout=120, check=False)
-    assert proc.returncode == 0, (
-        f"the checkout copy's accept_tenant did not refuse {root}:\n{proc.stdout}\n{proc.stderr}")
-    assert proc.stdout, "the checkout copy's accept_tenant refused with no message"
-    return proc.stdout
 
 
 def _knowledge_link(base: Path, root: Path) -> None:
@@ -152,16 +121,14 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
 
 
 #: The refusal cells each entry point takes. O6: there is no row, so no `no-row` cell; `tenant.py
-#: setup` and `scaffold` are retired (F-12); `tenant.check` runs through the launcher (no database
-#: in a subprocess), and in a copied checkout through `H.checkout_tenant_py`.
+#: setup` and `scaffold` are retired (F-12); `tenant.py check <id>` retired with #1471 B3 (`check --folder`
+#: takes no tenant), so `tenant.check` is no longer a tenant-taking entry point (stale, updated).
 ALL_CELLS = ("bad-id", "knowledge-link", "mounted-tree")
 CELLS_OF = {
     "run.main": ALL_CELLS,
     "branch.cli.main": ALL_CELLS,
-    "tenant.check": ALL_CELLS,
     "policy_cli.main": ALL_CELLS,
 }
-PROCESS_ENTRIES = {"tenant.check"}  # #1366 O1/O11: validate_scaffold.main (--tenant) is retired
 
 
 @dataclass
@@ -173,7 +140,6 @@ class _Cell:
     tenant_id: str
     expected: str
     env: dict[str, str] = field(default_factory=dict)
-    checkout: Path | None = None
     defender_dir: Path | None = None
     never_created: bool = False
     source: Path | None = None
@@ -205,11 +171,6 @@ def _build_cell(entry: str, cell: str, base: Path, monkeypatch) -> _Cell:  # noq
         root = tree / "data"
         H.adopted(root)
         return _Cell(root, H.TID, _owner(root, defender_dir=tree), defender_dir=tree)
-    if entry in PROCESS_ENTRIES:
-        checkout = H.tmp_checkout(base / "checkout")
-        root = checkout / "defender" / "tenant-data"
-        H.adopted(root)
-        return _Cell(root, H.TID, _owner_in_checkout(checkout, root), checkout=checkout)
     root = _never_created_root()
     cell_ = _Cell(root, H.TID, _owner(root), never_created=True)
     if launcher:
@@ -247,20 +208,6 @@ def _drive(entry: str, cell: _Cell, base: Path, monkeypatch, capsys) -> tuple[bo
             return True, H.exit_text(refused) + capsys.readouterr().err, False
         cap = capsys.readouterr()
         return rc != 0, cap.err + cap.out, True
-    # The process entries.
-    module, args = {
-        "tenant.check": (tenant_py, ["check", cell.tenant_id]),
-    }[entry]
-    if entry == "tenant.check":
-        # The launcher's directory holds the asked-for tenant active, so the refusal is accept_tenant's own.
-        if cell.checkout is not None:
-            proc = H.checkout_tenant_py(cell.checkout, *args, root=cell.root, seed=[cell.tenant_id],
-                                        unset=("DEFENDER_DIR",), **cell.env)
-        else:
-            proc = H.tenant_py(module, *args, root=cell.root, seed=[cell.tenant_id], unset=("DEFENDER_DIR",),
-                               **cell.env)
-        text = H.output(proc)
-        return proc.returncode != 0 and "Traceback" not in text, text, False
     raise AssertionError(entry)
 
 
@@ -367,8 +314,7 @@ def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data
             f"the launcher did not refuse {root} before reading the source's record: {text!r}")
     _assert_never_created(inside)
 
-    proc = H.tenant_py(tenant_py, "check", H.TID, root=relative, seed=[H.TID], cwd=tmp_path)
-    H.assert_refused(proc, str(relative))
+    # #1471 B3: `check <id>`, the last tenant.py path that took a data root, retired (stale, updated)
     assert not (tmp_path / relative).exists()
 
     # Positive control: another checkout's defender/ is not the running one.

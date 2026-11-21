@@ -182,7 +182,7 @@ everything here grows post-merge.
 The per-system skill and its seed templates are the tenant's knowledge, not this repo's: they
 belong in the tenant repo's `agent/` tree. Write them into a **staging folder** of your own,
 outside this repo and empty to begin with (`<staged>` below), shaped like that `agent/` root.
-Step 6 validates it and proposes it to the tenant's repo.
+Step 6 validates it and leaves it with the handoff.
 
 `<staged>/skills/{system}/`:
 
@@ -226,7 +226,7 @@ table grants them, no run can call the system. On the **generate** path the adap
 shared code, so also add its rows to `knowledge/tenant-template/settings/verb-grants.yaml`
 (withheld, `roles: []` with a reason) and `defender/tests/fixtures/tenant-fixture/settings/verb-grants.yaml`
 (granted as the tests need) in this repo: CI (`lint_verb_disposition_census.py`) fails on a
-declared verb with no row there, and `tenant.py check <tenant>` reports one a tenant's table
+declared verb with no row there, and the tenant's readiness check reports one a tenant's table
 leaves undecided. A catalog adapter's template and fixture rows already exist.
 
 The allowlist is deliberate, not bookkeeping. It is authored so that
@@ -271,16 +271,14 @@ git add defender/integrations/{system}_adapter.py \
 **The tenant half** (a system with investigator tools) — the system skill and its seed templates
 go to the tenant's own repo as one pull request, never into this one:
 
-```bash
-python3 defender/cli/tenant.py propose {tenant} <staged>
-```
-
-`propose` adds or replaces the staged files under the tenant's `agent/` and opens the pull
-request on the tenant's forge; a human merges it there. It refuses (`[tenant.py] ...`) a
-staged file outside a folder of `agent/`; fix what it names and propose again. The grant table
-lives under the tenant repo's `settings/`, which `propose` does not touch: branch and stage it
-there, and run `python3 defender/cli/tenant.py check --folder <that repo>` to see the census
-over it.
+There is no command here that opens that pull request. For a carried adapter that ships base
+files (Elastic in #1471), the tenant admin sends the adoption request
+(`POST /api/tenants/{tenant}/systems/{system}/adoptions`), which opens the pull request on the
+tenant's forge; a human merges it there. For a generated adapter, and for a carried one that
+ships none, leave the staged folder with the handoff folder: the tenant admin or a person
+commits it to the tenant's repo. The grant table lives under the tenant repo's `settings/`:
+branch and stage it there, and run `python3 defender/cli/tenant.py check --folder <that repo>`
+to see the census over it.
 
 **The steps after you**, in this order — give them as one list with the handoff folder. You run
 none of them: the tenant admin writes the tenant's records and its secret through the API, and
@@ -301,8 +299,8 @@ our operator deploys the product.
    `case_key` line (`PUT /alert-mapping`) **only if** the stored mapping lacks it or names another field
    (`configure.md` → "The ticket key").
 5. A system with investigator tools: merge the tenant's PR(s) (skill and seeds, grant table) and
-   publish them (`tenant.py update {tenant}`).
-6. `python3 defender/cli/tenant.py check {tenant}` — it judges the stored records, the grants and
+   publish them (the next run's launch-time publish, or a drain start, publishes the merged `main`).
+6. The tenant admin requests the readiness check (`POST /api/tenants/{tenant}/readiness`) — it judges the stored records, the grants and
    the case system together.
 7. **The final check:** run `check.md`'s check and its control through the credential proxy.
    Done means the check gives the agreed answer and the control does not.

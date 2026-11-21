@@ -761,7 +761,10 @@ ADMIN = "7a0c0c0c-1083-4000-8000-0000000ad111"  # the administrator who offboard
 #: Where another connection reads the change an event names, by the event's action family: (table, column, key).
 _VISIBLE_IN = {"investigation": ("jobs.investigations", "stage", "id"),
                "learning_job": ("jobs.learning_jobs", "status", "id"),
-               "alert_mapping": ("tenancy.alert_mappings", "title", "tenant_id")}
+               "alert_mapping": ("tenancy.alert_mappings", "title", "tenant_id"),
+               # #1471: the host requests, one table for both kinds (stale, updated)
+               "readiness": ("jobs.host_requests", "stage", "id"),
+               "adoption": ("jobs.host_requests", "stage", "id")}
 
 
 class _SeenAtEmit(logging.Handler):
@@ -825,9 +828,23 @@ async def _w_offboard_tenant(dsn: str, store: Any, adapter: Any, act: Any) -> li
             *(("learning_job.finish", str(job), "skipped") for (job,) in live_jobs)]
 
 
+async def _w_create_readiness(dsn: str, store: Any, adapter: Any, act: Any) -> list[tuple[str, str, Any]]:
+    started, created = await act(lambda: adapter.create_readiness(A, actor=PROGRAM, credential_id=CREDENTIAL))
+    assert created, "premise: the start inserted the row"
+    return [("readiness.start", str(started.readiness_id), "queued")]
+
+
+async def _w_create_adoption(dsn: str, store: Any, adapter: Any, act: Any) -> list[tuple[str, str, Any]]:
+    started, created = await act(lambda: adapter.create_adoption(A, "ticket", actor=PROGRAM, credential_id=CREDENTIAL))
+    assert created, "premise: the start inserted the row"
+    return [("adoption.start", str(started.adoption_id), "queued")]
+
+
 WRITE_CASES = {"create_investigation": _w_create_investigation, "cancel_investigation": _w_cancel_investigation,
                "delete_investigation": _w_delete_investigation, "create_learning_job": _w_create_learning_job,
-               "put_alert_mapping": _w_put_alert_mapping, "offboard_tenant": _w_offboard_tenant}
+               "put_alert_mapping": _w_put_alert_mapping, "offboard_tenant": _w_offboard_tenant,
+               # #1471: the host requests' starts, the audited writes of `HostRequestsRepository` (stale, updated)
+               "create_readiness": _w_create_readiness, "create_adoption": _w_create_adoption}
 
 
 @POSTGRES
@@ -838,7 +855,8 @@ async def test_o9_each_audited_write_of_the_port_announces_each_change_once_afte
     change, naming the caller's actor and credential (offboarding: the administrator). (O9, P2, #1360 O5)"""
     from defender.api.job_store import JobStorePorts
     from defender.api.ports import (
-        AlertMappingRepository, AlertsRepository, InvestigationsRepository, LearningJobsRepository, Offboarding, Writes,
+        AlertMappingRepository, AlertsRepository, HostRequestsRepository, InvestigationsRepository,
+        LearningJobsRepository, Offboarding, Writes,
     )
     from defender.jobs.audit import AuditAction
     from defender.tests.support.jobs._jobs1342 import JOBS_AUDIT_LOGGER
@@ -846,9 +864,15 @@ async def test_o9_each_audited_write_of_the_port_announces_each_change_once_afte
     def members(*protocols: type) -> set[str]:
         return {n for p in protocols for n in vars(p) if not n.startswith("_")}
 
-    reads = members(AlertsRepository, InvestigationsRepository, LearningJobsRepository, AlertMappingRepository)
+    # #1471 (stale, updated): `HostRequestsRepository` serves both; its starts are the writes, its polls the reads
+    host = members(HostRequestsRepository)
+    host_writes = {n for n in host if n.startswith("create_")}
+    assert {n.split("_", 1)[0] for n in host - host_writes} == {"get"}, f"premise: the rest are reads: {sorted(host)}"
+    reads = members(AlertsRepository, InvestigationsRepository, LearningJobsRepository, AlertMappingRepository) | (
+        host - host_writes)
     served = {n for n in vars(JobStorePorts) if not n.startswith("_")}
-    assert served - reads == members(Writes, Offboarding) == set(WRITE_CASES), "census: every write the port serves"
+    assert served - reads == members(Writes, Offboarding) | host_writes == set(WRITE_CASES), (
+        "census: every write the port serves")
     caplog.set_level(logging.DEBUG, logger=JOBS_AUDIT_LOGGER)
     seen = _SeenAtEmit(dsn)
 

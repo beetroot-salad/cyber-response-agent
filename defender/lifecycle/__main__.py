@@ -1,6 +1,7 @@
 """Run the tenant lifecycle (#1214 DC-14).
 
     python -m defender.lifecycle serve  # the management service and the host actor, one process (dev)
+    python -m defender.lifecycle make-runs-folders  # one-time: `<T>/runs` for every active tenant made before #1471
 
 It reads `DEFENDER_DATABASE_DSN` (the database at exactly this code's revision) and the lifecycle's
 settings (`defender.lifecycle.config`: the files holding the forge admin token and the OpenBao
@@ -17,6 +18,7 @@ import logging
 import os
 import signal
 import sys
+from pathlib import Path
 from typing import Any
 
 _logger = logging.getLogger(__name__)
@@ -58,6 +60,29 @@ def _lifecycle_settings() -> Any:
     return LifecycleConfig.from_env(template_dir=template_dir(PATHS.repo_root))
 
 
+async def _make_runs_folders() -> int:
+    """The one-time upgrade step (R13-0): make each active tenant's `<T>/runs`. Any refusal, after the sweep, is one error
+    naming every refused tenant and a non-zero exit."""
+    from defender.lifecycle import RunsFoldersRefused, make_runs_folders
+    from defender.lifecycle.config import DATA_ROOT_ENV, ConfigRefused
+    from defender.tenancy.postgres import PostgresTenantRepository
+
+    raw = os.environ.get(DATA_ROOT_ENV, "")
+    if not raw or not Path(raw).is_absolute():
+        raise ConfigRefused(f"set {DATA_ROOT_ENV} to the absolute data root")
+    tenants = PostgresTenantRepository(_dsn())
+    try:
+        try:
+            made = await make_runs_folders(tenants, data_root=Path(raw))
+        except RunsFoldersRefused as refused:
+            print(f"python -m defender.lifecycle make-runs-folders: {refused}", file=sys.stderr)
+            return 1
+    finally:
+        await tenants.close()
+    print(f"made the runs folder of {len(made)} tenant(s)" + "".join(f"\n  {t}" for t in made))
+    return 0
+
+
 async def _serve() -> int:
     from defender.identity import Bootstrap, IdentityService
     from defender.identity.postgres import PostgresIdentityRepository
@@ -82,7 +107,7 @@ async def _serve() -> int:
     directory = TenantDirectory(lambda: PostgresTenantRepository(dsn))
     host = HostActor(tenants, forge=clients.forge_anonymous(config), openbao_login=clients.openbao_login(config),
                      git=git_runner, config=config, clock=_now,
-                     # as run start's: the outcomes only the launcher sees are recorded for `tenant.py check`
+                     # as run start's: the outcomes only the launcher sees are recorded for the readiness check
                      publish=functools.partial(launch_publish, directory=directory))
     _logger.info("lifecycle: serving both actors every %ss", config.poll_interval)
     try:
@@ -102,12 +127,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m defender.lifecycle", description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("serve", help="run the management service and the host actor until stopped (dev)")
+    commands.add_parser("make-runs-folders", help="one-time upgrade: make <T>/runs for every active tenant that lacks it")
     args = parser.parse_args(argv)
 
     from defender.lifecycle import ConfigRefused
 
     try:
-        return asyncio.run(_serve())
+        return asyncio.run(_make_runs_folders() if args.command == "make-runs-folders" else _serve())
     except ConfigRefused as refused:
         print(f"python -m defender.lifecycle {args.command}: {refused}", file=sys.stderr)
         return 2

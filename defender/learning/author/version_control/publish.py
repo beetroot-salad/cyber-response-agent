@@ -62,7 +62,8 @@ REPORT_CLASSES = (FRESH, STALE_TRANSIENT, STALE_OPERATOR, MISCONFIGURED)
 #: Each network call's own bound in the child (issuer, forge, fetch). The calls together are
 #: bounded by the child's one deadline (`--budget`), which this never outlasts.
 CHILD_NETWORK_TIMEOUT = 30.0
-#: Who records a launch-time publish's outcome (`tenant.py check` names the trigger).
+#: Who records a launch-time publish's outcome when its launcher names no trigger (`--trigger`; a readiness check's
+#: publish is recorded `readiness`, #1471): an investigation's launch.
 _TRIGGER = "launch-time publish"
 
 
@@ -85,15 +86,16 @@ def publish_for_run(  # noqa: PLR0913 — the child's work and its in-process st
     network_timeout: float | None = None,
     locked_hook: Callable[[], None] | None = None,
     budget: float | None = None,
+    trigger: str = _TRIGGER,
 ) -> str:
-    """The child's work, in-process: accept the tenant from its id and the data root; read its
+    """The child's work, in-process (its outcome recorded as `trigger`'s): accept the tenant from its id and the data root; read its
     forge wiring from the tenant records (`directory`, else the one `DEFENDER_DATABASE_DSN` names),
     refusing a tenant with none before anything is sent; mint the tenant's credential through its
     live generation (or use the injected `identity`; `credential_config` is the host's issuer
     configuration, `issuer_transport` a stand-in transport to it); open the tenant's delivery
     against the recorded origin with the forge `client`; fetch; then, under the tenant lock
     (`locked_hook` first, the locked phase's one injectable slow point), publish. Returns the
-    report line; records the outcome in the tenant records for `tenant.py check` (O-SEE). With
+    report line; records the outcome in the tenant records for the readiness check (O-SEE). With
     the lock busy the outcome is `fresh` when `current` already names the fetched `origin/main`,
     else `stale:transient`. `budget` is the one deadline over the network phase (login, open,
     fetch; none when `None`): past it, `stale:transient`. Clients made here are closed before it
@@ -115,7 +117,7 @@ def publish_for_run(  # noqa: PLR0913 — the child's work and its in-process st
         tenant, directory=directory, credential_config=credential_config, client=client,
         issuer_transport=issuer_transport, identity=identity, network_timeout=network_timeout,
         locked_hook=locked_hook, budget=budget)
-    record_report(directory, tenant.id, line, by=_TRIGGER)
+    record_report(directory, tenant.id, line, by=trigger)
     return line
 
 
@@ -269,14 +271,15 @@ def publish_child_main(
     network_timeout: float | None = None,
     locked_hook: Callable[[], None] | None = None,
 ) -> int:
-    """The child process's entry: `<tenant id> --data-root <root> [--budget <seconds>]`
-    (identifiers and a number, never a secret or a path to one). Prints the report line and
+    """The child process's entry: `<tenant id> --data-root <root> [--budget <seconds>] [--trigger <who asked>]`
+    (identifiers, a number and a fixed word, never a secret or a path to one). Prints the report line and
     returns 0 for every outcome it reports. The keywords are in-process stand-ins (as
     `publish_for_run`'s); with no `--budget` the child holds no deadline of its own."""
     parser = argparse.ArgumentParser(prog="publish-child", add_help=False)
     parser.add_argument("tenant_id")
     parser.add_argument("--data-root", dest="root", required=True, type=Path)
     parser.add_argument("--budget", type=float, default=None)
+    parser.add_argument("--trigger", default=_TRIGGER)
     ns = parser.parse_args(list(argv))
     previous = signal.signal(signal.SIGTERM, _on_terminate)
     try:
@@ -290,6 +293,7 @@ def publish_child_main(
             network_timeout=network_timeout,
             locked_hook=locked_hook,
             budget=ns.budget,
+            trigger=ns.trigger,
         )
     except _Stopped:
         return 128 + signal.SIGTERM

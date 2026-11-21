@@ -56,13 +56,14 @@ def assert_missing_wording_names_verb_and_route(wording: str) -> None:
     and no removed operator command (#1470 O1, O11; plain words as `tenant.py <word>`, as the upgrade-notes test reads)."""
     import re
 
-    from defender.tests.support.tenancy._records1470 import REMOVED_COMMANDS
+    from defender.tests.support.tenancy._records1470 import CHECK_BY_ID, REMOVED_COMMANDS
 
     head, tail = ALERT_MAPPING_ROUTE.split("{tenant_id}")
     assert re.search(rf"PUT {re.escape(head)}\S+{re.escape(tail)}", wording), wording
     named = [c for c in REMOVED_COMMANDS
              if (c in wording if "-" in c else re.search(rf"tenant\.py\s+{re.escape(c)}\b", wording))]
     assert named == [], (named, wording)
+    assert not CHECK_BY_ID.search(wording), wording
 
 
 async def add_to_twin(twin: Any, tenant_id: str, mapping: Any) -> None:

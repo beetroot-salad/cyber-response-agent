@@ -143,13 +143,26 @@ the adapter spells it (the same method and segments, `*` only where the route ha
 must hold exactly one `*`, where the ticket goes, so an adapter whose comment route has none or several cannot be a
 case system (the credential proxy writes under no other shape). A wider
 write that used to cover the route (a `*` in place of a literal), a second write route, or any non-GET read is refused:
-by `PUT /systems/<id>` and `tenant check`, and at run start, where a flagged investigation then ends with an `error`
-receipt and no comment (the request is still accepted). After upgrading, run `tenant check` for each tenant with a case
+by `PUT /systems/<id>` and the readiness check, and at run start, where a flagged investigation then ends with an `error`
+receipt and no comment (the request is still accepted). After upgrading, request the readiness check (`POST /api/tenants/<tenant-id>/readiness`) for each tenant with a case
 record and re-save any case system it names with `PUT /systems/<id>`.
 
 The credential proxy now forwards only an allowed list of an adapter's request headers (`Content-Type`, `Accept`,
 `User-Agent`, `Idempotency-Key`, in any case) and drops every other one, the request still going; a credential header
 is still refused. A tenant adapter that relied on another header reaching its system loses it.
+
+Removed (#1471): `tenant.py check <tenant-id>`, `tenant.py update` and `tenant.py propose` (`tenant.py check --folder
+<path>` stays; `check <id>` is now a usage error, exit 2). Use the requests instead: the readiness check
+(`POST /api/tenants/<tenant-id>/readiness`, then its GET) judges a tenant's repo and stored records; the adoption request
+(`POST /api/tenants/<tenant-id>/systems/<system-id>/adoptions`) carries a carried adapter's base files to the tenant's
+repo as a pull request, and any other connect output is left in the handoff folder for a person to commit. A merged
+`main` is published by the next launch-time publish (a run or a drain start). `cli/learning/revert_lesson.py` stays.
+
+A tenant's `<data root>/<T>/runs` is now made by the lifecycle's `prepare` step, and the job lane no longer makes it (a
+missing one fails the worker's claim `worker_error`). Once, with `DEFENDER_DATABASE_DSN` and `DEFENDER_DATA_ROOT` set, make
+it for the tenants created before: `python -m defender.lifecycle make-runs-folders`. It covers each `active` tenant, is
+idempotent, and prints the ids it made. A tenant whose `<T>` folder is missing or whose `runs` is a link is refused: the
+sweep finishes the others, then exits non-zero naming every refused tenant. Fix those and run it again.
 
 ## Upgrade from before #1083
 

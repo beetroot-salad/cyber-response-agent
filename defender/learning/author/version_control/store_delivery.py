@@ -16,7 +16,6 @@ from defender._frontmatter import FrontmatterError, split_frontmatter
 
 from .commits import CommitMaker, _Line
 from .delivery import TenantDelivery
-from .forgejo import ForgeError
 from .model import (
     AgentChange,
     ChangeSet,
@@ -98,23 +97,10 @@ class StoreRecord:
         return [r for r in self.rows if any(target in names and p == change.path for target, p in (r.reverts or ()))]
 
 
-def pr_number(url: str) -> int | None:
-    """The PR number a forge PR URL ends with (`.../pulls/<n>`), or `None`."""
-    tail = url.rstrip("/").rsplit("/", 1)[-1]
-    return int(tail) if tail.isdecimal() else None
-
-
 def open_pr_on(repository: GitRepository, *, branch: str, title: str, body: str) -> tuple[int, str]:
-    """Open the PR of `branch` against `main`: `(number, url)`. A URL naming no number is looked up by
-    the branch among the open PRs."""
-    url = repository.open_pr(branch=branch, title=title, body=body)
-    number = pr_number(url)
-    if number is None:
-        found = [row for row in repository.forge.list_open_prs(branch) if row["headRefName"] == branch]
-        if not found:
-            raise ForgeError(f"the PR opened for {branch} ({url}) names no number and cannot be found")
-        number = int(found[0]["number"])
-    return number, url
+    """Open the PR of `branch` against `main`: `(number, url)`, the number the forge's create response gave (#1471)."""
+    opened = repository.open_pr(branch=branch, title=title, body=body)
+    return opened.number, opened.url
 
 
 def cited_in_tree(repository: GitRepository, commit: str, folder: str, field: str) -> set[str]:
@@ -259,5 +245,5 @@ def _end_quietly(store: Any, held: Any) -> None:
                                               "it lapses for a takeover")
 
 
-__all__ = ["NetChange", "StoreRecord", "cited_in_paths", "cited_in_tree", "open_pr_on", "pr_number", "remote_tip",
+__all__ = ["NetChange", "StoreRecord", "cited_in_paths", "cited_in_tree", "open_pr_on", "remote_tip",
            "revert_lesson", "tip_commits_recorded"]

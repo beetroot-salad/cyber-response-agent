@@ -10,10 +10,11 @@ from __future__ import annotations
 from defender.lifecycle._host import HostActor
 from defender.lifecycle._job import StepFailed
 from defender.lifecycle._process import git_runner, integration_runner, serve
+from defender.lifecycle._runs import RunsFoldersRefused, make_runs_folders
 from defender.lifecycle._service import ManagementService
 from defender.lifecycle.config import ConfigRefused, LifecycleConfig
 
 __all__ = [
-    "ConfigRefused", "HostActor", "LifecycleConfig", "ManagementService", "StepFailed",
-    "git_runner", "integration_runner", "serve",
+    "ConfigRefused", "HostActor", "LifecycleConfig", "ManagementService", "RunsFoldersRefused", "StepFailed",
+    "git_runner", "integration_runner", "make_runs_folders", "serve",
 ]
