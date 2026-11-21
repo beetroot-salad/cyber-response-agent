@@ -150,7 +150,7 @@ async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Any]:
 
 #: kind -> (read, position of an item, how to call it for one tenant)
 KINDS: dict[str, tuple[Callable[..., Any], Callable[[Any], tuple[dt.datetime, str]], Callable[..., Any], Callable[[Any], str]]] = {
-    "alerts": (lambda r, t, **kw: r.list_alerts(t, fired_after=None, fired_before=None, **kw),
+    "alerts": (lambda r, t, **kw: r.list_alerts(t, fired_after=None, fired_before=None, outcome=None, **kw),
                lambda a: (a.fired_at, a.alert_id), lambda b, t, times: b.alerts(t, times), lambda a: str(a.alert_id)),
     "investigations": (lambda r, t, **kw: r.list_investigations(t, alert_id=None, **kw),
                        lambda i: (i.created_at, i.investigation_id), lambda b, t, times: b.investigations(t, times),
@@ -209,7 +209,7 @@ async def test_o10_the_alert_window_is_closed_below_open_above_and_adjacent_wind
     ids = dict(zip(times, await backend.alerts(A, times), strict=True))
 
     async def window(after: dt.datetime | None, before: dt.datetime | None) -> list[str]:
-        found = await backend.reads.list_alerts(A, fired_after=after, fired_before=before, after=None, limit=50)
+        found = await backend.reads.list_alerts(A, fired_after=after, fired_before=before, outcome=None, after=None, limit=50)
         return [str(a.alert_id) for a in found]
 
     assert await window(times[1], times[3]) == [ids[times[2]], ids[times[1]]]
@@ -219,6 +219,33 @@ async def test_o10_the_alert_window_is_closed_below_open_above_and_adjacent_wind
     lower, upper = await window(None, times[2]), await window(times[2], None)
     assert sorted(lower + upper) == sorted(ids.values())
     assert set(lower).isdisjoint(upper)
+
+
+@POSTGRES
+async def test_alert_list_o1_o2_the_adapter_lists_each_alerts_outcome_and_latest_status_and_filters_by_the_outcome(store, adapter, clock):
+    """Over the real store: wire summaries carry the newest completed investigation's disposition and the newest one's
+    status (a queued rerun over a completed one keeps the outcome), `outcome=<code>` and the `NoOutcome` marker narrow the
+    list, and no summary carries `raw`. (O1, O2, AP4)"""
+    from defender.tests.support.jobs._outcome1581 import no_outcome
+
+    newest, middle, oldest = [await _alert(store, A, f"X-{n}", AT + n * MINUTE) for n in (2, 1, 0)]
+    await _ended(store, adapter, newest, disposition="malicious", cost_usd=1.0)
+    clock.at += MINUTE
+    await _ended(store, adapter, middle, disposition="benign", cost_usd=1.0)
+    clock.at += MINUTE
+    await adapter.create_investigation(_principal(), middle, "k2")  # queued over a known outcome
+
+    async def listed(outcome: Any = None) -> list[Any]:
+        return await adapter.list_alerts(A, fired_after=None, fired_before=None, outcome=outcome, after=None, limit=10)
+
+    everything = await listed()
+    assert [(a.alert_id, a.outcome, a.latest_status) for a in everything] == [
+        (newest, "malicious", "completed"), (middle, "benign", "queued"), (oldest, None, None)]
+    assert all("raw" not in a.model_dump() for a in everything)
+    assert [a.alert_id for a in await listed("malicious")] == [newest]
+    assert [a.alert_id for a in await listed("benign")] == [middle]
+    assert [a.alert_id for a in await listed(no_outcome())] == [oldest]
+    assert await listed("unresolved") == []
 
 
 # --- reads by id, the wire mapping, tenant keying ------------------------------------------------------------------
@@ -330,7 +357,7 @@ async def test_o10_o6_an_alert_reads_as_the_store_holds_it_and_lists_without_its
     """The wire alert carries the store's fields by name and the raw text exactly; the list omits `raw`. (O10, O6)"""
     alert_id = await _alert(store, A, "T-1")
     alert = await adapter.get_alert(A, alert_id)
-    [summary] = await adapter.list_alerts(A, fired_after=None, fired_before=None, after=None, limit=5)
+    [summary] = await adapter.list_alerts(A, fired_after=None, fired_before=None, outcome=None, after=None, limit=5)
     assert (alert.alert_id, alert.vendor, alert.vendor_ticket_id) == (alert_id, "elastic", "T-1")
     assert (alert.title, alert.description) == (TITLE, DESCRIPTION)
     assert alert.fired_at == alert.changed_at == alert.received_at == AT
@@ -346,7 +373,7 @@ async def test_o10_another_tenants_ids_read_as_absent_and_its_writes_find_nothin
     from defender.api.ports import NotFound, UnknownReference
 
     alert_id = await _alert(store, A, "T-1")
-    investigation_id = await _ended(store, adapter, alert_id)
+    investigation_id = await _ended(store, adapter, alert_id, disposition="benign")  # #1581 O10: a completed row has one (conflict, updated)
     [job] = await adapter.list_learning_jobs(A, investigation_id=investigation_id, after=None, limit=5)
     assert (await adapter.get_alert(A, alert_id)).alert_id == alert_id
     assert (await adapter.get_investigation(A, investigation_id)).investigation_id == investigation_id
@@ -388,8 +415,8 @@ async def test_o6_an_investigations_status_is_the_stores_stage_for_every_wire_st
         if status == "running":
             await store.claim()
     else:
-        investigation_id = await _ended(store, adapter, alert_id, stage=status,
-                                        failure_reason=None if status in {"completed", "unparseable"} else "worker_error")
+        investigation_id = await _ended(store, adapter, alert_id, stage=status, disposition="benign" if status == "completed" else None,
+                                        failure_reason=None if status in {"completed", "unparseable"} else "worker_error")  # #1581 O10 (conflict, updated)
     stored = await store.get_investigation(A, investigation_id)
     wire = await adapter.get_investigation(A, investigation_id)
     assert stored.stage == status

@@ -207,7 +207,8 @@ table. Per call, in order: the world's own stored answer (a repeated call is
 served byte for byte); else the call's base answer — the family's recording, or
 one live read, unbounded: the adapter is told neither the branch point nor the run clock, and the
 oracle applies the cut (#1385); a real error passes through as itself
-(`real-error`). A world with no facts is served its base (`passthrough`).
+(`real-error`). A world with no facts is served its recorded base as is (`passthrough`); a
+live base still takes an oracle turn, which applies the cut.
 Otherwise the world's **oracle** (`estate/oracle.py`, `AgentRole.ORACLE`) takes
 one turn, in which it serves the world as it stood at the branch point: for a system that takes a
 query it makes a **re-ask** with its `re_ask` tool (the call's own question, edited to end there):
@@ -215,7 +216,11 @@ the host refuses one that is not that question before reading anything, reads it
 in the attempt its answer is the base the patch applies to; a committed re-ask is kept as a
 base answer of the world. For a system of record it
 undoes the source run's own later writes (each such change names the reserved fact `fork`) and
-edits the response to the world's facts. It sees the call, the base answer (saved for its code)
+edits the response to the world's facts. It sees the call, the base answer (saved for its code;
+an answer past gather's in-context ceiling (8 KB unless gather's setting moves it), or past its
+share of the prompt's budget, is shown as gather shows it within that size: its shape, each
+dropped region marked, the whole in the saved file; so is each of its own reads and re-asks, and
+a python reply shows its head and tail within the same ceiling)
 and the world's facts, and this world's earlier servings most like the call (how each was made:
 its code and changes, for servings that changed something or ran code; each call starts a fresh
 conversation), may explore real examples through the same
@@ -234,7 +239,13 @@ row before and after), cut for length, are what the verifier judges and the answ
 base's shape, the forged rows to the real columns, ids and recorded facts, and each proof to a
 removed row; then a verifier
 (`AgentRole.ORACLE_CHECK`), in its own context and never shown the oracle's
-reasoning, asks whether each covered fact's telemetry is present and plausible.
+reasoning, asks whether each covered fact's telemetry is present and plausible. What it judges
+(the base, the served answer, a re-ask's dropped rows) is shown the same bounded way, the changes
+as the oracle saw them (each cut for length), and all of it is saved whole in a sandboxed box of
+its own, never the oracle's, where its `python` checks every row. Every box of an attempt is made
+and stopped by one owner: the box starts on its first `python` call, one that cannot start is not
+tried again, and all stop together when the attempt ends, its deadline passes or the sibling
+closes under it (a box made after that never starts).
 A failure goes back to the oracle and the turn retries; past the cap the world is
 unservable and the sibling aborts with that reason. Each world owns its oracle
 state with one writer; one oracle turn runs at a time per sibling, and the

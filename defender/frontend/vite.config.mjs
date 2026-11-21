@@ -16,5 +16,23 @@ export default defineConfig({
     strictPort: true,
     ...(upstream ? { proxy: { "/api": { target: `http://${upstream}` } } } : {}),
   },
-  test: { include: ["src/**/*.test.{ts,tsx}"] },
+  // The test steps, each a project its script names (`vitest run --project <name>`), so the build reads no test
+  // setting and a name that matches no project is refused (a bare `vitest run` runs them all). The generated tests
+  // (`*.generated.test.ts`, exhaustive oracles, `bun run test:generated`) and the jsdom ones (`*.dom.test.tsx`,
+  // `bun run test:dom`) are kept out of `bun run test`: the build tests run that dozens of times, and these would
+  // multiply into minutes there (#1581, #1598).
+  test: {
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "unit",
+          include: ["src/**/*.test.{ts,tsx}"],
+          exclude: ["**/node_modules/**", "src/**/*.generated.test.{ts,tsx}", "src/**/*.dom.test.{ts,tsx}"],
+        },
+      },
+      { extends: true, test: { name: "generated", include: ["src/**/*.generated.test.{ts,tsx}"] } },
+      { extends: true, test: { name: "dom", include: ["src/**/*.dom.test.{ts,tsx}"], environment: "jsdom" } },
+    ],
+  },
 });

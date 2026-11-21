@@ -405,13 +405,15 @@ def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated
     alerts = _jobs_columns(migrated_database, "alerts")
     investigations = _jobs_columns(migrated_database, "investigations")
     assert set(alerts) == {"id", "tenant_id", "vendor", "vendor_ticket_id", "fired_at", "changed_at",
-                           "received_at", "title", "description", "raw"}
+                           "received_at", "title", "description", "raw",
+                           "outcome", "outcome_investigation_id", "outcome_created_at"}  # #1581: the stored outcome (conflict, updated)
     assert set(investigations) == {"id", "tenant_id", "alert_id", "request_key", "attempt", "stage", "created_at",
                                    "started_at", "finished_at", "disposition", "cost_usd", "knowledge",
                                    "failure_reason", "failure_message", "lease_expires_at", "accounting_written_at",
                                    "cost_is_lower_limit", "update_ticket"}  # #1471: the request's flag
     # #1345 (data model): the store derives an alert's title and description from the tenant's mapping, so both are nullable.
-    assert {n for n, (_, nullable, _) in alerts.items() if nullable} == {"title", "description"}
+    assert {n for n, (_, nullable, _) in alerts.items() if nullable} == {
+        "title", "description", "outcome", "outcome_investigation_id", "outcome_created_at"}  # #1581: null until a completed investigation (conflict, updated)
     nullable = {n for n, (_, can_be_null, _) in investigations.items() if can_be_null}
     assert nullable == {"started_at", "finished_at", "disposition", "cost_usd", "knowledge", "failure_reason",
                         "failure_message", "lease_expires_at", "accounting_written_at"}  # #1471: `update_ticket` is required
@@ -424,13 +426,14 @@ def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated
 
 @pytest.mark.postgres
 def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
-    """PKs, the tenant FK, the alert uniques, the composite FK, the attempt unique, a stage CHECK, #1343's lease CHECK and #1377's
-    lower-limit-needs-a-cost CHECK; no other constraint (#1342 M10; #1377 S4: the job row enforces it; #1471 r9 R9-1: no
-    outcome-word CHECK)."""
+    """PKs, the tenant FK, the alert uniques, the composite FK, the attempt unique; on alerts the stored outcome's two CHECKs
+    and on investigations five CHECKs (stage, lease, lower-limit-needs-a-cost, completed-has-a-disposition, disposition value);
+    no other constraint (#1342 M10; #1377 S4; #1471 r9 R9-1; #1581)."""
     alerts = _jobs_constraints(migrated_database, "alerts")
-    assert [(kind, cols) for kind, cols, _ in alerts] == sorted([
+    assert [(kind, cols) for kind, cols, _ in alerts if kind != "c"] == sorted([
         ("f", ("tenant_id",)), ("p", ("id",)), ("u", ("id", "tenant_id")),
-        ("u", ("tenant_id", "vendor", "vendor_ticket_id"))])
+        ("u", ("tenant_id", "vendor", "vendor_ticket_id"))])  # #1581: no foreign key to the outcome's source (conflict, updated)
+    assert len([k for k, _, _ in alerts if k == "c"]) == 2, "#1581: the all-or-none CHECK and the five-codes CHECK of the stored outcome, no other"
     assert next(d for k, _, d in alerts if k == "f") == "FOREIGN KEY (tenant_id) REFERENCES tenancy.tenants(id)", \
         "no ON DELETE / ON UPDATE action: the default restricts (M10)"
 
@@ -442,26 +445,36 @@ def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
     assert foreign == "FOREIGN KEY (tenant_id, alert_id) REFERENCES jobs.alerts(tenant_id, id)", \
         "no ON DELETE / ON UPDATE action: delete and cascade are the store's, under the alert lock (M10, O10)"
     checks = [d for k, _, d in investigations if k == "c"]
-    assert len(checks) == 3, "the stage CHECK, #1343's running-has-a-lease CHECK and #1377's mark-needs-a-cost CHECK, no other"
-    [check] = [d for d in checks if "completed" in d]
+    assert len(checks) == 5, ("the stage CHECK, #1343's running-has-a-lease CHECK, #1377's mark-needs-a-cost CHECK and #1581's "
+                              "completed-has-a-disposition and disposition-value CHECKs, no other")
+    [check] = [d for d in checks if "'queued'" in d]
     for stage in ("queued", "running", "completed", "unparseable", "failed", "aborted"):
         assert f"'{stage}'" in check
     [mark] = [d for d in checks if "cost_is_lower_limit" in d]
     assert "cost_usd" in mark
-    [lease] = [d for d in checks if "completed" not in d and d != mark]
+    [lease] = [d for d in checks if "lease_expires_at" in d]
     assert "lease_expires_at" in lease
     assert "'running'" in lease  # (#1343: second CHECK; conflict updated)
+
+
+@pytest.mark.postgres
+def test_neither_jobs_table_has_a_trigger(migrated_database):
+    """`jobs.alerts` and `jobs.investigations` carry no trigger: the stored outcome is the store's, not the table's. (#1581 r3.1)"""
+    assert execute(migrated_database, """
+        SELECT t.relname, g.tgname FROM pg_trigger g JOIN pg_class t ON t.oid = g.tgrelid JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'jobs' AND t.relname IN ('alerts', 'investigations') AND NOT g.tgisinternal""") == []
 
 
 @pytest.mark.postgres
 def test_the_jobs_indexes_are_the_constraints_plus_one_partial_unique_and_the_list_index_and_nothing_else(migrated_database):
     """Four indexes on alerts and on investigations: key-backed ones, #1083's newest-first list index, and on investigations one partial unique over the live stages only (#1342 M10; #1083 Am-5, CONFLICT: the list indexes join the set)."""
     alerts = _jobs_indexes(migrated_database, "alerts")
-    assert len(alerts) == 4
+    assert len(alerts) == 5, "#1581: and the outcome index (conflict, updated)"
     assert len([i for i in alerts if "(tenant_id, fired_at DESC, id DESC)" in i]) == 1
     investigations = _jobs_indexes(migrated_database, "investigations")
-    assert len(investigations) == 4
+    assert len(investigations) == 5, "#1581 r3.3: and the `latest_status` index"
     assert len([i for i in investigations if "(tenant_id, created_at DESC, id DESC)" in i]) == 1
+    assert len([i for i in investigations if "(tenant_id, alert_id, created_at DESC, id DESC)" in i]) == 1
     [partial] = [i for i in investigations if "WHERE" in i]
     assert "UNIQUE" in partial
     assert "(tenant_id, alert_id)" in partial
@@ -470,4 +483,4 @@ def test_the_jobs_indexes_are_the_constraints_plus_one_partial_unique_and_the_li
     assert not any(f"'{stage}'" in partial for stage in ("completed", "unparseable", "failed", "aborted"))
 
     execute(migrated_database, "CREATE INDEX extra_1342 ON jobs.investigations (stage)")  # control: the census sees one
-    assert len(_jobs_indexes(migrated_database, "investigations")) == 5
+    assert len(_jobs_indexes(migrated_database, "investigations")) == 6

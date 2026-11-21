@@ -9,6 +9,8 @@ that re-derive the test.
 
 from __future__ import annotations
 
+from typing import Literal, get_args
+
 # The canonical run-disposition vocabulary. The ordered tuple is authored because rendered
 # surfaces (deny reasons, the invlang slot catalog) need a stable order; the membership set is
 # derived and frozen.
@@ -21,10 +23,28 @@ from __future__ import annotations
 # `unresolved` is recorded only by the host when it ends a run without a settled finding (gate
 # overrule, incomplete review, run cut short); the model's own "could not settle" is
 # `inconclusive`. See `HOST_ONLY_DISPOSITION`.
-DISPOSITION_VALUES: tuple[str, ...] = (
-    "benign", "false-positive", "inconclusive", "malicious", "unresolved",
-)
+#
+# Declared once, as a `Literal` (#1581 AP4): the value tuple, the investigations and alerts table
+# checks, the API's enums and the list port's filter all derive from it.
+Disposition = Literal["benign", "false-positive", "inconclusive", "malicious", "unresolved"]
+DISPOSITION_VALUES: tuple[str, ...] = get_args(Disposition)
 DISPOSITION_ENUM = frozenset(DISPOSITION_VALUES)
+
+
+class NoOutcome:
+    """The alert list's filter for alerts with no completed investigation (#1581 O2): passed as an
+    instance where a `Disposition` would be. The API maps its `none` to this, so a store never
+    reads the word `none` as a code."""
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, NoOutcome)
+
+    def __hash__(self) -> int:
+        return hash(NoOutcome)
+
+    def __repr__(self) -> str:
+        return "NoOutcome()"
+
 
 #: The member only the host may commit; every model/analyst authoring surface refuses it
 #: (`test_authoring_surfaces.py` enumerates them).

@@ -11,6 +11,7 @@ import dataclasses
 import json
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -246,6 +247,49 @@ def test_1540_f3_a_document_without_a_field_a_screen_reads_fails_the_build(built
         assert _previous_build_kept(frontend)
 
 
+#: The five outcome codes (alert list design O2, AP4); the document declares them once, whichever schema carries them.
+OUTCOME_CODES = {"benign", "false-positive", "inconclusive", "malicious", "unresolved"}
+
+
+def _each_code_list(document: Any, edit: Callable[[list[str]], None]) -> int:
+    """`edit` applied to every `enum` list in the document that is exactly the five outcome codes; how many there were."""
+    found = 0
+
+    def walk(node: Any) -> None:
+        nonlocal found
+        if isinstance(node, dict):
+            codes = node.get("enum")
+            if isinstance(codes, list) and set(codes) == OUTCOME_CODES:
+                edit(codes)
+                found += 1
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(document)
+    return found
+
+
+@pytest.mark.parametrize("edit", [None, lambda codes: codes.append("zz-sixth"), lambda codes: codes.remove("benign")],
+                         ids=["produced-unedited", "sixth-code-added", "code-removed"])
+def test_ap4_a_document_whose_outcome_codes_the_screen_does_not_name_fails_the_build(built_frontend, tmp_path, edit):
+    """The screen's labels and address check are keyed by the generated outcome union: over the produced document the
+    build passes (control); with a sixth code added, or one removed, it fails and writes no `index.html`. (AP4)"""
+    document = _produced()
+    assert _each_code_list(document, lambda codes: None) >= 1, "the document declares the five outcome codes (O1, AP4)"
+    frontend = _copy(tmp_path, built_frontend, openapi=_bytes(document))
+    done = run_bun(frontend, "run", "build")
+    assert done.returncode == 0, (done.stdout[-1500:], done.stderr[-1500:])
+    if edit is not None:
+        _each_code_list(document, edit)
+        (frontend / OPENAPI).write_bytes(_bytes(document))
+        done = _failing_build(frontend)
+        assert done.returncode != 0, "the build accepted outcome codes the screen does not name"
+        assert _previous_build_kept(frontend)
+
+
 #: The investigation screen's read, as the document keys it.
 INVESTIGATION_READ = "/api/tenants/{tenant_id}/investigations/{investigation_id}"
 
@@ -282,7 +326,4 @@ def test_1161_the_test_build_never_writes_the_checkout(built_frontend):
     """The built `dist/` is outside the checkout's frontend folder, so a build never replaces files another run is
     serving. (B11, test machinery)"""
     assert FRONTEND not in built_frontend.parents, built_frontend
-
-
-# --- F8: the source check, observed through the lint job's gate (F6): `bun run check`, then `bun run test` ---------------
 

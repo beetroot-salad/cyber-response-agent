@@ -1,12 +1,16 @@
-"""#1540 F1/F6/F8: the source check observed through the lint job's gate, one case per form and location (split from
+"""#1540 F1/F6/F8, #1581 G9: the source check observed through the lint job's gate, one case per form and location (split from
 `test_1161_build.py`)."""
+import json
+import re
+from typing import Any
 
 import pytest
 
+from defender.tests.support.frontend._ingress1161 import FRONTEND
 
 from defender.tests.frontend._gate_support import (  # noqa: F401
-    ALLOWED_FORMS, CONTROL, LOCATION_FORM, CONTROL_TEST_SOURCE, LOCATIONS, NEVER_CALLED, REFUSED_FORMS, SCREEN_IMPORT, SHELL_IMPORT,
-    _check, _extension, _gate, _lib_declares_navigation, _unit_tests, _with_source)
+    ALLOWED_FORMS, CONTROL, CONTROL_TEST_SOURCE, LOCATION_FORM, LOCATIONS, NEVER_CALLED, REFUSED_FORMS, SCREEN_IMPORT,
+    SHELL_IMPORT, _check, _extension, _gate, _lib_declares_navigation, _unit_tests, _with_source)
 
 
 def test_1540_f8_the_gate_passes_on_the_unmodified_tree(checked):
@@ -93,4 +97,64 @@ def test_1540_f8_a_test_file_is_not_exempt_from_the_source_check(checked):
     assert not inside.refused, inside.output[-1500:]
 
 
-# --- F8: the corpus of refused and allowed forms, one gate run per corpus -----------------------------------------------
+# --- #1581 G9: `usePagedRead` refuses every read that is not a page -------------------------------------------------------
+
+def _resolve(document: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
+    while "$ref" in schema:
+        node: Any = document
+        for part in schema["$ref"].removeprefix("#/").split("/"):
+            node = node[part]
+        schema = node
+    return schema
+
+
+def _reads_of(document: dict[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
+    """The GET reads whose 200 answer is JSON, by path key, as the TypeScript call's params text: (those whose answer is
+    `{items, next_cursor}`, all the others). Read from the document alone. Only the body decides: the design says "Only
+    reads whose body is `{items, next_cursor}` qualify", and a page read whose query has no `cursor` is a page read."""
+    paged: dict[str, str] = {}
+    other: dict[str, str] = {}
+    for path, item in document["paths"].items():
+        operation = item.get("get")
+        body = None if operation is None else operation["responses"].get("200", {}).get("content", {}).get("application/json")
+        if body is None:
+            continue
+        schema = _resolve(document, body["schema"])
+        parameters = [_resolve(document, p) for p in operation.get("parameters", [])]
+        names = [p["name"] for p in parameters if p["in"] == "path"]
+        params = "{ path: { " + ", ".join(f'{name}: ""' for name in names) + " } }" if names else "{}"
+        is_page = {"items", "next_cursor"} <= set(schema.get("properties", {}))
+        (paged if is_page else other)[path] = params
+    return paged, other
+
+
+def _paged_calls(paged: dict[str, str], other: dict[str, str]) -> tuple[str, set[int]]:
+    """A source file calling `usePagedRead` once per read, each call on its own line with otherwise correct params, and
+    the numbers of the lines that call a read that is not a page."""
+    lines = ['import { usePagedRead } from "./provider";', "export function zzPagedCalls(): void {"]
+    refused: set[int] = set()
+    for path, params in {**paged, **other}.items():
+        lines.append(f"  usePagedRead({json.dumps(path)}, {params});")
+        if path in other:
+            refused.add(len(lines))
+    return "\n".join([*lines, "}"]), refused
+
+
+def test_1581_g9_usepagedread_refuses_every_read_that_is_not_a_page(checked):
+    """A file that calls `usePagedRead` once for each GET read of the document whose answer is JSON, with otherwise
+    correct params, fails `bun run check` with a type error (of whatever code) on exactly the lines
+    that call a read whose answer is not `{items, next_cursor}`, and on none that call a page read: the key is what is
+    refused. The file is in `src/shell/`, where the source check allows what a screen could not hold; no
+    `@ts-expect-error` is used, since the source check refuses it everywhere. (#1581 PagedKey)"""
+    paged, other = _reads_of(json.loads((FRONTEND.parent / "api" / "openapi.json").read_text(encoding="utf-8")))
+    assert len(other) >= 5, f"premise: reads that are not pages exist: {sorted(other)}"
+    assert len(paged) >= 3, f"premise: page reads exist: {sorted(paged)}"
+    assert "/api/tenants/{tenant_id}/alerts" in paged
+    assert "/api/me" in other
+    source, refused = _paged_calls(paged, other)
+    gate = _with_source(checked, "shell/zz_paged_calls.ts", source, _check)
+    errors = re.findall(r"zz_paged_calls\.ts:(\d+): TS\d+", gate.output)
+    assert gate.refused, gate.output[-2000:]
+    assert errors, gate.output[-2000:]
+    assert {int(line) for line in errors} == refused, gate.output[-2000:]
+

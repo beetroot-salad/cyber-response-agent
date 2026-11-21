@@ -9,8 +9,10 @@ import pytest
 from defender.tests.support.frontend._ingress1161 import FRONTEND
 
 from defender.tests.frontend._gate_support import (  # noqa: F401
-    ALLOWED_FORMS, CONTROL, NEVER_CALLED, REFUSED_FORMS, Gate, _gate, _with_source)
+    ALLOWED_FORMS, CONTROL, LOCATION_FORM, NEVER_CALLED, REFUSED_FORMS, Gate, _gate, _with_source)
 
+
+# --- F8: the corpus of refused and allowed forms, one gate run per corpus -----------------------------------------------
 
 #: The DOM library's refused members of the window and global scope, each reachable from every window-like receiver.
 _WINDOW_SYMBOLS = ("fetch", "XMLHttpRequest", "EventSource", "WebSocket", "localStorage", "sessionStorage", "indexedDB",
@@ -123,7 +125,107 @@ def _refused_corpus() -> dict[str, str]:
             'import * as React from "react";\nexport const zzForm = React.createElement("img", { src: "/api/me" });'),
         "React's JSX runtime": 'import { jsx } from "react/jsx-runtime";\nexport const zzForm = jsx("img", { src: "/api/me" });',
     })
+    corpus.update(_api_spelling_corpus())
     return corpus
+
+
+#: Rule 5 (#1581 R3): what the browser resolves to a path under `/api` however the markup spells it. The requests those
+#: spellings make are the API's, so they are refused whichever attribute carries them. Checked against the URL standard's
+#: parser: from `/home` or from any returnable address of `api/addresses.json` (`/t/<uuid>/investigations/<uuid>`), each
+#: resolves to a path under `/api` (the percent-encoded letters are the ingress's to decode).
+API_SPELLINGS: dict[str, str] = {
+    "a dot segment": "/./api/me",
+    "a segment and its parent": "/x/../api/me",
+    "a parent of the root": "/../api/me",
+    "a dot segment after the api": "/api/./me",
+    "a percent-encoded letter": "/%61pi/me",
+    "a percent-encoded capital": "/%41pi/me",
+    "a percent-encoded dot": "/%2e/api/me",
+    "a percent-encoded parent": "/%2e%2e/api/me",
+    "a half-encoded parent": "/.%2e/api/me",
+    "a backslash for a slash": "/a\\..\\api/me",
+    "a tab inside the name": "/ap\ti/me",
+    "a newline inside the name": "/ap\ni/me",
+    "the api itself": "/api",
+    "the api with a query": "/api?x=1",
+    "the api with a fragment": "/api#f",
+    "the api behind a home segment": "/home/../api/me",
+    "relative from home, plain": "api/me",
+    "relative from home, dot": "./api/me",
+    "relative from home, parent": "../api/me",
+    "relative from an investigation, up to the root": "../../../api/me",
+    "relative from an investigation, past the root": "../../../../api/me",
+}
+#: One spelling in every attribute whose value the browser requests or navigates to, as the JSX that holds it.
+API_ATTRIBUTE_FORMS: dict[str, str] = {
+    "src": '<img alt="" src="{v}" />', "srcSet": '<img alt="" srcSet="{v} 2x" />', "href": '<a href="{v}">x</a>',
+    "action": '<form action="{v}"><button /></form>', "formAction": '<form><button formAction="{v}" /></form>',
+    "poster": '<video poster="{v}" />', "data": '<object data="{v}" />', "ping": '<a href="/home" ping="{v}">x</a>',
+    "cite": '<blockquote cite="{v}" />', "xlinkHref": '<svg><use xlinkHref="{v}" /></svg>',
+}
+
+
+def _api_spelling_corpus() -> dict[str, str]:
+    """description -> one module: every spelling in `href`, and the plain dot-segment spelling in every other attribute,
+    plus a candidate list whose second candidate is the API's."""
+    corpus = {f"{why} ({text!r}) in href": f"export const zzForm = {API_ATTRIBUTE_FORMS['href'].format(v=text)};"
+              for why, text in API_SPELLINGS.items()}
+    for attribute, form in API_ATTRIBUTE_FORMS.items():
+        corpus[f"a dot segment into the api in {attribute}"] = f"export const zzForm = {form.format(v='/./api/me')};"
+    corpus["an image candidate list whose second candidate is the api's"] = (
+        'export const zzForm = <img alt="" srcSet="/home 1x, /./api/me 2x" />;')
+    corpus["an image candidate list whose only candidate is the api's"] = (
+        'export const zzForm = <img alt="" srcSet="/%61pi/me" />;')
+    corpus.update(_any_attribute_corpus())
+    return corpus
+
+
+#: Rule 5 has no attribute list (#1581 r3.3): a string a screen writes in ANY attribute is refused when it resolves to the
+#: API, including attributes no list of URL-bearing ones ever had; `srcDoc`, `dangerouslySetInnerHTML` and a `meta`
+#: `httpEquiv` `content` carry HTML or a navigation instruction in a string, so they are refused outright.
+ANY_ATTRIBUTE_FORMS: dict[str, str] = {
+    "imageSrcSet on a link": '<link rel="preload" as="image" imageSrcSet="/api/me 1x" />',
+    "imageSrcSet on a link, a dot segment": '<link rel="preload" as="image" imageSrcSet="/home 1x, /./api/me 2x" />',
+    "a made-up data attribute": '<div data-zz-url="/api/me" />',
+    "a made-up data attribute, a dot segment": '<div data-zz-url="/./api/me" />',
+    "a made-up data attribute, a relative dot segment": '<div data-zz-url="./api/me" />',
+    "a made-up data attribute, a percent-encoded relative name": '<div data-zz-url="%61pi/me" />',
+    "a made-up data attribute, a named-entity slash": '<div data-zz-url="&sol;api/me" />',
+    "a link, a named-entity slash": '<a href="&sol;api/me">x</a>',
+    "href, a bare api": '<a href="api">x</a>',
+    "src, a bare api": '<img alt="" src="api" />',
+    "a made-up aria attribute": '<div aria-zz-url="/api/me" />',
+    "aria-label": '<div aria-label="/api/me" />',
+    "title": '<div title="/api/me" />',
+    "a data attribute holding a string expression": '<div data-zz-url={"/api/me"} />',
+    "a data attribute holding a template": '<div data-zz-url={`/api/me`} />',
+    "the content of a refresh meta": '<meta httpEquiv="refresh" content="0;url=/api/me" />',
+    "any content of a refresh meta": '<meta httpEquiv="refresh" content="0" />',
+    "srcDoc": '<iframe srcDoc="<p>hello</p>" />',
+    "srcDoc with no URL in it": '<iframe srcDoc="" />',
+    "dangerouslySetInnerHTML": '<div dangerouslySetInnerHTML={{ __html: "<p>hello</p>" }} />',
+}
+
+
+def _any_attribute_corpus() -> dict[str, str]:
+    return {f"{why} (any attribute)": f"export const zzForm = {form};" for why, form in ANY_ATTRIBUTE_FORMS.items()}
+
+
+#: Paths that are not under `/api` however they are spelled, which stay allowed (the twin of API_SPELLINGS).
+NOT_API_SPELLINGS: dict[str, str] = {
+    "a longer first segment": "/apix",
+    "a longer first segment with a dot segment": "/./apix",
+    "a longer first segment, percent-encoded": "/%61pix",
+    "a hyphenated first segment": "/api-docs",
+    "an api path in a query": "/home?next=/api/me",
+    "an api path in a fragment": "/home#/api/me",
+    "a dot segment that stays in the app": "/./home",
+    "a parent that leaves the api": "/api/../home",
+    "an investigation address": "/t/0b1f2a3c-0000-4000-8000-000000000001/investigations/0b1f2a3c-0000-4000-8000-000000000002",
+    "an alerts address": "/t/0b1f2a3c-0000-4000-8000-000000000001/alerts",
+    "an alerts address with a query naming the api": "/t/0b1f2a3c-0000-4000-8000-000000000001/alerts?q=/api",
+    "an api segment deeper in the path": "/t/0b1f2a3c-0000-4000-8000-000000000001/api",
+}
 
 
 #: Locals, parameters and properties merely named like the refused globals, and `/api/auth/` outside a string (F8: by
@@ -160,6 +262,26 @@ ALLOWED_CORPUS: dict[str, str] = {
                                   'export const zzForm = (zzProps: { title: string }) => <ZzBox {...zzProps} />;'),
     "a local function named createElement": "export const zzForm = () => { const createElement = () => 1; return createElement(); };",
 }
+ALLOWED_CORPUS.update({f"{why} ({text!r}) in href": f'export const zzForm = <a href="{text}">x</a>;'
+                      for why, text in NOT_API_SPELLINGS.items()})
+ALLOWED_CORPUS.update({
+    "an ordinary string in className": 'export const zzForm = <div className="card wide" />;',
+    "a label naming the API": 'export const zzForm = <div aria-label="API docs" />;',
+    "a title that is a longer first segment": 'export const zzForm = <div title="/apix" />;',
+    "a made-up data attribute holding an app path": 'export const zzForm = <div data-zz-url="/home" />;',
+    "a made-up aria attribute holding words": 'export const zzForm = <div aria-zz-note="see the API" />;',
+    "an image set of app paths on a link": 'export const zzForm = <link rel="preload" as="image" imageSrcSet="/home 1x, /apix 2x" />;',
+    "an abbreviation titled with the bare word": 'export const zzForm = <abbr title="API">application programming interface</abbr>;',
+    "an option valued with the bare word": 'export const zzForm = <option value="api">api</option>;',
+    "a class named with the bare word": 'export const zzForm = <div className="api" />;',
+    "a label that is the bare word": 'export const zzForm = <div aria-label="API" />;',
+    "a made-up data attribute holding the bare word": 'export const zzForm = <div data-zz-kind="api" />;',
+    "a title with a non-breaking space entity": 'export const zzForm = <button title="Load&nbsp;more" />;',
+    "a label with an ellipsis entity": 'export const zzForm = <div aria-label="Loading&hellip;" />;',
+    "a title with a dash entity": 'export const zzForm = <div title="a&mdash;b" />;',
+    "a meta that is not a refresh": 'export const zzForm = <meta name="description" content="an ordinary description" />;',
+})
+ALLOWED_CORPUS["an image candidate list of app paths"] = 'export const zzForm = <img alt="" srcSet="/home 1x, /apix 2x" />;'
 
 
 #: What could claim a value is anything (an `any`, a cast, a comment switching type checking off), so would reach what

@@ -21,7 +21,6 @@ def _copy(tmp_path: Path, built: Path, **override: bytes | None) -> Path:
 
 
 
-
 CONTROL = "zz_control"
 #: One refused form each (F8's list, `navigation` included). Each is valid TypeScript but `navigation`, which the pinned
 #: TypeScript's DOM library may not declare: then a type error also refuses it, and its shell twin below cannot pass.
@@ -136,7 +135,6 @@ def _lib_declares_navigation(frontend: Path) -> bool:
 
 def _extension(form: str) -> str:
     return "tsx" if "JSX" in form else "ts"
-
 
 
 #: A passing test file the copy already holds, and the import it makes of its neighbour in `src/shell/`.

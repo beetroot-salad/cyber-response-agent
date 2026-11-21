@@ -31,6 +31,14 @@ export type ReadResult<K extends ReadKey> = Outcome<
 
 export type Person = components["schemas"]["Me"];
 
+/** What accepting an invitation came to: `left` when the shell navigated away (to the accepted tenant's alerts, or to
+ * sign in after a 401), `not-open` when the invitation is no longer open (404), `refused` when the API declined it
+ * for this person (a 403, or any other 4xx but 404 and 401: r3.3). The server's own failures (5xx, no answer) are
+ * `error`. */
+export type AcceptResult = Outcome<
+  { readonly kind: "left" } | { readonly kind: "not-open" } | { readonly kind: "refused" }
+>;
+
 /** The reasons the API's sign-in callback sends a person to the failed screen with (the API's identity service). Not in
  * the OpenAPI document: the callback answers with a redirect. */
 export type CallbackReason =
