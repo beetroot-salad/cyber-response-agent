@@ -2,39 +2,22 @@
 """defender/cli/tenant.py — the connect skill's tenant command (#1214: what is left of the tenant
 lifecycle's operator command once the lifecycle became a service).
 
-    python3 defender/cli/tenant.py check <tenant-id> [--token-file <path> [--kv-mount <mount>]] | --folder <path>
-    python3 defender/cli/tenant.py update <tenant-id>
-    python3 defender/cli/tenant.py propose <tenant-id> <staged dir>
+    python3 defender/cli/tenant.py check --folder <path>
 
 Tenants are created, rotated and offboarded by platform administrators through the API; the
 tenant management service and the execution host's actor do the work (the repo from the template,
-the bot and its credential, the host folder and its clone, a first publish). The tenant record —
-its state, its forge wiring, its credential generations, its last publish outcome — lives in
-PostgreSQL, and this command reads it from `DEFENDER_DATABASE_DSN`: `check <id>`, `update` and
-`propose` work for a tenant only while it is `active` (#1214 Flow 4). `setup`, `scaffold`,
-`new-id` and `migrate` are retired with the on-disk row.
+the bot and its credential, the host folder and its clone, a first publish). What the command
+once did for a tenant on the host is a request to the API now (#1471): the readiness check
+(`POST /api/tenants/{tenant_id}/readiness`) judges a tenant's repo and stored records, the adoption request carries a
+catalog adapter's base files, and a person's edit to the tenant repo undoes a lesson.
 
-`check` reports what acceptance does not refuse: the grant census against the RUNNING code (a verb
-the adapters declare that the table leaves undecided, a row for a verb nobody declares), retired
-settings files left in the repo, and — for a git clone — that `agent/.tenant-id` is what the tenant's repo
-commits (failing closed when git cannot answer). `check <id>` judges the tenant under
-`$DEFENDER_DATA_ROOT` through acceptance; `check --folder <path>` judges a tenant repo's working
-folder with no data root and no tenant record at all (tenant CI).
-
-`update` publishes (#1108 P4 flow 1): it mints the tenant's forge credential through its live
-generation, fetches the recorded origin, fast-forwards the clone, writes the export and points
-`current` at it. `check <id>` also reports how far `current` trails the clone's `origin/main` and
-the last publish refusal any trigger met (a run launch, a drain start, `update`), so a sealed
-issuer or a refused merge is visible (O-SEE). `propose` hands a staged directory shaped like the
-tenant's `agent/` root (connect's tenant half: a system skill, seed queries, tacit entries) to the
-commit-maker as one PR on the tenant forge; files are added or replaced, nothing is deleted, and
-only `agent/` is touched.
-
-A tenant's alert mapping (#1345), its systems and its case record (#1366) live in the database and are written by the
-tenant's admin through the platform API (#1470): `PUT /alert-mapping`, `PUT /systems/{id}` (and its credentials),
-`PUT /case-record`, each named in the API's reference. `check <id>` judges the stored records as the store judges a
-write and, given `--token-file` (the operator's OpenBao token; `--kv-mount` the KV mount, default `kv`), also reports
-each system with no credentials at its current version's generation.
+`check --folder <path>` judges a tenant repo's working folder with no data root and no tenant
+record at all (tenant CI). It reports what acceptance does not refuse: the grant census against
+the RUNNING code (a verb the adapters declare that the table leaves undecided, a row for a verb
+nobody declares), retired settings files left in the repo, the tacit-knowledge registry, the
+feedback setting, and — for a git clone — that `agent/.tenant-id` is what the tenant's repo
+commits (failing closed when git cannot answer). `setup`, `scaffold`, `new-id`, `migrate`,
+`update` and `propose` are retired.
 
 Exit status: 0 clean, 1 a finding or a refusal, 2 a usage error. A check that could not judge (the
 grant census not taken, `.tenant-id` unverifiable) is one more finding, not a separate code, and
@@ -47,7 +30,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 # Hand-rolled rather than `venv_guard.reexec_into_venv`, matching `run.py`: this must run
 # BEFORE any `defender.*` import resolves, and reaching that helper is itself such an import.
@@ -81,17 +63,13 @@ from defender import _git
 from defender import tenancy  # noqa: E402
 from defender._io import read_plain_bytes  # noqa: E402
 from defender.tenancy import AGENT_HALF, SETTINGS_HALF, TENANT_ID_FILE  # noqa: E402
-from defender.systems import tacit_registry  # noqa: E402
 from defender.systems.verbs import is_platform_served  # noqa: E402
-from defender.systems import run_tenant  # noqa: E402
 from defender.systems.verb_dispositions import (  # noqa: E402
     DispositionError,
     dispositions_path,
-    run_grants,
 )
 from defender.records.formats import TenantRefused  # noqa: E402
 from defender.cli import _tenant_secrets  # noqa: E402
-from defender.kit.faults import AdapterFault  # noqa: E402
 
 #: How long one git call of `check`'s committed read may take: each is a local lookup of one
 #: path, so a call still running is blocked (a FIFO where git expects a file), not slow.
@@ -105,168 +83,8 @@ _say = _tenant_secrets.say
 
 
 # ==========================================================================================
-# check
+# check --folder
 # ==========================================================================================
-
-def check_tenant(admitted: run_tenant.Admitted, *, secrets: Any = None) -> int:
-    """`check <id>`, for the tenant `main`'s host acceptance admitted: every finding about its
-    settings, its repo and its last publish, all reported. `secrets` is the operator's OpenBao
-    login, for the record findings that ask the secret store (#1366)."""
-    from defender.cli import _tenant_records_check as records_check
-    tenant, records = admitted.tenant, admitted.directory
-    mine = records_check.records_check(tenant.id, records, knowledge=tenant.knowledge, secrets=secrets,
-                                       defender_dir=_DEFENDER_DIR)
-    findings = _findings(tenant.knowledge, systems=mine.systems)
-    return _report([*mine.lines, *findings, *_mapping_findings(tenant, records), *_publish_findings(tenant, records)])
-
-
-def _mapping_findings(tenant: tenancy.Tenant, records: tenancy.TenantDirectory) -> list[str]:
-    """Every run and new investigation of a tenant with no saved alert mapping is refused (#1345 O4), so it is not ready."""
-    from defender.records.formats import ALERT_MAPPING_MISSING
-
-    return [] if records.alert_mapping(tenant.id) is not None else [ALERT_MAPPING_MISSING]
-
-
-def _publish_findings(tenant: tenancy.Tenant, records: tenancy.TenantDirectory) -> list[str]:
-    """O-SEE: how far `current` trails the clone's `origin/main` (as the last fetch left it; no
-    network), and the last publish refusal any trigger recorded in the tenant records, while no
-    later publish has succeeded. Read locally only."""
-    from defender.learning.author import version_control as vc
-    from defender.learning.author.version_control.status import read_status
-
-    findings: list[str] = []
-    try:
-        current: str | None = vc.current_export(tenant).commit
-    except vc.DeliveryRefused:
-        current = None  # never published: nothing trails yet (a refusal is reported below)
-    trail = _trail(tenant, current)
-    if trail is not None:
-        findings.append(trail)
-    status = read_status(records, tenant.id)
-    if status is not None and status.get("refused"):
-        findings.append(
-            f"the last publish ({status.get('by', 'unknown trigger')}) was refused "
-            f"({status.get('kind', 'operator')}): {status['refused']}")
-    return findings
-
-
-def _trail(tenant: tenancy.Tenant, current: str | None) -> str | None:
-    """The finding that `current` trails `origin/main`, or None when it does not (or there is
-    no clone with an `origin/main` to compare with)."""
-    from defender.learning.author.version_control import DeliveryRefused
-    from defender.learning.author.version_control.repository import LocalRepository
-
-    if current is None or not os.path.lexists(tenant.knowledge / ".git"):
-        return None
-    try:
-        repository = LocalRepository.open_local(tenant.knowledge)
-        if not repository.holds_ref("refs/remotes/origin/main"):
-            return None
-        upstream = repository.revision("refs/remotes/origin/main")
-        if current == upstream:
-            return None
-        behind = len(repository.commits_since(current, upstream))
-    except (OSError, _git.GitError, ValueError, DeliveryRefused) as unreadable:
-        return f"could not compare `current` with origin/main in {tenant.knowledge}: {unreadable}"
-    if not behind:
-        return None
-    return (f"`current` ({current[:12]}) trails origin/main ({upstream[:12]}) by {behind} "
-            f"{'commit' if behind == 1 else 'commits'}: the merged knowledge is not published "
-            "yet (see the last publish refusal, or run tenant.py update)")
-
-
-# ==========================================================================================
-# update / propose (#1108 P4)
-# ==========================================================================================
-
-def _delivery(tenant: tenancy.Tenant, records: tenancy.TenantDirectory, *, client=None, identity=None,
-              credential_config=None):
-    """The tenant's opened `TenantDelivery` (a context manager): its recorded origin, its forge
-    credential minted through its live generation (or the given stand-ins)."""
-    from defender.learning.author import version_control as vc
-
-    return vc.opened_delivery(tenant, defender_dir=_DEFENDER_DIR, directory=records, purpose="connect",
-                              client=client, identity=identity, credential_config=credential_config)
-
-
-def _publish(tenant: tenancy.Tenant, records: tenancy.TenantDirectory, *, by: str, client=None,
-             identity=None, credential_config=None) -> int:
-    from defender.learning.author import version_control as vc
-    from defender.learning.author.version_control.status import recording
-
-    try:
-        with recording(records, tenant.id, by=by), _delivery(
-                tenant, records, client=client, identity=identity,
-                credential_config=credential_config) as delivery:
-            export = delivery.publish()
-    except (vc.DeliveryRefused, vc.ForgejoAuthError, TenantRefused) as refused:
-        _say(f"publish refused: {refused}")
-        return 1
-    print(f"published {export.commit} as tenant {tenant.id}'s current knowledge")
-    return 0
-
-
-def update(admitted: run_tenant.Admitted, *, client=None, identity=None, credential_config=None) -> int:
-    """`update <id>`: publish the admitted tenant's merged `main` (flow 1). The keywords are
-    in-process stand-ins for the forge client, the credential and the host's issuer
-    configuration. Refusals print `[tenant.py] ...`, exit 1, and are what `check` reports
-    afterwards."""
-    return _publish(admitted.tenant, admitted.directory, by="tenant.py update", client=client,
-                    identity=identity, credential_config=credential_config)
-
-
-def propose(admitted: run_tenant.Admitted, staged: Path, *, client=None, identity=None,
-            credential_config=None) -> int:
-    """`propose <id> <dir>` for the admitted tenant (`_proposed`)."""
-    return _proposed(admitted, staged, client=client, identity=identity, credential_config=credential_config)
-
-
-def _proposed(admitted: run_tenant.Admitted, staged: Path, *,
-              client: Any, identity: Any, credential_config: Any) -> int:
-    """`propose <id> <dir>`: the staged directory (shaped like `agent/`) as one commit-maker
-    commit on a branch off the origin's `main`, pushed to the tenant origin with one PR. Files
-    are added or replaced; nothing absent from the directory is deleted. A link, a special
-    file, `.tenant-id` or a git control name anywhere in it refuses the whole proposal before
-    anything is committed. Refusals print `[tenant.py] ...` and exit 1."""
-    import secrets
-    from dataclasses import replace
-
-    from defender.learning.author import version_control as vc
-    from defender.tenancy import regular_files as _regular_files
-
-    records, tenant = admitted.directory, admitted.tenant
-    batch = None
-    try:
-        try:
-            files = _regular_files(Path(staged))
-        except OSError as unreadable:
-            raise vc.DeliveryRefused(f"{staged} could not be read: {unreadable}") from None
-        if not files:
-            raise vc.DeliveryRefused(f"{staged} stages no file: there is nothing to propose")
-        change_set = vc.ChangeSet(tuple(
-            vc.AgentChange(f"agent/{rel}", data) for rel, data in sorted(files.items())))
-        lanes = sorted({change.path.split("/")[1] for change in change_set
-                        if change.path.count("/") >= 2})
-        flat = [change.path for change in change_set if change.path.count("/") < 2]
-        if flat:
-            raise vc.DeliveryRefused(
-                f"{', '.join(flat)}: propose stages files below a folder of agent/ only")
-        with _delivery(tenant, records, client=client, identity=identity,
-                       credential_config=credential_config) as opened:
-            delivery = replace(opened, branch_prefix="propose/")
-            batch = delivery.start_batch(f"propose-{secrets.token_hex(4)}", lanes=lanes)
-            batch.commit(change_set, f"propose: {', '.join(sorted(files))[:200]}")
-            delivered = delivery.finish(batch)
-    except (vc.DeliveryRefused, vc.ForgejoAuthError, TenantRefused) as refused:
-        _say(f"propose refused: {refused}")
-        return 1
-    finally:
-        if batch is not None:
-            batch.discard()
-    print(f"proposed {len(files)} file(s): {delivered.status}"
-          + (f" {delivered.url}" if delivered.url else ""))
-    return 0
-
 
 def check_folder(folder: Path) -> int:
     """`check --folder <path>`: a tenant repo's working folder judged by every rule that needs
@@ -283,17 +101,16 @@ def check_folder(folder: Path) -> int:
     return _report(_findings(folder))
 
 
-def _findings(knowledge: Path, *, systems: Any = None) -> list[str]:
-    """Everything `check` reports about a folder acceptance (or the folder rules) passed: the
+def _findings(knowledge: Path) -> list[str]:
+    """Everything `check --folder` reports about a folder acceptance (or the folder rules) passed: the
     settings files load, the grant table loads, the grant census both ways against the running checkout, and the committed
     `.tenant-id`. A census that cannot be taken costs only the census: its finding says the
     table went unchecked and why, and every other rule still runs."""
     settings = knowledge / SETTINGS_HALF
     findings: list[str] = []
-    from defender.cli._tenant_records_check import census_findings, leftover_findings
+    from defender.cli._tenant_records_check import leftover_findings
     findings += leftover_findings(knowledge)
-    # Here, not at the top: the census reaches the lead-author's whole extraction stack, which
-    # only `check` uses — `update` and `propose` start without paying for it.
+    # Here, not at the top: the census reaches the lead-author's whole extraction stack, which only `check` uses.
     from defender.cli import _tenant_census
 
     table = dispositions_path(settings)
@@ -310,7 +127,7 @@ def _findings(knowledge: Path, *, systems: Any = None) -> list[str]:
     findings += _tenant_findings(knowledge)
     try:
         if census is not None:
-            findings += census_findings(_tenant_census.table_findings(settings, census), systems).lines(table)
+            findings += _tenant_census.table_findings(settings, census).lines(table)
         else:
             _tenant_census.folder_findings(settings)  # the table still loads, or its refusal is the finding
     except DispositionError as unloadable:
@@ -329,44 +146,24 @@ def _tenant_findings(knowledge: Path) -> list[str]:
 
 
 def _feedback_findings(knowledge: Path) -> list[str]:
-    """The feedback setting (#1414 O1): an unreadable file, or one naming an unknown outcome."""
-    from defender.tenancy import feedback_setting
+    """The feedback setting (#1414 O1): `feedback_findings` over the folder's `settings/`."""
+    from defender.cli._tenant_records_check import feedback_findings
 
-    try:
-        feedback_setting.load_feedback_outcomes(knowledge / SETTINGS_HALF)
-    except feedback_setting.FeedbackSettingError as bad:
-        return [str(bad)]
-    return []
+    return feedback_findings(knowledge / SETTINGS_HALF)
 
 
 def _registry_findings(knowledge: Path) -> list[str]:
-    """The tacit-knowledge registry file judged by what `tacit_cli check` fails on (a whole-file
-    refusal or a dropped entry, #1390 O7), whether or not the grant table reaches `lookup`
-    (A10). Date-dependent notes stay advisory, so a tenant's CI does not go red by the calendar."""
-    path = tacit_registry.registry_path(knowledge / AGENT_HALF)
-    return [f"{tacit_registry.SYSTEM} registry: {why}"
-            for why in tacit_registry.read_registry(path).problems]
+    """The tacit-knowledge registry file (`registry_findings` over the folder's `agent/`)."""
+    from defender.cli._tenant_records_check import registry_findings
+
+    return registry_findings(knowledge / AGENT_HALF)
 
 
 def _registry_grant_findings(knowledge: Path) -> list[str]:
-    """The registry file against the grant table, which only this check holds together: `lookup`
-    granted with no file behind it fails. Entries with no `lookup` grant only earn a note, since
-    a tenant may write them before it grants the verb. An unloadable table is reported where the
-    table is judged, so it costs only this comparison."""
-    try:
-        gather = run_grants(knowledge / SETTINGS_HALF).gather
-    except DispositionError:
-        return []
-    granted = any(system == tacit_registry.SYSTEM and verb == "lookup"
-                  for system, verb, _ in gather.entries)
-    read = tacit_registry.read_registry(tacit_registry.registry_path(knowledge / AGENT_HALF))
-    if granted and read.absent:
-        return [f"{tacit_registry.SYSTEM} registry: gather is granted `lookup`, but there is no "
-                "registry file for it to read"]
-    if read.entries and not granted:
-        _say(f"note: {tacit_registry.SYSTEM} registry holds {len(read.entries)} entr(ies), but "
-             "gather is not granted `lookup`, so none of them is consulted yet")
-    return []
+    """The registry file against the grant table (`registry_grant_findings`), its note on stderr."""
+    from defender.cli._tenant_records_check import registry_grant_findings
+
+    return registry_grant_findings(knowledge / AGENT_HALF, knowledge / SETTINGS_HALF, note=_say)
 
 
 def _report(findings: list[str]) -> int:
@@ -435,69 +232,17 @@ def _no_commits_yet(folder: Path, env: dict[str, str], bound: float) -> bool:
 # the command line
 # ==========================================================================================
 
-def main(  # noqa: PLR0913 — the command line plus its in-process stand-ins
-    argv: list[str], *, directory: tenancy.TenantDirectory | None = None, client=None, identity=None,
-    credential_config=None, secrets=None,
-) -> int:
-    """The command line. `directory` is the tenant records a test or a launcher hands in; a
-    production process passes none and reads them from `DEFENDER_DATABASE_DSN`. `client`,
-    `identity` and `credential_config` are in-process stand-ins for the forge client, the
-    tenant's credential and the host's issuer configuration (`update`, `propose`); `secrets` is
-    the operator's OpenBao login (`OpenBaoSecrets`) that `check` uses, else built from `--token-file`.
-
-    `check <id>`, `update` and `propose` work for the tenant through the one host acceptance
-    (r10 A1), held for the whole command: this process recorded under the tenant's host lock,
-    the tenant `active` with its forge wiring, its folder accepted — or `[tenant.py] ...`, exit
-    1, at the first refusal, before any work."""
+def main(argv: list[str], *, directory: object = None) -> int:
+    """The command line: `check --folder <path>`, the only subcommand. `directory` is accepted and ignored: the
+    command reads no tenant records, so callers that still hand one in (a launcher's shape) are not a usage error."""
+    del directory
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="command", required=True)
-    check_p = sub.add_parser("check", help="report the census and repo findings of a tenant")
-    check_p.add_argument("tenant_id", nargs="?")
-    check_p.add_argument("--folder", type=Path, default=None)
-    check_p.add_argument("--token-file", type=Path, default=None,
-                         help="a file holding the operator's OpenBao token: also report systems with no credentials")
-    check_p.add_argument("--kv-mount", default="kv", help="the KV mount credential sets are stored on (default kv)")
-    update_p = sub.add_parser("update", help="publish the tenant's merged main as `current`")
-    update_p.add_argument("tenant_id")
-    propose_p = sub.add_parser(
-        "propose", help="propose a staged agent/-shaped directory as one PR on the tenant forge")
-    propose_p.add_argument("tenant_id")
-    propose_p.add_argument("staged", type=Path)
+    check_p = sub.add_parser("check", help="judge a tenant repo's working folder")
+    check_p.add_argument("--folder", type=Path, required=True)
     ns = p.parse_args(argv)
-    if ns.command == "check":
-        if (ns.tenant_id is None) == (ns.folder is None):
-            check_p.error("give exactly one of <tenant-id> and --folder")
-        if ns.folder is not None:
-            return check_folder(ns.folder)
-    try:
-        admitted = run_tenant.host_tenant(tenancy.resolve_data_root(), ns.tenant_id, directory=directory,
-                                          defender_dir=_DEFENDER_DIR)
-    except TenantRefused as refused:
-        _say(f"propose refused: {refused}" if ns.command == "propose" else refused)
-        return 1
-    with admitted:
-        try:
-            return _admitted_command(admitted, ns, client=client, identity=identity,
-                                     credential_config=credential_config, secrets=secrets)
-        except AdapterFault as fault:  # the secret store's every refusal (a bad mount, OpenBao down or refusing): one line
-            _say(f"{type(fault).__name__}: {fault}")
-            return 1
-
-
-def _admitted_command(admitted: run_tenant.Admitted, ns: argparse.Namespace, *, client: Any, identity: Any,
-                      credential_config: Any, secrets: Any) -> int:
-    """`update`, `propose` or `check <id>` for the admitted tenant."""
-    if ns.command == "update":
-        return update(admitted, client=client, identity=identity, credential_config=credential_config)
-    if ns.command == "propose":
-        return propose(admitted, ns.staged, client=client, identity=identity,
-                       credential_config=credential_config)
-    if secrets is None and ns.token_file is not None:
-        secrets = _tenant_secrets.operator_secrets(ns.token_file, mount=ns.kv_mount)
-        if secrets is None:
-            return 1
-    return check_tenant(admitted, secrets=secrets)
+    return check_folder(ns.folder)
 
 
 if __name__ == "__main__":

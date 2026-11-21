@@ -706,3 +706,51 @@ def test_the_runtime_image_still_bakes_the_build_stamp():
     instructions = _instructions(RUNTIME_DOCKERFILE.read_text(encoding="utf-8"))
     assert "ARG DEFENDER_BUILD_COMMIT=\"\"" in instructions
     assert any(i.startswith("ENV DEFENDER_BUILD_COMMIT=") for i in instructions)
+
+
+# --- #1471 R13-1: the host request pool is sized by its setting at the real start (repair 5, G9) -------------------------
+
+def _host_stages(dsn: str) -> list[str]:
+    return sorted(r[0] for r in execute(dsn, "SELECT stage FROM jobs.host_requests"))
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize(("slots", "running"), [(None, 1), ("2", 2)], ids=["default", "two"])
+def test_1471_the_host_request_slots_setting_sizes_the_pool_a_started_worker_runs(source, data_root, db, slots, running):
+    """Two readiness requests whose helpers wait on their tenants' host locks (held exclusive here): a worker started
+    with `DEFENDER_WORKER_HOST_REQUEST_SLOTS=2` runs both at once; one started without it runs one and leaves the other
+    queued. (R13-1, W-settings; the setting reaches the worker it is started with)"""
+    from defender.tenancy import host_lock
+    from defender.tests.support.jobs._jobs1342 import T2
+
+    register_tenant(db, T2)
+    held = []
+    for tenant in (T1, T2):
+        (data_root / tenant / "runs").mkdir(parents=True)
+        held.append(host_lock.acquire(data_root, tenant, exclusive=True, timeout=0))
+    assert None not in held, "premise: the host locks were taken"
+
+    async def queue() -> None:
+        store = _live_store(db)
+        try:
+            for tenant in (T1, T2):
+                await store.create_readiness(tenant, actor="u-1")
+        finally:
+            await store.close()
+
+    try:
+        asyncio.run(queue())
+        extra = {} if slots is None else {"DEFENDER_WORKER_HOST_REQUEST_SLOTS": slots}
+        env = W.worker_env(data_root, dsn=db, extra=extra)
+        with W.serving(source, env, ready=lambda: "running" in _host_stages(db), what="a host request to run") as proc:
+            if running == 2:
+                W.wait_until(lambda: _host_stages(db) == ["running", "running"], timeout=60,
+                             what="both host requests to run", proc=proc)
+            else:
+                time.sleep(8)  # several poll intervals
+                assert _host_stages(db) == ["queued", "running"], "a second host request ran with one host slot"
+            assert proc.poll() is None
+            assert W.stop(proc) == 0, W.stderr_of(proc)
+    finally:
+        for fd in held:
+            host_lock.release_lock(fd)

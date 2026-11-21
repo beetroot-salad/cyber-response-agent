@@ -93,7 +93,8 @@ def test_the_endpoint_check_judges_only_get_and_head_and_passes_every_other_meth
             confine_read_endpoint("elastic", "http://es:9200/_cat/indices", method=method)
 
     for method, url in [("POST", "http://es:9200/logs-*/_search"), ("POST", "http://es:9200/_query?format=json"),
-                        ("POST", "http://es:9200/logs-*/_update/1"), ("DELETE", "http://es:9200/logs-*/_search"),
+                        ("POST", "http://es:9200/logs-*/_update/1"),  # lint-stale-ref: ok — an Elasticsearch URL path, not the removed function
+                        ("DELETE", "http://es:9200/logs-*/_search"),
                         ("PUT", "http://es:9200/_bulk")]:
         assert confine_read_endpoint("elastic", url, method=method) == url, (method, url)
 
@@ -110,7 +111,7 @@ def test_the_endpoint_check_binds_a_get_on_the_resolved_normalized_path_without_
         confine_read_endpoint("elastic", "http://es:9200/_cluster/health/../../_cat/indices", method="GET")
     with pytest.raises(ConfinementFault):
         confine_read_endpoint("elastic", "http://es:9200/%5Fcluster/../_cat/indices", method="GET")
-    url = "http://es:9200/logs-*/_search/../../_update/1"
+    url = "http://es:9200/logs-*/_search/../../_update/1"  # lint-stale-ref: ok — an Elasticsearch URL path, not the removed function
     assert confine_read_endpoint("elastic", url, method="POST") == url
 
 

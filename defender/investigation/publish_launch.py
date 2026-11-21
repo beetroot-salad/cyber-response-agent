@@ -58,8 +58,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 #: How far inside the launcher's budget the child's own deadline falls (at most a quarter of
 #: it), so the child reports running out itself before the backstop fires.
 _REPORT_MARGIN = 5.0
-#: Who records an outcome only the launcher sees (`tenant.py check` names the trigger).
-_TRIGGER = "launch-time publish"
+#: Who records an outcome only the launcher sees, unless the caller names its own trigger (a readiness check's publish
+#: is recorded `readiness`, #1471): an investigation's launch.
+LAUNCH_TRIGGER = "launch-time publish"
 #: How long a child asked to stop (SIGTERM) may take to unwind before it is killed.
 _STOP_GRACE = 5.0
 #: How often the launcher looks at the child it waits for.
@@ -75,11 +76,11 @@ def _tenant(tenant_id: str, data_root: Path) -> Tenant | None:
         return None
 
 
-def _recorded(directory: TenantDirectory | None, tenant_id: TenantId, line: str) -> str:
-    """`line`, an outcome the child never recorded, recorded for `tenant.py check` by the
-    child's own recorder (`record_report`) in the tenant records, so it reads as the child's
-    would. With no records handed in nothing is recorded."""
-    record_report(directory, tenant_id, line, by=_TRIGGER)
+def _recorded(directory: TenantDirectory | None, tenant_id: TenantId, line: str, *, trigger: str) -> str:
+    """`line`, an outcome the child never recorded, recorded by the child's own recorder
+    (`record_report`) in the tenant records as `trigger`'s, so it reads as the child's would. With
+    no records handed in nothing is recorded."""
+    record_report(directory, tenant_id, line, by=trigger)
     return line
 
 
@@ -108,11 +109,14 @@ def launch_publish(
     command: Sequence[str] | None = None,
     spawn: Spawn | None = None,
     directory: TenantDirectory | None = None,
+    trigger: str = LAUNCH_TRIGGER,
 ) -> str:
     """Run the publish child for `tenant_id` under `data_root` and return its report line (module
     doc). `command` replaces the child's argv prefix (the launcher appends `<tenant id>
-    --data-root <root> --budget <seconds>`); `spawn` is `subprocess.Popen`'s stand-in;
-    `directory` the tenant records the launcher records the outcomes only it sees in.
+    --data-root <root> --budget <seconds> --trigger <trigger>`); `spawn` is `subprocess.Popen`'s
+    stand-in; `directory` the tenant records the launcher records the outcomes only it sees in;
+    `trigger` who asked for the publish, recorded as the outcome's `by` (#1471: `readiness` for a
+    readiness check, else an investigation's launch).
 
     The child's own report, whenever it printed one, is the outcome, however the wait ended
     (the child recorded it). Only a child with no valid report gets the launcher's line, which
@@ -121,10 +125,10 @@ def launch_publish(
     with _sigterm_noted() as asked:
         try:
             return _launch_child(tenant_id, data_root=data_root, budget=budget, command=command,
-                                 spawn=spawn, directory=directory, asked=asked)
+                                 spawn=spawn, directory=directory, asked=asked, trigger=trigger)
         except Exception as failed:  # noqa: BLE001 — U11: whatever fails here is a failed publish child, recorded
             return _recorded(directory, tenant_id, run_knowledge.failed_line(
-                f"the launcher failed: {type(failed).__name__}: {failed}"))
+                f"the launcher failed: {type(failed).__name__}: {failed}"), trigger=trigger)
 
 
 @contextlib.contextmanager
@@ -148,13 +152,13 @@ def _sigterm_noted() -> Iterator[list[int]]:
 
 def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
     tenant_id: TenantId, *, data_root: Path, budget: float, command: Sequence[str] | None,
-    spawn: Spawn | None, directory: TenantDirectory | None, asked: list[int],
+    spawn: Spawn | None, directory: TenantDirectory | None, asked: list[int], trigger: str,
 ) -> str:
     if not budget > 0:
         raise ValueError(f"the launch-time publish budget must be positive, not {budget!r}")
     prefix = list(command) if command is not None else [sys.executable, "-m", CHILD_MODULE]
     argv = [*prefix, str(tenant_id), "--data-root", str(data_root),
-            "--budget", f"{child_budget(budget):g}"]
+            "--budget", f"{child_budget(budget):g}", "--trigger", trigger]
     start = spawn if spawn is not None else subprocess.Popen
     try:
         proc = start(
@@ -163,7 +167,7 @@ def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
     except (OSError, ValueError) as unstarted:
         return _recorded(directory, tenant_id, run_knowledge.failed_line(
             f"it could not be started: {type(unstarted).__name__}: "
-            f"{getattr(unstarted, 'strerror', None) or unstarted}"))
+            f"{getattr(unstarted, 'strerror', None) or unstarted}"), trigger=trigger)
     try:
         out, err, stopped = _wait(proc, budget=budget, asked=asked,
                                   holds_lock=lambda: _holds_lock(proc, tenant_id, data_root))
@@ -178,7 +182,7 @@ def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
     if stopped is not None:
         # Stopped in its network phase with nothing to say (a stopped child prints nothing).
         line = f"{STALE_TRANSIENT} the launch-time publish {stopped}"
-    return _recorded(directory, tenant_id, line)
+    return _recorded(directory, tenant_id, line, trigger=trigger)
 
 
 def _wait(

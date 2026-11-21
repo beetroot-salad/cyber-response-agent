@@ -68,10 +68,11 @@ MERGE_FILES = {LESSON: lesson_text(MERGED_MARK), MARK_FILE: mark_text(MERGED_MAR
 
 @contextlib.contextmanager
 def run_tenant(tmp_path: Path, data_root: Path, *,
-               files: dict[str, Any] | None = None) -> Iterator[Any]:
-    """`published_tenant` with the revision marks above (then `files`) written over the fixture."""
-    with published_tenant(tmp_path / "forge", root=data_root,
-                          files={**SEED_FILES, **(files or {})}) as t:
+               files: dict[str, Any] | None = None, tenant_id: str | None = None) -> Iterator[Any]:
+    """`published_tenant` with the revision marks above (then `files`) written over the fixture; `tenant_id`: another
+    id than the fixture's (#1471: a second scene in one database)."""
+    with published_tenant(tmp_path / "forge", root=data_root, files={**SEED_FILES, **(files or {})},
+                          **({} if tenant_id is None else {"tenant_id": tenant_id})) as t:
         yield t
 
 

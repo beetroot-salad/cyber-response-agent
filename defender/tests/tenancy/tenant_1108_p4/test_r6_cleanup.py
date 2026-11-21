@@ -11,12 +11,10 @@ import time
 import uuid
 from pathlib import Path
 
-import httpx
 import pytest
 
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.tenancy.tenant_1108_p4._drain_support import draft_entries
-from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, export_dir
+from defender.tests.tenancy.tenant_1108_p4._support import export_dir
 
 WORKTREE = Path(__file__).resolve().parents[4]
 
@@ -70,30 +68,6 @@ def test_r6_an_export_build_that_fails_leaves_no_staging_folder(tmp_path, data_r
 
 
 # --- propose always discards its draft ---------------------------------------------------------
-
-def _staged(tmp_path) -> Path:
-    staged = tmp_path / "staged" / "lessons"
-    staged.mkdir(parents=True)
-    (staged / "r6-proposed.md").write_text("---\nname: r6\n---\nbody\n", encoding="utf-8")
-    return staged.parent
-
-
-@pytest.mark.parametrize("outcome", ["proposed", "refused"])
-def test_r6_propose_discards_its_draft_whether_it_succeeds_or_is_refused(p4_tenant, tmp_path,
-                                                                        capsys, outcome):
-    from defender.cli import tenant as cli
-
-    t = p4_tenant
-    bind_forge(t)
-    if outcome == "refused":
-        t.forge.fault = lambda request: (
-            httpx.ConnectError("the forge is down", request=request)
-            if request.method == "POST" and request.url.path.endswith("/pulls") else None)
-    with t.admitted() as admitted:
-        rc = cli.propose(admitted, _staged(tmp_path), client=t.forge.client, identity=t.vault.identity())
-    assert rc == (0 if outcome == "proposed" else 1), capsys.readouterr()
-    assert draft_entries(t) == [], "propose left its draft behind"
-
 
 # --- liveness and pinning ----------------------------------------------------------------------
 

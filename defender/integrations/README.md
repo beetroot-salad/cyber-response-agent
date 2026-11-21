@@ -6,8 +6,11 @@ the shim, never the script directly — see `../../bin/README.md` for the
 shim contract and `../../docs/system-skill-shape.md` for the per-system
 knowledge an adapter is paired with.
 
-(Every file here is an adapter `*_adapter.py`, its reference `*_adapter.md` (what its credential needs and the
-configuration mistakes no check refuses, #1504), or `confinement.py`, Elastic's own
+(An adapter that ships base files for the tenant's `agent/` (#1471 P-8) names their folder in its `BASE_FILES` constant,
+read cold by the catalog; the folders live under `base-files/{adapter}/`, laid out as `agent/` with a literal `{system}`
+path segment, and `system_rules/base_files.py` renders them. Every other file here is an adapter `*_adapter.py`, its
+reference `*_adapter.md` (what its credential needs and the configuration mistakes no check refuses, #1504), or
+`confinement.py`, Elastic's own
 endpoint and index confinement; the shared transport they import is `kit/transport.py`. The gather pipe-tools, run-dir tooling, and analytics that used
 to share this dir now live under `investigation/`, `presentation/`,
 and the repo-root `scripts/` tree.)

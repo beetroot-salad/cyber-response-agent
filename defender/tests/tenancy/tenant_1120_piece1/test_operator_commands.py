@@ -158,7 +158,8 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     table = H.settings_dir(data_root) / "verb-grants.yaml"
     table.write_text(UNPARSEABLE_TABLE, encoding="utf-8")
 
-    H.assert_refused(H.check(tenant_py, data_root, H.TID), "verb-grants.yaml")
+    # #1471 B3: over `--folder`, `check <id>` retired (stale, updated)
+    H.assert_refused(H.check(tenant_py, None, "--folder", str(H.knowledge_dir(data_root))), "verb-grants.yaml")
 
     rec = H.RunRecorder(tmp_path / "run")
     rc, exc = H.drive_run(run_py, [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID],

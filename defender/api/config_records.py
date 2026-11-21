@@ -27,6 +27,7 @@ from defender.records.formats import TenantId
 from defender.system_records import NoCurrentRecord, RecordRefused, RecordStore, Stale
 from defender.system_rules import Catalog
 from defender.tenancy import TenantRepository
+from defender.tenancy.record_refusals import NoSuchTenant, TenantNotActive
 from defender.tenancy.record_values import SystemRecord
 
 from .models import CaseRecord, CaseRecordPut, CatalogAdapter, CatalogRead, SavedSystem, System, SystemPut
@@ -106,6 +107,20 @@ class ConfigRecords:
 
     async def served(self, tenant_id: TenantId, record: SystemRecord) -> System:
         return self._system(record, has=await has_credentials(self._secrets, tenant_id, record))
+
+    async def without_credentials(self, tenant_id: TenantId) -> list[str] | None:
+        """Every current system, disabled included, with no set at its generation, sorted (#1471 D10). The tenant's state is
+        asked first: a tenant that is not active has no known records, so the secret store is never reached (R13-2)."""
+        try:
+            current = (await self._tenants.current_records(tenant_id)).systems
+        except (NoSuchTenant, TenantNotActive):
+            return None
+        held = await asyncio.gather(*(has_credentials(self._secrets, tenant_id, current[s]) for s in sorted(current)))
+        return [s for s, has in zip(sorted(current), held, strict=True) if not has]
+
+    async def ships_base_files(self, system_id: str) -> bool:
+        """A system's adapter is its id (P4); an id the catalog lacks ships none."""
+        return system_id in self._catalog and self._catalog.entry(system_id).base_files is not None
 
     def _system(self, record: SystemRecord, *, has: bool) -> System:
         return System(**self._saved(record).model_dump(), has_credentials=has)

@@ -631,11 +631,10 @@ def test_1366_o5_a_write_naming_a_version_no_longer_current_is_refused_naming_th
 
 
 @pytest.mark.postgres
-def test_1366_o5_a_delete_is_a_version_and_check_then_reports_the_grants_on_it_as_orphaned(imported_op):
-    """Deleting cmdb adds version 2 marked deleted; cmdb is no longer a current system and `check` reports its grant
-    rows as orphaned, which it did not before. (#1366 O5, O1)"""
-    _, before = imported_op.check()
-    assert not R.lines_naming(before, "cmdb", "orphan"), before
+def test_1366_o5_a_delete_is_a_version_and_the_system_is_no_longer_current(imported_op):
+    """Deleting cmdb adds version 2 marked deleted; cmdb is no longer a current system. (#1366 O5, O1; #1471 B3: the
+    `check <id>` report of its grants as orphaned retired with `check <id>`, stale, updated)"""
+    assert "cmdb" in imported_op.current(), "premise: cmdb is current before the delete"
 
     rc, said = imported_op.delete_system("cmdb", replaces=1)
 
@@ -643,8 +642,6 @@ def test_1366_o5_a_delete_is_a_version_and_check_then_reports_the_grants_on_it_a
     assert [(v.version, v.deleted, v.author) for v in imported_op.versions("cmdb")] == [
         (1, False, R.SEED_AUTHOR), (2, True, R.ADMIN_AUTHOR)]
     assert "cmdb" not in imported_op.current()
-    _, after = imported_op.check()
-    assert R.lines_naming(after, "cmdb", "orphan"), after
 
 
 @pytest.mark.postgres
@@ -849,7 +846,8 @@ def test_1366_p5_a_delete_carries_the_generation_and_a_re_create_takes_the_next_
     assert op.numbers("identity") == [(1, 1, False), (2, 2, False), (3, 3, False), (4, 3, True), (5, 4, False),
                                       (6, 4, True), (7, 5, False)]
     assert op.kv.written() == [f"{op.tid}/identity/g1"]
-    assert R.lines_naming(op.check()[1], "identity", "no credentials")
+    # #1471 B3: `check <id>`'s "no credentials at the current generation" line retired with it (stale, updated); the
+    # credentials stay at g1 while identity is at g5, which the line above and `numbers` pin.
 
 
 @pytest.mark.postgres

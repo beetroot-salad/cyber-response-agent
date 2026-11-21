@@ -708,14 +708,6 @@ class Admin:
                                                             generation=slot.generation)
         return self._run(work)
 
-    def check(self) -> tuple[int, str]:
-        from defender.cli import tenant
-
-        self.capsys.readouterr()
-        rc = tenant.main(["check", self.tid], secrets=operator_secrets(self.kv))
-        said = self.capsys.readouterr()
-        return rc, said.out + said.err
-
     def current(self) -> dict[str, Any]:
         return dict(current_records(self.dsn, self.tid).systems)
 

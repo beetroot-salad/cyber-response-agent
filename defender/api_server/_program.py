@@ -213,7 +213,7 @@ def api_deps(*, identity: IdentityService, tenants: TenantRepository, ports: Job
         identity=identity, tenants=tenants, frontend_origin=frontend_origin,
         alerts=ports, investigations=ports, learning_jobs=ports, alert_mapping=ports, writes=ports,
         learning_work=learning_work if learning_work is not None else Refusing(_LEARNING_WORK),
-        offboarding=ports, lessons=Refusing(_LESSONS), systems=systems, secrets=secrets,
+        offboarding=ports, host_requests=ports, lessons=Refusing(_LESSONS), systems=systems, secrets=secrets,
         checker=Refusing(_CHECK), artifact_links=Refusing(_BLOB_STORE), audit=Refusing(_BLOB_STORE))
 
 

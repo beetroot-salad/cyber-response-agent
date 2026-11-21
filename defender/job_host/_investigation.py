@@ -21,12 +21,12 @@ import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from defender.credential_proxy import PASS_LIFETIME_SEC
 from defender.job_socket import Refused
 
-from ._common import answer_pass, grant, mirror_run_page, read_passes, set_up_signing, settle_knowledge, start_run_box
+from ._common import LaunchFacts, answer_pass, mirror_run_page, start_run_box, tenant_launch_steps
 from ._session import DOCKER_DID_NOT_RUN, KindSpec, Prepared, Registry, Session, SetupRefused, Signing, setup_step
 
 _logger = logging.getLogger(__name__)
@@ -103,12 +103,10 @@ def _materialize(session: Session, accepted: Any, run: Any, launch: Any, mapping
     return made
 
 
-def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: C901, PLR0915 — the host half, in order
+def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:
     from defender import run_common
+    from defender.investigation.publish_launch import LAUNCH_TRIGGER
     from defender.records import job_lane
-    from defender.records.formats import TenantRefused
-    from defender.systems.catalog import Catalog
-    from defender.systems.run_tenant import host_tenant
 
     inv = str(session.job_id)
     data_root = session.root
@@ -116,47 +114,24 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
         raise SetupRefused("the worker handed this helper no --alert-digest: the alert is checked against it alone")
     if session.post_ticket and not session.ticket_link:
         raise SetupRefused("a flagged job needs the worker's --ticket-link")
-    try:
-        admitted = host_tenant(data_root, session.tenant_id, defender_dir=session.defender_dir, clone_tree=False)
-    except TenantRefused as refused:
-        raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
-    hold.enter_context(admitted)
-    accepted, records = admitted.tenant, admitted.directory
-    session.tenant_accepted(accepted)
-    try:
-        with job_lane.JobLane.open(data_root, session.tenant_id) as lane:
-            launch = lane.check_launch(inv)
-    except job_lane.JobLaneRefused as refused:
-        raise SetupRefused(f"the launch check refused the job: {refused}") from None
-    # The tenant's current records, read once here (#1366 O6): a tenant whose records are not known (#1470 O8) is
-    # refused before its alert mapping is read. The container reads no database; it is handed these in the launch facts.
-    current = setup_step(run_common.read_records, records, accepted.id)
-    mapping = setup_step(run_common.read_alert_mapping, records, accepted.id)
-    source = settle_knowledge(session, accepted, records)
-    try:
-        run = accepted.runs_repository().launched(launch)
-    except TenantRefused as refused:
-        raise SetupRefused(str(refused)) from None
-    cleanup = contextlib.ExitStack()
-    try:
-        copy = setup_step(run_common.copy_knowledge, accepted, source, inv)
-        cleanup.callback(copy.remove)
-        # The catalog's roster, read once and cold (no adapter code runs here, N7): the records' reads are judged
-        # against its adapters' lists (#1504 O3), then the tenant's systems are narrowed to it.
-        roster = setup_step(run_common.run_roster, session.defender_dir)
+
+    def check_launch() -> Any:
         try:
-            run_tenant = setup_step(run_common.run_tenant_or_exit, accepted, dispatches_lead_zero=True,
-                                    records=current, copy=copy, catalog=Catalog(roster))
-        except TenantRefused as refused:
-            raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
-        # Its grants narrowed to the systems it has enabled records of (#1366 R12), so the pass names none it has not;
-        # the container warns.
-        verdict = setup_step(run_common.tenant_verdict, run_tenant, roster, warn=False)
-        reads = grant(verdict.tenant)
-        signing = set_up_signing(session, accepted, records)  # every investigation, whatever its grant (W-D8)
-        passes = read_passes(session, signing, reads)
+            with job_lane.JobLane.open(data_root, session.tenant_id) as lane:
+                return lane.check_launch(inv)
+        except job_lane.JobLaneRefused as refused:
+            raise SetupRefused(f"the launch check refused the job: {refused}") from None
+
+    # The tenant-level steps, the readiness check's too (#1471 P-1), with the launch check after the admission; then
+    # the investigation's own: the run folder and the records beside it.
+    facts = tenant_launch_steps(session, hold, copy_id=inv, facts=LaunchFacts(), trigger=LAUNCH_TRIGGER,
+                                launch=check_launch)
+    accepted, launch, source, copy, current = facts.accepted, facts.launched, facts.source, facts.copy, facts.current
+    cleanup, passes, reads = facts.cleanup, facts.passes, facts.reads
+    try:
         record_texts: list[str] = []
-        made = _materialize(session, accepted, run, launch, mapping, source, digest=session.alert_digest, admitted=record_texts)
+        made = _materialize(session, accepted, facts.run, launch, facts.mapping, source, digest=session.alert_digest,
+                            admitted=record_texts)
         setup_step(run_common.write_versions_record, Path(made.run_dir), current)
     except BaseException:
         cleanup.close()
@@ -164,7 +139,7 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
     session.minted.add(inv)
     command = session.command or [
         "python3", str(session.defender_dir / "run.py"), "--job", inv, "--tenant", session.tenant_id]
-    facts = {
+    launch_facts = {
         "kind": KIND, "tenant": session.tenant_id, "job": inv, "tenant_state": "active",
         "export_commit": source.commit, "knowledge": source.host_record(), "run_dir": str(made.run_dir),
         "run_copy": str(copy.root), "proxy_url": passes.proxy_url if passes is not None else None,
@@ -177,9 +152,10 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:  # noqa: 
         # its ticket, and the link it posts. The container asks for a write pass only when flagged.
         "post_ticket": session.post_ticket, "ticket_link": session.ticket_link,
     }
-    write = _WritePass(system=_case_write_system(current, run_tenant), ticket=_alert_ticket(record_texts[0] if record_texts else None)) \
+    write = _WritePass(system=_case_write_system(current, facts.run_tenant), ticket=_alert_ticket(record_texts[0] if record_texts else None)) \
         if session.post_ticket else None
-    return Prepared(launch=facts, command=list(command), passes=passes, cleanup=cleanup,
+    signing = cast(Signing, facts.signing)  # set by every launch not refused: signing is set up for each (W-D8)
+    return Prepared(launch=launch_facts, command=list(command), passes=passes, cleanup=cleanup,
                     state=_State(made, copy, accepted, launch.record.box_token, signing, write), exited=_exited)
 
 

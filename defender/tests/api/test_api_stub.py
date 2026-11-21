@@ -193,7 +193,19 @@ PROGRAM_ROUTES = {
     ("DELETE", API + "/tenants/{tenant_id}/programs/{program_id}/credentials/{credential_id}"),
 }
 IDENTITY_ROUTES = IDENTITY_ROUTES | PROGRAM_ROUTES  # same refusal contract as the members/invitations routes
-PUBLIC_ROUTES = EXISTING_ROUTES | IDENTITY_ROUTES
+#: What #1471 adds (surface §1): readiness and adoption, under the tenant and the admin routes. Their behaviour is
+#: `test_1471_host_requests_api`, over the real store, so they are listed here and not scripted (repair 5).
+HOST_REQUEST_ROUTES = {
+    ("POST", API + "/tenants/{tenant_id}/readiness"),
+    ("GET", API + "/tenants/{tenant_id}/readiness/{readiness_id}"),
+    ("POST", API + "/tenants/{tenant_id}/systems/{system_id}/adoptions"),
+    ("GET", API + "/tenants/{tenant_id}/adoptions/{adoption_id}"),
+    ("POST", API + "/admin/tenants/{tenant_id}/readiness"),
+    ("GET", API + "/admin/tenants/{tenant_id}/readiness/{readiness_id}"),
+    ("POST", API + "/admin/tenants/{tenant_id}/systems/{system_id}/adoptions"),
+    ("GET", API + "/admin/tenants/{tenant_id}/adoptions/{adoption_id}"),
+}
+PUBLIC_ROUTES = EXISTING_ROUTES | IDENTITY_ROUTES | HOST_REQUEST_ROUTES
 
 #: One successful call per route: (route, concrete path, body, the port answers it needs).
 HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] = [
@@ -325,6 +337,7 @@ def _deps(ports: Any) -> tuple[ApiDeps, dict[str, str]]:
         alerts=ports, investigations=ports, learning_jobs=ports, learning_work=ports, lessons=ports,
         systems=ports, writes=ports, secrets=ports, checker=ports, artifact_links=ports, offboarding=ports,
         alert_mapping=ports, audit=ports,  # FC-11 and the audit-only port (Am-5: every construction site)
+        **({"host_requests": ports} if "host_requests" in {f.name for f in dataclasses.fields(ApiDeps)} else {}),  # #1471
     ), users
 
 

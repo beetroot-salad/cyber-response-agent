@@ -15,7 +15,7 @@ cd defender && uv venv .venv && uv pip install --python .venv/bin/python -e '.[d
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout   # every run names its tenant; there is no default (#1078)
 export DEFENDER_DATABASE_DSN=<the tenant database>   # host processes read the tenant records from it (see below)
 export TENANT_ID=<the id POST /api/admin/tenants answered>   # an `active` tenant: see "Creating a tenant"
-python3 defender/cli/tenant.py check "$TENANT_ID"    # admitted and its folder accepted; every finding reported
+# readiness of the tenant: POST /api/tenants/$TENANT_ID/readiness (a tenant admin), then poll the GET it names; every finding reported
 python3 defender/run.py <alert.json> --tenant "$TENANT_ID"   # one investigation → run dir under $DEFENDER_DATA_ROOT/$TENANT_ID/runs/; --no-learn skips curation enqueue
 python3 defender/cli/learning/branch.py --tenant "$TENANT_ID" <run_id> <branch_message_id>   # fork a finished run (by id, under the tenant's runs) into a family of worlds and grade it
 python3 defender/learning/loop.py --tenant "$TENANT_ID" --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
@@ -34,7 +34,7 @@ publish. Then the tenant is `active`. Nothing is cloned or set up by hand, and t
 
 An `active` tenant has no alert mapping, and its investigations and runs are refused until a tenant admin saves one with
 `PUT /api/tenants/<id>/alert-mapping`. Its systems and case record are written the same way (`PUT /api/tenants/<id>/systems/{id}`,
-`PUT /api/tenants/<id>/systems/{id}/credentials`, `PUT /api/tenants/<id>/case-record`; #1470). `tenant.py check` reports a missing mapping as a finding.
+`PUT /api/tenants/<id>/systems/{id}/credentials`, `PUT /api/tenants/<id>/case-record`; #1470). The readiness check reports a missing mapping as a finding.
 
 - `GET /api/admin/tenants/<id>` shows the state, the pending action, the step and the actor, and the
   failure of a failed step; `POST /api/admin/tenants/<id>/resume` retries it.
@@ -46,7 +46,8 @@ An `active` tenant has no alert mapping, and its investigations and runs are ref
   (the forge admin token and OpenBao management login are read from files, never the environment).
   OpenBao's address is `https`; the config refuses cleartext.
 - The tenant's knowledge repository lives on the forge. Edit it through its pull requests; humans
-  merge, and `python3 defender/cli/tenant.py update <id>` publishes the merged `main`.
+  merge, and the next launch-time publish (a run or a drain start) publishes the merged `main`; the readiness
+  check reports whether `current` trails it and the last publish refusal.
 
 The drains, standalone author commands, frontend, trace and revert commands require
 `--tenant <T>`. Run-associated writers derive the tenant from the accepted run or episode.
@@ -180,7 +181,7 @@ enough to list, read and cancel):
 ## Tenant version control credentials (PR #1253)
 
 Since #1108 P4 every corpus write goes through `defender.learning.author.version_control.TenantDelivery`:
-the drains, `tenant.py update`/`propose` and the launch-time publish child mint the tenant's token
+the drains and the launch-time publish child mint the tenant's token
 themselves (`forge_credential`, #1214): the AppRole of the tenant's live credential generation in
 the tenant records, its secret from the host secret file that generation records, and the
 deployment's issuer (the fixed service names above). The run process never imports it:
@@ -332,8 +333,8 @@ the old code. Upgrade every checkout using the data root together. With all writ
    into it by hand as a pull request, keeping `agent/.tenant-id` as the lifecycle wrote it (the
    new UUID followed by one newline). Review and update any external credentials or identity
    claims bound to the old tenant ID.
-3. Run `python3 defender/cli/tenant.py update <new-uuid>` once the pull request is merged, then
-   `python3 defender/cli/tenant.py check <new-uuid>`. The new tenant never imports the archived
+3. Once the pull request is merged, the next launch-time publish publishes it; then request the new tenant's
+   readiness check (`POST /api/tenants/<new-uuid>/readiness`). The new tenant never imports the archived
    runtime state. Use the UUID in every CLI, API token and integration configuration thereafter.
 
 This is an explicit identity migration. The archive retains the old identity and bytes;

@@ -184,7 +184,7 @@ def test_1504_o3_a_get_only_adapter_refuses_any_non_get_read():
 
 
 def test_1504_o3_the_stores_judgement_of_a_tenants_records_refuses_the_mismatch_and_accepts_the_exact_one():
-    """`judge_records` over a tenant's records (the save and `tenant check` entry): threat-intel with `DELETE /*`
+    """`judge_records` over a tenant's records (the save entry): threat-intel with `DELETE /*`
     listed is refused naming it; with only its lookup the same records are accepted. (O3, C2)"""
     from defender.tenancy.models import SystemRecord, TenantRecords
 

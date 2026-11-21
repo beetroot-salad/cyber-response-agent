@@ -47,10 +47,11 @@ A catalog system record's non-GET reads must now be exactly the routes its adapt
 module; `GET /adapters` carries them as `reads`, null beside a `reads_unusable` reason for an adapter with no usable
 list, and the adapter's reference as `reference`): Elastic's `POST /*/_search` <!-- lint-shippable: ok — the vendor-specific product integration. -->
 and `POST /_query`, threat-intel's `POST /lookup`, none for the others. A record with a missing route, an extra one
-(`DELETE /*` listed as a read, or a search narrowed to `POST /logs-*/_search`) is refused by `PUT /systems/<id>` and
-`tenant check`, and at run start the system is down with that reason (no read pass names it, so a case system among them
-cannot take the comment). Stop the API and the workers and start the new code together, run `tenant check` for each
-tenant, and re-save each system it names with `PUT /systems/<id>` and the reads `GET /adapters` shows. Until then those
+(`DELETE /*` listed as a read, or a search narrowed to `POST /logs-*/_search`) is refused by `PUT /systems/<id>`, and
+at run start the system is down with that reason (no read pass names it, so a case system among them cannot take the
+comment), which the readiness check reports. Stop the API and the workers and start the new code together, request the
+readiness check (`POST /api/tenants/<tenant-id>/readiness`, then its GET) for each tenant, and re-save each system it
+reports down for its reads with `PUT /systems/<id>` and the reads `GET /adapters` shows. Until then those
 systems are down, and a tenant whose only query system is one of them has its runs refused. Elastic's in-process <!-- lint-shippable: ok — the vendor-specific product integration. -->
 endpoint check now judges only GET and HEAD; the proxy alone refuses any other undeclared route.
 
@@ -156,13 +157,26 @@ the adapter spells it (the same method and segments, `*` only where the route ha
 must hold exactly one `*`, where the ticket goes, so an adapter whose comment route has none or several cannot be a
 case system (the credential proxy writes under no other shape). A wider
 write that used to cover the route (a `*` in place of a literal), a second write route, or any non-GET read is refused:
-by `PUT /systems/<id>` and `tenant check`, and at run start, where a flagged investigation then ends with an `error`
-receipt and no comment (the request is still accepted). After upgrading, run `tenant check` for each tenant with a case
+by `PUT /systems/<id>` and the readiness check, and at run start, where a flagged investigation then ends with an `error`
+receipt and no comment (the request is still accepted). After upgrading, request the readiness check (`POST /api/tenants/<tenant-id>/readiness`) for each tenant with a case
 record and re-save any case system it names with `PUT /systems/<id>`.
 
 The credential proxy now forwards only an allowed list of an adapter's request headers (`Content-Type`, `Accept`,
 `User-Agent`, `Idempotency-Key`, in any case) and drops every other one, the request still going; a credential header
 is still refused. A tenant adapter that relied on another header reaching its system loses it.
+
+Removed (#1471): `tenant.py check <tenant-id>`, `tenant.py update` and `tenant.py propose` (`tenant.py check --folder
+<path>` stays; `check <id>` is now a usage error, exit 2). Use the requests instead: the readiness check
+(`POST /api/tenants/<tenant-id>/readiness`, then its GET) judges a tenant's repo and stored records; the adoption request
+(`POST /api/tenants/<tenant-id>/systems/<system-id>/adoptions`) carries a carried adapter's base files to the tenant's
+repo as a pull request, and any other connect output is left in the handoff folder for a person to commit. A merged
+`main` is published by the next launch-time publish (a run or a drain start). `cli/learning/revert_lesson.py` stays.
+
+A tenant's `<data root>/<T>/runs` is now made by the lifecycle's `prepare` step, and the job lane no longer makes it (a
+missing one fails the worker's claim `worker_error`). Once, with `DEFENDER_DATABASE_DSN` and `DEFENDER_DATA_ROOT` set, make
+it for the tenants created before: `python -m defender.lifecycle make-runs-folders`. It covers each `active` tenant, is
+idempotent, and prints the ids it made. A tenant whose `<T>` folder is missing or whose `runs` is a link is refused: the
+sweep finishes the others, then exits non-zero naming every refused tenant. Fix those and run it again.
 
 ## Upgrade from before #1083
 

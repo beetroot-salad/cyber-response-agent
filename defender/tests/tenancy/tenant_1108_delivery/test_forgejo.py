@@ -63,12 +63,13 @@ def test_open_pr_listing_traverses_pages_and_filters_head_prefix():
 
 def test_create_sends_all_pr_fields_to_origin_repository():
     http = ForgeHTTP()
-    url = forge(http).open_pr(base="main", head="lessons/a", title="tenant change", body="agent/lessons/a.md")
+    opened = forge(http).open_pr(base="main", head="lessons/a", title="tenant change", body="agent/lessons/a.md")
     [request] = [r for r in http.requests if r.method == "POST"]
     assert request.url == "http://forge.invalid:3000/api/v1/repos/tenants/blue/pulls"
     assert json.loads(request.content) == {"base": "main", "head": "lessons/a",
                                           "title": "tenant change", "body": "agent/lessons/a.md"}
-    assert url.endswith("/tenants/blue/pulls/7")
+    assert opened.url.endswith("/tenants/blue/pulls/7")  # #1471: open_pr answers the number too (conflict update)
+    assert opened.number == 7
     _all_ours(http)
 
 

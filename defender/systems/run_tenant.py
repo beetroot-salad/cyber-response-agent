@@ -308,7 +308,7 @@ def warn_ignored(verdict: TenantVerdict) -> None:
     for system, why in verdict.ignored.items():
         _logger.warning(
             f"{verdict.tenant.grants.path}: the grants on system {system} are ignored for this run: {why} "
-            "(`tenant check` reports it)")
+            "(the readiness check reports it)")
 
 
 def _narrowed(grants: RunGrants, ignored: frozenset[str]) -> RunGrants:

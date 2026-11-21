@@ -25,7 +25,6 @@ from defender.tests.tenancy.lifecycle_1214._support import REPO_ROOT, LifecycleW
 from defender.tests.tenancy.lifecycle_1214.test_host_entry import (  # noqa: E402
     TENANT,
     _command,
-    _connect,
     _drain_start,
     _launcher,
     _run_start,
@@ -59,13 +58,14 @@ def inside_the_checkout():
         shutil.rmtree(root, ignore_errors=True)
 
 
-@pytest.mark.parametrize("entry", ["run start", "drain start", "connect command"])
+# #1471 B3 (stale, updated): the connect command keeps only `check --folder`, which takes no data root; its param here
+# passed on the usage error alone.
+@pytest.mark.parametrize("entry", ["run start", "drain start"])
 def test_each_host_entry_point_refuses_a_data_root_inside_the_checkout_and_creates_nothing(entry, inside_the_checkout, tmp_path,
                                                                                          monkeypatch):
-    """Run start, drain start and the connect command refuse a data root under `defender/` and leave it uncreated (FR3-13)."""
+    """Run start and drain start refuse a data root under `defender/` and leave it uncreated (FR3-13)."""
     monkeypatch.setenv(DATA_ROOT_ENV, str(inside_the_checkout))
-    text = {"run start": lambda: _run_start(TENANT, tmp_path), "drain start": lambda: _drain_start(TENANT),
-            "connect command": lambda: _connect(["check", TENANT])}[entry]()
+    text = {"run start": lambda: _run_start(TENANT, tmp_path), "drain start": lambda: _drain_start(TENANT)}[entry]()
     assert text.strip() and "Traceback" not in text, "control: the entry point refused in words"
     assert not inside_the_checkout.exists(), f"{entry} created {inside_the_checkout}: {_files_below(inside_the_checkout)}"
 

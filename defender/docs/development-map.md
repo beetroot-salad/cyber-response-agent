@@ -103,7 +103,7 @@ Runtime verification includes unit tests, hermetic e2e replay, and real-alert ev
 | To change... | Edit... |
 |---|---|
 | Runtime loop shape, phase discipline, gather dispatch ergonomics | `defender/SKILL.md` |
-| Per-system reference (what data a system holds, sample queries) | the tenant repo's `agent/skills/{system}/SKILL.md`, through `tenant.py propose` (#1108 P4) |
+| Per-system reference (what data a system holds, sample queries) | the tenant repo's `agent/skills/{system}/SKILL.md`, ; a carried adapter that ships base files reaches it through the adoption request (`POST /api/tenants/{tenant_id}/systems/{system_id}/adoptions`, #1471), any other leaves its files in connect's handoff folder |
 | Gather subagent behavior, raw payload contract, query-template format | `defender/skills/gather/` (`query-schema.md` is the format; the templates are the tenant's `agent/skills/gather/queries/`) |
 | How the two tables are read/joined | `defender/learning/lead_repository.py` |
 | Questioner prompts + driver | `defender/learning/branch/questioner/` (`role.md`, `family.md`, `world.md` + `__init__.py`) |

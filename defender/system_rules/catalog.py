@@ -1,6 +1,6 @@
 """The catalog of adapters (#1366 DC7): every `*_adapter.py` under the checkout's `integrations/`, with the declarations
 each makes as module constants (`DISPLAY_NAME`, `EXAMPLE`, `PREFIX`, `REQUIRED_CONFIG_KEYS`, `PATH_KEYS`,
-`SAMPLE_SETTINGS`, read cold, K2) and its `comment_route` (read by loading the module, C1). The surfaces with no tenant
+`SAMPLE_SETTINGS`, `BASE_FILES`, read cold, K2) and its `comment_route` (read by loading the module, C1). The surfaces with no tenant
 read it: the product CI census lint, the invlang ceiling gate, connect, `check --folder`, the API's catalog read and the
 record judgement. A tenant's systems (`systems.catalog.TenantSystems`) are drawn from it.
 
@@ -27,7 +27,7 @@ from defender.system_rules.registry import RosterRead, fresh_adapter_module, rea
 READS = "READ_ROUTES"
 #: The module constants every catalog adapter declares, read cold (K2).
 DECLARATIONS = ("PREFIX", "REQUIRED_CONFIG_KEYS", "PATH_KEYS", "DISPLAY_NAME", "EXAMPLE", "SAMPLE_SETTINGS",
-                READS)
+                READS, "BASE_FILES")
 #: The adapter function that declares the comment route (C1).
 COMMENT_ROUTE = "comment_route"
 #: The shared keys template an adapter's keys may splat (`*transport.REQUIRED_CONFIG_KEYS_TEMPLATE`).
@@ -38,7 +38,9 @@ _TEMPLATE_NAME = "REQUIRED_CONFIG_KEYS_TEMPLATE"
 class CatalogEntry:
     """One catalog adapter as its module declares it, read without running it. A declaration the module lacks, or does
     not spell as a literal, is None (`PATH_KEYS` defaults to none); `unparsed` is the roster's reason when its source
-    could not be read. `sample_settings` is its `SAMPLE_SETTINGS` (stored key -> an example value, #1470 D11)."""
+    could not be read. `sample_settings` is its `SAMPLE_SETTINGS` (stored key -> an example value, #1470 D11).
+    `base_files` is the folder of its `BASE_FILES` (a literal path relative to `integrations/`, #1471 P-8), None when it
+    declares none, or one that is not a path below `integrations/`; `system_rules.base_files` renders it."""
 
     adapter_id: str
     path: Path
@@ -61,6 +63,7 @@ class CatalogEntry:
     #: catalog, built whole at start, serves it without a file read; None when no such file can be read (the catalog
     #: lint holds one present).
     reference: str | None = None
+    base_files: Path | None = None
 
     @property
     def stored_keys(self) -> tuple[str, ...]:
@@ -130,6 +133,7 @@ class Catalog:
                 prefix=_nonblank(values.get("PREFIX")), required_keys=_keys(values.get("REQUIRED_CONFIG_KEYS")),
                 path_keys=_keys(values.get("PATH_KEYS")) or (), tools=self._roster.declared_verbs(adapter_id),
                 unparsed=unparsed, sample_settings=_text_map(values.get("SAMPLE_SETTINGS")),
+                base_files=_folder_below(path.parent, values.get("BASE_FILES")),
                 reads=reads, reads_unusable=reads_unusable, reference=_reference_text(path.with_suffix(".md")))
             self._entries[adapter_id] = made
             return made
@@ -256,6 +260,15 @@ def _tuple_literal(node: ast.Tuple | ast.List, assigned: Mapping[str, ast.expr],
 
 def _nonblank(value: object) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
+
+
+def _folder_below(integrations: Path, value: object) -> Path | None:
+    """`value`, a relative path literal, as a folder below `integrations`; None for anything else (absent, not text,
+    absolute, or climbing out)."""
+    text = _nonblank(value)
+    if text is None or Path(text).is_absolute() or ".." in Path(text).parts:
+        return None
+    return integrations / text
 
 
 def _keys(value: object) -> tuple[str, ...] | None:

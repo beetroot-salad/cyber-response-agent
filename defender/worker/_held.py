@@ -9,6 +9,8 @@ from typing import Any
 #: What a held entry runs: an investigation, a learning job's family step, or the post-step that
 #: follows one (#1344). A post-step holds no row: it has no lease to renew and nothing to fence.
 INVESTIGATION, LEARNING, POST_STEP = "investigation", "learning", "post_step"
+#: A host request (#1471): a readiness check or an adoption, claimed from its own pool (`host_request_slots`).
+HOST_REQUEST = "host_request"
 
 
 @dataclass
@@ -93,3 +95,14 @@ class LearningOutcome:
     message: str | None = None
     progress: Any = None
     findings: Any = None
+
+
+@dataclass(frozen=True)
+class HostEnding:
+    """What a host request's holder writes last (#1471): `completed` with the kind's validated `result`, or `failed`
+    with a fixed `failure_reason` and the worker's own words. Never a hand-back: a host request is never retried (B2)."""
+
+    stage: str
+    result: dict[str, Any] | None = None
+    failure_reason: str | None = None
+    failure_message: str | None = None
