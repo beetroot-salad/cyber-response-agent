@@ -173,11 +173,19 @@ def _parser_takes(route: tuple[str, str], where: str) -> bool:
     return True
 
 
+def _oracle(method: str, path: str) -> bool:
+    """A6.1's route shape, written from the design: the method is upper-case letters, 3 to 10; the path starts with `/` and
+    holds no `?` or `#`."""
+    import re
+
+    return bool(re.fullmatch(r"[A-Z]{3,10}", method)) and path.startswith("/") and "?" not in path and "#" not in path
+
+
 def test_1504_a61_the_access_parser_the_lint_and_the_catalog_judge_every_generated_route_alike(tmp_path):
     """Over method x path pools (empty, case, digits, lengths 2/3/10/11, whitespace, control characters, `?`, `#`), one
-    adapter per pair with its own path: the parser's verdict (in reads and in writes) is the lint's and the catalog's, and a
-    refused route's reason names each non-empty part. (A6.1)"""
-    pairs = [(m, f"{p}_{i}" if p else p) for i, (m, p) in enumerate(itertools.product(X.SHAPE_METHODS, X.SHAPE_PATHS))]
+    adapter per pair: the parser's verdict (in reads and in writes), the lint's and the catalog's each equal the rule as
+    A6.1 states it (written here, `oracle`), and a refused route's reason names each non-empty part. (A6.1)"""
+    pairs = list(itertools.product(X.SHAPE_METHODS, X.SHAPE_PATHS))
     checkout = tmp_path / "tree" / "defender"
     for i, pair in enumerate(pairs):
         X.plant_adapter(checkout, f"w{i}", reads=repr((pair,)))
@@ -192,12 +200,12 @@ def test_1504_a61_the_access_parser_the_lint_and_the_catalog_judge_every_generat
         entry = catalog.entry(f"w{i}")
         flagged = any(X.READS_CONSTANT in line and f"w{i}_adapter.py" in line for line in lines)
         reason = getattr(entry, X.UNUSABLE_FIELD)
-        if len(taken) != 1:
-            disagree.append(f"{pair!r}: the parser takes it in only one of reads and writes")
-        accepted = taken == {True}
+        accepted = _oracle(*pair)
         taken_count += accepted
+        if taken != {accepted}:
+            disagree.append(f"{pair!r}: the parser takes it = {taken}, the rule says {accepted}")
         if flagged is accepted or (getattr(entry, X.ENTRY_FIELD) is None) is accepted:
-            disagree.append(f"{pair!r}: parser accepts={accepted}, lint flags={flagged}, "
+            disagree.append(f"{pair!r}: rule accepts={accepted}, lint flags={flagged}, "
                             f"catalog reads={getattr(entry, X.ENTRY_FIELD)!r}")
         elif accepted:
             if tuple(getattr(entry, X.ENTRY_FIELD)) != (pair,) or reason is not None:
@@ -283,12 +291,19 @@ LINT, CATALOG, PARSER = ("tooling/lint/lint_catalog_declarations.py", "defender/
 #: The route method's shape as the access parser spells it (A6.1). The proxy's own incoming-request pattern `[A-Z]{1,16}`
 #: is another rule (a request line, not a declared route) and is not this.
 ROUTE_METHOD_SHAPE = "[A-Z]{3,10}"
+#: Fewer files than this read means the scan lost the tree (a path filter that drops it, e.g. a checkout under a folder named
+#: like a skipped one), not that the tree is small.
+SCANNED_FLOOR = 100
 
 
 def _source_trees() -> dict[str, ast.Module]:
     skipped = {"tests", ".venv", "__pycache__", "node_modules"}
-    return {path.relative_to(REPO).as_posix(): ast.parse(path.read_text(encoding="utf-8"))
-            for top in SCANNED for path in sorted((REPO / top).rglob("*.py")) if not skipped & set(path.parts)}
+    trees = {path.relative_to(REPO).as_posix(): ast.parse(path.read_text(encoding="utf-8"))
+             for top in SCANNED for path in sorted((REPO / top).rglob("*.py"))
+             if not skipped & set(path.relative_to(REPO).parts)}
+    assert KIT_ACCESS in trees, "premise: the scan reads the kit's access module"
+    assert len(trees) > SCANNED_FLOOR, f"premise: the scan reads the product tree ({len(trees)} files)"
+    return trees
 
 
 def _is_read_method_literal(node: ast.AST) -> bool:
@@ -354,6 +369,49 @@ def test_1504_a61_each_reader_of_the_rule_imports_it_from_the_kit_and_binds_no_l
         assert not own, f"{rel} binds a {{GET, HEAD}} literal of its own at {own}"
 
 
+def _kit_names(tree: ast.Module) -> tuple[dict[str, str], set[str]]:
+    """(local name -> kit name for each name imported from `defender.kit.access`, local names of the module itself)."""
+    names: dict[str, str] = {}
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == X.KIT_ACCESS_MODULE:
+            names |= {alias.asname or alias.name: alias.name for alias in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "defender.kit":
+            modules |= {alias.asname or alias.name for alias in node.names if alias.name == "access"}
+        elif isinstance(node, ast.Import):
+            modules |= {alias.asname or alias.name for alias in node.names if alias.name == X.KIT_ACCESS_MODULE}
+    return names, modules
+
+
+def _calls_kit_function(tree: ast.Module, function: str) -> bool:
+    """Whether `tree` CALLS `defender.kit.access.<function>`: an `ast.Call` whose callee is the imported name or an
+    attribute of the imported module (a bare import, or a mention that is not a call, does not count)."""
+    names, modules = _kit_names(tree)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        callee = node.func
+        if isinstance(callee, ast.Name) and names.get(callee.id) == function:
+            return True
+        if isinstance(callee, ast.Attribute) and callee.attr == function and _dotted(callee.value) in {*modules, X.KIT_ACCESS_MODULE}:
+            return True
+    return False
+
+
+def test_1504_a61_the_route_shape_is_decided_by_calling_the_kits_functions_and_the_list_rule_builds_on_them():
+    """The access parser CALLS `route_shape_fault`; the lint and the catalog reader CALL `read_routes_fault` (each from
+    `defender.kit.access`, not a bare import); and `read_routes_fault`'s body uses `route_shape_fault` and `READ_METHODS`,
+    so the list rule is not a third copy of the shape or the methods. (A6.1)"""
+    trees = _source_trees()
+    assert _calls_kit_function(trees[PARSER], X.ROUTE_SHAPE_FAULT), f"{PARSER} does not call {X.ROUTE_SHAPE_FAULT}"
+    for rel in (LINT, CATALOG):
+        assert _calls_kit_function(trees[rel], X.READ_ROUTES_FAULT), f"{rel} does not call {X.READ_ROUTES_FAULT}"
+    functions = [n for n in ast.walk(trees[KIT_ACCESS]) if isinstance(n, ast.FunctionDef) and n.name == X.READ_ROUTES_FAULT]
+    assert len(functions) == 1, f"{KIT_ACCESS} does not define exactly one {X.READ_ROUTES_FAULT}"
+    used = {n.id for f in functions for n in ast.walk(f) if isinstance(n, ast.Name)}
+    assert {X.ROUTE_SHAPE_FAULT, X.READ_METHODS_NAME} <= used, f"{X.READ_ROUTES_FAULT} does not use both: {used}"
+
+
 # --- A6.2 / A6.3: a list that is not usable is "no usable list", with its reason, in every reader ------------------------
 
 #: Every source of "no usable list": readable-but-unusable (tagged with the text the reason names) and unreadable or absent.
@@ -408,25 +466,31 @@ def test_1504_a62_a_list_that_is_not_usable_has_no_reads_and_one_reason_in_the_c
         records = _record(reads)
         faults = list(rules("judge_records")(records, None, catalog=catalog))
         assert [f for f in faults if reason in f and RECORDS.part("widget", "access") in f], (reads, reason, faults)
+        named = [f for f in faults if any(needle in f for needle in needles)]
+        assert named or not needles, (needles, faults)
+        assert all(RECORDS.part("widget", "access") in f for f in named), (reads, named)
         held = record_settings(records, catalog=catalog)["access"]["widget"]
         assert isinstance(held, ConfigFault), held
         assert reason in str(held), (reason, str(held))
         if unusable:
-            assert not [f for f in faults if computed in f or "without running" in f], (computed, faults)
+            assert not [f for f in faults if computed in f], (computed, faults)
             assert computed not in str(held), str(held)
-            assert "without running" not in str(held), str(held)
     item = _served(catalog)["widget"]
     assert item[X.API_FIELD] is None, item
     assert item[X.UNUSABLE_FIELD] == reason, item
     out = _validate_over(root / "defender", "widget")
+    lines = sorted({line.strip() for line in reason.splitlines() if line.strip()}, key=len, reverse=True)
     first = reason.splitlines()[0].strip()
     assert [line for line in out.splitlines() if "[✗]" in line and X.READS_CONSTANT in line and first in line], out
-    try:
-        listed = [r for r in ast.literal_eval(source or "()") if isinstance(r, tuple) and len(r) == 2] if source else []
-    except (ValueError, TypeError, SyntaxError):
-        listed = []
-    for route in listed:
-        assert X.shown(route) not in out.replace(reason, ""), (route, out)
+    for line in lines:
+        assert line in out, (line, out)  # the whole reason is printed, every non-blank line of it
+    rest = out
+    for line in lines:
+        rest = rest.replace(line, "")
+    written = [node.value for node in ast.walk(ast.parse(source or "()", mode="eval"))
+               if isinstance(node, ast.Constant) and isinstance(node.value, str) and "/" in node.value]
+    for text in (*needles, *written, "/widgets/_find"):
+        assert text not in rest, (text, rest)  # nothing to copy is left once the reason is taken out
     assert not [line for line in out.splitlines() if "[✓]" in line and X.READS_ROW_WORD in line], out
 
 

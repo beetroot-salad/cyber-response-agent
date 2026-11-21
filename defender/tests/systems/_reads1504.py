@@ -40,6 +40,16 @@ REFERENCE_GATE = "lint_catalog_declarations"
 READS_ROW_WORD = "reads"
 NO_READS_WORD = "none"
 
+#: The kit layer's one owner of the route rule (A6.1), in `defender.kit.access`. FORCED: the names and shapes (the design
+#: names the owner and what it decides, not the functions). `READ_METHODS` is the methods that need no declaration;
+#: `route_shape_fault(method, path) -> str | None` is why one declared route is not well-formed (None when it is);
+#: `read_routes_fault(value) -> str | None` is why a READ_ROUTES value is not a usable list (None when it is), by calling
+#: `route_shape_fault` and consulting `READ_METHODS`.
+KIT_ACCESS_MODULE = "defender.kit.access"
+READ_METHODS_NAME = "READ_METHODS"
+ROUTE_SHAPE_FAULT = "route_shape_fault"
+READ_ROUTES_FAULT = "read_routes_fault"
+
 #: The declared reads the design's census (C3) finds today, spelled in the route syntax.
 ELASTIC_READS = (("POST", "/*/_search"), ("POST", "/_query"))
 THREAT_INTEL_READS = (("POST", "/lookup"),)
@@ -113,8 +123,8 @@ UNUSABLE_LISTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     # A readable literal that is not a list of pairs is unusable (not unreadable); its reason names the value (A6.2).
     ("whole-string", "'POST /widgets/_gone'", ("/widgets/_gone",)),
     ("bare-pair-not-a-tuple-of-pairs", "('POST', '/widgets/_gone')", ("/widgets/_gone",)),
-    ("path-not-text", "(('POST', 7),)", ("7",)),
-    ("a-number", "7", ("7",)),
+    ("path-not-text", "(('POST', 73519),)", ("73519",)),
+    ("a-number", "73519", ("73519",)),
 )
 #: Lists the module does not hold readably (absent, or computed): (id, source, None for no declaration).
 UNREADABLE_LISTS: tuple[tuple[str, str | None], ...] = (
