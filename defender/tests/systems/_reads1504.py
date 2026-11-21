@@ -15,7 +15,8 @@ READS_CONSTANT = "READ_ROUTES"
 #: The `CatalogEntry` attribute the catalog reads it into, cold (O1). FORCED: name; a tuple of `(method, path)`.
 ENTRY_FIELD = "reads"
 #: The `GET /adapters` item field (O3). FORCED: name; each element `{"method", "path"}` (the access declaration's own
-#: shape, so an admin copies it into `reads:` as is); `[]`, never null, for an adapter with none.
+#: shape, so an admin copies it into `reads:` as is); `[]` for an adapter declaring none, and null (beside the item's
+#: `reads_unusable` reason, A6.3) for an adapter with no usable list.
 API_FIELD = "reads"
 #: The `GET /adapters` item field holding the reference file's text verbatim (O5). FORCED: name and verbatim.
 API_REFERENCE_FIELD = "reference"
@@ -38,6 +39,16 @@ REFERENCE_GATE = "lint_catalog_declarations"
 #: declares none it says `none` (the code stage corrects the words here).
 READS_ROW_WORD = "reads"
 NO_READS_WORD = "none"
+
+#: The kit layer's one owner of the route rule (A6.1), in `defender.kit.access`. FORCED: the names and shapes (the design
+#: names the owner and what it decides, not the functions). `READ_METHODS` is the methods that need no declaration;
+#: `route_shape_fault(method, path) -> str | None` is why one declared route is not well-formed (None when it is);
+#: `read_routes_fault(value) -> str | None` is why a READ_ROUTES value is not a usable list (None when it is), by calling
+#: `route_shape_fault` and consulting `READ_METHODS`.
+KIT_ACCESS_MODULE = "defender.kit.access"
+READ_METHODS_NAME = "READ_METHODS"
+ROUTE_SHAPE_FAULT = "route_shape_fault"
+READ_ROUTES_FAULT = "read_routes_fault"
 
 #: The declared reads the design's census (C3) finds today, spelled in the route syntax.
 ELASTIC_READS = (("POST", "/*/_search"), ("POST", "/_query"))
@@ -70,7 +81,7 @@ def plant_adapter(root: Path, name: str, *, reads: str | None, check: str = "ret
     """A checkout holding `<name>_adapter.py`: cold declarations, `reads` spelled as the source of its list constant (None:
     no list declared) and a `check_settings` whose body is `check`. Test data for a catalog the caller holds."""
     folder = root / "integrations"
-    folder.mkdir(parents=True)
+    folder.mkdir(parents=True, exist_ok=True)
     prefix = name.upper()
     (folder / f"{name}_adapter.py").write_text(textwrap.dedent(f'''\
         PREFIX = "{prefix}"
@@ -86,3 +97,44 @@ def plant_adapter(root: Path, name: str, *, reads: str | None, check: str = "ret
             {check}
         '''))
     return root
+
+
+# --- #1504 A6 (one route rule): names and data the amendment's tests share ----------------------------------------------
+
+#: The `CatalogEntry` attribute holding why an adapter has no usable list (A6.2), and the `GET /adapters` item field
+#: carrying it (A6.3). FORCED by the design: `reads_unusable`, text or None.
+UNUSABLE_FIELD = "reads_unusable"
+
+#: Readable-but-unusable `READ_ROUTES` sources (A6.2), each with the text its reason must name (the offending entry's
+#: path as written). The paths are not any route a test record lists, so a fault naming one got it from the list.
+#: (id, source of the list, needles).
+UNUSABLE_LISTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("get", "(('GET', '/widgets/_gone'),)", ("/widgets/_gone",)),
+    ("head", "(('HEAD', '/widgets/_gone'),)", ("/widgets/_gone",)),
+    ("lower-case-method", "(('post', '/widgets/_gone'),)", ("/widgets/_gone",)),
+    ("no-leading-slash", "(('POST', 'widgets_gone'),)", ("widgets_gone",)),
+    ("query-in-path", "(('POST', '/widgets/_gone?x=1'),)", ("/widgets/_gone",)),
+    ("fragment-in-path", "(('POST', '/widgets/_gone#top'),)", ("/widgets/_gone",)),
+    ("repeated-route", "(('POST', '/widgets/_gone'), ('POST', '/widgets/_gone'))", ("/widgets/_gone",)),
+    ("non-pair-entry", "('POST /widgets/_gone',)", ("/widgets/_gone",)),
+    ("triple-entry", "(('POST', '/widgets/_gone', 'x'),)", ("/widgets/_gone",)),
+    ("good-route-beside-a-bad-one", "(('POST', '/widgets/_fine'), ('GET', '/widgets/_gone'))", ("/widgets/_gone",)),
+    ("two-bad-entries", "(('GET', '/widgets/_one'), ('post', '/widgets/_two'))", ("/widgets/_one", "/widgets/_two")),
+    # A readable literal that is not a list of pairs is unusable (not unreadable); its reason names the value (A6.2).
+    ("whole-string", "'POST /widgets/_gone'", ("/widgets/_gone",)),
+    ("bare-pair-not-a-tuple-of-pairs", "('POST', '/widgets/_gone')", ("/widgets/_gone",)),
+    ("path-not-text", "(('POST', 73519),)", ("73519",)),
+    ("a-number", "73519", ("73519",)),
+)
+#: Lists the module does not hold readably (absent, or computed): (id, source, None for no declaration).
+UNREADABLE_LISTS: tuple[tuple[str, str | None], ...] = (
+    ("absent", None), ("computed", "tuple([('POST', '/widgets/_find')])"))
+
+#: Pools the route-shape agreement test (A6.1) crosses: every pair is judged by the access parser, the lint and the catalog
+#: reader, each against the A6.1 oracle written in the test. Empty parts, case, digits and underscore, lengths 2/3/10/11, whitespace, control
+#: characters, `?` and `#`. (GET and HEAD are not here: the parser takes them, the list refuses them, tested apart.)
+SHAPE_METHODS = ("", "post", "Post", "PO", "POS", "POST", "PO5T", "PO_ST", "POST ", "POST\n", "ABCDEFGHIJ", "ABCDEFGHIJK")
+SHAPE_PATHS = ("", "/", "/x/_a", "x/_a", "/x/*/b", "/x/a%20b", "/x/", "/x y", "/x\t", "/x\x00", " /x", "/x?y=1", "/x#y", "?", "#")
+
+#: Methods the readers of the read-method list are asked about (all fit every reader's own method pattern).
+METHOD_POOL = ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT", "ABC")

@@ -409,15 +409,11 @@ def _validate_in(checkout: Path, system: str) -> tuple[list[str], str]:
 @pytest.mark.parametrize(("reads_source", "readable"), [
     pytest.param(None, False, id="no-list-declared"),
     pytest.param("tuple([('POST', '/widgets/_find')])", False, id="not-a-literal"),
-    pytest.param("(('POST', '/widgets/_find', 'more'),)", False, id="a-route-of-three-parts"),
-    pytest.param("('POST', '/widgets/_find')", False, id="a-bare-route-not-a-tuple-of-routes"),
-    pytest.param("(('POST', 7),)", False, id="a-path-not-text"),
-    pytest.param("'POST /widgets/_find'", False, id="a-string"),
     pytest.param("()", True, id="control-an-empty-literal"),
 ])
 def test_1504_o3_an_adapter_without_a_readable_list_refuses_even_a_record_with_no_non_get_reads(
         tmp_path, reads_source, readable):
-    """An adapter whose list is missing, not a literal, or a literal not of `(method, path)` text pairs: a record of it
+    """An adapter whose list is absent or computed (the other no-usable-list causes are the A6.2 class test's): a record of it
     listing no non-GET read is refused at its system by the judgement, held as a ConfigFault by the run's record builder,
     and connect's validator fails a row naming the list; an empty literal list accepts the same record. (O3, O4)"""
     from defender.kit.faults import ConfigFault
@@ -440,3 +436,18 @@ def test_1504_o3_an_adapter_without_a_readable_list_refuses_even_a_record_with_n
     failed, out = _validate_in(checkout, "widget")
     naming = [line for line in failed if X.READS_CONSTANT in line]
     assert bool(naming) is not readable, out
+
+
+# --- #1504 A6.2: a list that is not usable is "no usable list", with its reason -------------------------------------------
+
+def test_1504_a62_a_usable_list_reads_as_itself_with_no_reason_and_its_record_is_accepted(tmp_path):
+    """Positive control: a usable literal (and `()`) reads as itself with `reads_unusable is None`, as do the checkout's
+    own adapters; the matching record is accepted. (A6.2)"""
+    for listed in ((WIDGET_ROUTE, ("PUT", "/widgets/*/mark")), ()):
+        catalog = rules("Catalog").of_checkout(X.plant_adapter(tmp_path / f"w{len(listed)}", "widget", reads=repr(listed)))
+        entry = catalog.entry("widget")
+        assert tuple(getattr(entry, X.ENTRY_FIELD)) == listed
+        assert getattr(entry, X.UNUSABLE_FIELD) is None
+        assert list(rules("judge_records")(_planted_record("widget", listed), None, catalog=catalog)) == []
+    own = _catalog()
+    assert {a: getattr(own.entry(a), X.UNUSABLE_FIELD) for a in own.adapter_ids} == dict.fromkeys(own.adapter_ids)
