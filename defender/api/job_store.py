@@ -1,5 +1,5 @@
 """The API's work-record ports over the job store (#1083 FC-10): one object serving the alerts, investigations, learning
-jobs, alert mapping, writes and offboarding ports from a `JobStore` it does not own.
+jobs, alert mapping, writes, host requests and offboarding ports from a `JobStore` it does not own.
 
 It maps the store's records to the wire models by field name (an investigation's `status` is the store's `stage`), and
 hands the principal's tenant, actor and credential to the store's own calls. The store's refusals are the API's
@@ -14,8 +14,10 @@ from typing import Any
 from pydantic import BaseModel
 
 from defender._vocab import Disposition, NoOutcome
-from defender.jobs import AlertListing, InvestigationRecord, JobStore, LearningJobRecord, StoredAlert
-from defender.records.formats import MAPPING_KEYS, AlertId, InvestigationId, LearningJobId, TenantId, check_mapping
+from defender.jobs import AlertListing, HostRequestRecord, InvestigationRecord, JobStore, LearningJobRecord, StoredAlert
+from defender.records.formats import (
+    MAPPING_KEYS, AlertId, CredentialId, HostRequestId, InvestigationId, LearningJobId, ProgramId, TenantId, UserId, check_mapping,
+)
 from defender.records.formats import AlertMapping as StoredAlertMapping
 from defender.tenancy import TenantRecord
 
@@ -26,6 +28,8 @@ from .models import (
     Investigation,
     InvestigationKnowledge,
     LearningJob,
+    SavedAdoption,
+    SavedReadiness,
 )
 from .ports import Principal, TimePosition
 
@@ -56,6 +60,17 @@ def _investigation(record: InvestigationRecord) -> Investigation:
 
 def _learning_job(record: LearningJobRecord) -> LearningJob:
     return LearningJob(**_by_name(LearningJob, record))
+
+
+def _readiness(record: HostRequestRecord) -> SavedReadiness:
+    """The status is the store's `stage`; `result` is the stored JSON, which the model validates by its `outcome`."""
+    return SavedReadiness(readiness_id=record.request_id, status=record.stage,  # type: ignore[arg-type]
+                          **_by_name(SavedReadiness, record, but=frozenset({"readiness_id", "status"})))
+
+
+def _adoption(record: HostRequestRecord) -> SavedAdoption:
+    return SavedAdoption(adoption_id=record.request_id, status=record.stage,  # type: ignore[arg-type]
+                         **_by_name(SavedAdoption, record, but=frozenset({"adoption_id", "status"})))
 
 
 def _wire_mapping(stored: StoredAlertMapping) -> AlertMapping:
@@ -144,6 +159,29 @@ class JobStorePorts:
             principal.tenant_id, check_mapping(body.model_dump()), actor=principal.actor_id,
             credential_id=principal.credential_id)
         return _wire_mapping(stored), created
+
+    # --- HostRequestsRepository ---------------------------------------------------------
+
+    async def create_readiness(
+        self, tenant_id: TenantId, *, actor: UserId | ProgramId, credential_id: CredentialId | None = None,
+    ) -> tuple[SavedReadiness, bool]:
+        record, created = await self._store.create_readiness(tenant_id, actor=actor, credential_id=credential_id)
+        return _readiness(record), created
+
+    async def get_readiness(self, tenant_id: TenantId, readiness_id: HostRequestId) -> SavedReadiness | None:
+        found = await self._store.get_host_request(tenant_id, readiness_id, kind="readiness")
+        return None if found is None else _readiness(found)
+
+    async def create_adoption(
+        self, tenant_id: TenantId, system_id: str, *, actor: UserId | ProgramId, credential_id: CredentialId | None = None,
+    ) -> tuple[SavedAdoption, bool]:
+        record, created = await self._store.create_adoption(
+            tenant_id, system_id, actor=actor, credential_id=credential_id)
+        return _adoption(record), created
+
+    async def get_adoption(self, tenant_id: TenantId, adoption_id: HostRequestId) -> SavedAdoption | None:
+        found = await self._store.get_host_request(tenant_id, adoption_id, kind="adoption")
+        return None if found is None else _adoption(found)
 
     # --- Offboarding --------------------------------------------------------------------
 

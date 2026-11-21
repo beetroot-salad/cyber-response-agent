@@ -13,7 +13,7 @@ from defender.identity import IdentityService
 # The store's refusals are the API's: one class each, so the store's raise is the API's answer
 # with no mapping between them (#1342).
 from defender.jobs.errors import Conflict, NotFound, OffboardNotSettled, UnknownReference  # noqa: F401 — re-exported: the API's refusals
-from defender.records.formats import AlertId, BatchId, CredentialId, InvestigationId, LearningJobId, ProgramId, TenantId, UserId, WorkItemId
+from defender.records.formats import AlertId, BatchId, CredentialId, HostRequestId, InvestigationId, LearningJobId, ProgramId, TenantId, UserId, WorkItemId
 
 from defender.tenancy.record_values import SystemRecord
 
@@ -31,6 +31,8 @@ from .models import (
     LearningJob,
     Lesson,
     ParkedBatch,
+    SavedAdoption,
+    SavedReadiness,
     SavedSystem,
     SetAsideItem,
     System,
@@ -199,6 +201,16 @@ class SystemsRepository(Protocol):
         secret store's answer (`SecretStoreUnavailable` when it gives none, `SecretStoreRefused` for a 403 or another 4xx)."""
         ...
 
+    async def without_credentials(self, tenant_id: TenantId) -> list[str] | None:
+        """The ids of the tenant's current systems, disabled ones included, with no credential set at their current
+        generation, sorted (#1471 D10, R3): the secret store's answer, failing as `served` does. `None` when the tenant is
+        not active, which is asked before the secret store, so it never reaches it (R13-2)."""
+        ...
+
+    async def ships_base_files(self, system_id: str) -> bool:
+        """Whether the catalog entry of the system's adapter (its id, P4) names base files to adopt (#1471 A1)."""
+        ...
+
     async def put_system(self, principal: Principal, system_id: str, body: SystemPut) -> tuple[SavedSystem, bool]:
         """Write the system's next version (O4); `(saved, created)`, `created` when a read showed none before. Asks no
         secret store (r8 Am-2): a read answers `has_credentials`."""
@@ -349,6 +361,36 @@ class ArtifactLinks(Protocol):
         ...
 
 
+class HostRequestsRepository(Protocol):
+    """The short requests the host's worker runs for a tenant: a readiness check and an adoption of a system's base files
+    (#1471). They take the tenant and the acting user, not a `Principal`, because the platform administrator's routes have
+    none. The store decides what a start does (dedupe, the offboarding refusal) and announces `<kind>.start` once, after its
+    commit; a replay announces nothing. `Conflict` for a tenant that is offboarding or offboarded, `UnknownReference` for one
+    with no row."""
+
+    async def create_readiness(
+        self, tenant_id: TenantId, *, actor: UserId | ProgramId, credential_id: CredentialId | None = None,
+    ) -> tuple[SavedReadiness, bool]:
+        """Queue a check of the tenant, or answer the one already queued (R1). `(check, created)`, `created` only when this
+        call inserted the row."""
+        ...
+
+    async def get_readiness(self, tenant_id: TenantId, readiness_id: HostRequestId) -> SavedReadiness | None:
+        """The tenant's readiness check; `None` for an unknown id, another tenant's or an adoption's (R2)."""
+        ...
+
+    async def create_adoption(
+        self, tenant_id: TenantId, system_id: str, *, actor: UserId | ProgramId, credential_id: CredentialId | None = None,
+    ) -> tuple[SavedAdoption, bool]:
+        """Queue an adoption of the system's base files, or answer the one already queued for it (A1). The caller has
+        checked the record and the catalog entry."""
+        ...
+
+    async def get_adoption(self, tenant_id: TenantId, adoption_id: HostRequestId) -> SavedAdoption | None:
+        """The tenant's adoption; `None` for an unknown id, another tenant's or a readiness check's (A2)."""
+        ...
+
+
 class Offboarding(Protocol):
     """The one operation behind the administrator's offboard request (#1360 D6): the tenant moves to `offboarding` and
     every queued or running job of it ends, as one change. `NotFound` for an absent tenant, `Conflict` for one that
@@ -389,3 +431,5 @@ class ApiDeps:
     audit: AuditPort
     #: The offboard request's one write: the tenant transition and the ending of its jobs (#1360 D6).
     offboarding: Offboarding
+    #: The readiness checks and adoptions of base files the host's worker runs (#1471).
+    host_requests: HostRequestsRepository
