@@ -19,14 +19,22 @@ from defender.tests.tenancy.tenant_1108_delivery._support import configured_orig
 from ._forge import DIGEST, RENDERING, SYSTEM, AdoptionForge, branch_for
 
 
+#: A remote no forge answers at (G3, repair 5): the clone's own `remote.origin.url` is set to it, unlike the wiring.
+DEAD_ORIGIN = "http://127.0.0.1:9/dead/clone-remote.git"
+
+
 @pytest.fixture
 def forge(repo):
+    """The forge double at the tenant's recorded wiring (`wired`), the clone's own remote then pointed at a dead address,
+    so every case here shows the entry fetches, pushes and opens at the wiring, never at the clone's remote."""
     http = AdoptionForge(remote=repo[1])
-    http.serve(configured_origin(repo[0].knowledge))
+    http.wired = configured_origin(repo[0].knowledge)
+    http.serve(http.wired)
+    git(location_path(repo[0].knowledge), "config", "remote.origin.url", DEAD_ORIGIN)
     return http
 
 
-def _facts(repo, **over):
+def _facts(repo, forge, **over):
     """The helper's launch facts for this job, as the helper hands them (surface §4); `over` changes keys."""
     facts = {
         "kind": "adoption",
@@ -36,7 +44,7 @@ def _facts(repo, **over):
         "system": SYSTEM,
         "digest": DIGEST,
         "rendering": {path: base64.b64encode(data).decode() for path, data in RENDERING.items()},
-        "forge_origin": configured_origin(repo[0].knowledge),
+        "forge_origin": forge.wired,
         "forge_repo": "tenants/blue",
     }
     return {**facts, **over}
@@ -51,10 +59,13 @@ def _enter(repo, forge, tmp_path, *, facts=None, silent=False):
     tenant = str(repo[0].id)
     runs = location_path(repo[0].tenant_root) / "runs"
     runs.mkdir(exist_ok=True)
-    handed = _facts(repo, job_id=job_id) if facts is None else facts(_facts(repo, job_id=job_id))
+    own = _facts(repo, forge, job_id=job_id)
+    handed = own if facts is None else facts(own)
     token = fixture_identity(tenant).token()
     environ = {**os.environ, "DEFENDER_DATA_ROOT": str(tmp_path / "data")}
     with SocketStandIn(tenant, launch=handed, answers={"forge.token": lambda fields: {"token": token}}) as stand_in:
+        for gone in set(own) - set(handed):  # the stand-in fills `tenant`/`tenant_state` by default: serve the removal
+            stand_in.launch.pop(gone, None)
         environ[SOCKET_ENV] = str(tmp_path / "no-such-socket") if silent else str(stand_in.path)
         adoption.main(["--job", job_id, "--tenant", tenant], environ=environ, client=forge.client)
     path = runs / f"{job_id}.adoption.json"
@@ -108,3 +119,41 @@ def test_facts_saying_the_tenant_is_not_active_are_failed_tenant_not_active_not_
     record = _enter(repo, forge, tmp_path, facts=lambda facts: {**facts, "tenant_state": "offboarding"})
     assert record == {"outcome": "failed", "reason": "tenant_not_active"}
     assert forge.creates == []
+
+
+#: The keys of the adoption launch facts (surface §4), as `_facts` hands them.
+FACT_KEYS = ("kind", "tenant", "job", "tenant_state", "system", "digest", "rendering", "forge_origin", "forge_repo")
+#: The facts' post-step key the adoption entry has no use for (the API base comes from `forge_origin`, surface §4).
+UNREAD_KEYS = ("forge_repo",)
+
+
+def _wrong_typed(value):
+    return ["not", "a", "mapping"] if isinstance(value, dict) else ("1471" if not isinstance(value, str) else 1471)
+
+
+@pytest.mark.parametrize("how", ["removed", "wrong-type"])
+@pytest.mark.parametrize("key", FACT_KEYS)
+def test_facts_missing_a_key_or_holding_a_value_of_another_type_end_in_a_record_never_a_crash(repo, forge, tmp_path, key, how):
+    """Generated over every key of the helper's facts, each removed and each of another type: `{failed, handover}`, the
+    container's `tenant_not_active` for `tenant_state`, or the honest `opened` for the key the entry does not read; never
+    a crash or an exit with no record. (R13-1.4; repair 5)"""
+    # `_facts` is the helper's own key set (`test_adoption_helper_1471`'s launch-facts case pins the helper to it)
+    assert set(_facts(repo, forge, job_id="x")) == set(FACT_KEYS), "premise: the keys are the surface's"
+
+    def mutate(facts):
+        changed = dict(facts)
+        if how == "removed":
+            changed.pop(key)
+        else:
+            changed[key] = _wrong_typed(changed[key])
+        return changed
+
+    record = _enter(repo, forge, tmp_path, facts=mutate)
+    assert record is not None, "the entry ended with no record"
+    if key == "tenant_state":
+        assert record in ({"outcome": "failed", "reason": "handover"}, {"outcome": "failed", "reason": "tenant_not_active"})
+    elif key in UNREAD_KEYS:
+        assert record in ({"outcome": "failed", "reason": "handover"}, {"outcome": "opened", "pr_number": record.get("pr_number")}), record
+    else:
+        assert record == {"outcome": "failed", "reason": "handover"}, record
+        assert forge.creates == []

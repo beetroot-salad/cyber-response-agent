@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import signal
+from typing import Any
 
 import pytest
 
@@ -24,6 +25,7 @@ from defender.tests.support.jobs._host_requests1471 import (
     READINESS,
     READINESS_CONTAINER_REASONS,
     READINESS_HELPER_REASONS,
+    READINESS_STEPS,
     STALE_OPERATOR,
     STALE_OPERATOR_SERVED,
     STEPS_WITH_KNOWLEDGE,
@@ -126,7 +128,7 @@ async def test_r13_1_5_adoption_nonzero_exit_with_no_record_is_worker_error(worl
 async def test_r13_1_5_each_kind_is_launched_with_its_own_command_and_the_request_id(world):
     """A readiness row runs `readiness_argv` and an adoption row `adoption_argv`, each handed its request, tenant and, for
     adoption, the system. (R13-6, surface §4)"""
-    r_child, a_child = host_child(world, "r", files={READINESS: ready()}), host_child(world, "a", files={ADOPTION: adopted("nothing_to_adopt")})
+    r_child, a_child = host_child(world, "r", files={READINESS: ready(), KNOWLEDGE: FRESH}), host_child(world, "a", files={ADOPTION: adopted("nothing_to_adopt")})
     async with job_store(world["dsn"]) as store:
         r, _ = await store.create_readiness(T1, actor="u")
         a, _ = await store.create_adoption(T1, SYSTEM, actor="u")
@@ -388,6 +390,38 @@ async def test_r13_1_1_an_unusable_runs_container_ends_the_row_worker_error_with
     assert len(ran.started()) == 1
 
 
+def _runs_linked(world) -> None:
+    """`<T>/runs` a link to a real, empty folder elsewhere: a directory to `is_dir`, refused by the lane (no links)."""
+    elsewhere = world["tmp"] / "runs-elsewhere"
+    elsewhere.mkdir()
+    shutil.rmtree(world["runs"])
+    world["runs"].symlink_to(elsewhere, target_is_directory=True)
+
+
+def _tenant_linked(world) -> None:
+    """`<T>` itself a link to a copy of the tenant folder: `<T>/runs` reads as a directory, the lane refuses the link."""
+    folder = world["runs"].parent
+    copy = world["tmp"] / "tenant-elsewhere"
+    shutil.copytree(folder, copy, symlinks=True)
+    shutil.rmtree(folder)
+    folder.symlink_to(copy, target_is_directory=True)
+
+
+@pytest.mark.parametrize("damage", [_runs_linked, _tenant_linked], ids=["runs-linked", "tenant-folder-linked"])
+@pytest.mark.parametrize("kind", ["readiness", "adoption"])
+async def test_r13_1_1_a_runs_folder_the_lane_cannot_use_though_it_reads_as_a_directory_starts_no_helper(world, kind, damage):
+    """Damage the lane refuses while `<T>/runs` is still a directory to a path check: `failed`/`worker_error` in the
+    investigation's words, no helper started. (R13-1.1: "a lane it cannot use", repair 5)"""
+    damage(world)
+    assert world["runs"].is_dir(), "premise: the damage still reads as a directory"
+    files = {READINESS: ready(), KNOWLEDGE: FRESH} if kind == "readiness" else {ADOPTION: adopted("nothing_to_adopt")}
+    _, stored, child = await _run(world, kind, files)
+    assert (stored["stage"], stored["failure_reason"], stored["result"]) == ("failed", "worker_error", None)
+    assert "the tenant's runs container cannot be used on this host" in stored["failure_message"]
+    assert child.launches == []
+    assert child.events() == [], "a helper was started over a lane that cannot be used"
+
+
 async def test_r13_1_1_the_words_are_the_investigations_own(world):
     """An investigation over the same damage fails with the message a host request gets. (R13-1.1)"""
     shutil.rmtree(world["runs"])
@@ -548,17 +582,30 @@ async def test_r13_5_a_stopping_worker_ends_the_request_it_holds_worker_stopped_
     assert [x["stage"] for x in host_rows(dsn)] == ["failed"], "a retry row was made"
 
 
-@pytest.mark.parametrize(("record", "stage", "reason"), [
-    pytest.param(ready(), "completed", None, id="ready"),
-    pytest.param(failed("handover"), "failed", "handover", id="failed-record"),
-])
-async def test_r13_5_a_valid_record_present_once_the_child_has_ended_wins_over_the_stop(world, record, stage, reason):
-    """The child records as the SIGTERM lands: the record stands. (R13-5)"""
+def _every_valid_record() -> list[Any]:
+    """Every valid record of each kind (surface §5), with the row it ends: a result completes it, a `failed` record fails
+    it with that reason. (repair 5: the class, not two members)"""
+    cases = [pytest.param("readiness", ready(), "completed", None, id="readiness-ready")]
+    cases += [pytest.param("readiness", refused(step), "completed", None, id=f"readiness-refused-{step}") for step in READINESS_STEPS]
+    cases += [pytest.param("readiness", failed(reason), "failed", reason, id=f"readiness-failed-{reason}")
+              for reason in (*READINESS_HELPER_REASONS, *READINESS_CONTAINER_REASONS)]
+    cases += [pytest.param("adoption", adopted(outcome, 7 if outcome in WITH_NUMBER else None), "completed", None,
+                           id=f"adoption-{outcome}") for outcome in ADOPTION_OUTCOMES]
+    cases += [pytest.param("adoption", failed(reason), "failed", reason, id=f"adoption-failed-{reason}")
+              for reason in ADOPTION_REASONS]
+    return cases
+
+
+@pytest.mark.parametrize(("kind", "record", "stage", "reason"), _every_valid_record())
+async def test_r13_5_a_valid_record_present_once_the_child_has_ended_wins_over_the_stop(world, kind, record, stage, reason):
+    """The child records as the SIGTERM lands: the record stands, for every valid record of either kind. (R13-5)"""
     dsn = world["dsn"]
-    child = host_child(world, files={READINESS: record, KNOWLEDGE: FRESH}, term="finish",
-                       term_mark=str(world["tmp"] / "termed"), wait_for=world["tmp"] / "never")
+    files = {READINESS: record, KNOWLEDGE: FRESH} if kind == "readiness" else {ADOPTION: record}
+    child = host_child(world, files=files, term="finish", term_mark=str(world["tmp"] / "termed"),
+                       wait_for=world["tmp"] / "never")
     async with job_store(dsn) as store:
-        rec, _ = await store.create_readiness(T1, actor="u")
+        rec, _ = await (store.create_readiness(T1, actor="u") if kind == "readiness"
+                        else store.create_adoption(T1, SYSTEM, actor="u"))
         serving = asyncio.create_task(host_worker(world, store, child, **_FAST).serve())
         try:
             await _until(lambda: child.started(), "the child")
@@ -567,6 +614,7 @@ async def test_r13_5_a_valid_record_present_once_the_child_has_ended_wins_over_t
                 os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=60)
     stored = host_row(dsn, rec.request_id)
+    assert (world["tmp"] / "termed").exists(), "premise: the stop reached the child"
     assert (stored["stage"], stored["failure_reason"]) == (stage, reason)
 
 

@@ -128,6 +128,12 @@ def test_a_byte_moved_across_the_path_content_boundary_changes_the_digest(left, 
 def scaffold_failures(tmp_path: Path, rendering: dict[str, bytes], system: str) -> list[str]:
     """The FAIL rows of connect's skill check and template check over `rendering`, judged against the adapter's declared verbs."""
     scaffold = importlib.import_module("defender.skills.connect.validate_scaffold")
+    return [message for status, message in scaffold_rows(tmp_path, rendering, system) if status == scaffold.FAIL]
+
+
+def scaffold_rows(tmp_path: Path, rendering: dict[str, bytes], system: str) -> list[tuple[str, str]]:
+    """Every `(status, message)` row of the registry, skill and template checks over `rendering`, as `main` runs them."""
+    scaffold = importlib.import_module("defender.skills.connect.validate_scaffold")
     staged = tmp_path / "staged-agent"
     for path, data in rendering.items():
         assert path.startswith("agent/"), path
@@ -138,7 +144,7 @@ def scaffold_failures(tmp_path: Path, rendering: dict[str, bytes], system: str) 
     verbs = scaffold.check_registry(report, DEFENDER, system)
     scaffold.check_skill(report, staged, system)
     scaffold.check_templates(report, staged, system, verbs)
-    return [message for status, message in report.rows if status == scaffold.FAIL]
+    return [(status, message) for status, message in report.rows]
 
 
 def _fixture_cmdb() -> dict[str, bytes]:
@@ -176,7 +182,11 @@ def test_every_shipped_base_file_set_renders_and_passes_the_scaffold_check(tmp_p
     assert rendering
     assert all(p.startswith("agent/") and "{" not in p for p in rendering), sorted(rendering)
     assert f"agent/skills/{adapter}/SKILL.md" in rendering
-    assert scaffold_failures(tmp_path, rendering, adapter) == []
+    rows = scaffold_rows(tmp_path, rendering, adapter)
+    assert rows, "the scaffold check judged nothing"
+    # every row PASS: a WARN is a part P-8 asks for that the set lacks (no seed template, no `execution.md`; repair 5)
+    scaffold = importlib.import_module("defender.skills.connect.validate_scaffold")
+    assert [(status, message) for status, message in rows if status != scaffold.PASS] == []
     assert not [p for p, d in rendering.items() if b"{system}" in d], "an unfilled system placeholder was shipped"
 
 

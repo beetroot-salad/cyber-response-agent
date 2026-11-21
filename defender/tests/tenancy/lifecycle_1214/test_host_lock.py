@@ -1,4 +1,4 @@
-"""#1214 host lock and registry (P3, RC-5): run start, drain start and the connect command hold T's host lock shared and
+"""#1214 host lock and registry (P3, RC-5): run start, drain start and the host commands hold T's host lock shared and
 record themselves; install holds it shared, prepare exclusive; teardown stops what is recorded.
 
 Black box over real processes: a launcher child enters the real entry point with a directory whose `state()` blocks, so it
@@ -59,9 +59,6 @@ LAUNCHER = textwrap.dedent("""
     elif entry == "drain":
         from defender.learning.core import cli
         cli.main(["loop.py", "--author-drain", "--tenant", tenant], directory=Blocking())
-    elif entry == "connect":
-        from defender.cli import tenant as connect
-        connect.main(["check", tenant], directory=Blocking())
     elif entry == "launcher":
         from defender.learning.branch import cli as branch_cli
         branch_cli.main(["--tenant", tenant, "9c2e4a17-3b58-4d06-b1f2-7e0a5c8d3f94", "1"], directory=Blocking(),
@@ -119,7 +116,7 @@ def holders(tmp_path):
         holder.kill()
 
 
-@pytest.mark.parametrize("entry", ["run", "drain", "connect", "launcher", *H.COMMANDS])
+@pytest.mark.parametrize("entry", ["run", "drain", "launcher", *H.COMMANDS])  # #1471 B3: `check <id>` is gone (stale, updated)
 def test_teardown_terminates_a_recorded_process_and_completes(world, holders, entry):
     """Teardown SIGTERMs what each host entry point recorded, then removes the folder (P3, O4; r10 O-A2, A1 table)."""
     tenant = world.active_tenant()
@@ -154,9 +151,10 @@ def test_another_tenants_process_is_left_alone(world, holders):
 
 
 def test_the_shared_holders_do_not_exclude_each_other(world, holders):
-    """Run, drain and connect hold the lock shared at once: all three get past it (P3)."""
+    """Run, drain and the launcher hold the lock shared at once: all three get past it (P3; #1471 B3: the connect
+    command's `check <id>` is gone, the launcher takes its place)."""
     tenant = world.active_tenant()
-    started = [holders(tenant, entry) for entry in ("run", "drain", "connect", "run")]
+    started = [holders(tenant, entry) for entry in ("run", "drain", "launcher", "run")]
     assert all(h.alive() for h in started)
 
 

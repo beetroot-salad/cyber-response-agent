@@ -22,6 +22,8 @@ pytestmark = [pytest.mark.postgres, pytest.mark.skipif(not sys.platform.startswi
 DEFENDER = Path(__file__).resolve().parents[2]
 SYSTEM = "identity"  # the scene's proxied system; its adapter carries base files in the planted checkout below
 NO_BASE = "cmdb"  # a tenant system whose adapter ships none there
+#: A remote no forge answers at: the clone's own `remote.origin.url` is never what the adoption reads (surface §4).
+DEAD_ORIGIN = "http://127.0.0.1:9/dead/clone-remote.git"
 PLANTED = {
     "skills/{system}/SKILL.md": b"---\nname: defender-{system}\ndescription: planted\n---\nkeep {host} and ${p}\n",
     "skills/{system}/execution.md": b"# Execution\r\n\xff raw\n",
@@ -76,7 +78,11 @@ def test_the_container_is_handed_the_tenant_the_system_and_the_rendering(scene, 
     """`launch` answers kind adoption, this job and tenant, an active tenant, the system, and the exact rendering with its digest. (R13-1, A3, P-8)"""
     from defender.system_rules import base_files
 
+    from defender.tests.tenancy.tenant_1108_delivery._support import git
+
     job_id, got = str(uuid.uuid4()), {}
+    # the clone's own remote is a dead address unlike the recorded wiring: the facts must carry the wiring (G3, repair 5)
+    git(scene.t.clone, "config", "remote.origin.url", DEAD_ORIGIN)
 
     def job(c) -> int:
         got["facts"] = c.request("launch")
@@ -85,6 +91,8 @@ def test_the_container_is_handed_the_tenant_the_system_and_the_rendering(scene, 
     ran, _, _ = _run(scene, job_id, SYSTEM, job)
     assert "facts" in got, f"premise: the container never ran (the helper's rc {ran.rc!r}): the adoption kind is not served"
     facts = got["facts"]
+    assert set(facts) == {"kind", "tenant", "job", "tenant_state", "system", "digest", "rendering", "forge_origin",
+                          "forge_repo"}, "the facts are surface §4's keys, no more (the container entry's cases run over them)"
     assert (facts["kind"], facts["job"], facts["tenant"], facts["tenant_state"], facts["system"]) == (
         "adoption", job_id, scene.tenant, "active", SYSTEM)
     rendering = {path: base64.b64decode(data) for path, data in facts["rendering"].items()}
@@ -95,6 +103,7 @@ def test_the_container_is_handed_the_tenant_the_system_and_the_rendering(scene, 
 
     [(repo, origin)] = execute(scene.dsn, "SELECT repo, origin FROM tenancy.forge_wiring WHERE tenant_id = %s", (scene.tenant,))
     assert origin, "premise: the scene records forge wiring for the tenant"
+    assert origin != DEAD_ORIGIN, "premise: the wiring is not the clone's remote"
     assert (facts["forge_origin"], facts["forge_repo"]) == (origin, repo), "the launch facts carry the tenant's recorded wiring (surface s4)"
 
 
@@ -222,3 +231,50 @@ def test_a_runs_folder_holding_the_helpers_failure_record_still_lists(scene, che
     (location_path(accepted.tenant_root) / "runs" / f"{uuid.uuid4()}.unknown.json").write_text("{}", encoding="utf-8")
     with pytest.raises(Exception, match="unknown.json"):  # noqa: PT011 — the listing's own sentence names the file
         accepted.runs_repository().list()
+
+
+# --- R13-1.2, R13-5: the helper's own ending before the container (repair 5) ------------------------------------------------
+
+def _docker_did_not_run() -> list[int]:
+    from defender.job_host._session import DOCKER_DID_NOT_RUN
+
+    return sorted(DOCKER_DID_NOT_RUN)
+
+
+@pytest.mark.parametrize("rc", _docker_did_not_run())
+def test_every_docker_exit_that_means_the_container_never_ran_is_failed_start_failed(scene, checkout, rc):
+    """Each `docker run` exit of the class that never ran the entry, with no record: one `{failed, start_failed}`. (R13-1.2)"""
+    from defender.tests.support.jobs._job_helper import drive_helper
+
+    job_id = str(uuid.uuid4())
+    docker = ContainerStandIn(lambda c: 0, run_fault=(rc, "docker: the container did not start\n"))
+    ran = drive_helper(scene, _argv(scene, job_id, SYSTEM), docker=docker, signer=make_signer(), forge=ForgeCredentialRecorder())
+    assert ran.raised is None, ran.raised
+    assert _record(scene, job_id) == {"outcome": "failed", "reason": "start_failed"}
+
+
+class _StoppedWhileBuilding(ForgeCredentialRecorder):
+    """The forge seam, asked while the host half runs: SIGTERM lands then (the worker stopping)."""
+
+    def __call__(self, tenant_id, *a, **k):
+        import os
+        import signal
+
+        os.kill(os.getpid(), signal.SIGTERM)
+        return super().__call__(tenant_id, *a, **k)
+
+
+def test_a_helper_told_to_stop_before_its_container_starts_writes_no_record(scene, checkout):
+    """SIGTERM while the host half runs: no container and no record of the helper's own, so the stopping worker's
+    `worker_stopped` stands; control: unstopped, the container starts. (R13-5)"""
+    from defender.tests.support.jobs._job_helper import drive_helper
+
+    control = str(uuid.uuid4())
+    _, ran_docker, _ = _run(scene, control, SYSTEM, lambda c: (c.request("launch"), 0)[1])
+    assert ran_docker.boxes, "control: the container starts"
+    job_id = str(uuid.uuid4())
+    docker = ContainerStandIn(lambda c: 0)
+    ran = drive_helper(scene, _argv(scene, job_id, SYSTEM), docker=docker, signer=make_signer(), forge=_StoppedWhileBuilding())
+    assert ran.raised is None, ran.raised
+    assert not docker.boxes, "a container was started after the stop"
+    assert _record(scene, job_id) is None, "a stopped helper wrote a record of its own"

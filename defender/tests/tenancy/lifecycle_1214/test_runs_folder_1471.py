@@ -4,6 +4,7 @@ job lane never does. A tenant made by the lifecycle, with no hand-made `runs/`, 
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import os
 import sys
 
@@ -113,7 +114,9 @@ def test_the_upgrade_makes_the_runs_folder_of_every_active_tenant_that_lacks_one
 
 def test_the_upgrade_returns_the_made_ids_oldest_first_and_none_for_an_up_to_date_data_root(world):
     """The returned ids are those it made, oldest first; with nothing missing it makes (returns) none (R13-0)."""
-    first, second = world.active_tenant(), world.active_tenant()
+    first = world.active_tenant()
+    world.clock.advance(_dt.timedelta(seconds=1))  # the world's clock is frozen: without this the two are created at once
+    second = world.active_tenant()
     _without_runs(world, second, first)
     assert _make(world) == [first, second]
     assert _make(world) == []
@@ -158,6 +161,32 @@ def test_the_upgrade_leaves_non_active_tenants_alone_and_refuses_an_active_tenan
     assert _runs(world, control).is_dir() and not _runs(world, control).is_symlink(), "the others were not made first"
     assert not (folder / "runs").exists(), "a tenant still being created was given a runs folder"
     assert not (world.data_root / gone).exists(), "a tenant folder was made for a tenant that has none here"
+
+
+def _not_active() -> list[str]:
+    from typing import get_args
+
+    from defender.tenancy.models import TenantState
+
+    return [state for state in get_args(TenantState) if state != "active"]
+
+
+@pytest.mark.parametrize("state", _not_active())
+def test_the_upgrade_leaves_a_tenant_in_every_state_but_active_alone_with_or_without_its_folder(world, state):
+    """Generated from the tenant states: a tenant not `active`, its folder here without `runs/` or gone (an offboarded
+    tenant's teardown removes it), is neither made nor refused, beside an active one that is made. (R13-0, surface 7b;
+    repair 5)"""
+    import shutil
+
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
+    left, made = world.active_tenant(), world.active_tenant()
+    _without_runs(world, left, made)
+    move_tenant(world.dsn, left, state=state)
+    assert _make(world) == [made], "a tenant that is not active was made, or refused"
+    assert not _runs(world, left).exists(), f"a tenant {state} was given a runs folder"
+    shutil.rmtree(world.data_root / left)
+    assert _make(world) == [], f"a tenant {state} with no folder here was refused"
 
 
 def test_links_at_runs_refuse_those_tenants_after_the_others_are_made_and_the_error_names_every_one(world, tmp_path):

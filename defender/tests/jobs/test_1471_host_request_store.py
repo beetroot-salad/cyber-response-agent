@@ -73,8 +73,9 @@ async def test_r1_a_running_request_does_not_dedupe_and_the_queued_one_then_does
     assert (c2, c3) == (True, False)
     assert second.request_id not in (first.request_id,)
     assert third.request_id == second.request_id
-    assert [(r["id"], r["stage"]) for r in host_rows(world)] == [(first.request_id, "running"),
-                                                                 (second.request_id, "queued")]
+    # the fixed clock gives both rows one `created_at`, so the listing's order is the ids' (repair 5: compared unordered)
+    assert sorted((r["id"], r["stage"]) for r in host_rows(world)) == sorted([(first.request_id, "running"),
+                                                                             (second.request_id, "queued")])
 
 
 @pytest.mark.parametrize("ended", ["completed", "failed"])
@@ -232,10 +233,11 @@ async def test_the_finish_is_fenced_on_running_and_stores_the_result_once(world,
     audit = JobsAudit(caplog)
     result = {"outcome": "refused", "step": "tenant", "sentence": "the tenant is not active", "knowledge": None}
     async with job_store(world) as store:
-        queued, _ = await store.create_readiness(T2, actor="u-1")
-        assert await store.finish_host_request(T2, queued.request_id, stage="completed", result=result) is None
         running, _ = await store.create_readiness(T1, actor="u-1")
-        await store.claim_host_request()
+        claimed = await store.claim_host_request()
+        assert claimed.record.request_id == running.request_id, "premise: the claim took T1's row"
+        queued, _ = await store.create_readiness(T2, actor="u-1")  # after the claim: the claim takes the oldest queued row
+        assert await store.finish_host_request(T2, queued.request_id, stage="completed", result=result) is None
         ended = await store.finish_host_request(T1, running.request_id, stage="completed", result=result)
         again = await store.finish_host_request(T1, running.request_id, stage="failed", failure_reason="worker_error",
                                                 failure_message="late")
@@ -261,6 +263,41 @@ async def test_a_failed_finish_stores_its_reason_and_words_and_no_result(world):
 
 
 # --- B1: offboarding ----------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("kind", ["readiness", "adoption"])
+async def test_b1_a_start_overlapping_an_offboard_leaves_no_live_row_on_the_offboarded_tenant(world, kind):
+    """A start that has read the tenant active and waits to insert its row while the offboard runs (a real stall, as
+    `test_1360_o3`): the start is refused or its row ends `failed`/`tenant_offboarded`; no live row is left on the
+    offboarded tenant. (B1, R1; repair 5)"""
+    import asyncio
+
+    from defender.tests.jobs.test_store import _holding_advisory, _stall_inserts
+    from defender.tests.support.shared._pglocks1339 import blocked, until, until_blocked
+
+    _stall_inserts(world, "host_requests", "true")
+    async with job_store(world) as store:
+        async with _holding_advisory(world):
+            start = asyncio.ensure_future(store.create_readiness(T1, actor="u-1") if kind == "readiness"
+                                          else store.create_adoption(T1, SYSTEM, actor="u-1"))
+            await until_blocked(world, 1)  # the start has read the tenant and waits to insert
+            offboard = asyncio.ensure_future(store.offboard_tenant(T1, actor="op-1"))
+
+            async def offboard_done_or_waiting() -> bool:
+                return offboard.done() or await blocked(world) == 2
+
+            await until(offboard_done_or_waiting)
+        started, offboarded = await asyncio.wait_for(asyncio.gather(start, offboard, return_exceptions=True), 10)
+    assert not isinstance(offboarded, BaseException), offboarded
+    [(state,)] = execute(world, "SELECT state FROM tenancy.tenants WHERE id = %s", (T1,))
+    assert state in ("offboarding", "offboarded"), "premise: the offboard went through"
+    live = [r for r in host_rows(world, T1) if r["stage"] in ("queued", "running")]
+    assert live == [], "a live row was left on an offboarded tenant"
+    if isinstance(started, BaseException):
+        assert is_refusal(started) or type(started).__name__ == "Conflict", started
+    else:
+        row = host_row(world, started[0].request_id)
+        assert (row["stage"], row["failure_reason"]) == ("failed", "tenant_offboarded")
+
 
 async def test_b1_offboarding_ends_live_rows_of_both_kinds_failed_tenant_offboarded_and_deletes_none(world, caplog):
     """Queued and running rows of both kinds end `failed`/`tenant_offboarded` with the offboard words, lease cleared and

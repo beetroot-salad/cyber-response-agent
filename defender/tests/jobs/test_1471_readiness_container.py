@@ -8,6 +8,7 @@ import dataclasses
 import json
 import sys
 import uuid
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -15,6 +16,7 @@ from defender.tests.support.jobs import _job_helper as J
 from defender.tests.support.jobs._job_helper import listing
 from defender.tests.support.jobs._readiness1471 import (
     OPERATOR_WORDS,
+    SECOND_TENANT,
     WARNING_KINDS,
     assert_refused_shape,
     grants_text,
@@ -222,6 +224,23 @@ def test_r4_every_retired_leftover_file_is_reported(tmp_path, monkeypatch, migra
         assert name in _of(warnings, "retired_file"), warnings
 
 
+def test_r13_3_the_census_reads_the_published_copy_not_the_host_clone(tmp_path, monkeypatch, migrated_database):
+    """The host clone and the published copy diverge in a census input: a retired file only the copy holds is warned, one
+    only the clone holds is not (R13-3 "over the published copy"; R4: the copy trailing the clone is no longer reported).
+    Control: each warns when it is in the copy (`test_r4_every_retired_leftover_file_is_reported`). (repair 5, G3)"""
+    files = {"settings/case-record.yaml": "system: ticket\n"}
+    with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL, files=files) as scene:
+        clone_settings = Path(scene.t.clone) / "settings"
+        (clone_settings / "case-record.yaml").unlink()  # the copy holds it, the clone no longer does
+        (clone_settings / "lead-zero.yaml").write_text("system: elastic\n", encoding="utf-8")  # the clone only
+        ran = readiness(scene)
+        retired = _of(_warnings(ran), "retired_file")
+        assert ran.facts is not None, "premise: the container was handed its facts"
+        assert "case-record.yaml" in retired, f"the copy's retired file is not warned: {ran.said()}"
+        assert "lead-zero.yaml" not in retired, f"the host clone was censused, not the published copy: {ran.said()}"
+        assert Path(ran.facts["run_copy"]) != Path(scene.t.clone), "premise: the copy is not the clone"
+
+
 @pytest.mark.parametrize("recorded", [True, False], ids=["recorded", "unrecorded"])
 def test_r13_3_a_verb_left_undecided_on_a_system_the_tenant_has_no_record_of_is_not_its_warning(
         tmp_path, monkeypatch, migrated_database, recorded):
@@ -313,9 +332,12 @@ def _hand(scene: Any, rid: str, mutate: Any) -> Any:
         if mutate == "silent":
             env = {**c.env, SOCKET_ENV: str(scene.root / "no-such-socket")}
             return int(run_py.readiness_main(["--readiness", rid, "--tenant", scene.tenant], environ=env))
+        handed = set(facts)
         if mutate is not None:
             mutate(facts)
         with SocketStandIn(scene.tenant, launch=facts) as stand_in:
+            for gone in handed - set(facts):  # the stand-in fills `tenant`/`tenant_state` by default: serve the removal
+                stand_in.launch.pop(gone, None)
             env = {**c.env, SOCKET_ENV: str(stand_in.path)}
             return int(run_py.readiness_main(["--readiness", rid, "--tenant", scene.tenant], environ=env))
     return container
@@ -345,10 +367,48 @@ def test_r13_1_4_an_exit_that_judges_whether_the_helper_and_container_agree_is_f
         rid = str(uuid.uuid4())
         ran = readiness(scene, rid=rid, container=_hand(scene, rid, HANDOVER[name]))
         assert ran.result() == {"outcome": "failed", "reason": "handover"}, ran.said()
-    with readiness_scene(tmp_path / "ctl", monkeypatch, migrated_database, proxied=ALL) as scene:
+    with readiness_scene(tmp_path / "ctl", monkeypatch, migrated_database, proxied=ALL, tenant_id=SECOND_TENANT) as scene:
         rid = str(uuid.uuid4())
         ran = readiness(scene, rid=rid, container=_hand(scene, rid, None))
         assert ran.result()["outcome"] == "ready", f"control: the stand-in route with the real facts: {ran.said()}"
+
+
+#: The keys of the readiness launch facts (surface §4), spelled once; the helper's own facts are checked against them.
+FACT_KEYS = ("kind", "tenant", "job", "tenant_state", "export_commit", "knowledge", "run_copy", "records")
+#: Keys the design's handover list does not name (R13-1.4): the honest entry may read them or not.
+UNNAMED_KEYS = ("export_commit", "knowledge")
+
+
+def _wrong_typed(value: Any) -> Any:
+    return ["not", "a", "mapping"] if isinstance(value, dict) else ("1471" if not isinstance(value, str) else 1471)
+
+
+@pytest.mark.parametrize("how", ["removed", "wrong-type"])
+@pytest.mark.parametrize("key", FACT_KEYS)
+def test_r13_1_4_launch_facts_missing_a_key_or_holding_a_value_of_another_type_end_in_a_record_never_a_crash(
+        tmp_path, monkeypatch, migrated_database, key, how):
+    """Generated over every key of the facts the real helper hands, each removed and each of another type: `{failed,
+    handover}`, the container's tenant refusal for `tenant_state`, or the honest `ready` for a key the handover list
+    does not name; never a crash or an exit with no record. (R13-1.4; repair 5)"""
+    def mutate(facts: dict[str, Any]) -> None:
+        assert set(facts) == set(FACT_KEYS), f"premise: the helper hands exactly the surface's keys: {sorted(facts)}"
+        if how == "removed":
+            facts.pop(key)
+        else:
+            facts[key] = _wrong_typed(facts[key])
+
+    with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL) as scene:
+        rid = str(uuid.uuid4())
+        ran = readiness(scene, rid=rid, container=_hand(scene, rid, mutate))
+        result = ran.result()
+
+    handover = {"outcome": "failed", "reason": "handover"}
+    if key == "tenant_state":
+        assert result == handover or (result["outcome"], result.get("step")) == ("refused", "container_tenant"), ran.said()
+    elif key in UNNAMED_KEYS:
+        assert result == handover or result["outcome"] == "ready", ran.said()
+    else:
+        assert result == handover, ran.said()
 
 
 def test_r13_1_4_launch_facts_saying_the_tenant_is_not_active_are_refused_at_the_containers_tenant_step(
@@ -381,13 +441,15 @@ def test_r13_1_4_launch_facts_saying_active_over_a_tenant_folder_the_container_r
     with readiness_scene(tmp_path / "ctl", monkeypatch, migrated_database, proxied=ALL) as scene:
         rid = str(uuid.uuid4())
         assert readiness(scene, rid=rid, container=entering(scene, rid, False)).result()["outcome"] == "ready"
-    with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL) as scene:
+    with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL, tenant_id=SECOND_TENANT) as scene:
         rid = str(uuid.uuid4())
         ran = readiness(scene, rid=rid, container=entering(scene, rid, True))
 
         assert ran.facts is not None
         assert ran.facts["tenant_state"] == "active", "the helper's admission passed: its facts say active"
-        with pytest.raises(tenancy.TenantRefused):
+        from defender.records.formats import TenantRefused
+
+        with pytest.raises(TenantRefused):  # repair 5: the refusal's home is `records.formats`, not `tenancy`
             tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=run_py.DEFENDER_DIR, clone_tree=False)
         assert_refused_shape(ran.result(), "container_tenant")
         assert isinstance(ran.knowledge, dict), "a refusal at a container step carries the helper's knowledge record"

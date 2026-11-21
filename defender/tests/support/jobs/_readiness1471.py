@@ -38,20 +38,23 @@ CONTAINER_STEPS = ("container_tenant", "systems")
 AFTER_PUBLISH = ("knowledge_copy", "run_tenant", "roster", "tenant_verdict", "signing", "first_pass", *CONTAINER_STEPS)
 WARNING_KINDS = frozenset({"case_system", "system_down", "grant_ignored", "verb_undecided", "verb_undeclared",
                            "tacit_registry", "tacit_grant", "feedback_setting", "retired_file"})
+#: The tenant of a test's second scene (the first is the fixture's, registered in the same database).
+SECOND_TENANT = "7a1c5e93-4b2d-4f86-9e07-3c8d1b6a2f54"
 #: Words that name an operator command: an admin reads our sentences too (#1470 O11, C9).
 OPERATOR_WORDS = ("tenant.py", "tenant check", "tenant update", "tenant propose")
 
 
 @contextlib.contextmanager
 def readiness_scene(tmp_path: Path, monkeypatch: Any, dsn: str, *, proxied: tuple[str, ...] = ("identity", "ticket"),
-                    files: dict[str, Any] | None = None, records: Callable[[Any], Any] | None = None
-                    ) -> Iterator[HelperScene]:
+                    files: dict[str, Any] | None = None, records: Callable[[Any], Any] | None = None,
+                    tenant_id: str | None = None) -> Iterator[HelperScene]:
     """`helper_scene` whose tenant's records are `records(default_spec)` when given: the tenant's records dropped and
     seeded again through the store (first versions), so a case can disable a system, break a case record or leave the
-    tenant with none. `files` are written over the published fixture as `helper_scene` does."""
+    tenant with none. `files` are written over the published fixture as `helper_scene` does. A second scene in one test
+    passes `tenant_id=SECOND_TENANT`: the database already holds the fixture's id."""
     from defender.tests.support.tenancy import _systems1366 as R
 
-    with helper_scene(tmp_path, monkeypatch, dsn, proxied=proxied, files=files) as scene:
+    with helper_scene(tmp_path, monkeypatch, dsn, proxied=proxied, files=files, tenant_id=tenant_id) as scene:
         if records is not None:
             R.drop_records(dsn, scene.tenant)
             R.seed_postgres_records(dsn, scene.tenant, records(J.proxied_records(proxied)))

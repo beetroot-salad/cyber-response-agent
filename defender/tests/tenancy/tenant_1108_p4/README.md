@@ -154,7 +154,7 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 - `evaluations/harness.py::run_author(tmp, *, invoke_agent=None)`: drafts plus the drain tests' fake forge, no issuer.
 
 **CLIs**
-- `cli/tenant.py`: `update(tenant_id, *, client=, identity=)`; `propose(tenant_id, staged, *, client=None, identity=None) -> int` (add/replace only, `agent/` only, refusals `[tenant.py] ...`); `check_tenant(tenant_id)` reports trail behind `origin/main` and the last publish refusal (O-SEE).
+- `cli/tenant.py`: `update(tenant_id, *, client=, identity=)`; `propose(tenant_id, staged, *, client=None, identity=None) -> int` (add/replace only, `agent/` only, refusals `[tenant.py] ...`). (The O-SEE tenant check retired with `check <id>` in #1471 B3.)
 - `cli/learning/revert_lesson.main(argv, *, client=None, identity=None, issuer_config=None, issuer_transport=None)`; drain lock still exit 3.
 - `validate_scaffold.py <system> --tenant <T> --staged <dir>`: the skill and template checks read the staged (agent-root-shaped) directory, the adapter checks the code tree (`DEFENDER_DIR`). `--tenant` exists today; `--staged` is the missing flag (U13).
 
