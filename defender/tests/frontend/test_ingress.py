@@ -224,3 +224,10 @@ def test_1161_b9_the_ingress_serves_plain_http_on_its_listen_address_for_any_hos
     assert server.get("automatic_https", {}).get("disable") is True, server.get("automatic_https")
     assert all("host" not in matcher for route in server["routes"] for matcher in route.get("match", [])), server["routes"]
     assert "tls" not in _adapted("127.0.0.1:8080", tmp_path)["apps"]
+
+
+@pytest.fixture
+def world(shared_world_fresh):
+    """These tests change nothing on the server, so the module's tests share one running system (conftest
+    `shared_world`), each with a fresh front channel, instead of starting a database, API child and ingress apiece."""
+    return shared_world_fresh

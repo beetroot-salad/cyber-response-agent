@@ -96,3 +96,10 @@ def test_1540_am5_a_page_opened_by_the_browser_itself_is_in_a_guarded_context(wo
     assert len(browser.made) == 1, "positive control: the page's context was made by the guarded browser"
     assert requests_of(browser.made[0]), "positive control: the page's requests were logged"
     browser.made[0].close()
+
+
+@pytest.fixture
+def world(shared_world_fresh):
+    """These tests change nothing on the server, so the module's tests share one running system (conftest
+    `shared_world`), each with a fresh front channel, instead of starting a database, API child and ingress apiece."""
+    return shared_world_fresh

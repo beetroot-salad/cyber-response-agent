@@ -101,3 +101,10 @@ def test_1540_f8_a_violation_left_in_a_contexts_list_fails_when_the_context_clos
     with pytest.raises(AssertionError, match="CSP"):
         context.close()
     violations.clear()  # acknowledged: the fixture's own teardown check has nothing left to report
+
+
+@pytest.fixture
+def world(shared_world_fresh):
+    """These tests change nothing on the server, so the module's tests share one running system (conftest
+    `shared_world`), each with a fresh front channel, instead of starting a database, API child and ingress apiece."""
+    return shared_world_fresh
