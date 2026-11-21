@@ -47,3 +47,15 @@ def shard_of_files(nodeids: Sequence[str], index: int, count: int,
         tests[file_of(nodeid)] += 1
     cost = {f: table.get(f, DEFAULT_SECONDS_PER_TEST * n) for f, n in tests.items()}
     return {f for f, shard in assign(cost, count).items() if shard == index - 1}
+
+
+def heaviest_first(nodeids: Sequence[str], weights: Mapping[str, float] | None = None) -> list[str]:
+    """The files of `nodeids`, heaviest recorded cost first (ties and unknown files by name). `--dist loadfile` hands
+    whole files to the next free worker in collection order, so a shard that starts its heaviest files first ends when
+    its last small ones do; started last, a 500-second file stretches the shard by its whole length."""
+    table = json.loads(WEIGHTS.read_text(encoding="utf-8")) if weights is None else weights
+    tests: dict[str, int] = defaultdict(int)
+    for nodeid in nodeids:
+        tests[file_of(nodeid)] += 1
+    cost = {f: table.get(f, DEFAULT_SECONDS_PER_TEST * n) for f, n in tests.items()}
+    return sorted(cost, key=lambda f: (-cost[f], f))

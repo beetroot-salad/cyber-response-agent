@@ -50,6 +50,10 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     mine = _shard.shard_of_files([item.nodeid for item in items], index, count)
     kept = [item for item in items if _shard.file_of(item.nodeid) in mine]
     config.hook.pytest_deselected(items=[item for item in items if item not in kept])
+    # Heaviest file first (a stable sort: a file's own tests keep their order), so `--dist loadfile` starts the long
+    # files early instead of leaving one for last.
+    rank = {name: n for n, name in enumerate(_shard.heaviest_first([item.nodeid for item in kept]))}
+    kept.sort(key=lambda item: rank[_shard.file_of(item.nodeid)])
     items[:] = kept
 
 
