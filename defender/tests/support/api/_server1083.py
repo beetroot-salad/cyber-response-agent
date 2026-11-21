@@ -122,6 +122,13 @@ def _ephemeral_floor() -> int:
 
 
 _PORT_FLOOR, _SLOTS = 10000, 64
+#: Ports Chromium refuses to navigate to (`net::ERR_UNSAFE_PORT`; its `kRestrictedPorts`): a browser test whose origin
+#: lands on one fails at `goto`. Only 10080 is above `_PORT_FLOOR`; the rest are kept so the floor can move.
+_UNSAFE_PORTS = frozenset({
+    1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110,
+    111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532,
+    540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061,
+    6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080})
 _RECENT: collections.deque[int] = collections.deque(maxlen=64)
 _PORT_LOCK = threading.Lock()
 
@@ -146,7 +153,7 @@ def free_port() -> int:
     """A loopback port nothing listens on when this returns (a closed proxy, a foreign port, the port a program is
     about to bind). Drawn from this xdist worker's own slice of the ports below the kernel's ephemeral range, and never
     the same as one of the last 64 handed out, so no other worker, no test client and no earlier call can take it
-    before the caller does. Where the system leaves no such range, a bind to port 0, as before."""
+    before the caller does. Where the system leaves no such range, a bind to port 0, as before. Never a port a browser refuses to open."""
     floor = _ephemeral_floor()
     if floor - _PORT_FLOOR >= _SLOTS * 8:
         width = (floor - _PORT_FLOOR) // _SLOTS
@@ -154,7 +161,7 @@ def free_port() -> int:
         with _PORT_LOCK:
             for _ in range(200):
                 port = start + secrets.randbelow(width)
-                if port not in _RECENT and _bindable(port):
+                if port not in _RECENT and port not in _UNSAFE_PORTS and _bindable(port):
                     _RECENT.append(port)
                     return port
     with socket.socket() as s:

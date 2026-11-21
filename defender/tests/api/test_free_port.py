@@ -33,3 +33,16 @@ def test_two_workers_draw_from_disjoint_slices(monkeypatch):
     for i, a in enumerate(names):
         for b in names[i + 1:]:
             assert not drawn[a] & drawn[b], (a, b)
+
+
+def test_a_port_is_never_one_a_browser_refuses(monkeypatch):
+    """Chromium fails a navigation to a restricted port (10080 among them) with ERR_UNSAFE_PORT: the draw skips them."""
+    monkeypatch.setattr(server.secrets, "randbelow", lambda n: 10080 - (server._PORT_FLOOR + 0))
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
+    server._RECENT.clear()
+    floor = server._ephemeral_floor()
+    if floor - server._PORT_FLOOR < server._SLOTS * 8:
+        return
+    drawn = [server.free_port() for _ in range(3)]
+    assert 10080 not in drawn
+    assert server._UNSAFE_PORTS.isdisjoint(drawn)
