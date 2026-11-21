@@ -13,6 +13,9 @@ from defender.records import _locations as L
 from defender.tests.support.shared.contracts._by_path import load_lint_gate
 from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
+#: Reads the source tree (ast, mypy, a repo-wide walk) rather than running the product: CI's `lint` job runs it (`-m gate`).
+pytestmark = pytest.mark.gate
+
 ROOT = Path(__file__).resolve().parents[3]
 TYPES = [value for name, value in vars(L).items()
          if isinstance(value, type) and issubclass(value, L._Location) and name != "_Location"]

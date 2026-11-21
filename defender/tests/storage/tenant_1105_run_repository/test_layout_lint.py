@@ -14,6 +14,9 @@ import pytest
 
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 
+#: Reads the source tree (ast, mypy, a repo-wide walk) rather than running the product: CI's `lint` job runs it (`-m gate`).
+pytestmark = pytest.mark.gate
+
 if TYPE_CHECKING:  # the import heuristic's view of the target; loaded by `_lint()` at run time
     from tooling.lint import lint_run_layout_imports  # noqa: F401
 

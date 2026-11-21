@@ -3,10 +3,15 @@
 The source-reading rules (no disk credential location, the check-file name's single home and absence from agent-facing text) are held by `tooling/lint/lint_delivery_architecture.py`."""
 from __future__ import annotations
 
+import pytest
+
 import ast
 import importlib
 
 from ._support import DEFENDER, target
+
+#: Reads the source tree (ast, mypy, a repo-wide walk) rather than running the product: CI's `lint` job runs it (`-m gate`).
+pytestmark = pytest.mark.gate
 
 _OWNER = "learning/author/version_control/"
 

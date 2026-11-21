@@ -13,6 +13,8 @@ so no receiver can reach it (`test_defender_paths_carries_no_corpus_accessor`).
 """
 from __future__ import annotations
 
+import pytest
+
 import ast
 import dataclasses
 import importlib
@@ -20,6 +22,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from defender.tests.support.shared.contracts._by_path import DEFENDER, WORKTREE, import_lint_lib
+
+#: Reads the source tree (ast, mypy, a repo-wide walk) rather than running the product: CI's `lint` job runs it (`-m gate`).
+pytestmark = pytest.mark.gate
 
 _astlib = import_lint_lib("_astlib")
 

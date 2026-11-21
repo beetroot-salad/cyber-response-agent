@@ -18,6 +18,9 @@ from typing import Any
 
 import pytest
 
+#: Reads the source tree (ast, mypy, a repo-wide walk) rather than running the product: CI's `lint` job runs it (`-m gate`).
+pytestmark = pytest.mark.gate
+
 REPO = Path(__file__).resolve().parents[4]
 EXEMPT = "# lint-report-file: ok"
 _PRODUCT_FLOOR = 300
