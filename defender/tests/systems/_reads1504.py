@@ -131,7 +131,7 @@ UNREADABLE_LISTS: tuple[tuple[str, str | None], ...] = (
     ("absent", None), ("computed", "tuple([('POST', '/widgets/_find')])"))
 
 #: Pools the route-shape agreement test (A6.1) crosses: every pair is judged by the access parser, the lint and the catalog
-#: reader, none by a verdict written here. Empty parts, case, digits and underscore, lengths 2/3/10/11, whitespace, control
+#: reader, each against the A6.1 oracle written in the test. Empty parts, case, digits and underscore, lengths 2/3/10/11, whitespace, control
 #: characters, `?` and `#`. (GET and HEAD are not here: the parser takes them, the list refuses them, tested apart.)
 SHAPE_METHODS = ("", "post", "Post", "PO", "POS", "POST", "PO5T", "PO_ST", "POST ", "POST\n", "ABCDEFGHIJ", "ABCDEFGHIJK")
 SHAPE_PATHS = ("", "/", "/x/_a", "x/_a", "/x/*/b", "/x/a%20b", "/x/", "/x y", "/x\t", "/x\x00", " /x", "/x?y=1", "/x#y", "?", "#")

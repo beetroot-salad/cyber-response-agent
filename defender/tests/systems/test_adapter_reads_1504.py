@@ -284,7 +284,7 @@ def test_1504_a61_each_reader_of_the_methods_that_need_no_declaration_judges_exa
 #: Python source the scan below reads: the product tree and the lint scripts, not the tests that exercise them.
 SCANNED = ("defender", "tooling/lint")
 KIT_ACCESS = "defender/kit/access.py"
-#: Where each reader of the rule lives. The route checker's name is the code stage's; a reader need only import from the kit.
+#: Where each reader of the rule lives. The kit's names are FORCED in `_reads1504.py`; each reader takes them from the kit.
 PROXY, CONFINEMENT = "defender/credential_proxy/_scope.py", "defender/integrations/confinement.py"
 LINT, CATALOG, PARSER = ("tooling/lint/lint_catalog_declarations.py", "defender/system_rules/catalog.py",
                          "defender/tenancy/_access.py")
@@ -486,7 +486,7 @@ def test_1504_a62_a_list_that_is_not_usable_has_no_reads_and_one_reason_in_the_c
         assert line in out, (line, out)  # the whole reason is printed, every non-blank line of it
     rest = out
     for line in lines:
-        rest = rest.replace(line, "")
+        rest = rest.replace(line, "", 1)
     written = [node.value for node in ast.walk(ast.parse(source or "()", mode="eval"))
                if isinstance(node, ast.Constant) and isinstance(node.value, str) and "/" in node.value]
     for text in (*needles, *written, "/widgets/_find"):
