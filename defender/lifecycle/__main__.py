@@ -82,7 +82,7 @@ async def _serve() -> int:
     directory = TenantDirectory(lambda: PostgresTenantRepository(dsn))
     host = HostActor(tenants, forge=clients.forge_anonymous(config), openbao_login=clients.openbao_login(config),
                      git=git_runner, config=config, clock=_now,
-                     # as run start's: the outcomes only the launcher sees are recorded for `tenant.py check`
+                     # as run start's: the outcomes only the launcher sees are recorded for the readiness check
                      publish=functools.partial(launch_publish, directory=directory))
     _logger.info("lifecycle: serving both actors every %ss", config.poll_interval)
     try:

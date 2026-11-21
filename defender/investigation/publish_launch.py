@@ -58,7 +58,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 #: How far inside the launcher's budget the child's own deadline falls (at most a quarter of
 #: it), so the child reports running out itself before the backstop fires.
 _REPORT_MARGIN = 5.0
-#: Who records an outcome only the launcher sees (`tenant.py check` names the trigger).
+#: Who records an outcome only the launcher sees (the readiness check names the trigger).
 _TRIGGER = "launch-time publish"
 #: How long a child asked to stop (SIGTERM) may take to unwind before it is killed.
 _STOP_GRACE = 5.0
@@ -76,7 +76,7 @@ def _tenant(tenant_id: str, data_root: Path) -> Tenant | None:
 
 
 def _recorded(directory: TenantDirectory | None, tenant_id: TenantId, line: str) -> str:
-    """`line`, an outcome the child never recorded, recorded for `tenant.py check` by the
+    """`line`, an outcome the child never recorded, recorded for the readiness check by the
     child's own recorder (`record_report`) in the tenant records, so it reads as the child's
     would. With no records handed in nothing is recorded."""
     record_report(directory, tenant_id, line, by=_TRIGGER)

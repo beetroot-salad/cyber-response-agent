@@ -1,8 +1,8 @@
 """The grant census a tenant's settings are held to, beyond
-acceptance — ONE rule for its two surfaces: `tenant.py check` (an operator, or a tenant repo's
+acceptance — ONE rule for its two surfaces: the readiness check (a tenant's admin, over the API), `check --folder` (a tenant repo's
 CI) and `tooling/lint/lint_verb_disposition_census.py` (the product repo's CI, over the template
 and the fixture). The surfaces share the judgement of which gaps count, not an exit status: the
-lint exits 2 when the census was never taken (the gate could not run); `check` reports it as one
+lint exits 2 when the census was never taken (the gate could not run); the readiness check and `check --folder` report it as one
 more finding, exit 1, and still judges everything that needs no census (`folder_findings`)."""
 from __future__ import annotations
 

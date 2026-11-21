@@ -62,7 +62,7 @@ REPORT_CLASSES = (FRESH, STALE_TRANSIENT, STALE_OPERATOR, MISCONFIGURED)
 #: Each network call's own bound in the child (issuer, forge, fetch). The calls together are
 #: bounded by the child's one deadline (`--budget`), which this never outlasts.
 CHILD_NETWORK_TIMEOUT = 30.0
-#: Who records a launch-time publish's outcome (`tenant.py check` names the trigger).
+#: Who records a launch-time publish's outcome (the readiness check names the trigger).
 _TRIGGER = "launch-time publish"
 
 
@@ -93,7 +93,7 @@ def publish_for_run(  # noqa: PLR0913 — the child's work and its in-process st
     configuration, `issuer_transport` a stand-in transport to it); open the tenant's delivery
     against the recorded origin with the forge `client`; fetch; then, under the tenant lock
     (`locked_hook` first, the locked phase's one injectable slow point), publish. Returns the
-    report line; records the outcome in the tenant records for `tenant.py check` (O-SEE). With
+    report line; records the outcome in the tenant records for the readiness check (O-SEE). With
     the lock busy the outcome is `fresh` when `current` already names the fetched `origin/main`,
     else `stale:transient`. `budget` is the one deadline over the network phase (login, open,
     fetch; none when `None`): past it, `stale:transient`. Clients made here are closed before it

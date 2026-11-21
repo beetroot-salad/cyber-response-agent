@@ -375,7 +375,7 @@ def main() -> None:
         check_handoff(report, defender, system, args.handoff.resolve(),
                       None if args.case is None else Path(os.path.abspath(args.case)))
     # The tenant half (system skill, seed queries) is judged where connect staged it, for
-    # `tenant.py propose`; the adapter checks above read the code tree (#1108 P4 flow 6).
+    # the adoption request; the adapter checks above read the code tree (#1108 P4 flow 6).
     if args.case is not None and args.handoff is None:
         report.add(FAIL, "--case is judged with the handoff's system: give the folder with --handoff <dir>")
     if args.staged is None and not needs_tenant_half(verbs):

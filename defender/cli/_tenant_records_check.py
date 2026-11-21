@@ -1,6 +1,6 @@
-"""What `tenant.py check <id>` reports about a tenant's records (#1366 R8, R12, O1, C3, C5, O9 leftovers).
+"""What the readiness check reports about a tenant's records (#1366 R8, R12, O1, C3, C5, O9 leftovers).
 
-The CLI's `check_tenant` asks this module and prints what it returns beside its other findings (the repo, the publish,
+The readiness worker asks this module and reports what it returns beside its other findings (the repo, the publish,
 the alert mapping, the registry). One finding per line; `[]` is clean. Every judgement here is one run start or the
 record store already makes, asked again over the tenant's current records:
 

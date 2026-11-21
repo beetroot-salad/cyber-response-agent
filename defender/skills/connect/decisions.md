@@ -75,8 +75,8 @@ is load-bearing — change one only on purpose. The *how* is in `SKILL.md`,
   Later investigations read a ticket's comments as its history, so the write goes only to a
   ticket the maintainer names as disposable (#1401).
 
-- **Human review gate.** connect branches the product half and proposes the tenant
-  half (`tenant.py propose`, a review PR on the tenant forge); it does not merge
+- **Human review gate.** connect branches the product half and leaves the tenant
+  half staged for the adoption request or a person's pull request on the tenant forge; it does not merge
   or push. Generated code does not go live without a human reading the
   diff.
 
