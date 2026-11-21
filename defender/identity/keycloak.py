@@ -367,7 +367,10 @@ class KeycloakSignIn(_RealmAdmin):
                 described = sent.get("error_description", [""])[0]
                 raise SignInUnavailable(f"the realm sends the sign-in request back to {self._redirect_uri} with error "
                                         f"{sent['error'][0]}" + (f" ({described})" if described else ""))
-        raise SignInUnavailable(f"the sign-in request was answered {response.status_code}, not the sign-in page")
+        sent_on = f" to {location}" if response.is_redirect else ""
+        raise SignInUnavailable(
+            f"the sign-in request was answered {response.status_code}{sent_on}, not the sign-in page (a realm whose "
+            "browser flow sends the browser to another sign-in provider first is not supported)")
 
     def _signin_query(self, *, state: str, nonce: str, code_challenge: str) -> str:
         """The browser sign-in request's query: one owner for the browser's URL and the start check's (#1620)."""

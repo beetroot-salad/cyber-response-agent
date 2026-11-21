@@ -34,7 +34,6 @@ from defender.tests.support.api._server1083 import (
     REALMS,
     SIGNIN_REALM,
     STEP_KINDS,
-    STEPS,
     Fail,
     FakeKeycloak,
     closed_port,
@@ -977,7 +976,7 @@ async def test_1083_o3_every_member_of_each_steps_failure_space_refuses_naming_t
     assert await probe_of(realm, FakeKeycloak()) is None  # positive control: the healthy realm passes
     messages: dict[str, set[str]] = {}
     wrong = []
-    for step in STEPS:
+    for step in REALM_STEPS[realm]:
         fake = FakeKeycloak()
         port = probed(realm, transport=fake)  # one adapter per step, as start builds it; earlier steps answer healthily
         try:
@@ -1001,7 +1000,7 @@ async def test_1083_o3_every_member_of_each_steps_failure_space_refuses_naming_t
             await port.close()
     assert wrong == [], "\n".join(wrong)
     # FC-6 names only the first step; the others are told apart: no message is given by two steps.
-    shared = {(a, b): messages[a] & messages[b] for a in STEPS for b in STEPS if a < b}
+    shared = {(a, b): messages[a] & messages[b] for a in REALM_STEPS[realm] for b in REALM_STEPS[realm] if a < b}
     assert all(not both for both in shared.values()), shared
 
 
@@ -1066,7 +1065,7 @@ async def test_1620_a_400_to_the_sign_in_request_refuses_naming_the_client_the_r
             else FakeKeycloak(signin_client=("another-client", "x")))
     message = await refusal_of(SIGNIN_REALM, fake)
     assert realms_named(message) == {SIGNIN_REALM}, message
-    for named in ("redirect", CLIENT_ID, REDIRECT_URI, "unknown or disabled client", "valid redirect URI"):
+    for named in ("redirect step", CLIENT_ID, REDIRECT_URI, "unknown or disabled client", "valid redirect URI"):
         assert named in message, (named, message)
     listed = FakeKeycloak(redirect_uris=[REDIRECT_URI])
     assert await probe_of(SIGNIN_REALM, listed) is None  # positive control: the listed URI passes
@@ -1090,6 +1089,7 @@ async def test_1620_a_redirect_to_the_callback_with_an_error_refuses_with_keyclo
     REDIRECT_URI.replace("api.defender.test", "api.defender.test:8443") + "?error=invalid_request",
     REDIRECT_URI.replace("api.defender.test", "other.test") + "?error=invalid_request",
     f"{REDIRECT_URI}?code=abc", f"{REDIRECT_URI}#error=invalid_request", f"{FRONT}/realms/{SIGNIN_REALM}/broker/x/login"])
+
 async def test_1620_any_other_redirect_refuses_without_claiming_a_keycloak_error(location):
     """Only a redirect to the redirect URI itself (scheme, host, port, path) carrying `error` in its query is
     Keycloak's error for this request; any other redirect refuses as an answer the step cannot read."""
@@ -1097,8 +1097,9 @@ async def test_1620_any_other_redirect_refuses_without_claiming_a_keycloak_error
     fake.answers[(SIGNIN_REALM, "redirect")] = lambda request: httpx.Response(302, headers={"location": location})
     message = await refusal_of(SIGNIN_REALM, fake)
     assert realms_named(message) == {SIGNIN_REALM}, message
-    assert "redirect" in message, message
-    assert "invalid_request" not in message, message
+    assert "redirect step" in message, message
+    assert "not the sign-in page" in message, message
+    assert "sends the sign-in request back" not in message, message
     assert "unknown or disabled client" not in message, message
 
 
@@ -1112,7 +1113,7 @@ async def test_1620_every_member_of_the_redirect_steps_failure_space_refuses_nam
         except pytest.fail.Exception:
             wrong.append(f"{label}: passed")
             continue
-        if realms_named(message) != {SIGNIN_REALM} or "redirect" not in message:
+        if realms_named(message) != {SIGNIN_REALM} or "redirect step" not in message:
             wrong.append(f"{label}: {message}")
         if label.startswith("raises") and urllib.parse.urlsplit(BACK).netloc not in message:
             wrong.append(f"{label}: does not name the address: {message}")
@@ -1141,3 +1142,23 @@ async def test_1620_the_stand_in_sets_cookies_a_cookie_keeping_client_would_send
         await client.post(f"/realms/{SIGNIN_REALM}/protocol/openid-connect/token", data={"grant_type": "x"})
     assert len(fake.cookies_sent) == 1, fake.cookies_sent
     assert "AUTH_SESSION_ID=" in fake.cookies_sent[0], fake.cookies_sent
+
+
+async def test_1620_a_redirect_elsewhere_is_named_in_the_refusal():
+    """The operator can tell a realm that sends the browser to another provider from a misbehaving proxy."""
+    elsewhere = f"{FRONT}/realms/{SIGNIN_REALM}/broker/corp/login"
+    fake = FakeKeycloak()
+    fake.answers[(SIGNIN_REALM, "redirect")] = lambda request: httpx.Response(302, headers={"location": elsewhere})
+    message = await refusal_of(SIGNIN_REALM, fake)
+    assert elsewhere in message, message
+    assert "another sign-in provider" in message, message
+
+
+async def test_1620_a_redirect_to_an_address_that_is_not_a_url_refuses_at_the_redirect_step():
+    """A `Location` whose port is not a number is refused by the HTTP client before the step reads it; start still
+    ends naming the step."""
+    fake = FakeKeycloak()
+    fake.answers[(SIGNIN_REALM, "redirect")] = lambda request: httpx.Response(
+        302, headers={"location": "https://api.defender.test:abc/auth/callback?error=invalid_request"})
+    message = await refusal_of(SIGNIN_REALM, fake)
+    assert "redirect step" in message, message

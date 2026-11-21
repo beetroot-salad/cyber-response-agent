@@ -402,7 +402,7 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
         """The browser's sign-in request (#1620), answered as observed on Keycloak 26.4 (2026-11-21): another client is
         a 400 page "Client not found"; a redirect URI the client does not list (`redirect_uris`, None: whichever the
         request names) a 400 page "Invalid parameter: redirect_uri"; a request it refuses but whose redirect it trusts
-        (not S256, or a challenge that is not 43 characters) a 302 to the callback with `error`, `state` and `iss`; a
+        (not S256, or a challenge outside RFC 7636's 43-128 characters of its alphabet; observed: `abc`) a 302 to the callback with `error`, `state` and `iss`; a
         healthy one the sign-in page, 200, setting the three cookies Keycloak sets on it."""
         params = request.url.params
         redirect = params.get("redirect_uri", "")
@@ -414,7 +414,8 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
         if kind == "redirect_elsewhere":
             return httpx.Response(302, headers={"location": f"{self.issuer(realm)}/broker/elsewhere/login"})
         challenge = params.get("code_challenge", "")
-        if kind == "callback_error" or params.get("code_challenge_method") != "S256" or len(challenge) != 43:
+        if (kind == "callback_error" or params.get("code_challenge_method") != "S256"
+                or not re.fullmatch(r"[A-Za-z0-9._~-]{43,128}", challenge)):
             query = urllib.parse.urlencode({
                 "error": "invalid_request",
                 "error_description": "Invalid parameter: code challenge method is not matching the configured one",

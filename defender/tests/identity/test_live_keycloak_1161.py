@@ -326,4 +326,16 @@ def test_1620_the_probe_holds_for_the_registered_callback_and_refuses_another_na
     assert _probe(_signin_adapter(live, live.callback)) is None
     unlisted = "http://localhost:9999/api/auth/callback"
     message = _probe(_signin_adapter(live, unlisted))
-    assert message is not None and "redirect" in message and unlisted in message and live.client[0] in message, message
+    assert message is not None, "an unlisted callback passed"
+    assert "redirect step" in message, message
+    assert unlisted in message, message
+    assert live.client[0] in message, message
+
+
+def test_1620_a_request_it_refuses_but_whose_callback_it_trusts_is_sent_back_there_with_an_error(live):
+    """The third answer the stand-in models (#1620 C3): a malformed challenge is sent to the callback with `error`."""
+    answer = httpx.get(live.authorize_url("s", "n", "abc"))
+    assert answer.status_code == 302, answer.status_code
+    location = urllib.parse.urlsplit(answer.headers["location"])
+    assert f"{location.scheme}://{location.netloc}{location.path}" == live.callback, answer.headers["location"]
+    assert urllib.parse.parse_qs(location.query)["error"] == ["invalid_request"], answer.headers["location"]
