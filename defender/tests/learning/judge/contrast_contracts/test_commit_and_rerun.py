@@ -330,25 +330,13 @@ class Watch:
 
 
 class _WatchedState:
-    """The findings store with `publish_findings` observed; every other verb delegated."""
+    """The findings store with `publish_finding_channels` observed; every other verb delegated."""
 
     def __init__(self, watch: Watch) -> None:
         self._watch = watch
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._watch.real, name)
-
-    def publish_findings(self, tenant: str, run_id: str, rows: Any, *, kind: str) -> Any:
-        w = self._watch
-        rows = list(rows)
-        channel = _channel(_kind_of(kind))
-        labels = list(dict.fromkeys(_label_of(r) for r in rows))
-        for label in labels:
-            w.snap("append", label, _kind_of(kind))
-        w.fire(w.before_append, labels, _kind_of(kind), channel)
-        out = w.real.publish_findings(tenant, run_id, rows, kind=kind)
-        w.fire(w.after_append, labels, _kind_of(kind), channel)
-        return out
 
     def publish_finding_channels(self, tenant: str, run_id: str, channels: Any) -> Any:
         """One call for every kind (#1565): each kind's before-append fires, then the one insert, then each after."""

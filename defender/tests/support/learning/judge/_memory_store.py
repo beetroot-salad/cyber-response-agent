@@ -1,11 +1,13 @@
 """An in-memory stand-in for the learning store's synchronous face, for tests of the judge's findings sink (#1278).
 
 Only the verbs the operator-lane sink calls (`work`, `publish_finding_channels`, by way of `publish_findings` per
-kind) and the store's one rule they depend on: a finding id is unique for good per (tenant, kind) and a repeat is a duplicate, not a second row. Everything else about the store (leases, batches,
+kind) and the store's one rule they depend on: a finding id is unique for good per (tenant, kind): a repeat is a duplicate, not a second row, and other content at a held id a
+collision (#1565), refusing the whole call. Everything else about the store (leases, batches,
 phases) is the store's own tests'; a test that needs it uses the real store (`tests/support/learning/core/_store1278.py`).
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,7 +38,12 @@ class MemoryStore:
         added = 0
         for row in rows:
             key = str(row["finding_id"])
-            if any(i.kind == kind and i.key == key for i in held):
+            same = [i for i in held if i.kind == kind and i.key == key]
+            if same and json.dumps(same[0].payload, sort_keys=True) != json.dumps(dict(row), sort_keys=True):
+                from defender.learning_store import ItemCollision
+
+                raise ItemCollision(f"a {kind} with id {key!r} came with other content: a collision, not a retry")
+            if same:
                 continue
             held.append(Item(kind, key, dict(row)))
             added += 1

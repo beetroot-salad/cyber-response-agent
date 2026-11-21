@@ -580,12 +580,12 @@ class EpisodeFindings:
         """Append each channel's rows to the episode's record for it, every row as given:
         `(appended, unreadable lines seen)` by channel. The record decides no repeat: the store's
         insert at the job's end, the one owner of that rule, stores the same row once and refuses
-        other content at one finding id (#1565). Every channel is checked before any is written;
+        other content at one finding id (#1565). Every channel's record is read (an unreadable one refuses) before any is written;
         rows of no channel write nothing (the record is still read, for its unreadable lines)."""
-        records = [(channel, self._record(channel), list(rows)) for channel, rows in channels.items()]
+        records = [(channel, self._record(channel), list(rows), self.rows_report(channel)[1])
+                   for channel, rows in channels.items()]
         done: dict[str, tuple[int, int]] = {}
-        for channel, record, rows in records:
-            malformed = self.rows_report(channel)[1]
+        for channel, record, rows, malformed in records:
             if rows:
                 getattr(self._episode, record).append("".join(json.dumps(row) + "\n" for row in rows))
             done[channel.name] = (len(rows), malformed)
