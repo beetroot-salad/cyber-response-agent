@@ -1,9 +1,10 @@
-// The signed-in home (F4; alert list design O8, O11): a link to each of the person's tenants' alerts, each open
-// invitation with Accept, and with neither, that Sluice is invite-only. Who is signed in, and sign-out, are in the
-// top bar.
+// The signed-in home (F4; alert list design O8, O11, amended by the home redesign): for each of the person's tenants,
+// a card that opens its alerts and a card that opens its knowledge repository on the forge (when the shell checked the
+// repository's page); each open invitation with Accept; and with neither, that Sluice is invite-only. With several
+// tenants, each tenant's cards sit under its id. Who is signed in, and sign-out, are in the top bar.
 import { useState } from "react";
-import { addressOf } from "../addresses";
-import { useActions, useMe, type AcceptResult, type Person } from "../shell/provider";
+import { addressOf, repoLink } from "../addresses";
+import { useActions, useMe, useRepoAddress, type AcceptResult, type Person } from "../shell/provider";
 import { TopBar } from "./TopBar";
 
 export function Home() {
@@ -11,15 +12,13 @@ export function Home() {
   const lone = me.tenants.length === 1;
   return (
     <>
-      <TopBar />
+      <TopBar current="home" />
       <main data-screen="home">
         <h1>Home</h1>
         {me.tenants.length > 0 ? (
           <ul data-list="tenants">
             {me.tenants.map(({ tenant_id }) => (
-              <li key={tenant_id}>
-                <a href={addressOf("alerts", [tenant_id])}>{lone ? "Alerts" : `Alerts — ${tenant_id}`}</a>
-              </li>
+              <Tenant key={tenant_id} tenant={tenant_id} lone={lone} />
             ))}
           </ul>
         ) : null}
@@ -33,6 +32,39 @@ export function Home() {
         {me.tenants.length === 0 && me.invitations.length === 0 ? <InviteOnly me={me} /> : null}
       </main>
     </>
+  );
+}
+
+/** One tenant's cards: its alerts, and its knowledge repository. Under the tenant's id when the person has several. */
+function Tenant({ tenant, lone }: { readonly tenant: string; readonly lone: boolean }) {
+  const repo = useRepoAddress(tenant);
+  return (
+    <li data-tenant={tenant}>
+      {lone ? null : <h2 data-field="tenant">{tenant}</h2>}
+      <div data-cards="tenant">
+        <section data-card="alerts">
+          <h3>Alerts</h3>
+          <p>Every alert pulled from your ticket system, with what Sluice concluded.</p>
+          <a href={addressOf("alerts", [tenant])} data-action="open-alerts">
+            Open alerts
+          </a>
+        </section>
+        <section data-card="repo">
+          <h3>Knowledge repo</h3>
+          <p>
+            What Sluice has learned about your environment, kept as files. A change takes effect once someone on your
+            team merges it, and Sluice asks for feedback there as issues you answer in a comment.
+          </p>
+          {repo === null ? (
+            <p data-field="no-repo">This tenant has no knowledge repository yet.</p>
+          ) : (
+            <a href={repoLink(repo)} data-action="open-repo">
+              Open repo <span aria-hidden="true">↗</span>
+            </a>
+          )}
+        </section>
+      </div>
+    </li>
   );
 }
 

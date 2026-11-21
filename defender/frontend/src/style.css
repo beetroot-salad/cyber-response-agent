@@ -69,11 +69,33 @@ header[data-bar="top"] {
   border-bottom: 1px solid var(--app-line);
   background: var(--app-raised);
 }
+header[data-bar="top"] {
+  flex-wrap: wrap;
+}
 header[data-bar="top"] a[data-action="home"] {
-  margin-right: auto;
   font-weight: 700;
   color: var(--app-ink-bright);
   text-decoration: none;
+}
+header[data-bar="top"] nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-right: auto;
+}
+header[data-bar="top"] nav a {
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  color: var(--app-ink);
+  text-decoration: none;
+}
+header[data-bar="top"] nav a:hover {
+  background: var(--app-paper);
+}
+header[data-bar="top"] nav a[aria-current="page"] {
+  color: var(--app-ink-bright);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--app-accent);
 }
 header[data-bar="top"] [data-field="email"] {
   font-size: 0.9rem;
@@ -252,7 +274,53 @@ p[data-later="failed"] {
   color: var(--app-bad);
 }
 
-/* Home (O8, O11): the tenants' alerts links and the open invitations. */
+/* Home (O8, O11, home redesign): each tenant's cards, and the open invitations. */
+main[data-screen="home"] {
+  max-width: 64rem;
+  margin: 2rem auto;
+}
+li[data-tenant] h2 {
+  margin: 1.5rem 0 0.5rem;
+  font-size: 1rem;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  color: var(--app-ink-bright);
+}
+div[data-cards="tenant"] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 1rem;
+}
+section[data-card] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.25rem;
+  border: 1px solid var(--app-line);
+  border-radius: 8px;
+  background: var(--app-raised);
+}
+section[data-card] h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--app-ink-bright);
+}
+section[data-card] p {
+  margin: 0;
+}
+section[data-card] a {
+  align-self: flex-start;
+  margin-top: auto;
+  padding: 0.4rem 1rem;
+  border: 1px solid var(--app-line);
+  border-radius: 6px;
+  color: var(--app-ink-bright);
+  font-weight: 600;
+  text-decoration: none;
+}
+section[data-card] a:hover {
+  border-color: var(--app-accent);
+}
 ul[data-list="tenants"],
 ul[data-list="invitations"] {
   list-style: none;

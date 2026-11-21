@@ -31,6 +31,13 @@ export type ReadResult<K extends ReadKey> = Outcome<
 
 export type Person = components["schemas"]["Me"];
 
+declare const checked: unique symbol;
+
+/** A forge address the shell checked (`repo.ts`): absolute http or https, a host, no user part, no query or fragment,
+ * and on another origin than the app's, so it can never be one of the app's own addresses (`/api` among them). Only
+ * `repoAddress` makes one. */
+export type RepoAddress = string & { readonly [checked]: true };
+
 /** What accepting an invitation came to: `left` when the shell navigated away (to the accepted tenant's alerts, or to
  * sign in after a 401), `not-open` when the invitation is no longer open (404), `refused` when the API declined it
  * for this person (a 403, or any other 4xx but 404 and 401: r3.3). The server's own failures (5xx, no answer) are

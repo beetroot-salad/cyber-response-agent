@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import logging
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Generic, Literal, NamedTuple, TypeVar, cast
@@ -75,6 +75,7 @@ from .models import (
     SystemCheck,
     SystemPut,
     TenantItem,
+    MeTenant,
     TenantRef,
 )
 from . import addresses
@@ -1073,6 +1074,22 @@ async def logout(request: Request, deps: Deps, caller: Person) -> Response:
     return response
 
 
+def _repo_page(wiring: _tenancy.ForgeWiring | None) -> str | None:
+    """The tenant repository's page for a browser: the recorded origin without `.git`, when it is an http or https
+    address with a host and no user part (the lifecycle records `<forge url>/<repo>.git`); otherwise None, so a remote
+    recorded by hand (an ssh one, one carrying a user, or one Python cannot even split) is never served as a link."""
+    if wiring is None:
+        return None
+    try:
+        parts = urlsplit(wiring.origin)
+        host = parts.hostname
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not host or "@" in parts.netloc or parts.query or parts.fragment:
+        return None
+    return wiring.origin.removesuffix(".git")
+
+
 @auth.get("/me", responses=_IDENTITY)
 async def read_me(deps: Deps, caller: AnyCaller) -> Me | ProgramMe:
     """Who the caller is: a person with their tenants and invitations, or a program with its one tenant
@@ -1085,7 +1102,7 @@ async def read_me(deps: Deps, caller: AnyCaller) -> Me | ProgramMe:
             credential=CredentialRef(id=view.credential.id, expires_at=view.credential.expires_at))
     return Me(
         user=MeUser(id=view.user.id, email=view.user.email, display_name=view.user.display_name),
-        tenants=[TenantRef(tenant_id=t) for t in view.tenants],
+        tenants=[MeTenant(tenant_id=t, repo_url=_repo_page(await deps.tenants.forge_wiring(t))) for t in view.tenants],
         administrator=view.administrator,
         invitations=[InvitationRef(id=i.id, tenant_id=i.tenant_id) for i in view.invitations])
 

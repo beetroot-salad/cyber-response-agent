@@ -561,6 +561,15 @@ class TenantRef(BaseModel):
     tenant_id: TenantId
 
 
+class MeTenant(TenantRef):
+    """One of a person's tenants as `/me` serves it: the id, and where a browser opens its knowledge repository."""
+
+    repo_url: str | None = Field(
+        description="The tenant's knowledge repository's page on the forge: the recorded origin without `.git`, when "
+                    "that is an http or https address with a host and no user part. Null when the tenant has no forge "
+                    "wiring, or its origin is not such an address (a remote recorded by hand).")
+
+
 class TenantItem(BaseModel):
     """A tenant and its one job, as an administrator sees it (#1214): the state, the pending action,
     the current step and whose it is, and the last failure (which names the step and the external
@@ -585,7 +594,7 @@ class Me(BaseModel):
 
     kind: Literal["person"] = "person"
     user: MeUser
-    tenants: list[TenantRef]
+    tenants: list[MeTenant]
     administrator: bool = Field(description="Whether this session holds platform administrator powers.")
     invitations: list[InvitationRef] = Field(description="Open invitations addressed to this user.")
 

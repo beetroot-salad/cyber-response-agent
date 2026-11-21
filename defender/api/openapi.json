@@ -1415,7 +1415,7 @@
           },
           "tenants": {
             "items": {
-              "$ref": "#/components/schemas/TenantRef"
+              "$ref": "#/components/schemas/MeTenant"
             },
             "title": "Tenants",
             "type": "array"
@@ -1431,6 +1431,34 @@
           "invitations"
         ],
         "title": "Me",
+        "type": "object"
+      },
+      "MeTenant": {
+        "description": "One of a person's tenants as `/me` serves it: the id, and where a browser opens its knowledge repository.",
+        "properties": {
+          "repo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The tenant's knowledge repository's page on the forge: the recorded origin without `.git`, when that is an http or https address with a host and no user part. Null when the tenant has no forge wiring, or its origin is not such an address (a remote recorded by hand).",
+            "title": "Repo Url"
+          },
+          "tenant_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_id",
+          "repo_url"
+        ],
+        "title": "MeTenant",
         "type": "object"
       },
       "MeUser": {

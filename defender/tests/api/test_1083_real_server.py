@@ -1280,3 +1280,44 @@ async def test_1161_b10_no_interactive_docs_page_is_served_whatever_the_environm
         assert (await client.get("/api/openapi.json")).status_code == 200
         assert [p for p in route_paths(running.app.routes) if not p.startswith("/api/")] == []
         assert [(await client.get(p)).status_code for p in ("/docs", "/redoc", "/docs/oauth2-redirect", "/openapi.json")] == [404] * 4
+
+
+# --- Home redesign: each of a person's tenants carries its repository's page ------------------------------------------
+
+def _wire(dsn: str, tenant: str, origin: str | None) -> None:
+    """Record `tenant`'s forge origin by hand (as the lab's row is), or drop its wiring (`None`)."""
+    if origin is None:
+        execute(dsn, "DELETE FROM tenancy.forge_wiring WHERE tenant_id = %s", (tenant,))
+    else:
+        execute(dsn, "UPDATE tenancy.forge_wiring SET origin = %s WHERE tenant_id = %s", (origin, tenant))
+
+
+async def _repo_urls(served: Served) -> list[tuple[str, str | None]]:
+    me = await served.client.get("/api/me", headers=served.ann(write=False))
+    assert me.status_code == 200, me.text
+    return [(t["tenant_id"], t["repo_url"]) for t in me.json()["tenants"]]
+
+
+@pytest.mark.postgres
+async def test_home_me_serves_each_tenants_repository_page_its_recorded_origin_without_dot_git(served):
+    """The lifecycle's origin `<forge>/<repo>.git` is served as `<forge>/<repo>`, the page a browser opens."""
+    [(origin,)] = execute(served.dsn, "SELECT origin FROM tenancy.forge_wiring WHERE tenant_id = %s", (A,))
+    assert origin.endswith(".git"), origin
+    assert await _repo_urls(served) == [(A, origin.removesuffix(".git"))]
+    _wire(served.dsn, A, "https://forge.example:8443/tenants/a")
+    assert await _repo_urls(served) == [(A, "https://forge.example:8443/tenants/a")]
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("origin", [
+    None, "ssh://git@forge.example/tenants/a.git", "git@forge.example:tenants/a.git", "file:///srv/tenants/a.git",
+    "https://bot:secret@forge.example/tenants/a.git", "https://bot@forge.example/tenants/a.git", "https:///tenants/a.git",
+    "https://forge.example/tenants/a.git?x=1", "https://forge.example/tenants/a.git#x", "tenants/a.git",
+    "https://[forge.example/tenants/a.git",
+], ids=["no-wiring", "ssh", "scp", "file", "user-and-password", "user", "no-host", "query", "fragment", "relative",
+        "malformed-host"])
+async def test_home_me_serves_no_repository_page_without_wiring_or_for_an_origin_a_browser_should_not_open(served, origin):
+    """No wiring, or a remote recorded by hand that is not a plain http(s) address with a host and no user part: null,
+    never the origin itself (a user part may carry a credential)."""
+    _wire(served.dsn, A, origin)
+    assert await _repo_urls(served) == [(A, None)]

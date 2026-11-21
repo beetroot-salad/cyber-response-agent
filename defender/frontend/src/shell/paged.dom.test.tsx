@@ -62,6 +62,7 @@ function server() {
     read,
     queryClient: onceQueryClient(),
     me: null,
+    repos: new Map(),
     pathname: "/",
     shape: null,
     query: { get: () => null, getAll: () => [] },
