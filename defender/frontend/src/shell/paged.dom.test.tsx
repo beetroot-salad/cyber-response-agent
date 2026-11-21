@@ -10,7 +10,7 @@ import type { ReadKey, ReadParams, ReadResult } from "./types";
 
 const ALERTS = "/api/tenants/{tenant_id}/alerts";
 const LESSONS = "/api/tenants/{tenant_id}/lessons";
-type Outcome = "malicious" | "benign";
+type Outcome = "malicious" | "benign" | "inconclusive" | "unresolved";
 
 /** The alert list's params under `outcome`. */
 const alerts = (outcome: Outcome): ReadParams<typeof ALERTS> => ({ path: { tenant_id: "t" }, query: { outcome } });
@@ -40,7 +40,8 @@ interface Sent {
   readonly cursor: string | null;
 }
 
-/** A server whose every read has three pages, `<what>-1` to `<what>-3`, the cursor of page n being `<key> <what> n`. */
+/** A server whose every read has three pages, `<what>-1` to `<what>-3`, the cursor of page n being `<key> <what> n`;
+ * page 2 of the inconclusive alerts is a fault (the read throws), and of the unresolved ones an error answer. */
 function server() {
   const sent: Sent[] = [];
   const read = <K extends ReadKey>(key: K, params: ReadParams<K>): Promise<ReadResult<K>> => {
@@ -51,6 +52,8 @@ function server() {
     sent.push({ key, what, cursor });
     if (cursor !== null && !cursor.startsWith(`${key} ${what} `)) return Promise.resolve({ kind: "error" }); // 422
     const n = cursor === null ? 1 : Number(cursor.split(" ").at(-1));
+    if (what === "inconclusive" && n === 2) return Promise.reject(new Error("a fault"));
+    if (what === "unresolved" && n === 2) return Promise.resolve({ kind: "error" });
     const body = { items: [alert(`${what}-${n}`)], next_cursor: n < 3 ? `${key} ${what} ${n + 1}` : null };
     // trust: the body is a page of the read's items (an alert's, which page 1 of the lessons read is never checked for)
     return Promise.resolve({ kind: "ok", body } as ReadResult<K>);
@@ -235,3 +238,47 @@ describe("usePagedRead's Load more reads the next page of the read it is pressed
     expect(probe.ids()).toEqual(["malicious-1", "malicious-2", "malicious-3"]);
   });
 });
+
+/** The params whose page 2 fails, by how it fails. */
+const FAILING = { "a fault": alerts("inconclusive"), "an error answer": alerts("unresolved") };
+
+/** Drawn for `params`, with their page 2 pressed for and failed; the press. */
+async function failedAtPage2(params: ReadParams<typeof ALERTS>) {
+  const probe = drawn({ key: ALERTS, params });
+  await waitFor(() => {
+    expect(probe.now().more).not.toBeNull();
+  });
+  const press = probe.now().more;
+  await pressed(press);
+  await waitFor(() => {
+    expect(probe.now().later).toBe("failed");
+  });
+  return { probe, press };
+}
+
+// #1581 "Shell, paged read": a failed later page stays failed for the load (no retry, #1540's once-per-load rule).
+describe.each(Object.entries(FAILING))(
+  "usePagedRead keeps a later page failed by %s failed for the load",
+  (_, params) => {
+    it("a Load more drawn before the page failed and pressed after does not read anything", async () => {
+      const { probe, press } = await failedAtPage2(params);
+      const mark = probe.sent.length;
+      await pressed(press);
+      expect(probe.sent.slice(mark)).toEqual([]);
+      expect(probe.now().later).toBe("failed");
+      expect(probe.now().more).toBeNull();
+    });
+
+    it("leaving its read and returning reads nothing and shows the page failed", async () => {
+      const { probe } = await failedAtPage2(params);
+      const what = params.query?.outcome ?? "";
+      await shown(probe, { key: ALERTS, params: alerts("benign") }, ["benign-1"]);
+      const mark = probe.sent.length;
+      await shown(probe, { key: ALERTS, params }, [`${what}-1`]);
+      await new Promise((settled) => setTimeout(settled, 50)); // whatever the return would send
+      expect(probe.sent.slice(mark)).toEqual([]);
+      expect(probe.now().later).toBe("failed");
+      expect(probe.now().more).toBeNull();
+    });
+  },
+);

@@ -205,6 +205,8 @@ export function usePagedRead<K extends PagedKey>(key: K, params: ReadParams<K>):
   const more =
     first.kind === "ok" && result.hasNextPage && later === null
       ? () => {
+          // a press drawn before its read's later page failed does nothing: that page stays failed for the load (#1604)
+          if (queryClient.getQueryState([key, params])?.status === "error") return;
           void result.fetchNextPage({ cancelRefetch: false });
         }
       : null;
