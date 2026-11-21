@@ -440,3 +440,78 @@ def test_1504_o3_an_adapter_without_a_readable_list_refuses_even_a_record_with_n
     failed, out = _validate_in(checkout, "widget")
     naming = [line for line in failed if X.READS_CONSTANT in line]
     assert bool(naming) is not readable, out
+
+
+# --- #1504 A6.2: a list that is not usable is "no usable list", with its reason -------------------------------------------
+
+def _unusable_params() -> list[Any]:
+    return [pytest.param(source, needles, id=name) for name, source, needles in X.UNUSABLE_LISTS]
+
+
+def _widget_catalog(tmp_path: Path, source: str | None) -> Any:
+    return rules("Catalog").of_checkout(X.plant_adapter(tmp_path / "checkout", "widget", reads=source))
+
+
+@pytest.mark.parametrize(("source", "needles"), _unusable_params())
+def test_1504_a62_a_list_that_is_not_usable_reads_as_no_list_and_its_reason_names_each_offending_entry(
+        tmp_path, source, needles):
+    """A readable `READ_ROUTES` that is not usable (GET/HEAD, bad shape, repeat, non-pair): the entry has `reads is None`
+    and a `reads_unusable` naming each offending entry. (A6.2)"""
+    entry = _widget_catalog(tmp_path, source).entry("widget")
+    assert getattr(entry, X.ENTRY_FIELD) is None
+    reason = getattr(entry, X.UNUSABLE_FIELD)
+    assert isinstance(reason, str), reason
+    for needle in needles:
+        assert needle in reason, (needle, reason)
+
+
+@pytest.mark.parametrize(("source", "needles"), _unusable_params())
+def test_1504_a62_a_record_of_an_adapter_with_an_unusable_list_is_refused_at_access_naming_the_route_not_unreadability(
+        tmp_path, source, needles):
+    """A record (listing no non-GET read, or one other route) of an adapter with an unusable list is refused at its access
+    part with a fault naming the offending route and not saying the list is unreadable; the run's record builder holds
+    the same fault. (A6.2, O3)"""
+    from defender.kit.faults import ConfigFault
+    from defender.systems.run_tenant import record_settings
+
+    catalog = _widget_catalog(tmp_path, source)
+    for reads in ((), (("POST", "/widgets/_fine_one"),)):
+        records = _planted_record("widget", reads)
+        faults = list(rules("judge_records")(records, None, catalog=catalog))
+        assert faults, reads
+        for needle in needles:
+            naming = [f for f in faults if needle in f]
+            assert naming, (needle, faults)
+            assert all(RECORDS.part("widget", "access") in f for f in naming), naming
+        assert not [f for f in faults if "without running" in f], faults
+        held = record_settings(records, catalog=catalog)["access"]["widget"]
+        assert isinstance(held, ConfigFault), held
+        assert all(needle in str(held) for needle in needles), str(held)
+        assert "without running" not in str(held), str(held)
+
+
+@pytest.mark.parametrize("source", [pytest.param(s, id=name) for name, s in X.UNREADABLE_LISTS])
+def test_1504_a62_an_absent_or_unreadable_list_has_no_reads_a_reason_and_a_refused_record(tmp_path, source):
+    """An absent or computed list: `reads is None`, a `reads_unusable` reason present, and a record of it (even one
+    listing no non-GET read) is refused at its access part with a fault naming that reason. (A6.2, O3 unchanged)"""
+    catalog = _widget_catalog(tmp_path, source)
+    entry = catalog.entry("widget")
+    assert getattr(entry, X.ENTRY_FIELD) is None
+    reason = getattr(entry, X.UNUSABLE_FIELD)
+    assert isinstance(reason, str)
+    assert reason.strip()
+    faults = list(rules("judge_records")(_planted_record("widget", ()), None, catalog=catalog))
+    assert [f for f in faults if reason in f and RECORDS.part("widget", "access") in f], (reason, faults)
+
+
+def test_1504_a62_a_usable_list_reads_as_itself_with_no_reason_and_its_record_is_accepted(tmp_path):
+    """Positive control: a usable literal (and `()`) reads as itself with `reads_unusable is None`, as do the checkout's
+    own adapters; the matching record is accepted. (A6.2)"""
+    for listed in ((WIDGET_ROUTE, ("PUT", "/widgets/*/mark")), ()):
+        catalog = rules("Catalog").of_checkout(X.plant_adapter(tmp_path / f"w{len(listed)}", "widget", reads=repr(listed)))
+        entry = catalog.entry("widget")
+        assert tuple(getattr(entry, X.ENTRY_FIELD)) == listed
+        assert getattr(entry, X.UNUSABLE_FIELD) is None
+        assert list(rules("judge_records")(_planted_record("widget", listed), None, catalog=catalog)) == []
+    own = _catalog()
+    assert {a: getattr(own.entry(a), X.UNUSABLE_FIELD) for a in own.adapter_ids} == dict.fromkeys(own.adapter_ids)

@@ -86,3 +86,46 @@ def plant_adapter(root: Path, name: str, *, reads: str | None, check: str = "ret
             {check}
         '''))
     return root
+
+
+# --- #1504 A6 (one route rule): names and data the amendment's tests share ----------------------------------------------
+
+#: The `CatalogEntry` attribute holding why an adapter has no usable list (A6.2), and the `GET /adapters` item field
+#: carrying it (A6.3). FORCED by the design: `reads_unusable`, text or None.
+UNUSABLE_FIELD = "reads_unusable"
+
+#: Readable-but-unusable `READ_ROUTES` sources (A6.2), each with the text its reason must name (the offending entry's
+#: path as written). The paths are not any route a test record lists, so a fault naming one got it from the list.
+#: (id, source of the list, needles).
+UNUSABLE_LISTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("get", "(('GET', '/widgets/_gone'),)", ("/widgets/_gone",)),
+    ("head", "(('HEAD', '/widgets/_gone'),)", ("/widgets/_gone",)),
+    ("lower-case-method", "(('post', '/widgets/_gone'),)", ("/widgets/_gone",)),
+    ("no-leading-slash", "(('POST', 'widgets_gone'),)", ("widgets_gone",)),
+    ("query-in-path", "(('POST', '/widgets/_gone?x=1'),)", ("/widgets/_gone",)),
+    ("fragment-in-path", "(('POST', '/widgets/_gone#top'),)", ("/widgets/_gone",)),
+    ("repeated-route", "(('POST', '/widgets/_gone'), ('POST', '/widgets/_gone'))", ("/widgets/_gone",)),
+    ("non-pair-entry", "('POST /widgets/_gone',)", ("/widgets/_gone",)),
+    ("triple-entry", "(('POST', '/widgets/_gone', 'x'),)", ("/widgets/_gone",)),
+    ("good-route-beside-a-bad-one", "(('POST', '/widgets/_fine'), ('GET', '/widgets/_gone'))", ("/widgets/_gone",)),
+    ("two-bad-entries", "(('GET', '/widgets/_one'), ('post', '/widgets/_two'))", ("/widgets/_one", "/widgets/_two")),
+)
+#: Lists the module does not hold readably (absent, or computed): (id, source, None for no declaration).
+UNREADABLE_LISTS: tuple[tuple[str, str | None], ...] = (
+    ("absent", None), ("computed", "tuple([('POST', '/widgets/_find')])"))
+
+#: Route shapes (A6.1) as the tenant access parser, the lint and the catalog reader must each judge them.
+SHAPE_BAD: tuple[tuple[str, tuple[str, str]], ...] = (
+    ("lower-case-method", ("post", "/x/_a")), ("mixed-case-method", ("Post", "/x/_a")),
+    ("two-letter-method", ("PO", "/x/_a")), ("eleven-letter-method", ("ABCDEFGHIJK", "/x/_a")),
+    ("digit-in-method", ("PO5T", "/x/_a")), ("underscore-in-method", ("PO_ST", "/x/_a")),
+    ("empty-method", ("", "/x/_a")), ("no-leading-slash", ("POST", "x/_a")), ("empty-path", ("POST", "")),
+    ("query-in-path", ("POST", "/x/_a?y=1")), ("fragment-in-path", ("POST", "/x/_a#y")),
+)
+SHAPE_GOOD: tuple[tuple[str, tuple[str, str]], ...] = (
+    ("post", ("POST", "/x/_a")), ("star-segment", ("PUT", "/x/*/b")), ("root", ("DELETE", "/")),
+    ("three-letter-method", ("ABC", "/x")), ("ten-letter-method", ("ABCDEFGHIJ", "/x")),
+    ("encoded-space", ("POST", "/x/a%20b")), ("trailing-slash", ("OPTIONS", "/x/")),
+)
+#: Methods the readers of the read-method list are asked about (all fit every reader's own method pattern).
+METHOD_POOL = ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT", "ABC")
