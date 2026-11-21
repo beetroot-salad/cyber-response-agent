@@ -1499,7 +1499,7 @@ def _helper_copy(ns: argparse.Namespace, accepted: tenancy.Tenant,
     return copy
 
 
-def _helper_named(what: str, made: Path, said: object, *, job: str) -> None:
+def _helper_named(what: str, made: object, said: object, *, job: str) -> None:
     if str(made) != str(said):
         sys.exit(f"[run.py] job {job}: the helper's {what} {said!r} is not this job's {made}")
 
