@@ -26,6 +26,7 @@ Run as `python -m defender.tests.support.api._server1083` it is the test-support
 from __future__ import annotations
 
 import base64
+import collections
 import contextlib
 import dataclasses
 import datetime as dt
@@ -109,8 +110,53 @@ OPENBAO_ADDR = "http://127.0.0.1:1"
 
 # --- ports ------------------------------------------------------------------------------------------
 
+#: The lowest port the kernel hands to an outgoing connection or a bind to port 0 (Linux's `ip_local_port_range`).
+#: A port picked below it cannot be taken by the sockets the tests themselves open (HTTP clients, database
+#: connections, another test's bind to port 0), which is how the earlier bind-to-0 pick lost its port between
+#: this call and the program's own bind ("Address already in use").
+def _ephemeral_floor() -> int:
+    try:
+        return int(Path("/proc/sys/net/ipv4/ip_local_port_range").read_text().split()[0])
+    except (OSError, ValueError, IndexError):
+        return 32768
+
+
+_PORT_FLOOR, _SLOTS = 10000, 64
+_RECENT: collections.deque[int] = collections.deque(maxlen=64)
+_PORT_LOCK = threading.Lock()
+
+
+def _slot_of(worker: str) -> int:
+    """This pytest-xdist worker's share of the range (`gw3` -> 3; no xdist -> 0), so two workers never draw from the
+    same ports."""
+    digits = "".join(c for c in worker if c.isdigit())
+    return int(digits) % _SLOTS if digits else 0
+
+
+def _bindable(port: int) -> bool:
+    with socket.socket() as s:
+        try:
+            s.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
 def free_port() -> int:
-    """A port nothing listens on right now (a small race; the program binds it itself)."""
+    """A loopback port nothing listens on when this returns (a closed proxy, a foreign port, the port a program is
+    about to bind). Drawn from this xdist worker's own slice of the ports below the kernel's ephemeral range, and never
+    the same as one of the last 64 handed out, so no other worker, no test client and no earlier call can take it
+    before the caller does. Where the system leaves no such range, a bind to port 0, as before."""
+    floor = _ephemeral_floor()
+    if floor - _PORT_FLOOR >= _SLOTS * 8:
+        width = (floor - _PORT_FLOOR) // _SLOTS
+        start = _PORT_FLOOR + _slot_of(os.environ.get("PYTEST_XDIST_WORKER", "")) * width
+        with _PORT_LOCK:
+            for _ in range(200):
+                port = start + secrets.randbelow(width)
+                if port not in _RECENT and _bindable(port):
+                    _RECENT.append(port)
+                    return port
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])
