@@ -50,6 +50,22 @@ def _bare_connect(path: Path) -> sqlite3.Connection:
                            isolation_level=None)
 
 
+def _connect_existing(path: Path) -> sqlite3.Connection:
+    """`_bare_connect` for a file that must already exist: SQLite's `mode=rw` never creates one, so
+    a store deleted after a caller looked is missing, not a fresh empty database (#1458). Not
+    `mode=ro`: on a WAL store whose writer has closed, a read-only connection creates `-wal`/`-shm`
+    and cannot remove them. Raises `FileNotFoundError` when no regular file is at `path`."""
+    if not path.is_file():
+        raise FileNotFoundError(f"session store not found: {path}")
+    try:
+        return sqlite3.connect(f"{path.absolute().as_uri()}?mode=rw", uri=True,
+                               timeout=STORE_BUSY_TIMEOUT_MS / 1000, isolation_level=None)
+    except sqlite3.OperationalError:
+        if not path.is_file():
+            raise FileNotFoundError(f"session store not found: {path}") from None
+        raise
+
+
 
 
 def _finish_connect(conn: sqlite3.Connection) -> None:
@@ -448,9 +464,7 @@ def open_store_for_read(store_path: Path) -> Iterator[StoreHandle]:
     Issues no DDL, so an older file may still carry an unscoped `gather_boundary` view with
     the same `SCHEMA_VERSION`; a reader of that view must rebuild it first."""
     store_path = Path(store_path)
-    if not store_path.is_file():
-        raise FileNotFoundError(f"session store not found: {store_path}")
-    conn = _bare_connect(store_path)
+    conn = _connect_existing(store_path)
     try:
         _refuse_stale_version(conn)
         _finish_connect(conn)
