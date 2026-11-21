@@ -533,6 +533,16 @@ class PublishLaunch(Protocol):
     def __call__(self, tenant_id: TenantId, *, data_root: Path) -> object: ...
 
 
+class KnowledgeExit(SystemExit):
+    """`resolve_knowledge`'s `[run.py]` refusal (a `SystemExit` like every run setup refusal, its code the text), with
+    the publish report it was refused on (`None` for a pinned run's): a caller that must not pass the report's reason
+    on (#1471 P-2: a readiness check names only the kind) reads the kind here, never from the text."""
+
+    def __init__(self, text: str, *, report: PublishReport | None) -> None:
+        super().__init__(text)
+        self.report = report
+
+
 def default_publish(records: tenancy.TenantDirectory) -> PublishLaunch:
     """The real launch-time publish: a separate child process (O-BUDGET, P-3), whose outcomes
     only the launcher sees are recorded through this run's tenant records."""
@@ -565,40 +575,44 @@ def stopped_by_sigterm() -> Iterator[None]:
 
 def publish_report(
     publish: PublishLaunch | None, tenant: tenancy.Tenant, data_root: DataRoot,
-    records: tenancy.TenantDirectory,
+    records: tenancy.TenantDirectory, *, trigger: str | None = None,
 ) -> PublishReport:
     """The launch-time publish's outcome (#1108 P4, U7): the child is handed identifiers only
     — the tenant id and the data root (O8: no login material passes through the run process)
     — and its one report line is read back. The real launcher never raises and records every
     outcome itself in the tenant records; a seam that raises is U11's `stale:operator`, never
-    fresh, recorded by the same recorder the launcher uses."""
+    fresh, recorded by the same recorder the launcher uses. `trigger` (who asked: a job's
+    helper names its own, #1471) is handed to the publish when given, and records its outcomes;
+    none keeps the launcher's own (an investigation's launch)."""
     from defender.tenancy import run_knowledge
 
+    named = {} if trigger is None else {"trigger": trigger}
     try:
         launch = publish if publish is not None else default_publish(records)
         with stopped_by_sigterm():
-            line = launch(tenant.id, data_root=tenancy.data_root_for_child(data_root))
+            line = launch(tenant.id, data_root=tenancy.data_root_for_child(data_root), **named)
     except Exception as failed:  # noqa: BLE001 — U11: a failed child is stale:operator, recorded
         from defender.tenancy import record_report
 
         line = run_knowledge.failed_line(f"{type(failed).__name__}: {failed}")
-        record_report(records, tenant.id, line, by="launch-time publish")
+        record_report(records, tenant.id, line, by=trigger or "launch-time publish")
     return run_knowledge.read_publish_report(line)
 
 
 def resolve_knowledge(
     tenant: tenancy.Tenant, *, pin: str | None, publish: PublishLaunch | None,
-    data_root: DataRoot, records: tenancy.TenantDirectory,
+    data_root: DataRoot, records: tenancy.TenantDirectory, trigger: str | None = None,
 ) -> KnowledgeSource:
     """Which export this run reads and why: the pinned one (no publish), else `current` after
-    the launch-time publish — or the refusal before the box (O-A, O9)."""
+    the launch-time publish (`trigger`: who asked for it, `publish_report`) — or the refusal
+    before the box (O-A, O9), a `KnowledgeExit` holding the report it was refused on."""
     from defender.tenancy import run_knowledge
 
-    report = None if pin is not None else publish_report(publish, tenant, data_root, records)
+    report = None if pin is not None else publish_report(publish, tenant, data_root, records, trigger=trigger)
     try:
         source = run_knowledge.resolve_source(tenant, report=report, pinned=pin)
     except run_knowledge.KnowledgeRefused as refused:
-        sys.exit(f"[run.py] {refused}")
+        raise KnowledgeExit(f"[run.py] {refused}", report=report) from None
     if source.kind == run_knowledge.STALE:
         _logger.warning(f"knowledge is stale ({source.stale_kind}): the run reads the last "
                         f"published snapshot {source.commit[:12]}; the publish said: "

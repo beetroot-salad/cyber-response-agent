@@ -138,8 +138,7 @@ def signing_access(tenant_id: TenantId, *, directory: TenantDirectory, signer: A
     (`request_signer`) unless one is injected."""
     address = proxy_url or os.environ.get(PROXY_URL_ENV)
     if not address:
-        raise ConfigFault(f"a system is reached through the credential proxy, but its address is "
-                          f"not configured ({PROXY_URL_ENV})")
+        raise ConfigFault(f"the credential proxy's address is not configured ({PROXY_URL_ENV})")
     try:
         tenancy.recorded_login(tenancy.live_generation(directory, tenant_id), tenancy.SIGN_LOGIN, tenant_id)
     except (tenancy.AppRoleLoginError, tenancy.RecordsUnreachable) as refused:

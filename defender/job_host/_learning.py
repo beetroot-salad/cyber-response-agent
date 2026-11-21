@@ -140,7 +140,8 @@ def _admit_tenant(session: Session, hold: contextlib.ExitStack) -> Any:
     from defender.systems.run_tenant import host_tenant
 
     try:
-        admitted = host_tenant(session.root, session.tenant_id, defender_dir=session.defender_dir)
+        admitted = host_tenant(session.root, session.tenant_id, directory=session.directory,
+                               defender_dir=session.defender_dir)
     except TenantRefused as refused:
         raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
     hold.enter_context(admitted)
@@ -177,6 +178,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     from defender import run_common
     from defender.records.formats import TenantRefused
     from defender.systems.run_tenant import run_tenant_for
+    from defender.investigation.publish_launch import LAUNCH_TRIGGER
     from defender.tenancy import run_knowledge
 
     job = str(session.job_id)
@@ -186,7 +188,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     # The tenant's current records, read once for the whole job (#1366 O6; a tenant not active refused, #1470 O8): the
     # container, which reads no database, is handed them in the launch facts, and so is each sibling's run.
     current = setup_step(run_common.read_records, records, accepted.id)
-    source = settle_knowledge(session, accepted, records)
+    source = settle_knowledge(session, accepted, records, trigger=LAUNCH_TRIGGER)
     try:
         export = session.inside_tenant(accepted.export_folder(source.commit))
         ready = run_tenant_for(accepted, dispatches_lead_zero=False, records=current,

@@ -33,7 +33,7 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 
-from . import _adoption, _common, _investigation, _learning, _store_relay
+from . import _adoption, _common, _investigation, _learning, _readiness, _store_relay
 from ._container import (
     STOP_GRACE,
     job_container_name,
@@ -46,7 +46,7 @@ from ._container import (
     start,
 )
 from ._server import Server
-from ._session import DOCKER_DID_NOT_RUN, HOST_REQUEST_KINDS, KINDS, HandBack, KindSpec, Registry, Session, SetupRefused, StartFailed
+from ._session import DOCKER_DID_NOT_RUN, KINDS, HandBack, KindSpec, Registry, Session, SetupRefused, StartFailed
 
 _logger = logging.getLogger(__name__)
 
@@ -58,20 +58,23 @@ _POLL = 0.05
 
 @functools.cache
 def registry() -> Registry:
-    """Every request and kind the helper answers: the shared requests, the investigation kind, the learning kinds."""
+    """Every request and kind the helper answers: the shared requests, the investigation kind, the learning kinds, and
+    the host requests (#1471), each kind registering only what it is answered."""
     built = Registry()
     _common.register_common(built)
     _investigation.register_investigation(built)
     _learning.register(built)
     _adoption.register_adoption(built)
     _store_relay.register_store(built)
+    # The host requests' kinds (`KINDS`' last two): the readiness check here, the adoption beside it.
+    _readiness.register_readiness(built)
     return built
 
 
 def _parse_argv(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="python -m defender.job_host",
                                 description="Run one job of one tenant in its own container (#1170).")
-    p.add_argument("--kind", required=True, choices=(*KINDS, *HOST_REQUEST_KINDS), help="the job's kind")
+    p.add_argument("--kind", required=True, choices=KINDS, help="the job's kind")
     p.add_argument("--job", help="the job's id (an investigation's, a learning job's; none for a family-less "
                                  "post-step)")
     p.add_argument("--tenant", required=True, help="the job's tenant")
@@ -221,6 +224,8 @@ def _start(session: Session, spec: KindSpec, signals: _Signals, hold: contextlib
             if session.signalled.is_set():
                 raise StartFailed("the helper was told to stop before its container started; none was started")
             proc = start(session, launch)
+        except _common.HelperFault:
+            raise  # the helper's own failure: no ending is recorded, and it exits non-zero (`_run`)
         except SetupRefused as refused:
             ending = ("refused", f"setup refused: {refused}")
         except StartFailed as failed:
@@ -256,7 +261,11 @@ def _run(session: Session, spec: KindSpec, signals: _Signals) -> int:
     hold = contextlib.ExitStack()
     proc, server = None, None
     try:
-        proc, server, ending = _start(session, spec, signals, hold)
+        try:
+            proc, server, ending = _start(session, spec, signals, hold)
+        except _common.HelperFault as fault:
+            _tell(session, f"the helper failed before its container started, and records no ending: {fault}")
+            return 1
         signals.raising = False
         if ending is not None:
             _tell(session, ending[1])
@@ -274,11 +283,12 @@ def _run(session: Session, spec: KindSpec, signals: _Signals) -> int:
 
 
 def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: Any = None, forge: Any = None,
-         command: list[str] | None = None, client: Any = None) -> int:
+         command: list[str] | None = None, client: Any = None, directory: Any = None) -> int:
     """The helper for one job (module doc). `docker` is the docker seam (the box package's real one by default),
     `signer` the request signer (the tenant's sign login), `publish` the launch-time publish (the real child),
     `forge` the forge credential's builder (the learning kinds'), `command` a container command line in place of the
-    kind's entry, `client` the forge client the drain's delivery uses (a new one by default). Returns 0 once the helper
+    kind's entry, `client` the forge client the drain's delivery uses (a new one by default), `directory` the tenant
+    records the tenant is admitted through (`host_tenant(directory=)`; None: the process's own, #1471). Returns 0 once the helper
     served the job to its end (its container ran and exited, whatever its status, or the helper wrote the ending it
     decided before the container), or, for a post-step whose container exited, its answer whether work still waits
     (`NOTHING_WAITS`, `WORK_WAITS`; #1487 Amendment r5.2); else another status: the worker reads any other status, with
@@ -307,7 +317,7 @@ def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: An
                       root_folder=tenancy.data_root_for_child(root), claim=claim,
                       docker=docker if docker is not None else run_docker,
                       defender_dir=process_defender_dir().resolve(), signer=signer, publish=publish, forge=forge,
-                      client=client, command=list(command) if command is not None else None,
+                      client=client, command=list(command) if command is not None else None, directory=directory,
                       alert_digest=ns.alert_digest, system=ns.system, post_ticket=bool(ns.post_ticket),
                       ticket_link=ns.ticket_link if ns.post_ticket else None)
     session.container = job_container_name(session)

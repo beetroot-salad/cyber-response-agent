@@ -64,12 +64,10 @@ from defender import _git
 from defender import tenancy  # noqa: E402
 from defender._io import read_plain_bytes  # noqa: E402
 from defender.tenancy import AGENT_HALF, SETTINGS_HALF, TENANT_ID_FILE  # noqa: E402
-from defender.systems import tacit_registry  # noqa: E402
 from defender.systems.verbs import is_platform_served  # noqa: E402
 from defender.systems.verb_dispositions import (  # noqa: E402
     DispositionError,
     dispositions_path,
-    run_grants,
 )
 from defender.records.formats import TenantRefused  # noqa: E402
 from defender.cli import _tenant_secrets  # noqa: E402
@@ -150,44 +148,24 @@ def _tenant_findings(knowledge: Path) -> list[str]:
 
 
 def _feedback_findings(knowledge: Path) -> list[str]:
-    """The feedback setting (#1414 O1): an unreadable file, or one naming an unknown outcome."""
-    from defender.tenancy import feedback_setting
+    """The feedback setting (#1414 O1): `feedback_findings` over the folder's `settings/`."""
+    from defender.cli._tenant_records_check import feedback_findings
 
-    try:
-        feedback_setting.load_feedback_outcomes(knowledge / SETTINGS_HALF)
-    except feedback_setting.FeedbackSettingError as bad:
-        return [str(bad)]
-    return []
+    return feedback_findings(knowledge / SETTINGS_HALF)
 
 
 def _registry_findings(knowledge: Path) -> list[str]:
-    """The tacit-knowledge registry file judged by what `tacit_cli check` fails on (a whole-file
-    refusal or a dropped entry, #1390 O7), whether or not the grant table reaches `lookup`
-    (A10). Date-dependent notes stay advisory, so a tenant's CI does not go red by the calendar."""
-    path = tacit_registry.registry_path(knowledge / AGENT_HALF)
-    return [f"{tacit_registry.SYSTEM} registry: {why}"
-            for why in tacit_registry.read_registry(path).problems]
+    """The tacit-knowledge registry file (`registry_findings` over the folder's `agent/`)."""
+    from defender.cli._tenant_records_check import registry_findings
+
+    return registry_findings(knowledge / AGENT_HALF)
 
 
 def _registry_grant_findings(knowledge: Path) -> list[str]:
-    """The registry file against the grant table, which only this check holds together: `lookup`
-    granted with no file behind it fails. Entries with no `lookup` grant only earn a note, since
-    a tenant may write them before it grants the verb. An unloadable table is reported where the
-    table is judged, so it costs only this comparison."""
-    try:
-        gather = run_grants(knowledge / SETTINGS_HALF).gather
-    except DispositionError:
-        return []
-    granted = any(system == tacit_registry.SYSTEM and verb == "lookup"
-                  for system, verb, _ in gather.entries)
-    read = tacit_registry.read_registry(tacit_registry.registry_path(knowledge / AGENT_HALF))
-    if granted and read.absent:
-        return [f"{tacit_registry.SYSTEM} registry: gather is granted `lookup`, but there is no "
-                "registry file for it to read"]
-    if read.entries and not granted:
-        _say(f"note: {tacit_registry.SYSTEM} registry holds {len(read.entries)} entr(ies), but "
-             "gather is not granted `lookup`, so none of them is consulted yet")
-    return []
+    """The registry file against the grant table (`registry_grant_findings`), its note on stderr."""
+    from defender.cli._tenant_records_check import registry_grant_findings
+
+    return registry_grant_findings(knowledge / AGENT_HALF, knowledge / SETTINGS_HALF, note=_say)
 
 
 def _report(findings: list[str]) -> int:
