@@ -853,7 +853,7 @@ def test_1565_a_held_id_check_that_could_not_read_the_queue_stops_the_pass_befor
     fid = other.finding_id(B, 0, 0)
     old = S.pre_change_world_row(fid, finding=f"{_claim(B, 'old')} — stopped early")
     J.findings_sink(store, tenant=str(S.J.episode_runs_for(other.ep).tenant.id)).append({_channel(QUESTIONER_Q): [old]})
-    with pytest.raises(ConnectionError, match="listing held ids"):
+    with pytest.raises(S.stops(), match="listing held ids"):
         S.grade(other, S.judge({B: _reply(world=[_design(B, "new")])}), store=store)
     assert [r for r in S.questioner_queue(store) if r.get("finding_id") == fid] == [old]
     assert not _carrying(S.questioner_queue(store), S.marker(B, "new")), "a row was appended past the unread check"
