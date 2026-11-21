@@ -256,3 +256,12 @@ def world(built_frontend: Path, migrated_database: str, tmp_path: Path) -> Itera
     finally:
         api.kill()
         front.close()
+
+
+@pytest.fixture
+def checked(built_frontend, tmp_path) -> Path:
+    """A pristine copy of the frontend for this test alone (the same helper as every build case: `_copy`), so no verdict
+    depends on what an earlier test ran in it, such as whether `generated/` already exists."""
+    from defender.tests.frontend._gate_support import _copy
+
+    return _copy(tmp_path, built_frontend)
