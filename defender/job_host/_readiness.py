@@ -121,17 +121,21 @@ def _prepare_readiness(session: Session, hold: contextlib.ExitStack) -> Prepared
     except BaseException:
         facts.cleanup.close()
         raise
-    source, copy, current = facts.source, facts.copy, facts.current
-    command = session.command or [
-        "python3", str(session.defender_dir / "run.py"), "--readiness", rid, "--tenant", session.tenant_id]
-    launch = {
-        "kind": KIND, "tenant": session.tenant_id, "job": rid, "tenant_state": "active",
-        "export_commit": source.commit, "knowledge": source.host_record(), "run_copy": str(copy.root),
-        # The records read above (#1366 O6), which the container builds its tenant from (it reads no database).
-        "records": current.as_wire(),
-    }
-    # The first pass was signed and is thrown away (R12-1): the container is handed no pass and answered none.
-    return Prepared(launch=launch, command=list(command), passes=None, cleanup=facts.cleanup, exited=_readiness_exited)
+    try:
+        source, copy, current = facts.source, facts.copy, facts.current
+        command = session.command or [
+            "python3", str(session.defender_dir / "run.py"), "--readiness", rid, "--tenant", session.tenant_id]
+        launch = {
+            "kind": KIND, "tenant": session.tenant_id, "job": rid, "tenant_state": "active",
+            "export_commit": source.commit, "knowledge": source.host_record(), "run_copy": str(copy.root),
+            # The records read above (#1366 O6), which the container builds its tenant from (it reads no database).
+            "records": current.as_wire(),
+        }
+        # The first pass was signed and is thrown away (R12-1): the container is handed no pass and answered none.
+        return Prepared(launch=launch, command=list(command), passes=None, cleanup=facts.cleanup, exited=_readiness_exited)
+    except BaseException:
+        facts.cleanup.close()
+        raise
 
 
 def _readiness_end(session: Session, cause: str) -> None:

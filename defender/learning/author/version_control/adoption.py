@@ -52,12 +52,9 @@ class _Matches:
 def adopt(repository: GitRepository, *, system: str, rendering: dict[str, bytes], digest: str) -> AdoptionRecord:
     """Offer `rendering` (`{agent/<path>: bytes}`, digest `digest`) to the repository's `main` for `system` (module doc)."""
     branch = base_files.branch_of(system, digest)
-    try:
-        repository.fetch()
-    except _git.GitError as fetch_fault:
-        return AdoptionRecord.failed(REPOSITORY_BUSY if _ref_lock_collision(fetch_fault) else DELIVERY_FAILED)
-    except _FAULTS:
-        return AdoptionRecord.failed(DELIVERY_FAILED)
+    refused = _fetch(repository)
+    if refused is not None:
+        return refused
     try:
         decided = _decide(repository, system, branch, rendering)
         if decided is not None:
@@ -67,6 +64,18 @@ def adopt(repository: GitRepository, *, system: str, rendering: dict[str, bytes]
         return _push_and_open(repository, system, branch, rendering, commit, digest)
     except _FAULTS:
         return AdoptionRecord.failed(DELIVERY_FAILED)
+
+
+def _fetch(repository: GitRepository) -> AdoptionRecord | None:
+    """The one fetch of `origin` both of `adopt`'s fetches use: None when it succeeded, else the failed record, a ref-lock
+    collision on the shared clone being `repository_busy` and any other fault `delivery_failed`."""
+    try:
+        repository.fetch()
+    except _git.GitError as fault:
+        return AdoptionRecord.failed(REPOSITORY_BUSY if _ref_lock_collision(fault) else DELIVERY_FAILED)
+    except _FAULTS:
+        return AdoptionRecord.failed(DELIVERY_FAILED)
+    return None
 
 
 def _ref_lock_collision(fault: _git.GitError) -> bool:
@@ -128,7 +137,9 @@ def _after_refused_push(repository: GitRepository, system: str, branch: str, ren
     """The branch refused our push (git refuses a non-fast-forward: a racer's commit of the same tree has another id).
     The branch is fetched; a pull request now naming it is answered by steps 1-4; none, and its tip holding the rendering at
     every path, the pull request is opened on that tip; anything else fails. The branch is never moved."""
-    repository.fetch()
+    refused = _fetch(repository)
+    if refused is not None:
+        return refused
     decided = _decide(repository, system, branch, rendering)
     if decided is not None:
         return decided
