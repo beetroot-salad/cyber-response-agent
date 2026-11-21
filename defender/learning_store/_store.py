@@ -466,7 +466,8 @@ class LearningStore(FeedbackVerbs):
 
     async def publish_findings(self, tenant: str, run_id: str, rows: Sequence[Mapping[str, Any]], *,
                                kind: str) -> tuple[int, int]:
-        """Queue `rows` as `kind`: `(added, duplicates)`. A finding id is unique for good (O14). The insert is the
+        """Queue `rows` as `kind`: `(added, duplicates)`. A finding id is unique for good (O14): a repeat with the same
+        content is a duplicate, one with other content refuses the whole call (#1565). The insert is the
         worker's own (`jobs.learning_models.insert_findings`): whatever it refuses is `ItemRefused` with nothing of
         the call stored; an outage propagates, and so does `FindingsNotStored` (an insert error neither the rows nor an
         outage explains). The rows are screened there, once; only `run_id` is screened here."""

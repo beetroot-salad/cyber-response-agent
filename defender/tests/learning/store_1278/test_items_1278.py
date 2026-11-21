@@ -121,6 +121,83 @@ async def test_a_finding_published_by_a_merged_batch_stays_unique(dsn):
         assert (await items(store))[("finding", "f1")].status == "published"
 
 
+async def test_1565_a_different_finding_at_a_held_id_refuses_the_whole_publish_and_stores_none_of_it(dsn):
+    """The same id with different content is a collision, not a retry: the whole call is refused, the held row keeps
+    its content, and a new id beside it is not stored either. (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        other = dict(finding("f1"), finding="a different narrative")
+
+        with pytest.raises(store_mod().ItemRefused, match="f1"):
+            await store.publish_findings(BLUE, "run-2", [other, finding("f2")], kind="finding")
+
+        after = await items(store)
+        assert set(after) == {("finding", "f1")}, "a refused publish stored a row"
+        assert after[("finding", "f1")].payload == finding("f1"), "the held row's content changed"
+
+
+async def test_1565_one_publish_carrying_two_contents_for_one_id_is_refused(dsn):
+    """Two rows of one call at one id with different content are the same collision. (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        other = dict(finding("f1"), finding="a different narrative")
+        with pytest.raises(store_mod().ItemRefused, match="f1"):
+            await store.publish_findings(BLUE, "run-1", [finding("f1"), other], kind="finding")
+        assert await items(store) == {}
+
+
+async def test_1565_the_same_finding_again_is_still_a_no_op_beside_a_new_one(dsn):
+    """Control: an identical repeat, held or within the call, adds nothing and refuses nothing. (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        counts = await store.publish_findings(BLUE, "run-2", [finding("f1"), finding("f2"), finding("f2")],
+                                              kind="finding")
+        assert tuple(counts) == (1, 2)
+        assert set(await items(store)) == {("finding", "f1"), ("finding", "f2")}
+
+
+async def test_1565_a_repeat_compares_as_stored_so_a_tuple_is_its_list(dsn):
+    """Content is compared as the store holds it (JSON): a repeat carrying a tuple where the held row has its list is
+    the same finding, not a collision. (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        again = dict(finding("f1"), contrast_evidence=tuple(finding("f1")["contrast_evidence"]))
+        assert tuple(await store.publish_findings(BLUE, "run-2", [again], kind="finding")) == (0, 1)
+
+
+async def test_1565_a_repeat_with_a_number_jsonb_rewrites_is_still_the_same_finding(dsn):
+    """jsonb holds `1e23` as the numeric it is and reads it back as an integer: an identical repeat is still a no-op.
+    (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        await store.publish_findings(BLUE, "run-1", [dict(finding("f1"), score=1e23)], kind="finding")
+        assert tuple(await store.publish_findings(BLUE, "run-2", [dict(finding("f1"), score=1e23)],
+                                                  kind="finding")) == (0, 1)
+
+
+@pytest.mark.parametrize("held_first", [True, False], ids=["held", "in-one-call"])
+async def test_1565_false_and_zero_are_different_content(dsn, held_first):
+    """`false` and `0` are different JSON, though Python finds them equal: the second is a collision. (#1565 item 1)"""
+    first, second = finding("f1"), dict(finding("f1"), world_label_doubted=0)
+    assert first["world_label_doubted"] is False, "premise"
+    async with learning_store(dsn) as store:
+        if held_first:
+            await store.publish_findings(BLUE, "run-1", [first], kind="finding")
+            calls = [[second]]
+        else:
+            calls = [[first, second]]
+        with pytest.raises(store_mod().ItemRefused, match="f1"):
+            await store.publish_findings(BLUE, "run-2", calls[0], kind="finding")
+
+
+async def test_1565_the_same_id_in_another_kind_or_tenant_is_no_collision(dsn):
+    """Control: a collision is within one tenant's one kind, the key the store holds. (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        other = dict(finding("f1"), finding="a different narrative")
+        assert tuple(await store.publish_findings(GREEN, "run-1", [other], kind="finding")) == (1, 0)
+        assert tuple(await store.publish_findings(BLUE, "run-1", [dict(world_finding("f1"), finding="x")],
+                                                  kind="questioner_finding")) == (1, 0)
+
+
 # --- pitfalls and the digest key -------------------------------------------------------------------------------
 
 

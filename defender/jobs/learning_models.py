@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as _dt
+import json
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
@@ -321,7 +322,8 @@ _CONTENT_CLASSES = frozenset({"22", "23", "54"})
 @dataclasses.dataclass(frozen=True)
 class FindingsInsert:
     """What `insert_findings` did: every row stored (`stored`, with `added` of them new; a finding id the store already
-    holds stays as it is), or none of them (`refused`, the refusal's words in `why`)."""
+    holds with the same content stays as it is), or none of them (`refused`, the refusal's words in `why`). A finding id
+    held, or given twice, with different content is a collision and refuses them all (#1565)."""
 
     stored: bool
     added: int = 0
@@ -334,7 +336,8 @@ async def insert_findings(s: AsyncSession, tenant: str, channels: Mapping[str, S
     `waiting` items of `tenant` from `source_run`, all under one savepoint: every row is stored, or, refused, none of
     any channel (the savepoint rolled back, the transaction usable). The caller holds the tenant's state for the
     transaction. Refused, for their content: a row PostgreSQL could never hold, with no finding id, or that the screens
-    cannot read (`refuse_unholdable`, `refuse_unkeyed`); an error of SQLSTATE class 22, 23 or 54. An outage
+    cannot read (`refuse_unholdable`, `refuse_unkeyed`); a finding id held, by an earlier call or this one, with other
+    content (#1565: a collision, not a retry); an error of SQLSTATE class 22, 23 or 54. An outage
     (`jobs.is_outage`: a lost connection, deadlock, lock timeout, cancel, full disk) propagates, for the caller to
     retry whole. Any other `Exception` at the insert (a deterministic database error such as a missing permission, or
     a fault in this code) says nothing about the findings: it is `FindingsNotStored`, raised from it, which the
@@ -358,11 +361,59 @@ async def insert_findings(s: AsyncSession, tenant: str, channels: Mapping[str, S
         async with s.begin_nested():
             for kind, rows in channels.items():
                 for start in range(0, len(rows), _INSERT_CHUNK):
-                    chunk = rows[start:start + _INSERT_CHUNK]
-                    added += len((await s.execute(_findings_insert(tenant, kind, chunk, source_run))).all())
+                    added += await _insert_chunk(s, tenant, kind, rows[start:start + _INSERT_CHUNK], source_run)
     except Exception as fault:  # noqa: BLE001 — classified: content refuses, an outage is raised again
         return FindingsInsert(False, why=_refusal_of(fault))
     return FindingsInsert(True, added=added)
+
+
+async def _insert_chunk(s: AsyncSession, tenant: str, kind: str, chunk: Sequence[Mapping[str, Any]],
+                        source_run: str) -> int:
+    """Insert one statement's rows; how many it added. A row it did not add must match what the store holds for its
+    id, or `_Collision` is raised."""
+    added = {str(key) for (key,) in (await s.execute(_findings_insert(tenant, kind, chunk, source_run))).all()}
+    await _refuse_colliding_held(s, tenant, kind, _not_added(chunk, added))
+    return len(added)
+
+
+class _Collision(Exception):
+    """A finding id the store holds with other content than the row given for it (#1565)."""
+
+
+def _collision_words(kind: str, key: str) -> str:
+    return (f"a {kind} with id {key!r} is already held with different content: a collision, not a retry, so no row "
+            "of this call is stored")
+
+
+def _not_added(rows: Sequence[Mapping[str, Any]], added: set[str]) -> list[Mapping[str, Any]]:
+    """The rows of one insert statement it did not add: each whose id it did not add, and every repeat of an id after
+    the first (the first is the one stored)."""
+    first: set[str] = set()
+    rest: list[Mapping[str, Any]] = []
+    for row in rows:
+        key = row["finding_id"]
+        if key in added and key not in first:
+            first.add(key)
+        else:
+            rest.append(row)
+    return rest
+
+
+async def _refuse_colliding_held(s: AsyncSession, tenant: str, kind: str, rows: Sequence[Mapping[str, Any]]) -> None:
+    """Raise `_Collision` if the store holds any of `rows` (an insert's rows it did not add, their id already held,
+    by an earlier call or this one) with other content, as jsonb compares them (`false` is not `0`; `1e23` is its
+    integer). Read after the insert, so a row a concurrent call committed first is the one compared."""
+    if not rows:
+        return
+    table = cast(Table, WorkItemRow.__table__)
+    found = (await s.execute(text(
+        "SELECT g.k FROM unnest(CAST(:keys AS text[]), CAST(:docs AS text[])) AS g(k, d) "
+        f"JOIN {table.fullname} w ON w.tenant_id = CAST(:tenant AS uuid) AND w.kind = :kind AND w.item_key = g.k "
+        "WHERE w.payload IS DISTINCT FROM CAST(g.d AS jsonb) LIMIT 1"),
+        {"keys": [r["finding_id"] for r in rows], "docs": [json.dumps(dict(r)) for r in rows],
+         "tenant": str(TenantId(tenant)), "kind": kind})).first()
+    if found is not None:
+        raise _Collision(_collision_words(kind, found[0]))
 
 
 #: Rows per INSERT: each row binds 14 values, and the driver takes at most 32767 per statement.
@@ -381,11 +432,13 @@ def _findings_insert(tenant: str, kind: str, rows: Sequence[Mapping[str, Any]], 
 
 
 def _refusal_of(fault: Exception) -> str:
-    """The refusal `fault` makes of an insert, in P4's order: content refuses; an outage is raised again; anything else
-    is `FindingsNotStored`, raised from it."""
+    """The refusal `fault` makes of an insert, in P4's order: a collision (#1565) and content refuse; an outage is
+    raised again; anything else is `FindingsNotStored`, raised from it."""
     from defender.jobs.errors import FindingsNotStored
     from defender.jobs.store import is_outage
 
+    if isinstance(fault, _Collision):  # raised inside the savepoint, so none of the call is stored
+        return str(fault)
     code = _sqlstate(fault)
     if code is not None and code[:2] in _CONTENT_CLASSES:
         return f"the database refused a finding (SQLSTATE {code})"
