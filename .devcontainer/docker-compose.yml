@@ -36,6 +36,9 @@ services:
       # The jobs daemon's network for job containers (#1170 N5): a job joins only a bridge network made for
       # it; `start-jobs-docker` makes this one.
       DEFENDER_JOB_NETWORK: defender-jobs
+      # The Forgejo site's public hostname (#1592): the API serves adoption's pull-request links
+      # under it, and the ingress answers it. Forgejo's own `DOMAIN` (forgejo/settings.env) is the same.
+      DEFENDER_FORGE_DOMAIN: forge.localhost
       # The dev issuer (the `openbao` service) serves a certificate from the private dev CA. Host
       # processes mint tokens from it (#1214), so this container trusts that CA, as `forgejo` does.
       SSL_CERT_DIR: /etc/ssl/certs:/etc/ssl/dev-issuer-ca
@@ -89,36 +92,26 @@ services:
   # GitHub. Operator-side infrastructure, like the data root — NOT part of the playground
   # (that is the simulated client estate, and is destroyed on lever-down).
   #
-  # From the dev container: http://forgejo:3000; from the host's browser:
-  # http://localhost:${FORGEJO_HTTP_PORT:-3000}. Each tenant has a non-admin bot and a
-  # repository-restricted Authorized Integration whose issuer is the `openbao` service below.
-  # Host delivery processes log in to it themselves (AppRole) and present its short-lived JWTs;
-  # see defender/docs/development-operations.md for provisioning and scope. Runtime boxes
-  # receive exported files and never receive Forgejo or issuer credentials.
+  # From the dev container: http://forgejo:3000 (the lifecycle and the bots); from the host:
+  # http://localhost:${FORGEJO_HTTP_PORT:-3000}. Tenant people use its web pages through the
+  # ingress's Forgejo site, http://forge.localhost:8000 (#1592), the `ROOT_URL` in its settings
+  # file. Each tenant has a non-admin bot and a repository-restricted Authorized Integration whose
+  # issuer is the `openbao` service below. Host delivery processes log in to it themselves (AppRole)
+  # and present its short-lived JWTs; see defender/docs/development-operations.md for provisioning
+  # and scope. Runtime boxes receive exported files and never receive Forgejo or issuer credentials.
+  # `.devcontainer/forgejo/setup.sh` builds its sessions database and adds the `product` login source.
   forgejo:
     # Authorized Integrations authenticate short-lived Vault identities for API and git.
     # Override per machine in .devcontainer/.env.
     image: codeberg.org/forgejo/forgejo:${FORGEJO_VERSION:-17.0.0}
     container_name: response-forgejo
+    # Every `FORGEJO__` setting is in this one file (#1592 "Forgejo configuration"), which CI's
+    # `forgejo-live` job runs too.
+    env_file:
+      - forgejo/settings.env
     environment:
       USER_UID: "1000"
       USER_GID: "1000"
-      FORGEJO__database__DB_TYPE: sqlite3
-      # Skip the web install wizard; accounts are created with `forgejo admin user create`.
-      FORGEJO__security__INSTALL_LOCK: "true"
-      # Accounts are created by the admin only: one per person, plus one bot per tenant.
-      FORGEJO__service__DISABLE_REGISTRATION: "true"
-      FORGEJO__service__REQUIRE_SIGNIN_VIEW: "true"
-      FORGEJO__server__DOMAIN: localhost
-      # The URL shown in the UI and in API responses (PR links): the one the host's browser opens.
-      FORGEJO__server__ROOT_URL: http://localhost:${FORGEJO_HTTP_PORT:-3000}/
-      FORGEJO__server__HTTP_PORT: "3000"
-      # SSH is reachable only on the compose network (not published to the host).
-      FORGEJO__server__SSH_DOMAIN: forgejo
-      FORGEJO__server__SSH_PORT: "22"
-      # Authorized Integrations may name only the dev issuer (#1108 P4). Forgejo fetches its
-      # discovery and JWKS over HTTPS on the compose network, trusting the dev CA added below.
-      FORGEJO__authorized_integration__ALLOWED_DOMAINS: openbao
       SSL_CERT_DIR: /etc/ssl/certs:/etc/ssl/dev-issuer-ca
     volumes:
       # A host folder, gitignored (#1108 P4, U2), so repos survive a rebuild AND
@@ -128,8 +121,11 @@ services:
       - ../playground-knowledge:/data
       # The dev CA's certificate only (never its key).
       - ../playground-issuer/trust:/etc/ssl/dev-issuer-ca:ro
+      # The rootful image's s6 service starts sshd whatever `DISABLE_SSH` says; an empty `down`
+      # file keeps it from starting (#1592, P36). No SSH port is published.
+      - ./forgejo/openssh-down:/etc/s6/openssh/down:ro
     ports:
-      # Loopback only: the UI is for this machine's browser, not the network.
+      # Loopback only: the private address, for this machine's tools, not the network.
       - "127.0.0.1:${FORGEJO_HTTP_PORT:-3000}:3000"
     # A git service with sqlite idles around 150 MB; the cap keeps it from competing with the
     # dev container's 8g on a 14 GiB host.
@@ -210,6 +206,9 @@ services:
       KC_DB_PASSWORD: dev-only-change-me
       # The URL the host's browser opens, so the token issuer is the one the API is configured with.
       KC_HOSTNAME: http://localhost:${KEYCLOAK_HTTP_PORT:-8080}
+      # Back-channel endpoints (token, userinfo, JWKS) named by the request's host, so Forgejo's
+      # container reaches them at keycloak:8080 while the issuer stays the browser's (#1592, P36).
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       KC_HTTP_PORT: "8080"
       # The master realm's first administrator, for the admin console only.
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
@@ -248,6 +247,9 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/create-application-database.sql:/docker-entrypoint-initdb.d/10-defender.sql:ro
+      # The Forgejo sessions database's SQL (#1592), run by `.devcontainer/forgejo/setup.sh` with
+      # psql: not an initdb script, which runs only on a fresh volume and in POSTGRES_DB.
+      - ./postgres:/defender-postgres:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U defender -d keycloak"]
       interval: 5s
