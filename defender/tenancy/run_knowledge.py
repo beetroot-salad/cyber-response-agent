@@ -12,20 +12,27 @@ import contextlib
 import json
 import os
 import secrets
+import shutil
+import signal
 import stat
+import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from defender import _io
 from defender._text import one_line
 from defender.records.formats import OID
 from defender.tenancy._exports import remove_entry
 from defender.tenancy._owner import owned_temporary, write_owner
-from defender.tenancy._tenant import Tenant
+from defender.tenancy._tenant import Tenant, data_root_for_child
 from defender.tenancy._tenants import AGENT_HALF, SETTINGS_HALF
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from defender.records.formats import DataRoot, TenantId
     from defender.tenancy.record_values import TenantRecords
 
 #: The fetch child's report vocabulary: `ok <commit>` or `refused <transient|lasting> <reason>`. A source is fresh (main's
@@ -228,3 +235,73 @@ __all__ = [
     "adopt_copy", "make_owned_empty", "place", "child_failed", "failed_line", "pinned_commit", "read_publish_report", "resolve_source",
     "write_host_record", "write_record_versions",
 ]
+
+
+class FetchSeam(Protocol):
+    """The one fetch seam every reader of knowledge takes (#1618 flow 1): `fetch(tenant_id, dest, *, data_root,
+    commit=None)` fills the caller's empty folder `dest` and answers the child's one report line (`ok <commit>` or
+    `refused <transient|lasting> <reason>`). The default runs the real child (`default_fetch`); an in-process caller
+    passes a stand-in. `trigger` is who asked, when it matters (`readiness`, `onboarding`: the child also checks main's
+    branch protection, D9); a stand-in takes it too."""
+
+    def __call__(self, tenant_id: TenantId, dest: Path, *, data_root: Path, commit: str | None = ...,
+                 trigger: str = ...) -> object: ...
+
+
+@contextlib.contextmanager
+def stopped_by_sigterm() -> Iterator[None]:
+    """While the launch-time publish runs, a SIGTERM (teardown stopping this run) unwinds this
+    process as `SystemExit(128 + SIGTERM)`, so the run never goes on past its publish. The real
+    launcher holds the signal back while its child runs: it stops the child by its one rule (a
+    child that took the tenant lock is waited for, never signalled), kills its process group (its own session, which
+    no signal to this process reaches) and only then delivers the signal here (#1379 r3). The
+    handler found is put back after. Only in the main thread, the one a handler runs in."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def stop(signum: int, _frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    previous = signal.signal(signal.SIGTERM, stop)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
+
+
+def fetch_report(fetch: FetchSeam | None, tenant_id: TenantId, dest: Path, data_root: DataRoot, *,
+                 commit: str | None = None, trigger: str | None = None) -> PublishReport:
+    """The one fetch seam (the real child when `None`) asked to fill the caller's empty owned folder `dest` with `main`'s
+    knowledge (or `commit`'s, by id); its one report line read (O8: no login material passes through here). A seam
+    that raises is a lasting refusal (U11); a stop (a `SystemExit` from `stopped_by_sigterm`) goes on up."""
+    if fetch is None:
+        raise ValueError("a fetch seam is required (`investigation.publish_launch.default_fetch()` is the real one)")
+    launch = fetch
+    named = {} if trigger is None else {"trigger": trigger}
+    try:
+        with stopped_by_sigterm():
+            line = launch(tenant_id, dest, data_root=data_root_for_child(data_root), commit=commit, **named)
+    except Exception as failed:  # noqa: BLE001 — U11's failed child
+        line = failed_line(f"{type(failed).__name__}: {failed}")
+    return read_publish_report(line)
+
+
+@contextlib.contextmanager
+def temporary_copy(
+    tenant_id: TenantId, *, data_root: DataRoot, fetch: FetchSeam | None = None, commit: str | None = None,
+) -> Iterator[Path]:
+    """Flows 4 and 5: `main`'s knowledge (or `commit`'s, by id) fetched by the fetch child into an empty folder this
+    process makes in its own temporary folder (outside `<T>`); the folder, holding `agent/` and `settings/`, is yielded
+    and removed on exit. `KnowledgeRefused` naming why when the fetch is refused (no stale fallback, D3)."""
+
+    dest = Path(tempfile.mkdtemp(prefix="defender-knowledge-"))
+    try:
+        report = fetch_report(fetch, tenant_id, dest, data_root, commit=commit)
+        if report.kind != OK:
+            raise KnowledgeRefused(f"tenant {tenant_id}'s knowledge could not be fetched: {report.reason}")
+        if commit is not None and report.commit != commit:
+            raise KnowledgeRefused(f"tenant {tenant_id}: asked for {commit}, the fetch brought {report.commit}")
+        yield dest
+    finally:
+        shutil.rmtree(dest, ignore_errors=True)

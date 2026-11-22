@@ -137,7 +137,7 @@ def _fetch_line(  # noqa: C901, PLR0913 — `fetch_copy`'s inputs: one accept, o
                         client=client, network_timeout=timeout, commit=commit)
                     if trigger in _PROTECTED_TRIGGERS:  # D9: only onboarding and readiness check main's protection
                         repository.forge.verify_main_protection()
-                    _fill(dest, knowledge_at(tenant, repository, got))
+                    _write_into(dest, knowledge_at(tenant, repository, got))
     except _OutOfTime as late:
         return report(REFUSED, f"transient the fetch did not finish within its {late.budget:g}s budget")
     except (DeliveryRefused, run_knowledge.KnowledgeRefused, OSError) as refused:
@@ -145,7 +145,7 @@ def _fetch_line(  # noqa: C901, PLR0913 — `fetch_copy`'s inputs: one accept, o
     return report(OK, got)
 
 
-def _fill(dest: Path, files: dict[str, bytes]) -> None:
+def _write_into(dest: Path, files: dict[str, bytes]) -> None:
     """`files` (`agent/...`, `settings/...`) written below `dest`, held open no-follow and required empty, every write
     relative to that handle: `agent/` and `settings/` as the commit holds them."""
     with _io.hold(dest, follow=False) as held:

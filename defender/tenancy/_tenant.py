@@ -204,6 +204,11 @@ class Tenant(RecordTenant):
                 "a Tenant is built only by accept_tenant — accept the tenant instead")
 
     @property
+    def data_root_path(self) -> Path:
+        """The data root this tenant was accepted under, for the host-side private repositories and the sweep (K7)."""
+        return unwrap_data_root(self.data_root)
+
+    @property
     def _layout(self) -> _TenantLayout:
         return _TenantLayout(unwrap_data_root(self.data_root) / self.id)
 

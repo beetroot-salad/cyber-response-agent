@@ -214,3 +214,11 @@ def _read_report(
         return run_knowledge.failed_line(
             f"its report is not one of the publish outcomes: {line!r}"), True
     return line, False
+
+
+def default_fetch() -> run_knowledge.FetchSeam:
+    """The real fetch: a separate child process (O-BUDGET, P-3) under the launcher."""
+    def fetch(tenant_id: TenantId, dest: Path, *, data_root: Path, commit: str | None = None, **named: Any) -> object:
+        return launch_publish(tenant_id, data_root=data_root, dest=dest, commit=commit, **named)
+
+    return fetch

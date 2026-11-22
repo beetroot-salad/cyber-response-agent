@@ -176,8 +176,9 @@ def main(argv: list[str], *, directory: Any = None, fetch: Any = None) -> int:
     if args.agent_root is not None:
         sys.stdout.write(dump_contract(stamped_view(args.agent_root)))
         return 0
-    from defender import run_common, tenancy
+    from defender import tenancy
     from defender.systems.run_tenant import host_tenant
+    from defender.investigation.publish_launch import default_fetch
     from defender.tenancy import run_knowledge
 
     try:
@@ -186,7 +187,7 @@ def main(argv: list[str], *, directory: Any = None, fetch: Any = None) -> int:
         parser.error(str(refused))
     with admitted:
         try:
-            with run_common.temporary_copy(admitted.tenant.id, data_root=tenancy.resolve_data_root(), fetch=fetch) as copy:
+            with run_knowledge.temporary_copy(admitted.tenant.id, data_root=tenancy.resolve_data_root(), fetch=fetch or default_fetch()) as copy:
                 sys.stdout.write(dump_contract(stamped_view(copy / "agent")))
         except run_knowledge.KnowledgeRefused as refused:
             parser.error(str(refused))

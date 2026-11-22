@@ -386,11 +386,13 @@ def _copy_of(tenant_id: TenantId, commit: str | None, *, container: JobContainer
     Forgejo by id (#1618 F4, K5): by the fetch child (`fetch`, the launcher's one seam) into this process's temporary folder,
     removed on exit, for an operator's launch; inside a job container by its host helper (`copy.make`), which owns the copy.
     `KnowledgeRefused` when the fetch is refused, naming why (no fallback to another commit, D3)."""
-    from defender import job_socket, run_common
+    from defender import job_socket
+    from defender.investigation.publish_launch import default_fetch
+    from defender.tenancy import run_knowledge
     from defender.tenancy.run_knowledge import KnowledgeRefused
 
     if container is None:
-        with run_common.temporary_copy(tenant_id, data_root=data_root, fetch=fetch, commit=commit) as folder:
+        with run_knowledge.temporary_copy(tenant_id, data_root=data_root, fetch=fetch or default_fetch(), commit=commit) as folder:
             yield folder
         return
     try:

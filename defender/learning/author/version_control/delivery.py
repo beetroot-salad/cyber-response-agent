@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from defender.tenancy import TenantDirectory
 from defender import _io
-from defender.tenancy import Tenant, data_root_for_child, sweep_dead_owners
+from defender.tenancy import Tenant, sweep_dead_owners
 from defender.records.formats import TenantRefused
 from defender import box
 from defender.box import DockerFn, run_docker
@@ -124,7 +124,7 @@ class TenantDelivery:
                 origin=origin,
                 client=client,
                 network_timeout=network_timeout,
-                data_root=None if relay is not None else data_root_for_child(accepted_tenant.data_root),
+                data_root=None if relay is not None else accepted_tenant.data_root_path,
             )
             try:
                 return cls(
@@ -165,7 +165,7 @@ class TenantDelivery:
             declared = _lanes(lanes)
             branch = branch if branch is not None else f"{self.branch_prefix}{batch_id}"
             self._refuse_taken(batch_id, branch)
-            sweep_dead_owners(data_root_for_child(self.tenant.data_root), self.tenant.id)  # flow 8: a batch start sweeps
+            sweep_dead_owners(self.tenant.data_root_path, self.tenant.id)  # flow 8: a batch start sweeps
             # The draft is the tick's own fetch of `main` (D4): nothing is fetched here.
             commit = self.repository.revision("refs/heads/main")
             build_draft(self.tenant, self.repository, batch_id, commit, declared)
