@@ -36,9 +36,10 @@ export function Alerts() {
 }
 
 function Screen({ state, children }: { readonly state: State; readonly children?: ReactNode }) {
+  const [tenant] = usePlaceholders("alerts");
   return (
     <>
-      <TopBar />
+      <TopBar tenant={tenant} current="alerts" />
       <main data-screen="alerts" data-state={state}>
         <h1>Alerts</h1>
         <p>Every alert pulled from your ticket system, newest first, with what Sluice concluded.</p>

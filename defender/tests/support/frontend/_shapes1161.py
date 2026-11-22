@@ -33,6 +33,7 @@ SHAPES = (
     Shape("home", "/home", True),
     Shape("investigation", "/t/{uuid}/investigations/{uuid}", True),
     Shape("alerts", "/t/{uuid}/alerts", True),  # alert list design O4
+    Shape("repo", "/t/{uuid}/repo", True),  # home redesign: leaves for the tenant's knowledge repository
     Shape("sign-in-failed", "/sign-in-failed", False),
 )
 RETURNABLE = frozenset(s.name for s in SHAPES if s.returnable)

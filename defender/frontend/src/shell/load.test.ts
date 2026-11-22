@@ -98,8 +98,9 @@ function loadAnswering(
   answer: () => Promise<Response>,
   record: () => boolean = () => true,
   assign: () => void = () => undefined,
+  replace: (url: string) => void = () => undefined,
 ) {
-  const effects = { fetch: answer, record, assign, replace: () => undefined };
+  const effects = { fetch: answer, record, assign, replace };
   return makeLoad({ taken: { status: "none" }, byHistory: false, target: "/home", origin: "http://app.test", effects });
 }
 
@@ -138,5 +139,51 @@ describe("what a read comes to", () => {
     );
     await expect(load.client.read(KEY, params("i"))).rejects.toBe(fault);
     expect(load.mayShow()).toBe(true);
+  });
+});
+
+describe("a way out of the app (home redesign: the knowledge repository)", () => {
+  /** A load at `http://app.test` and the addresses it replaced the page with. */
+  function leaving() {
+    const replaced: string[] = [];
+    const load = loadAnswering(
+      () => Promise.reject(new Error("no request")),
+      undefined,
+      undefined,
+      (url) => {
+        replaced.push(url);
+      },
+    );
+    return { load, replaced };
+  }
+
+  it("replaces the page with an http or https page on another origin, as the browser spells it", () => {
+    const { load, replaced } = leaving();
+    const leave = load.outbound("HTTPS://Forge.Example/tenants/a");
+    expect(replaced).toEqual([]);
+    leave?.();
+    expect(replaced).toEqual(["https://forge.example/tenants/a"]);
+  });
+
+  it("called again while leaving (an effect run twice), navigates once", () => {
+    const { load, replaced } = leaving();
+    load.outbound("https://forge.example/a")?.();
+    load.outbound("https://forge.example/a")?.();
+    expect(replaced).toHaveLength(1);
+  });
+
+  it.each([
+    ["not an address", "tenants/a"],
+    ["a path on the app", "/api/me"],
+    ["ssh", "ssh://git@forge.example/tenants/a.git"],
+    ["javascript", "javascript:alert(1)"],
+    ["a user part", "https://bot@forge.example/tenants/a"],
+    ["a user and password", "https://bot:secret@forge.example/tenants/a"],
+    ["the app's own origin", "http://app.test/api/me"],
+    ["the app's own origin, spelled otherwise", "HTTP://APP.TEST:80/x"],
+  ])("refuses %s and navigates nowhere", (_, address) => {
+    const { load, replaced } = leaving();
+    expect(load.outbound(address)).toBeNull();
+    expect(replaced).toEqual([]);
   });
 });

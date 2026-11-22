@@ -31,9 +31,16 @@ def _alerts_by_hand(value: str) -> bool:
     return len(parts) == 4 and parts[0] == "" and parts[1] == "t" and parts[3] == "alerts" and _uuid(parts[2])
 
 
+
+def _repo_by_hand(value: str) -> bool:
+    """The same for `/t/{uuid}/repo` (home redesign)."""
+    parts = value.split("/")
+    return len(parts) == 4 and parts[0] == "" and parts[1] == "t" and parts[3] == "repo" and _uuid(parts[2])
+
 #: Each shape with a uuid placeholder, its regex-free check, and how many near misses are members: each hex digit
 #: of each uuid replaced by each of the 15 others (`64 * 15` for two uuids).
-_BY_HAND = {"investigation": (_investigation_by_hand, 64 * 15), "alerts": (_alerts_by_hand, 32 * 15)}
+_BY_HAND = {"investigation": (_investigation_by_hand, 64 * 15), "alerts": (_alerts_by_hand, 32 * 15),
+            "repo": (_repo_by_hand, 32 * 15)}
 
 
 @pytest.mark.parametrize("shape", S.SHAPES, ids=lambda s: s.name)
@@ -54,7 +61,7 @@ def test_the_classifier_is_exact_ascii_case_sensitive_with_no_tolerance():
         assert S.classify(bad) is None, bad
     assert S.classify("/sign-in-failed") == "sign-in-failed" and S.classify("/") == "root"
     assert S.classify("/home") == "home"
-    assert {"home", "investigation", "alerts"} == S.RETURNABLE  # F4: `root` is non-returnable; O4: `alerts` returns
+    assert {"home", "investigation", "alerts", "repo"} == S.RETURNABLE  # F4: `root` is non-returnable; O4: `alerts` returns
 
 
 def test_the_near_misses_cover_every_edit_kind_and_leave_the_member_out():

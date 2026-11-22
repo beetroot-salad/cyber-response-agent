@@ -41,6 +41,19 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade: the home page's Knowledge repo link
+
+Home and the top bar link each tenant's knowledge repository through the app's `/t/<tenant>/repo`, which sends the
+browser to the page the lifecycle recorded on the tenant (`tenancy.tenants.repo_url`). That page was built from
+`DEFENDER_LIFECYCLE_FORGE_URL`, the forge address the lifecycle calls, which may be an internal service name a browser
+cannot reach (the lab's `http://forgejo:3000`). Once:
+
+1. Set `DEFENDER_LIFECYCLE_FORGE_PUBLIC_URL` to the forge's address as a browser reaches it (http or https, no
+   credentials, query or fragment; a path is allowed), and restart the lifecycle service. Unset, it is the forge URL.
+2. Rewrite the page already recorded on each tenant, which a resume or rotation keeps:
+   `UPDATE tenancy.tenants t SET repo_url = '<public url>/' || w.repo FROM tenancy.forge_wiring w WHERE w.tenant_id =
+   t.id AND t.repo_url IS NOT NULL`. Until then the link opens the old address.
+
 ## Upgrade: the sign-in screens' name and wording
 
 The sign-in screens name the product and say it is invite-only. On an existing sign-in provider (the dev realm file is
