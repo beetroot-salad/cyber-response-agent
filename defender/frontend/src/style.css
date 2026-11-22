@@ -59,6 +59,29 @@ button[data-action="sign-out"] {
 button[data-action="sign-out"]:hover {
   border-color: var(--app-accent);
 }
+
+/* The signed-in screens' top bar: the product's name on the left, who is signed in and their actions on the right. */
+header[data-bar="top"] {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1.5rem;
+  border-bottom: 1px solid var(--app-line);
+  background: var(--app-raised);
+}
+header[data-bar="top"] a[data-action="home"] {
+  margin-right: auto;
+  font-weight: 700;
+  color: var(--app-ink-bright);
+  text-decoration: none;
+}
+header[data-bar="top"] [data-field="email"] {
+  font-size: 0.9rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 main[data-screen="error"] h1,
 main[data-screen="sign-in-failed"] h1 {
   color: var(--app-bad);
