@@ -184,7 +184,6 @@ def test_d1_prepare_makes_no_clone_and_activates_once_a_fetch_of_main_validates(
     assert sorted(p.name for p in folder.iterdir() if p.name != "runs") == [], sorted(p.name for p in folder.iterdir())
     assert (folder / "runs").is_dir(), "control: prepare still made the tenant's host folder"
     assert not [c for c, _env in world.git.calls if "clone" in c], "prepare cloned"
-    assert world.publish.calls == [], "the first-publish seam was still called"
 
 
 @pytest.mark.parametrize(("how", "klass"), [("down", "transient"), ("auth", None), ("crash", None)],
@@ -206,10 +205,11 @@ def test_d2_prepare_stays_at_prepare_when_the_fetch_child_refuses(world, how, kl
     if klass is not None:
         assert call["line"].split()[1] == klass, call["line"]
     assert item["failure"], item
-    # the child's line as the failure carries it: a failure text is bounded (#1214 `_job._FAILURE_LIMIT`, 600 characters,
-    # cut with `...`), and a real git refusal's line is longer, so the line's head (its class and cause) is what must be there
-    carried = call["line"].strip()[:300]
-    assert carried in item["failure"], f"the failure does not carry the child's line: {item['failure']!r}"
+    line = call["line"].strip()
+    if line:  # the child's line in the failure: its class and its cause (the reason's last clause), whatever else it says
+        head, cause = " ".join(line.split()[:2]), line.rsplit(": ", 1)[-1]
+        assert head in item["failure"], f"the failure does not carry the child's class: {item['failure']!r}"
+        assert cause in item["failure"], f"the failure does not carry the child's cause {cause!r}: {item['failure']!r}"
     assert not call["dest"].exists(), "a refused prepare left its temporary copy"
     assert not (world.data_root / tenant / "knowledge").exists()
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
@@ -286,7 +286,7 @@ def test_prepare_refuses_a_link_at_the_tenant_folder_and_resumes_once_removed(wo
     item = world.item(tenant)
     assert (item["state"], item["step"], item["step_actor"]) == ("creating", "prepare", "host"), item
     assert item["failure"]
-    assert world.publish.calls == []
+    assert world.fetch.calls == []
     assert link.is_symlink() and _tree(target) == before and target.exists() == (linked != "dangling tenant")
     link.unlink()
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
@@ -700,7 +700,7 @@ def test_install_fails_loudly_when_the_bot_could_push_or_merge_main_and_resumes_
     assert item["state"] == "creating" and "install" in item["failure"], item
     assert (item["step"], item["step_actor"]) == ("wrap", "service"), item  # DC-4: the check runs after the unwrap; the wrapper is spent
     assert not [g for g in world.generations(tenant) if g.status == "live"]
-    assert world.publish.calls == []
+    assert world.fetch.calls == []
     assert len(world.git.pushes()) == 1, "only the template commit may be pushed"
     assert not [1 for args, _e in world.git.calls if "--dry-run" in args]
     world.forge.repos[f"{ORG}/{tenant}"]["protections"]["main"] = saved  # control: the same channel, protected again

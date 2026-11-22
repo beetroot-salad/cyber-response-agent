@@ -171,7 +171,7 @@ def test_install_runs_beside_a_shared_holder_and_prepare_waits_for_it(world, hol
     ran = threading.Thread(target=world.host_pass, daemon=True)
     ran.start()
     time.sleep(WAIT + 1.0)
-    assert world.publish.calls == [], "prepare published while a shared holder was alive"
+    assert world.fetch.calls == [], "prepare published while a shared holder was alive"
     assert not (world.data_root / tenant).exists(), "prepare made the folder under a shared holder"
     holder.kill()
     ran.join(timeout=60)
@@ -180,6 +180,6 @@ def test_install_runs_beside_a_shared_holder_and_prepare_waits_for_it(world, hol
         assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
-    assert world.publish.calls == [(tenant, world.data_root)]
+    assert [(c["tenant"], c["data_root"]) for c in world.fetch.calls] == [(tenant, world.data_root)]
 
 

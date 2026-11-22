@@ -42,13 +42,13 @@ def _at_prepare(world, *tenants: str) -> None:
 def test_a_new_tenant_is_active_with_a_real_empty_runs_folder_and_prepare_made_it_before_the_first_publish(world):
     """A lifecycle-made tenant has `<T>/runs`, a real directory, already there when the first publish runs (R13-0)."""
     seen: list[bool] = []
-    first = world.publish
+    first = world.fetch  # #1618: prepare's first read of the knowledge is the fetch (was the first publish)
 
-    def watching(tenant_id, *, data_root, **kw):
+    def watching(tenant_id, dest, *, data_root, **kw):
         seen.append((data_root / tenant_id / "runs").is_dir())
-        return first(tenant_id, data_root=data_root, **kw)
+        return first(tenant_id, dest, data_root=data_root, **kw)
 
-    world.host_actor = world.new_host(world.tenants, publish=watching)
+    world.host_actor = world.new_host(world.tenants, fetch=watching)
     tenant = world.active_tenant()
     runs = _runs(world, tenant)
     assert runs.is_dir() and not runs.is_symlink() and list(runs.iterdir()) == []
@@ -78,7 +78,7 @@ def test_a_link_at_the_runs_folder_fails_prepare_and_nothing_is_followed(world, 
     item = world.item(tenant)
     assert (item["state"], item["step"], item["step_actor"]) == ("creating", "prepare", "host") and item["failure"], item
     assert list(elsewhere.iterdir()) == [] and _runs(world, tenant).is_symlink()
-    assert world.publish.calls == []
+    assert world.fetch.calls == []
 
 
 # --- the upgrade step ------------------------------------------------------------------------------------------------

@@ -60,16 +60,24 @@ def _job_state(scene, signer, forge, docker):
 #: What each kind may ask on the very channel the refused request goes down (the positive control).
 _OWN_REQUEST = {"investigation": ("pass", {"id": "<job>"}), "learning": ("pass", {"id": "<job>"}),
                 "post-step": ("forge.token", {"min_validity": 60})}
+_RECORD = {"commit": COMMIT}
+_REFUSAL = {"kind": "transient", "reason": "the forge is unreachable"}
 # #1618 (design r5 census: "the `publish_status` table and its writers (`record.published`, `record.refusal`)" go): the
-# record.* rows of this table, and the post-step's publish-outcome cases below, are retired with those requests.
+# record.* rows below now show the writers refused to every kind; the post-step's publish-outcome cases are retired.
 
 
 @pytest.mark.parametrize(("kind", "request_name", "fields"), [
     ("investigation", "forge.token", {"min_validity": 60}),
+    ("investigation", "record.published", _RECORD),
+    ("investigation", "record.refusal", _REFUSAL),
     ("investigation", "batch.start", {"lanes": ["lessons"]}),
     ("learning", "forge.token", {"min_validity": 60}),
+    ("learning", "record.published", _RECORD),
+    ("learning", "record.refusal", _REFUSAL),
     ("learning", "batch.start", {"lanes": ["lessons"]}),
     ("post-step", "pass", {"id": "<job>"}),
+    ("post-step", "record.published", _RECORD),
+    ("post-step", "record.refusal", _REFUSAL),
 ])
 def test_requests_are_refused_by_job_kind(scene, kind, request_name, fields):
     """A kind that runs adapter code gets no forge token, database write or drain publish; the post-step gets no pass;
@@ -370,15 +378,13 @@ def test_a6_a_sibling_gets_its_worlds_roster_id_a_folder_in_the_episode_and_an_o
         assert not (scene.runs / copy["run"]).exists(), "a sibling's folder was made under <T>/runs"
     assert got["seen"] == [True, True]
     assert got["owners"] == [os.getpid()] * 2, "a run copy's owner is not the helper"
-    from defender.credential_proxy import PASS_LIFETIME_SEC
-
     for copy, token, (before, after) in zip(got["copies"], got["tokens"], got["asked"], strict=True):
         claims = claims_of(signer, token)
         assert claims["investigation"] == copy["run"]
         assert claims["tenant"] == scene.tenant
         assert A.grant_of(claims) == [("identity", "r")]
         # one pass lifetime from the moment the pass was asked (whole seconds), never one fixed at the job's start
-        assert before - 1 <= claims["exp"] - PASS_LIFETIME_SEC <= after + 1, (claims["exp"], before, after)
+        assert before - 1 <= claims["exp"] - 600 <= after + 1, (claims["exp"], before, after)
     assert len(got["boxes"]) == 2
     assert all(got["boxes"])
     sibling_creates = docker.creates()

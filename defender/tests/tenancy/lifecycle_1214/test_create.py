@@ -91,7 +91,7 @@ def test_the_job_leaves_an_active_tenant_with_repo_bot_credential_folder_and_no_
     folder = world.data_root / tenant
     assert folder.is_dir() and not folder.is_symlink()
     assert not list(folder.rglob("learning")), "prepare made a learning entry; the tenant's learning state is in the store (O10, D10)"
-    assert world.publish.calls == [(tenant, world.data_root)]
+    assert [(c["tenant"], c["data_root"]) for c in world.fetch.calls] == [(tenant, world.data_root)]
     assert world.call(world.repo.memberships_of_tenant, tenant) == []
     assert not list(world.data_root.rglob("tenant.json"))
     assert not list(world.data_root.rglob("publish-status.json"))
@@ -156,10 +156,10 @@ def test_the_generation_is_live_at_the_sweep_while_the_tenant_is_still_creating_
     item = world.item(tenant)
     assert (item["state"], item["step"], item["step_actor"]) == ("creating", "prepare", "host")
     assert world.live(tenant).bot_login  # one live generation already
-    assert world.publish.calls == []
+    assert world.fetch.calls == []
     world.drive()
     assert world.item(tenant)["state"] == "active"
-    assert world.publish.calls == [(tenant, world.data_root)]
+    assert [(c["tenant"], c["data_root"]) for c in world.fetch.calls] == [(tenant, world.data_root)]
 
 
 def test_the_job_shows_its_steps_with_their_actors_in_the_documented_order(world):

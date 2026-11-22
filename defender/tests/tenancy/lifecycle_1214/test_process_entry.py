@@ -95,7 +95,7 @@ def test_serve_runs_both_actors_every_round_until_stopped(world):
     assert len(rounds) == 30
     assert world.item(tenant)["state"] == "active"
     assert world.forge.made("POST", "/api/v1/orgs/tenants/repos"), "control: the service's steps ran"
-    assert world.publish.calls, "control: the host's prepare ran"
+    assert world.fetch.calls, "control: the host's prepare ran"
 
 
 # --- sweeps (RC-8) -----------------------------------------------------------------------------------

@@ -269,7 +269,7 @@ def test_p2_the_launch_time_publish_is_told_its_trigger_readiness_for_a_check_an
         inv_seen: list[dict[str, Any]] = []
         investigate(scene, fetch=_recording_fetch(inv_seen, scene))
         assert len(inv_seen) == 1, f"premise: an investigation's launch fetches once: {inv_seen}"
-        assert [k.get("trigger") for k in inv_seen] != ["readiness"], inv_seen
+        assert not {k.get("trigger") for k in inv_seen} & {"readiness", "onboarding"}, inv_seen  # D9's protected triggers
         seen: list[dict[str, Any]] = []
         ran = readiness(scene, fetch=_recording_fetch(seen, scene), container=lambda c: 0)
 

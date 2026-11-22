@@ -19,7 +19,7 @@ ImportError (the expected red before implementation). Pinned shapes (amendment r
 Interface for the cases (all on `LifecycleWorld(tmp_path, data_root)`):
 `.create() -> T`, `.active_tenant() -> T`, `.item(T)`, `.record(T)`, `.generations(T)`, `.live(T)`,
 `.member_of(T, email)`, `.directory()`, `.tenants` (twin), `.fakes` and its aliases `.forge .integration .openbao
-.git .publish`, `.config`, `.service_actor`, `.host_actor`, `.ops` (administrator browser),
+.git`, `.fetch` (the host actor's fetch seam), `.config`, `.service_actor`, `.host_actor`, `.ops` (administrator browser),
 `.forge.bearer_calls()` / `.admin_token_calls()` (who presented what), `.service_pass()` / `.host_pass()` (one `work()` each, the step count), `.drive(limit=, stop=)`
 (alternate service pass, host pass until neither ran a step or `stop()` is true between passes),
 `.new_service(tenants=None, identity=None, **fakes)` / `.new_host(...)` (another actor over the same fakes, e.g. over a
@@ -77,7 +77,7 @@ class LifecycleWorld(World):
         self.tmp_path = tmp_path
         self.fakes = Fakes(tmp_path)
         self.forge, self.integration, self.openbao = self.fakes.forge, self.fakes.integration, self.fakes.openbao
-        self.git, self.publish = self.fakes.git, self.fakes.publish
+        self.git = self.fakes.git  # #1618: no `publish` seam (prepare fetches: `self.fetch`, made with the host actor)
         self.config = lifecycle_config(tmp_path, data_root)
         super().__init__(administrators=[OPS], start=False, database=True)  # #1496: offboarding is the real store's
         self.call(self.service.start)
