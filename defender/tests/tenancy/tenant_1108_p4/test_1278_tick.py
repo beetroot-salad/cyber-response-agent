@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+import os
 import signal
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -31,7 +33,6 @@ from defender.tests.support.learning.core._store1278 import (
     files_under,
     finding,
     foreign_commit_on,
-    forget_local_branch,
     kill_if_alive,
     lapse_lease,
     lease_seconds_left,
@@ -51,6 +52,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     lead_author_drain,
     own_store,
     remote_branches,
+    run_stage,
     without_clone,
 )
 from defender.tests.tenancy.knowledge_1618 import _repos_1618 as R
@@ -175,7 +177,7 @@ def test_d5_the_branch_is_set_at_claim_base_and_start_with_the_first_commit_and_
     assert not row.reverts
     assert [c[0] for c in row.changes] == [f"agent/lessons/{LESSON_NAME}"]
     assert dict(remote_branches(w.t.remote))[branch] == writer.commits[0]
-    assert git(w.t.clone, "show", "--name-only", "--format=", writer.commits[0]).split() == [f"agent/lessons/{LESSON_NAME}"], \
+    assert git(w.t.remote, "show", "--name-only", "--format=", writer.commits[0]).split() == [f"agent/lessons/{LESSON_NAME}"], \
         "raw findings (or anything but the lesson) went into Git (H1)"
 
 
@@ -190,7 +192,8 @@ def test_o3_a_holder_whose_lease_lapsed_makes_no_commit_and_changes_no_item(worl
     assert writer.served, critical_text(caplog)
     assert writer.commits == []
     assert remote_branches(w.t.remote) == {}
-    assert git(w.t.clone, "for-each-ref", "refs/heads/lessons/") == ""
+    # #1618: the tick's private repository (where an unpushed commit could live) is gone with the tick.
+    assert K.repo_scratch(w.t) == []
     assert _record(w) == []
     [batch] = _batches(w).values()
     assert batch.phase == "working", "a holder past its lease cannot end its own batch"
@@ -198,7 +201,8 @@ def test_o3_a_holder_whose_lease_lapsed_makes_no_commit_and_changes_no_item(worl
 
 
 def test_o3_a_holder_that_lost_its_lease_after_committing_pushes_nothing_and_opens_no_pr(world, caplog):  # noqa: F811 — the imported fixture
-    """The lease lapses past grace after the commit: no push, no PR; the next tick takes over and delivers, no rerun. (O3, P6, Renewal and stop)"""
+    """The lease lapses past grace after the commit: no push, no PR; the next tick's takeover reads only the forge, finds
+    nothing there and abandons the batch, so the unpushed work is redone. (O3, P6, Renewal and stop; #1618 D4 amended)"""
     w = world
     _seed(w, "f1")
     writer = LessonWriter({LESSON_NAME: lesson_citing("f1")}, after_commit=lambda batch: lapse_lease(w.dsn, batch.id))
@@ -212,14 +216,13 @@ def test_o3_a_holder_that_lost_its_lease_after_committing_pushes_nothing_and_ope
     assert _batches(w)[batch_id].phase == "working"
     assert [r.commit for r in _record(w)] == writer.commits, "the commit was recorded before the lease went"
 
+    # #1618 (design r5 "Retired promises": `test_1278_tick::o3` "a takeover only finishes delivery"): the lost holder's
+    # commit was never pushed, and a takeover reads only the remote branch (K10), so it cannot deliver it.
     _tick(w, writer)
 
-    assert writer.served == [batch_id], "a takeover only finishes delivery: no new authoring run"
-    [(branch, tip)] = remote_branches(w.t.remote).items()
-    assert tip == writer.commits[0]
-    [pr] = [r for r in w.t.forge.prs if r["state"] == "open"]
-    assert pr["head"]["ref"] == branch
-    assert (_batches(w)[batch_id].phase, _batches(w)[batch_id].pr_number) == ("in_review", pr["number"])
+    assert (_batches(w)[batch_id].phase, _batches(w)[batch_id].outcome) == ("ended", "abandoned"), critical_text(caplog)
+    assert writer.commits[0] not in remote_branches(w.t.remote).values(), "the takeover delivered what only the lost holder had"
+    assert not [r for r in w.t.forge.prs if r["state"] == "open" and r["head"]["ref"] == _batches(w)[batch_id].branch]
 
 
 # --- Locks: the working-batch rule replaces the author-drain lock ------------------------------------------------
@@ -404,12 +407,23 @@ def test_o1_every_recovery_path_judges_a_lapse_by_the_databases_clock_alone(worl
         assert after is None, "offboarding a batch lapsed past grace left its rows"
 
 
+def _replacement_host(w: Any) -> None:
+    """The host as a replacement one finds it (was `forget_local_branch` on the clone): no draft, and no private
+    repository of an earlier tick left under `.repo-scratch/` (premise: the stranded tick closed its own)."""
+    import shutil
+
+    for draft in (drafts_dir(w.t).iterdir() if drafts_dir(w.t).is_dir() else ()):
+        shutil.rmtree(draft, ignore_errors=True)
+    assert K.repo_scratch(w.t) == [], "premise: the earlier tick left its private repository"
+
+
 def test_o1_a_branch_only_on_the_forge_is_verified_against_the_record_and_gets_its_pr_from_a_fresh_clone(world, caplog):  # noqa: F811 — the imported fixture
-    """The replacement host's clone has no local branch: the takeover fetches the tip, finds it is the recorded commit, opens the PR. (O1, D11b)"""
+    """A replacement host has no draft and no repository of the stranded tick's (#1618: every tick's repository is its own,
+    so this is every takeover): the takeover fetches the tip, finds it is the recorded commit, opens the PR. (O1, D11b)"""
     w = world
     writer, batch_id, branch = _stranded(w, caplog)
-    forget_local_branch(w.t.clone, branch, drafts=drafts_dir(w.t))
-    assert git(w.t.clone, "for-each-ref", f"refs/heads/{branch}") == ""
+    _replacement_host(w)
+    assert dict(remote_branches(w.t.remote))[branch] == writer.commits[0], "premise: the branch is only on the forge"
 
     lapse_lease(w.dsn, batch_id)
     _tick(w, writer)
@@ -426,7 +440,7 @@ def test_o5_a_forge_tip_beyond_the_record_is_not_opened_and_goes_to_a_person(wor
     w = world
     writer, batch_id, branch = _stranded(w, caplog)
     foreign_commit_on(w.t.remote, branch, w.scratch)
-    forget_local_branch(w.t.clone, branch, drafts=drafts_dir(w.t))
+    _replacement_host(w)
 
     lapse_lease(w.dsn, batch_id)
     _tick(w, writer)
@@ -712,9 +726,18 @@ def test_1618_k7_a_tick_in_the_job_container_never_sweeps(world, post_step_helpe
     without_clone(w.t)
     sweep_dead_owners = importlib.import_module(K.SWEEP_MODULE).sweep_dead_owners  # FORCED: the name the shared support module (`K.sweep`) fixes
 
+    drains = importlib.import_module("defender.learning.core.drains")
+    box = BoxSpy()
+
+    def container_tick(paths, *, store):
+        # the drain as the container runs it (as `_relay_tick`): no `directory=` or `identity=` of the host's; its job
+        # container is the real helper's, which answers records, `forge.token` and `batch.start`; only the forge's API client
+        # is the fake's
+        return drains.author_drain(paths, store=store, container=helper.container(), client=w.t.forge.client,
+                                   trigger_author=writer, start_box=box.start, stop_box=box.stop)
+
     with counting_calls(sweep=sweep_dead_owners) as seen:
-        rc = post_step_in_container(None, w.t.tenant_id, forward=helper.ask,
-                                    author_tick=lambda _paths, *, store: author_drain(w.t, w.paths, trigger=writer, box=BoxSpy(), store=store))
+        rc = post_step_in_container(None, w.t.tenant_id, forward=helper.ask, author_tick=container_tick)
     assert (rc, bool(writer.served)) == (0, True), f"premise: the container's tick opened a batch ({critical_text(caplog)})"
     assert seen.counts["sweep"] == 0, "a tick in a job container swept, and would remove a live host owner's folder"
 
@@ -767,7 +790,11 @@ def test_1618_b12_a_container_tick_builds_its_batch_on_the_base_the_helper_answe
     # K7, container side: its private repository is in its own tmpfs, never an entry of the host's `.repo-scratch/` (whose sweep a
     # container never runs) and never under `<T>`; the fetch by id and the push both reached the listener while watched
     assert watch.snapshots, "premise: the container's fetch and push were not observed"
-    assert all(snap["names"] == [] for snap in watch.snapshots), [snap["names"] for snap in watch.snapshots]
+    # (the container runs in this process; the one owner an entry may name is the helper's, whose host-side delivery answered
+    # `batch.start` and `forge.token`: every entry seen is the helper process's own, none is this process's)
+    owners = {n.split(".owner-", 1)[1].split("-", 1)[0] for snap in watch.snapshots for n in snap["names"]}
+    assert owners <= {str(helper._process.helper_pid)}, (owners, helper._process.helper_pid, [s["names"] for s in watch.snapshots])
+    assert str(os.getpid()) not in owners
     assert all(snap["under_tenant"] == [] for snap in watch.snapshots), [snap["under_tenant"] for snap in watch.snapshots]
 
 
@@ -787,8 +814,11 @@ def test_1618_b12_a_container_tick_refuses_a_base_it_cannot_fetch_by_id_and_auth
         return {**answer, "base": K.ABSENT_COMMIT} if name == "batch.start" else answer
 
     writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
-    _relay_tick(w, helper, ask, writer)
+    # through the stage runner, as every drain case here runs its tick (`_drain_support.author_drain`): the tick's
+    # configuration refusal is logged `critical` and is the stage's exit 2
+    rc = run_stage(lambda: _relay_tick(w, helper, ask, writer))
 
+    assert rc == 2, f"the tick did not refuse ({critical_text(caplog)})"
     assert "batch.start" in asked, "premise: the helper answered the batch start (the tick did not die earlier)"
     refusal = critical_text(caplog)
     assert K.ABSENT_COMMIT in refusal, f"the tick did not refuse naming the base it could not fetch (K5): {refusal!r}"

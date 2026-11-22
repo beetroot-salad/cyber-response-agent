@@ -113,6 +113,15 @@ def _mark_seen(mark: str | None) -> str | None:
     return "pin" if mark == K.mark_text(K.SEEDED_MARK) else "other"
 
 
+def _settings_seen(t: Any, pin: str, settings: dict[str, bytes] | None) -> str | None:
+    """Which commit's `settings/` a copy holds, judged from the remote alone (`half_at`): `pin` when it is exactly the pin's,
+    `other` when it is anything else (the later `main`'s, a decoy's), None when nothing was copied. For scenes whose seed carries
+    no revision mark (the job scene), so the mark comparison of `_mark_seen` has nothing to tell the pin by."""
+    if settings is None:
+        return None
+    return "pin" if settings == K.half_at(t, pin, "settings") else "other"
+
+
 def _later(t: Any) -> Callable[[], Any]:
     return lambda: K.advance_main(t, LATER)
 
@@ -131,7 +140,9 @@ def _run_start(env: Env) -> contextlib.AbstractContextManager[Rig]:
                 out = B.launch(t, env.tmp_path, publish=None, fetch=pub, argv_extra=extra)
                 assert out.raised is None, out.text()
                 mark = A.settings_mark(out.seen[0]) if out.seen else None
-                return Result(refused=out.refusal is not None, text=out.refusal or "", rc=out.rc, asks=_asks(pub.calls, pub.lines),
+                # the exit a refusal by `SystemExit` makes (what a shell sees), else `main`'s return
+                rc = out.rc if out.exit_status is None else out.exit_status
+                return Result(refused=out.refusal is not None, text=out.refusal or "", rc=rc, asks=_asks(pub.calls, pub.lines),
                               left=A.listing(A.run_copies(t)), seen=_mark_seen(mark), spent=bool(out.reached))
             yield Rig(t, run, t.commit, _later(t))
     return opened()
@@ -196,11 +207,11 @@ def _helper(env: Env, *, with_commit: bool, sibling: bool = False) -> contextlib
                 return 0
 
             run_kind(scene, "learning", job, forge=forge, fetch=fetch, **kw)
-            mark = None if "answer" not in got else (got["settings"].get(K.MARK_FILE.removeprefix("settings/")) or b"").decode()
             left = got.get("new", []) + [p.name for p in _copy_dirs(scene)]
             left += listing(scene.root / scene.tenant / "run-knowledge") if sibling else []
             return Result(refused="refusal" in got, text=got.get("refusal", ""), asks=_asks(fetch.calls[got["mark"]:]), left=left,
-                          seen=_mark_seen(mark), minted=len(forge.built) + len(forge.asked))
+                          seen=_settings_seen(t, commit or t.commit, got.get("settings")),
+                          minted=len(forge.built) + len(forge.asked))
         yield Rig(t, run, t.commit, _later(t), down=lambda: armed.update(down=True))
     return opened()
 

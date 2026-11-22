@@ -8,7 +8,7 @@ from typing import Any
 
 from defender.tests.support.shared._locations_1210 import location_path
 
-from ._support import DEFENDER, configured_origin, fixture_identity, target
+from ._support import delivery
 
 
 def retire_clone(tenant: Any) -> None:
@@ -21,13 +21,8 @@ def retire_clone(tenant: Any) -> None:
 
 
 def delivery_without_clone(repo: Any, http: Any, **options: Any) -> Any:
-    """`delivery(repo, http)` after `retire_clone`: the origin is read from the clone first, then the clone goes.
-    FORCED: r5 keeps `TenantDelivery.open(tenant, defender_dir=, client=, identity=, origin=)`; the tenant has no knowledge path."""
-    origin = configured_origin(repo[0].knowledge)
-    if http.remote is None:
-        http.remote = repo[1]
-    if http.address is None and origin is not None:
-        http.serve(origin)
-    options.setdefault("identity", fixture_identity(str(repo[0].id)))
+    """`delivery(repo, http)` for a tenant with no `<T>/knowledge`, `exports/` or lock (`retire_clone` makes sure: the seeded
+    `repo` already has none, #1618). FORCED: r5 keeps `TenantDelivery.open(tenant, defender_dir=, client=, identity=, origin=)`;
+    the tenant has no knowledge path."""
     retire_clone(repo[0])
-    return target().TenantDelivery.open(repo[0], defender_dir=DEFENDER, client=http.client, origin=origin, **options)
+    return delivery(repo, http, **options)

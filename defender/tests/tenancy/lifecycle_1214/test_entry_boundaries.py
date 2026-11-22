@@ -98,7 +98,7 @@ def _entries(tmp_path: Path) -> dict[str, Entry]:
     def run_seams() -> dict[str, Any]:
         calls = _Calls()
         return dict(preflight=calls.hook("preflight", 0), visualize=calls.hook("visualize", None),
-                    enqueue=calls.hook("enqueue", False), publish=calls.hook("publish", ""),
+                    enqueue=calls.hook("enqueue", False), fetch=calls.hook("fetch", ""),
                     lifecycle=calls.hook("lifecycle", {"output": "", "requests": 0, "truncated_by": None}))
 
     entries: dict[str, Entry] = {

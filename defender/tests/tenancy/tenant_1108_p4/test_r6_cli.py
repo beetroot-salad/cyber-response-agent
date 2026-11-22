@@ -163,16 +163,21 @@ def test_r6_revert_lesson_logs_in_from_the_secret_file_the_generation_records(
     assert str(missing) in "\n".join(r.getMessage() for r in caplog.records), caplog.text
 
 
-def test_r6_the_publish_child_logs_in_from_the_secret_file_the_generation_records(p4_tenant, tmp_path,
-                                                                                 capsys):
-    """The child is handed identifiers only: the secret file comes from the tenant's live generation."""
-    from defender.learning.author import version_control as vc
+def test_r6_the_fetch_child_logs_in_from_the_secret_file_the_generation_records(p4_tenant, tmp_path, capsys):
+    """The child is handed identifiers only: the secret file comes from the tenant's live generation. (#1618: the fetch
+    child replaces the retired publish child, flows 1-4; a credential it cannot read is a `lasting` refusal, D11.)"""
+    import importlib
 
+    from defender.tests.tenancy.knowledge_1618 import _support as K
+
+    child = importlib.import_module(K.CHILD_MODULE)
     t = p4_tenant
     missing = _bind_missing_secret(t, tmp_path)
+    dest = tmp_path / "fetch-dest"
+    dest.mkdir()
     capsys.readouterr()
-    rc = vc.publish_child_main([t.tenant_id, "--data-root", str(t.data_root)], directory=t.directory)
+    rc = child.fetch_child_main([t.tenant_id, "--data-root", str(t.data_root), "--dest", str(dest)], directory=t.directory)
     line = capsys.readouterr().out.strip().splitlines()[-1]
     assert rc == 0
-    assert line.startswith("misconfigured"), line
+    assert line.startswith("refused lasting "), line
     assert str(missing) in line, line

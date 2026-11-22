@@ -83,8 +83,8 @@ def test_the_stop_points_cover_each_curator_before_and_after_its_commit_and_the_
     assert [p.name for p in STOP_POINTS if p.push] == ["during_the_push", "during_the_push_which_then_fails"]
 
 
-def _the_takeover_abandons(w, s, batch, again) -> None:  # 1618-tradeoff: nothing is on the remote, so the takeover abandons the batch, the attempt counted, the items wait again
-    assert w.t.server.pushes == ["refused"], "premise: the one push the remote saw was refused"
+def _the_takeover_abandons(w, s, batch, again, pushed_before) -> None:  # 1618-tradeoff: nothing is on the remote, so the takeover abandons the batch, the attempt counted, the items wait again
+    assert pushed_before in ([], ["refused"]), f"premise: nothing of the stopped holder's landed: {pushed_before}"
     assert s.batches()[batch.id].outcome == "abandoned", "the takeover delivered what only the stopped holder had"
     assert s.branch_tip_on_remote(batch.branch) is None
     assert again.started(), "the abandoned batch's items did not wait again: nothing was authored a second time"
@@ -93,7 +93,7 @@ def _the_takeover_abandons(w, s, batch, again) -> None:  # 1618-tradeoff: nothin
 
 
 @pytest.mark.parametrize(("lane", "stop", "how"), _stop_cases())
-def test_a_stop_anywhere_in_a_claim_runs_no_further_curator_commit_or_pr_and_leaves_the_batch_expired_or_abandoned(
+def test_a_stop_anywhere_in_a_claim_runs_no_further_curator_commit_or_pr_and_leaves_the_batch_expired_or_abandoned(  # noqa: PLR0915 — one table of stop points
         world, caplog, lane, stop, how):  # noqa: F811 — the imported fixture
     """A stop inside any curator, after a commit, or in the push (also a failing one): nothing more is authored, committed or opened; with commits the lease is expired and the next tick delivers once, without any commits the batch is abandoned and the lane free. (Stop path)"""
     from defender.learning_store import Stop
@@ -148,10 +148,16 @@ def test_a_stop_anywhere_in_a_claim_runs_no_further_curator_commit_or_pr_and_lea
             "the stop path's push is the claim's commits, once, or nothing when it fails"
         assert spy.timeouts()[-1] <= STOP_PUSH_BUDGET, "the stop path's push is not bounded by the stop budget"
     w.monkeypatch.setenv(RENEW_ENV, "600")
+    pushed_before = list(w.t.server.pushes)  # the stopped holder's pushes (the takeover's own re-authoring pushes after)
     again = Cast(s, tag='-again')
     s.run(again)
-    if stop.push_fails:
-        _the_takeover_abandons(w, s, batch, again)
+    if stop.push_fails or not signalled:
+        # 1618-tradeoff (design r5 "Retired promises": "commits after a stop are pushed later"): a store `Stop` inside a
+        # curator ends the tick with no stop-path push, and a failed one lands nothing; the commits were only in the stopped
+        # tick's private repository, so the takeover (reading the forge alone, K10) abandons the batch and the work is redone
+        if stop.push_fails:
+            assert pushed_before == ["refused"], "premise: the stop path's one push was refused"
+        _the_takeover_abandons(w, s, batch, again, pushed_before)
         return
     assert again.started() == [], "the takeover ran a curator again"
     [pr] = s.open_prs()

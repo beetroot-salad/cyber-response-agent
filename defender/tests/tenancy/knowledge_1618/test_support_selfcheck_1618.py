@@ -28,7 +28,7 @@ def test_decoy_scene_leaves_stale_copies_while_main_moves_on(decoy):
     assert K.local_state(t) == ["exports", "knowledge"]
     assert (K.tenant_root(t) / "exports" / "current").read_text().strip() == t.commit
     assert t.origin_main() != t.commit
-    assert K.CLONE_ONLY_MARK in (Path(t.clone) / K.LESSON).read_text()
+    assert K.CLONE_ONLY_MARK in (Path(t.checkout) / K.LESSON).read_text()
     stale = K.tree_bytes(K.tenant_root(t) / "exports" / t.commit / "agent")
     assert stale["lessons/fixture-owner-before-close.md"] == K.lesson_text(K.SEEDED_MARK).encode()
     now = K.half_at(t, t.origin_main(), "settings")[K.MARK_FILE.removeprefix("settings/")]

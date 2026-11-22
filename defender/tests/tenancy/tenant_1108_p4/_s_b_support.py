@@ -232,6 +232,8 @@ class Seen:
 @dataclass
 class Launch:
     rc: int | None = None
+    #: The process exit status a `SystemExit` out of `main` stands for (None: `main` returned or raised otherwise).
+    exit_status: int | None = None
     refusal: str | None = None
     raised: BaseException | None = None
     publish_calls: list[tuple[tuple, dict]] = field(default_factory=list)
@@ -306,6 +308,7 @@ def launch(t: Any, tmp_path: Path, *, publish: Callable[..., Any] | None,
     except SystemExit as exit_:
         # argparse exits with a code and writes its reason to stderr: keep both.
         out.refusal = f"{exit_.code}\n{err.getvalue()}".strip()
+        out.exit_status = 0 if exit_.code is None else (exit_.code if isinstance(exit_.code, int) else 1)
     except Exception as e:  # noqa: BLE001 — kept for the assertions to name
         out.raised = e
     if out.seen:

@@ -13,7 +13,6 @@ working tree was then edited; and `exports/K1/` was deleted, so the launcher mus
 from __future__ import annotations
 
 import json
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,7 +29,7 @@ from ._support import (
     FIXTURE_SETTINGS,
     export_dir,
     files_under,
-    git,
+    plant_old_clone,
     published_tenant,
 )
 
@@ -94,9 +93,9 @@ def scene(tmp_path, data_root):
         k1 = t.commit
         _base, src = S.source_run(tmp_path, est, calls=_calls(), tenant_id=t.tenant_id)
         k2 = t.merge({QPATH: _questioner_lesson(Q_CURRENT)}, message="a later questioner lesson")
-        assert t.publish().commit == k2
-        (t.clone / QPATH).write_text(_questioner_lesson(Q_WORKTREE), encoding="utf-8")
-        shutil.rmtree(export_dir(t.tenant, k1))
+        assert t.origin_main() == k2, "premise: main is the later commit"
+        # #1618: a decoy where the old clone's working tree was (no reader may look there); no export exists.
+        plant_old_clone(t, {QPATH: _questioner_lesson(Q_WORKTREE)})
         yield Scene(t=t, est=est, k1=k1, k2=k2, src=Path(src))
 
 
@@ -128,6 +127,9 @@ def _launch(scene: Scene, *, argv_extra=(), **seams) -> Launch:
     seams.setdefault("judge", S.quiet_judge())
     seams.setdefault("oracle", S.oracle(then=S.submit()).model)
     seams.setdefault("verifier", S.passing_verifier().model)
+    # #1618 FORCED (`knowledge_1618._support`'s seam list): every launch reads Forgejo through the one fetch seam, the real
+    # child over the scene's remote; the launcher's own default child would need the host's database to admit the tenant
+    seams.setdefault("fetch", K.fetch_seam(scene.t))
     message = ""
     minted = None
     argv = ["--tenant", scene.t.tenant_id, scene.src.name, str(T.BRANCH_MESSAGE_ID), *argv_extra]
@@ -195,7 +197,7 @@ def test_o_b_the_live_capture_stamps_the_pinned_export_so_the_anchor_survives_a_
     assert code.commit, f"fixture bug: the checkout's code commit is unreadable ({code})"
     _stamp_source(scene, knowledge={"commit": scene.k1}, commit=code.commit, dirty=False,
                   scope=code.scope)
-    assert git(scene.t.clone, "rev-parse", "HEAD") == scene.k2, "fixture bug: HEAD is K1"
+    assert scene.t.origin_main() == scene.k2, "fixture bug: main is K1"
 
     launch = _launch(scene, argv_extra=("--allow-dirty",) if code.dirty else ())
 

@@ -289,11 +289,12 @@ def _docstrings(tree: ast.AST) -> set[int]:
             and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}
 
 
-def uses(name: str, *, literal: str | None = None) -> list[str]:
+def uses(name: str, *, literal: str | None = None, under: str = "") -> list[str]:
     """`file:line` of every product use of the identifier `name` (a name, attribute, definition, parameter, import or
-    keyword), and of every non-docstring string literal containing `literal`, in the product `.py` files."""
+    keyword), and of every non-docstring string literal containing `literal`, in the product `.py` files (those whose
+    path starts with `under`, when given)."""
     hits = []
-    for rel in product_python():
+    for rel in (p for p in product_python() if p.startswith(under)):
         try:
             tree = ast.parse((REPO / rel).read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):

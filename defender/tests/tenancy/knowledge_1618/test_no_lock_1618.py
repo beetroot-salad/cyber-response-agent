@@ -22,10 +22,24 @@ def test_a13_the_census_scans_product_code_and_sees_a_kept_name():
     assert A.uses("owned_temporary")
 
 
+#: Names generic enough that another product tree spells them for its own, unrelated use (`playground-v2/chaos/lock.py`
+#: has a `_LOCKED` shell-snippet attribute): K1 is about the defender's knowledge lock, so these are looked for under
+#: `defender/` only. Every other lock name is looked for in all product code.
+DEFENDER_ONLY = {"_LOCKED"}
+
+
 @pytest.mark.parametrize("name", LOCK_NAMES)
 def test_a13_no_product_code_names_the_lock(name):
-    """Each lock name is absent from product code (K1)."""
-    assert A.uses(name) == []
+    """Each lock name is absent from product code (K1); a generic one (`DEFENDER_ONLY`) from the defender's product code."""
+    assert A.uses(name, under="defender/" if name in DEFENDER_ONLY else "") == []
+
+
+def test_a13_the_defender_scope_is_the_defender_product_tree():
+    """Control for `DEFENDER_ONLY`: the scoped census still covers the defender's product code (a kept name is found there)
+    and nothing outside it."""
+    hits = A.uses("owned_temporary", under="defender/")
+    assert hits, "control: a kept name is found under defender/"
+    assert all(h.startswith("defender/") for h in hits), hits
 
 
 def test_a13_no_product_string_names_the_lock_file():

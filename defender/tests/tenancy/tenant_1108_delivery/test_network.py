@@ -10,7 +10,7 @@ import time
 import pytest
 
 from ._revert_store import claimed_batch, reviewed, revert_with
-from ._support import LANES, ForgeHTTP, Trickle, delivery, merge_on_remote, opened, quiet, target
+from ._support import LANES, ForgeHTTP, Trickle, delivery, merge_on_remote, opened, push_and_open, quiet, target
 
 #: The wall timeout the cases give network git, and how long past it a call may take to end.
 _TIMEOUT = 3.0
@@ -41,19 +41,31 @@ class _Stall:
         self._go.set()
 
 
+def _refusals(route):
+    """How the route's caller is refused: a delivery's open and a revert answer `DeliveryRefused`; the end push is the
+    tick's bare `GitRepository.push` (#1618: `finish`, which wrapped it, is deleted), whose git failure or timeout the
+    tick reads as a forge fault (`store_tick._forge_faults`)."""
+    from defender import _git
+
+    refused = target().DeliveryRefused
+    return (refused, _git.GitError, _git.GitTimeout) if route == "end-push" else (refused,)
+
+
 def _left(tenant, server):
     """Processes still at work in the tenant's folders, or talking to the server, a moment
     after the call ended (a killed process may take that long to go)."""
     return quiet(location_path(tenant.tenant_root), naming=(server.url,), seconds=1.0)
 
 
+#: #1618 (design flow 6, K4): a delivery's one fetch of `main` and every branch is its open's (the tick's opening fetch),
+#: so `publish-fetch` and `start_batch-fetch` are now the `open-fetch` route (nothing is fetched at `start_batch`:
+#: `test_start_batch_makes_no_network_request`), and the batch's end push is `end-push` (the tick's
+#: `GitRepository.push`). `finish-lookup` and `refinish-push` are retired with the test-only `TenantDelivery.finish`
+#: (design census) whose lookup and retry they timed.
 _ROUTES = {
-    "publish-fetch": ("git-upload-pack", True),
-    "start_batch-fetch": ("git-upload-pack", True),
-    "finish-lookup": ("git-upload-pack", False),
-    "finish-push": ("git-receive-pack", True),
-    "refinish-push": ("git-receive-pack", False),
-    "revert-fetch": ("git-upload-pack", True),
+    "open-fetch": ("git-upload-pack", True),
+    "end-push": ("git-receive-pack", True),
+    "revert-fetch": ("git-upload-pack", True),  # the revert's own repository's opening fetch (flow 7)
     "revert-push": ("git-receive-pack", True),
 }
 
@@ -81,36 +93,28 @@ def _stalled_route(http_repo, tmp_path, route, then=None, trickle=False, store=N
     Returns `(call, stall, required)`."""
     server = http_repo[3]
     http = ForgeHTTP()
-    d = delivery(http_repo, http, network_timeout=_TIMEOUT)
     service, required = _ROUTES[route]
-    if route == "publish-fetch":
-        call = d.publish
-    elif route == "start_batch-fetch":
+    if route == "open-fetch":
         def call():
-            return d.start_batch("stalled", lanes=LANES)
-    elif route in ("finish-lookup", "finish-push"):
+            return delivery(http_repo, http, network_timeout=_TIMEOUT)
+    elif route == "end-push":
+        d = delivery(http_repo, http, network_timeout=_TIMEOUT)
         batch = _claimed(d, "stalled")
 
         def call():
-            return d.finish(batch)
-    elif route == "refinish-push":
-        batch = _claimed(d, "stalled")
-        http.fail_create = True
-        with pytest.raises(target().DeliveryRefused):
-            d.finish(batch)
-        http.fail_create = False
-
-        def call():
-            return d.finish(batch)
+            return batch.repository.push(batch.repository.branch_tip(batch.branch), batch.branch)
     else:
+        d = delivery(http_repo, http, network_timeout=_TIMEOUT)
         batch, held = _claimed(d, "stalled", (http_repo, store))
-        finished = d.finish(batch)
+        finished = push_and_open(batch)
         opened(finished)
         reviewed(store, held, finished)
         merge_on_remote(http_repo, tmp_path, batch.branch)
+        d.close()
 
-        def call():
-            return revert_with(d, store, "agent/lessons/stalled.md", "stalled")
+        def call():  # flow 7: the revert opens its own private repository (its fetch), then commits and pushes
+            with delivery(http_repo, http, network_timeout=_TIMEOUT) as own:
+                return revert_with(own, store, "agent/lessons/stalled.md", "stalled")
     stall = _Stall(service, then, trickle)
     server.rearm()
     server.on_service = stall
@@ -127,7 +131,7 @@ def test_a_stalled_forge_fails_within_the_timeout_and_leaves_no_process(http_rep
         result, error = None, None
         try:
             result = call()
-        except target().DeliveryRefused as refused:
+        except _refusals(route) as refused:
             error = refused
         elapsed = time.monotonic() - started
         reached = stall.reached.is_set()
@@ -198,3 +202,14 @@ def test_network_git_has_a_finite_wall_timeout_by_default(repo):
     assert default > 0, default
     assert delivery(repo, ForgeHTTP()).network_timeout == default
     assert delivery(repo, ForgeHTTP(), network_timeout=_TIMEOUT).network_timeout == _TIMEOUT
+
+
+def test_start_batch_makes_no_network_request(http_repo):
+    """#1618 (flow 6, K4): a batch start builds its draft from its delivery's opening fetch; it asks the forge's git
+    nothing. The control: the open itself did reach it."""
+    server = http_repo[3]
+    with delivery(http_repo, ForgeHTTP(), network_timeout=_TIMEOUT) as d:
+        opened_with = len(server.seen)
+        assert opened_with > 0, "control: the delivery's open fetched over the forge's git"
+        d.start_batch("no-network", lanes=LANES)
+        assert server.seen[opened_with:] == [], "start_batch made a git request of its own"

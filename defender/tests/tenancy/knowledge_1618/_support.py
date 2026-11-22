@@ -99,10 +99,10 @@ def _plant_decoy(t: Any) -> None:
     root = tenant_root(t)
     export = root / "exports" / t.commit
     for half in ("agent", "settings"):
-        shutil.copytree(Path(t.clone) / half, export / half, symlinks=True)
+        shutil.copytree(Path(t.checkout) / half, export / half, symlinks=True)
     (root / "exports" / "current").write_text(f"{t.commit}\n", encoding="utf-8")
-    (Path(t.clone) / LESSON).write_text(lesson_text(CLONE_ONLY_MARK), encoding="utf-8")
-    (Path(t.clone) / MARK_FILE).write_text(mark_text(CLONE_ONLY_MARK), encoding="utf-8")
+    (Path(t.checkout) / LESSON).write_text(lesson_text(CLONE_ONLY_MARK), encoding="utf-8")
+    (Path(t.checkout) / MARK_FILE).write_text(mark_text(CLONE_ONLY_MARK), encoding="utf-8")
 
 
 def _retire_local_state(t: Any) -> None:
@@ -136,7 +136,7 @@ def scene(tmp_path: Path, data_root: Path, *, decoy: bool = False) -> Iterator[P
         vault = VaultHTTP(tenant_id)
         stand_in = SimpleNamespace(id=tenant_id, tenant_root=Path(location_path(data_root)) / tenant_id, knowledge=clone)
         t = PublishedTenant(
-            tenant=stand_in, data_root=data_root, clone=clone, remote=remote, origin=origin,
+            tenant=stand_in, data_root=data_root, checkout=clone, remote=remote, origin=origin,
             forge=ForgeHTTP(remote=remote, origin=origin), vault=vault, identity=vault.identity(), server=server,
             scratch=scratch, export=SimpleNamespace(commit=seed), p3=(stand_in, remote, None))
         bind_forge(t)
@@ -369,7 +369,8 @@ sys.exit(main(sys.argv[2:], directory=directory, identity=VaultHTTP(spec["tenant
 '''
 
 
-def child_report(t: Any, tmp_path: Path, dest: Path, commit: str | None = None, *, timeout: float = 120.0) -> Report:
+def child_report(t: Any, tmp_path: Path, dest: Path, commit: str | None = None, *, timeout: float = 120.0,
+                 trigger: str | None = None) -> Report:
     """Run the fetch child as a real subprocess for `dest` (made by the caller) and return its report line (`ok <commit>` /
     `refused <transient|lasting> <reason>`). FORCED: see `_CHILD_WRAPPER`."""
     wrapper = tmp_path / "fetch_child_wrapper.py"
@@ -380,6 +381,8 @@ def child_report(t: Any, tmp_path: Path, dest: Path, commit: str | None = None, 
     argv = [t.tenant_id, "--data-root", str(location_path(t.data_root)), "--dest", str(dest)]
     if commit is not None:
         argv += ["--commit", commit]
+    if trigger:  # who asked, as the product's caller passes it (D9: readiness and onboarding also check main's protection)
+        argv += ["--trigger", trigger]
     env = {**os.environ, "PYTHONPATH": str(IMPORT_ROOT)}
     done = subprocess.run([sys.executable, str(wrapper), str(spec), *argv], cwd=IMPORT_ROOT, env=env,  # noqa: S603
                           capture_output=True, text=True, check=False, timeout=timeout)
@@ -407,25 +410,32 @@ class Fetch:
         self.before = before
         self.calls: list[dict[str, Any]] = []
         self.faults: list[tuple[Callable[[], Any], Callable[[], Any]]] = []
+        import threading
+
+        self._lock = threading.Lock()  # concurrent asks (K2) each get their own call record and work folder
 
     def once(self, arm: Callable[[], Any], heal: Callable[[], Any] = lambda: None) -> None:
         self.faults.append((arm, heal))
 
-    def __call__(self, tenant_id: Any, dest: Path, *, data_root: Any, commit: str | None = None, **_kw: Any) -> str:
+    def __call__(self, tenant_id: Any, dest: Path, *, data_root: Any, commit: str | None = None, trigger: str | None = None,
+                 **_kw: Any) -> str:
         dest = Path(dest)
         call = {"tenant": str(tenant_id), "dest": dest, "data_root": Path(location_path(data_root)), "commit": commit,
+                "trigger": trigger,
                 "was_empty_dir": dest.is_dir() and not dest.is_symlink() and not any(dest.iterdir()), "line": None}
-        self.calls.append(call)
-        arm, heal = self.faults.pop(0) if self.faults else (lambda: None, lambda: None)
+        with self._lock:
+            self.calls.append(call)
+            number = len(self.calls)
+            arm, heal = self.faults.pop(0) if self.faults else (lambda: None, lambda: None)
         if self.before is not None:
             self.before(str(tenant_id))
         arm()
         self.work.mkdir(parents=True, exist_ok=True)
-        folder = self.work / f"call-{len(self.calls)}"
+        folder = self.work / f"call-{number}"
         folder.mkdir()
         scene = SimpleNamespace(tenant_id=str(tenant_id), origin=self.origin_of(str(tenant_id)), data_root=data_root)
         try:
-            call["line"] = child_report(scene, folder, dest, commit).line
+            call["line"] = child_report(scene, folder, dest, commit, trigger=trigger).line
         finally:
             heal()
             shutil.rmtree(folder, ignore_errors=True)
