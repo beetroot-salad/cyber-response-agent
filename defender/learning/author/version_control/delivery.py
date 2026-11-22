@@ -223,8 +223,8 @@ class TenantDelivery:
             )
         if self.repository.branch_tip(branch) is not None:
             raise DeliveryRefused(
-                f"the branch {branch} already exists on the forge: its commits are "
-                "a takeover's to pick up, and its id is not used again"
+                f"the branch {branch} already exists (on the forge, or committed by this delivery): "
+                "its commits are a takeover's to pick up, and its id is not used again"
             )
 
     def start_box(
