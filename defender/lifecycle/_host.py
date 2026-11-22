@@ -44,7 +44,7 @@ from defender.lifecycle._job import (
 )
 from defender.lifecycle._teardown import Containers, stop_containers, take_exclusive
 from defender.lifecycle.config import LifecycleConfig
-from defender.tenancy import FenceMissed, Generation, HeldTenant, TenantRepository, host_lock
+from defender.tenancy import REPO_SCRATCH, FenceMissed, Generation, HeldTenant, TenantRepository, host_lock
 
 _logger = logging.getLogger(__name__)
 
@@ -289,6 +289,10 @@ class HostActor(Actor):
 
     def _remove_tenant_files(self, tenant: str) -> None:
         targets = [self._root / tenant, self._tenant_secrets(tenant)]
+        # K7: the tenant's private git repositories (`<data root>/.repo-scratch/<tenant>.owner-...`) go by name, whoever owns them.
+        scratch = self._root / REPO_SCRATCH
+        if scratch.is_dir():
+            targets += sorted(scratch / name for name in os.listdir(scratch) if name.startswith(f"{tenant}."))
         root = publish_root.publish_root()
         if isinstance(root, Path):
             targets.append(root / tenant)
