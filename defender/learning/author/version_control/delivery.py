@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from defender.tenancy import TenantDirectory
 from defender import _io
-from defender.tenancy import Tenant
+from defender.tenancy import Tenant, data_root_for_child, sweep_dead_owners
 from defender.records.formats import TenantRefused
 from defender import box
 from defender.box import DockerFn, run_docker
@@ -32,23 +32,16 @@ from .exports import (
     draft_path,
     TenantExport,
     build_draft,
-    knowledge_at,
-    sweep_dead_owners,
 )
 from .credential import forge_credential
 from .model import (
-    _PRECEDENCE,
-    Delivered,
     DeliveryRefused,
-    DeliveryStatus,
-    _answer,
     _lanes,
     _one_word,
     _refusals,
 )
 from .record import _BatchKey
 from .repository import NETWORK_TIMEOUT, GitRepository
-from .status import recording
 
 #: The lessons lane's branch prefix on the tenant repository (a lane passes its own).
 LESSONS_BRANCH_PREFIX = "lessons/"
@@ -128,7 +121,7 @@ class TenantDelivery:
         directory: TenantDirectory | None = None,
         relay: Callable[..., dict[str, Any]] | None = None,
     ) -> TenantDelivery:
-        with recording(directory, accepted_tenant.id, by="delivery"), _refusals():
+        with _refusals():
             # One private repository for this delivery's life: history and every branch fetched once, here (D4/K12).
             repository = GitRepository.open(
                 tenant_id=str(accepted_tenant.id),
@@ -141,26 +134,6 @@ class TenantDelivery:
                 tenant=accepted_tenant, defender_dir=defender_dir, repository=repository,
                 directory=directory, relay=relay,
             )
-
-    def publish(self) -> TenantExport:
-        """SPIKE SHIM (#1618): NOT the design. The retired `exports/` snapshot of the clone's HEAD, kept only so the
-        sketch's fixture (`published_tenant`) can lay down its decoy `exports/<seed>/` + `current`."""
-        import shutil
-
-        from defender.records.formats import unwrap_exports_root
-        from .repository import LocalRepository
-
-        clone = LocalRepository.open_local(self.tenant.knowledge)
-        commit = clone.revision("HEAD")
-        files = knowledge_at(self.tenant, clone, commit)
-        exports = unwrap_exports_root(self.tenant.exports)
-        final = exports / commit
-        shutil.rmtree(final, ignore_errors=True)
-        for rel, data in files.items():
-            (final / rel).parent.mkdir(parents=True, exist_ok=True)
-            (final / rel).write_bytes(data)
-        (exports / "current").write_text(f"{commit}\n", encoding="utf-8")
-        return TenantExport(commit=commit, path=final)
 
     def close(self) -> None:
         """The delivery's private repository is its tick's: removed when the tick ends."""
@@ -186,7 +159,7 @@ class TenantDelivery:
             declared = _lanes(lanes)
             branch = branch if branch is not None else f"{self.branch_prefix}{batch_id}"
             self._refuse_taken(batch_id, branch)
-            sweep_dead_owners(self.tenant)  # flow 8: a batch start sweeps; no lock
+            sweep_dead_owners(data_root_for_child(self.tenant.data_root), self.tenant.id)  # flow 8: a batch start sweeps
             # The draft is the tick's own fetch of `main` (D4): nothing is fetched or published here.
             commit = self.repository.revision("refs/heads/main")
             build_draft(self.tenant, self.repository, batch_id, commit, declared)
@@ -272,73 +245,3 @@ class TenantDelivery:
                     "holds agent/ alone"
                 )
         return box.start_box(replace(request, require_sandbox=True), docker=docker)
-
-    def _deliver(
-        self, batch: _BatchKey, tip: str, *, mine: frozenset[str], title: str, body: str
-    ) -> Delivered:
-        """The push route. Each commit between the batch's base and `tip` must be one the
-        commit-maker made for this batch (`mine`, checked before anything else, so a branch
-        holding only a foreign commit refuses rather than having nothing to deliver). Then the
-        batch's PR is looked up, before any push: one found (open, merged or closed) is
-        answered and nothing is pushed or opened (D-closed). With none, a branch at its base
-        has nothing to deliver; otherwise `tip` (by id, so a branch moved meanwhile sends
-        nothing new) is pushed to the remote branch alone and a PR opened against `main`."""
-        if tip != batch.base:
-            sent = self.repository.commits_since(batch.base, tip)
-            foreign = [commit for commit in sent if commit not in mine]
-            if foreign or not sent:
-                raise DeliveryRefused(
-                    f"the branch {batch.branch} at {tip} holds {len(foreign) or 'no'} commit(s) "
-                    f"past its base {batch.base} that the commit-maker did not make for it "
-                    f"({', '.join(foreign) or 'it does not descend from its base'}): nothing "
-                    "is pushed"
-                )
-        found = sorted(
-            self.repository.pull_requests(mine) if mine else (),
-            key=lambda pr: (_PRECEDENCE[pr.status], -pr.number),
-        )
-        if found:
-            return _answer(found[0])
-        if tip == batch.base:
-            return Delivered(status=DeliveryStatus.NOTHING)
-        self.repository.push(tip, batch.branch)
-        opened = self.repository.open_pr(branch=batch.branch, title=title, body=body)
-        return Delivered(status=DeliveryStatus.OPENED, url=opened.url)
-
-    def _body(self, tip: str, from_commit: bool) -> str | None:
-        """The PR body the tip commit's message holds, when the lane's PRs are described by it (#1414 A2)."""
-        return self.repository.commit_message(tip) if from_commit else None
-
-    def finish(self, batch: Batch, *, body_from_commit: bool = False) -> Delivered:
-        """Deliver the batch: `nothing to deliver` when it made no commit (it has no branch);
-        otherwise its PR's status when the forge has one, or its branch pushed and a PR
-        opened. A branch moved from the commit-maker's last commit, or holding any commit it
-        did not make for this batch, is refused before any push."""
-        with _refusals():
-            line = batch._line
-            tip = self.repository.branch_tip(line.batch.branch)
-            if tip != line.tip:
-                raise DeliveryRefused(
-                    f"the branch {line.batch.branch} is at {tip or 'nothing'}, not the "
-                    f"commit-maker's last commit {line.tip or '(none yet)'}: nothing is pushed"
-                )
-            if tip is None:
-                return Delivered(status=DeliveryStatus.NOTHING)
-            return self._deliver(
-                line.batch,
-                tip,
-                mine=frozenset(m.commit for m in batch.committer.made if m.batch == line.batch),
-                title=_batch_title(batch.id),
-                body=self._body(tip, body_from_commit) or _batch_body(line.batch.branch, line.batch.base),
-            )
-
-
-def _batch_title(batch_id: str) -> str:
-    return f"learning: tenant knowledge batch {batch_id}"
-
-
-def _batch_body(branch: str, base: str) -> str:
-    return (
-        f"Tenant agent knowledge batch `{branch}`, based on `{base[:12]}`. Changes `agent/` "
-        "only, every commit made by the host's commit-maker."
-    )

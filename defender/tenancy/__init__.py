@@ -60,11 +60,14 @@ if TYPE_CHECKING:
     )
     from defender.tenancy._owner import (
         OWNER_FILE as OWNER_FILE,
+        REPO_SCRATCH as REPO_SCRATCH,
         mark_alive as mark_alive,
         owned_temporary as owned_temporary,
         owner_alive as owner_alive,
+        private_folder as private_folder,
         process_mark as process_mark,
         process_start as process_start,
+        sweep_dead_owners as sweep_dead_owners,
         write_owner as write_owner,
     )
     from defender.tenancy._publish_status import (
@@ -141,7 +144,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("open_command_line_run",), "_command_line_run"),
     **dict.fromkeys(("RecordsUnreachable", "TenantDirectory",), "_directory"),
     **dict.fromkeys(("DeliveryRefused", "POINTER", "TenantExport", "current_export", "current_export_at", "read_export_text", "regular_files", "remove_entry",), "_exports"),
-    **dict.fromkeys(("OWNER_FILE", "mark_alive", "owned_temporary", "owner_alive", "process_mark", "process_start", "write_owner",), "_owner"),
+    **dict.fromkeys(("OWNER_FILE", "REPO_SCRATCH", "mark_alive", "owned_temporary", "owner_alive", "private_folder", "process_mark", "process_start", "sweep_dead_owners", "write_owner",), "_owner"),
     **dict.fromkeys(("FRESH", "MISCONFIGURED", "OPERATOR", "STALE_OPERATOR", "STALE_TRANSIENT", "TRANSIENT", "read_status", "record_published", "record_refusal", "record_report",), "_publish_status"),
     **dict.fromkeys(("ISSUER_ROLE", "Tenant", "TenantId", "accept_tenant", "box_mounted_arm_container", "box_mounted_episodes", "check_knowledge_folder", "check_run_settings", "clone_halves", "data_root_for_child", "data_root_from_path", "is_valid_tenant_id", "job_tenant_folder", "parse_tenant_id_bytes", "refuse_unplaceable_data_root", "requested_tenant", "requested_tenant_id", "resolve_data_root", "tenant_exports", "tenant_id_file_text",), "_tenant"),
     **dict.fromkeys(("AGENT_HALF", "SETTINGS_HALF", "TENANT_ID_FILE", "add_tenant_arguments", "template_dir",), "_tenants"),

@@ -656,7 +656,7 @@ class _TokenMint:
 # operator command runs it here, beside its run half.
 _resolve_run_tenant = _run.run_tenant_or_exit
 _publish_report = _run.publish_report
-PublishLaunch = _run.PublishLaunch
+FetchSeam = _run.FetchSeam
 _knowledge_source = _run.resolve_knowledge
 _copy_knowledge = _run.copy_knowledge
 _write_knowledge_record = _run.write_knowledge_record
@@ -1014,7 +1014,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
     oracle: Any,
     verifier: Any,
     roster: Any,
-    publish: PublishLaunch | None,
+    fetch: FetchSeam | None,
     signer: Any = None,
     proxy_url: str | None = None,
     issuer_transport: Any = None,
@@ -1077,7 +1077,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
         # (or the pin), one export — copied into the run's own folder, named by its run id,
         # before anything reads it. The copy is the run's alone and is removed when it ends.
         early = _early_run(ns, accepted, world, episode_runs)
-        knowledge = _knowledge_source(accepted, pin=pin, publish=publish, data_root=data_root,
+        knowledge = _knowledge_source(accepted, pin=pin, fetch=fetch, data_root=data_root,
                                       records=records, run_id=early.run_dir.name)
         copy = _copy_knowledge(accepted, knowledge, early.run_dir.name)
         try:
@@ -1251,7 +1251,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     oracle: Any = None,
     verifier: Any = None,
     roster: Any = None,
-    publish: PublishLaunch | None = None,
+    fetch: FetchSeam | None = None,
     directory: tenancy.TenantDirectory | None = None,
     signer: Any = None,
     proxy_url: str | None = None,
@@ -1264,9 +1264,9 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
     value — to the investigation, so the roster judged and the roster used are one and the run
     is not judged twice.
 
-    `publish` is the launch-time publish (#1108 P4, U7/O11): called once per unpinned launch
-    with the tenant id and the data root, it returns the child's one report line. `None` is the
-    real child process (`launch_publish`); only an in-process caller passes a stand-in.
+    `fetch` is the knowledge fetch (#1618 flow 1): called once per launch with the tenant id, the empty folder
+    to fill and the data root (and a pinned run's commit), it returns the child's one report line. `None` is
+    the real child process (`launch_publish`); only an in-process caller passes a stand-in.
 
     `directory` is the tenant records (#1214 Flow 4): a test's or a launcher's; a production run
     passes none and reads them from `DEFENDER_DATABASE_DSN`. The run's tenant must be `active`
@@ -1300,7 +1300,7 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its injection seams
         with _tenant_refusal_exits():
             admitted = host_tenant(data_root, ns.tenant, directory=directory, **_acceptance_args(ns, data_root))
         setup = _operator_set_up(ns, data_root, admitted, preflight=preflight, materialize=materialize,
-                                 oracle=oracle, verifier=verifier, roster=roster, publish=publish,
+                                 oracle=oracle, verifier=verifier, roster=roster, fetch=fetch,
                                  signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport)
     else:
         setup = _sibling_set_up(ns, request, preflight=preflight, roster=roster, oracle=oracle, verifier=verifier)

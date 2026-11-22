@@ -12,7 +12,7 @@ from .model import (
     DeliveryRefused,
     DeliveryStatus,
 )
-from .publish import publish_child_main, publish_for_run
+from .fetch import fetch_child_main, fetch_copy
 from .repository import NETWORK_TIMEOUT
 
 __all__ = [
@@ -30,6 +30,6 @@ __all__ = [
     "TenantForgeCredential",
     "forge_credential",
     "opened_delivery",
-    "publish_child_main",
-    "publish_for_run",
+    "fetch_child_main",
+    "fetch_copy",
 ]

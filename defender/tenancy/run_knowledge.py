@@ -21,33 +21,19 @@ from defender import _io
 from defender._text import one_line
 from defender.tenancy._exports import (
     OID,
-    DeliveryRefused,
-    current_export,
-    regular_files,
     remove_entry,
 )
-from defender.tenancy._owner import owned_temporary, owner_alive, write_owner
-from defender.tenancy._publish_status import (
-    FRESH,
-    MISCONFIGURED,
-    OK,
-    OPERATOR,
-    REFUSED,
-    STALE_OPERATOR,
-    STALE_PREFIX,
-    TRANSIENT,
-)
+from defender.tenancy._owner import owned_temporary, write_owner
 from defender.tenancy._tenant import Tenant
-from defender.records.formats import TenantRefused
 from defender.tenancy._tenants import AGENT_HALF, SETTINGS_HALF
 
 if TYPE_CHECKING:
     from defender.tenancy.record_values import TenantRecords
 
-#: The report line's classes (OD2) are `tenancy._publish_status`'s, shared with the child that
-#: writes them. `stale:*` keeps a run with a snapshot going; `misconfigured` refuses it (O9);
-#: anything else is a failed child (U11). A source is fresh, stale or pinned.
-STALE, PINNED = "stale", "pinned"
+#: The fetch child's report vocabulary: `ok <commit>` or `refused <transient|lasting> <reason>`. A source is fresh (main's
+#: tip, as fetched) or pinned (a commit asked for by id).
+OK, REFUSED, TRANSIENT, LASTING = "ok", "refused", "transient", "lasting"
+FRESH, PINNED = "fresh", "pinned"
 
 #: How long a failed child's summary may run in the reason, so one line stays one line.
 _SUMMARY_LIMIT = 300
@@ -88,7 +74,7 @@ def child_failed(summary: object) -> PublishReport:
 
 def failed_line(summary: object) -> str:
     """U11's report line for a child with no valid one of its own: what the launcher returns, and records."""
-    return f"{REFUSED} lasting {child_failed(summary).reason}"
+    return f"{REFUSED} {LASTING} {child_failed(summary).reason}"
 
 
 def read_publish_report(line: object) -> PublishReport:
@@ -107,7 +93,7 @@ def read_publish_report(line: object) -> PublishReport:
         return child_failed(f"ok without a full commit id: {text!r}")
     if head == REFUSED and rest:
         klass, _sep2, why = rest.partition(" ")
-        if klass in (TRANSIENT, "lasting") and why.strip():
+        if klass in (TRANSIENT, LASTING) and why.strip():
             return PublishReport(REFUSED, reason=why.strip(), transient=klass == TRANSIENT)
         return child_failed(f"refused without a class: {text!r}")
     return child_failed(f"unrecognised report line: {text!r}")
@@ -199,15 +185,15 @@ def make_owned_empty(parent: Path, label: str) -> Path:
 
 
 def place(temporary: Path, final: Path) -> None:
-    """Rename the filled temporary into place with an `owner` record (this process); a live owner's copy at `final`
-    refuses, a dead one's is replaced."""
-    parent = temporary.parent
-    if _io.entry_present(final):
-        if owner_alive(final):
-            raise KnowledgeRefused(f"{final} is a live run copy: another process is running it")
-        _remove_copy(parent, final.name)
+    """The filled temporary made the run's copy: `agent/` moved under `stage/` with the box's start token, an `owner`
+    record for this process, then renamed into place. Run ids are minted, never reused (C-K11), so anything already
+    at `final` refuses: nothing there is replaced."""
+    if os.path.lexists(final):
+        raise KnowledgeRefused(f"{final} exists already: a run id is never reused")
     with _io.hold(temporary, follow=False) as held:
+        held.mkdir(STAGE)  # lint-unguarded-tree-write: ok — `Held.mkdir`, no link followed
         held.write(f"{STAGE}/{STAGE_TOKEN}", secrets.token_hex(16), mode="create")
+    os.rename(temporary / AGENT_HALF, temporary / STAGE / AGENT_HALF)
     write_owner(temporary)
     os.rename(temporary, final)
 
@@ -241,7 +227,7 @@ def write_record_versions(path: Path, records: TenantRecords) -> None:
 
 
 __all__ = [
-    "FRESH", "MISCONFIGURED", "OPERATOR", "PINNED", "STALE", "STAGE", "STAGE_TOKEN",
+    "FRESH", "LASTING", "OK", "PINNED", "REFUSED", "STAGE", "STAGE_TOKEN",
     "TRANSIENT", "KnowledgeRefused", "KnowledgeSource", "PublishReport", "RunCopy",
     "adopt_copy", "make_owned_empty", "place", "child_failed", "failed_line", "pinned_commit", "read_publish_report", "resolve_source",
     "write_host_record", "write_record_versions",

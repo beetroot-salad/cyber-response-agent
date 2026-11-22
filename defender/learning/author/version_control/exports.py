@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from defender.records.formats import unwrap_drafts_root
 
-import os
 from pathlib import Path
 
 from defender import _io
@@ -21,7 +20,7 @@ from .model import (
     DeliveryRefused,
     _plain_component,
 )
-from .owner import owner_alive, write_owner
+from .owner import write_owner
 from .repository import LocalRepository
 
 #: What a draft is built under (`.<id>-<rand>`) before it is renamed into place: a leading dot
@@ -32,18 +31,6 @@ _DRAFT_TEMPORARY = "."
 def scratch_name(prefix: str) -> str:
     """A name for scratch this process is about to make: carries its owner from its first instant."""
     return owned_temporary(prefix)
-
-
-def sweep_dead_owners(tenant: Tenant) -> None:
-    """O-SWEEP (flow 8): remove every draft and run copy (`<T>/drafts/*`, `<T>/run-knowledge/*`, dot-named
-    temporaries included) whose owner names no running process, as the entry it is. No lock: every scratch folder
-    carries its owner from its first instant, a live owner's is kept however old it is."""
-    for root in (unwrap_drafts_root(tenant.drafts), tenant.run_knowledge):
-        if not _io.entry_present(root):
-            continue
-        for name in sorted(os.listdir(root)):
-            if not owner_alive(root / name):
-                _remove_entry(root, name)
 
 
 def knowledge_at(

@@ -1,48 +1,21 @@
-"""What a publish fault means (O-STALE), and the tenant's last publish outcome (O-SEE).
-
-P3 folds git, forge, auth and OS faults into one `DeliveryRefused` (P4-C23); the fault it was
-raised from stays its cause. `classify` reads that chain: an outage that may pass by itself
-(the issuer or the forge unreachable or failing with a server error, a network call timing
-out, the tenant lock busy) is `transient`; anything else needs a human (`operator`): a refused
-login or token, `main` unprotected, a dirty or diverged clone, a commit refused on content.
-
-Every publish trigger records its outcome in the tenant records (`tenancy.publish_status`, #1214
-O6, through `tenancy`'s recorders): the refusal classified here, or the commit it published.
-"""
+"""What a fetch or delivery fault means: `transient` (an outage that may pass by itself) or `lasting` (a retry changes
+nothing). P3 folds git, forge, auth and OS faults into one `DeliveryRefused`; the fault it was raised from stays its
+cause, and `classify` reads that chain. Drains use the split for the person ceiling; the fetch child reports it."""
 
 from __future__ import annotations
 
-import contextlib
 import re
 import subprocess
-from collections.abc import Iterator
-from typing import TYPE_CHECKING
 
 import httpx
 
 from defender import _git
 from defender._text import one_line
-from defender.tenancy import (
-    FRESH,
-    MISCONFIGURED,
-    OPERATOR,
-    STALE_OPERATOR,
-    STALE_TRANSIENT,
-    TRANSIENT,
-    RecordsUnreachable,
-    read_status,
-    record_published,
-    record_refusal,
-    record_report,
-)
+from defender.tenancy import RecordsUnreachable
 
-if TYPE_CHECKING:
-    from defender.records.formats import TenantId
-    from defender.tenancy import TenantDirectory
-
-from .auth import CredentialMisconfigured
 from .forgejo import ForgeError
 
+TRANSIENT, LASTING = "transient", "lasting"
 #: What git says when it could not reach the remote at all (no answer, not a refusal).
 _GIT_UNREACHABLE = re.compile(
     r"could not resolve host|failed to connect|connection refused|connection reset|"
@@ -65,23 +38,15 @@ def _chain(error: BaseException) -> list[BaseException]:
 
 
 def classify(error: BaseException) -> tuple[str, str]:
-    """`(kind, one-line reason)` of a publish fault: `transient` or `operator` (module doc)."""
+    """`(kind, one-line reason)` of a fault: `transient` or `lasting`."""
     reason = str(error)
     for fault in _chain(error):
-        if isinstance(fault, httpx.HTTPStatusError) and any(
-            isinstance(f, ForgeError) for f in _chain(error)
-        ):
+        if isinstance(fault, httpx.HTTPStatusError) and any(isinstance(f, ForgeError) for f in _chain(error)):
             body = fault.response.text[:_BODY_LIMIT] if fault.response is not None else ""
             if body:
                 reason = f"{reason}: {body}"
             break
     return _fault_kind(error), one_line(reason)
-
-
-def is_misconfigured(error: BaseException) -> bool:
-    """Whether `error` stems from a credential the host cannot even log in with (its host secret
-    file missing, unreadable or malformed): the `misconfigured` outcome, not a `stale` one."""
-    return any(isinstance(fault, CredentialMisconfigured) for fault in _chain(error))
 
 
 def _fault_kind(error: BaseException) -> str:
@@ -90,32 +55,7 @@ def _fault_kind(error: BaseException) -> str:
             return TRANSIENT
         if isinstance(fault, httpx.HTTPStatusError):
             status = fault.response.status_code if fault.response is not None else 0
-            return TRANSIENT if status >= 500 else OPERATOR
+            return TRANSIENT if status >= 500 else LASTING
         if isinstance(fault, _git.GitError):
-            return TRANSIENT if _GIT_UNREACHABLE.search(fault.stderr) else OPERATOR
-    return OPERATOR
-
-
-def record_refused(directory: TenantDirectory | None, tenant_id: TenantId, error: BaseException, *,
-                   by: str) -> None:
-    """A publish by `by` was refused."""
-    kind, reason = classify(error)
-    record_refusal(directory, tenant_id, kind=kind, reason=reason, by=by)
-
-
-@contextlib.contextmanager
-def recording(directory: TenantDirectory | None, tenant_id: TenantId, *, by: str) -> Iterator[None]:
-    """Record a refusal raised inside as `by`'s publish refusal of `tenant_id` (through
-    `directory`, the host's tenant records; none: nothing is recorded), and re-raise it."""
-    try:
-        yield
-    except Exception as refused:
-        record_refused(directory, tenant_id, refused, by=by)
-        raise
-
-
-__all__ = [
-    "FRESH", "MISCONFIGURED", "OPERATOR", "STALE_OPERATOR", "STALE_TRANSIENT", "TRANSIENT",
-    "classify", "is_misconfigured", "read_status", "record_published", "record_refused", "record_report",
-    "recording",
-]
+            return TRANSIENT if _GIT_UNREACHABLE.search(fault.stderr) else LASTING
+    return LASTING
