@@ -1,7 +1,7 @@
 """#1540 Am-5, the no-repeat guard's own controls: the `browser` fixture's contexts carry it however a test opens them
 (the `context` fixture, its own `browser.new_context()`), so a `GET` to `/api/*` sent twice within one load fails when the
 context closes, and the same two reads across a navigation or a restore do not. A test that repeats on purpose asserts it,
-then clears the log. (The dev server's contexts: `test_1540_dev_server.py`.)"""
+then clears the log. (The dev server's contexts: `test_dev_server.py`.)"""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -96,3 +96,10 @@ def test_1540_am5_a_page_opened_by_the_browser_itself_is_in_a_guarded_context(wo
     assert len(browser.made) == 1, "positive control: the page's context was made by the guarded browser"
     assert requests_of(browser.made[0]), "positive control: the page's requests were logged"
     browser.made[0].close()
+
+
+@pytest.fixture
+def world(shared_world_fresh):
+    """These tests change nothing on the server, so the module's tests share one running system (conftest
+    `shared_world`), each with a fresh front channel, instead of starting a database, API child and ingress apiece."""
+    return shared_world_fresh

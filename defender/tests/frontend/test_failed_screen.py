@@ -153,3 +153,10 @@ def test_1161_b4_a_sign_in_start_with_a_judged_return_goes_to_the_provider_not_t
     page.goto(f"{world.origin}/api/auth/login?return=%2Fhome")
     screen(page, HOME)
     assert navigations_to(requests, world.origin, "/sign-in-failed") == []
+
+
+@pytest.fixture
+def world(shared_world_fresh):
+    """These tests change nothing on the server, so the module's tests share one running system (conftest
+    `shared_world`), each with a fresh front channel, instead of starting a database, API child and ingress apiece."""
+    return shared_world_fresh

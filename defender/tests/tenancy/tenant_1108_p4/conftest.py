@@ -9,13 +9,16 @@ tenant holds (`_drain_support.carried_impl`); nothing is kept by a module. Every
 `defender/tests` has no `__init__.py`, so a relative import loads a second copy of it."""
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from defender.tests.tenancy.tenant_1108_p4._drain_support import CARRIED, PORT_LANES, TICK_IMPLS, TickImpl
-from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
+from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+from defender.tests.tenancy.tenant_1108_p4._r6_support import WORKTREE
+from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, published_tenant
 
 #: The case parameters that name the lane a tick runs: a port case of a lane the port does not serve never reaches the port
 #: (its tick is the adapter's), so it is not collected.
@@ -69,12 +72,23 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Drop the port cases whose tick is of a lane the port does not serve (the lead lane's port is not in #1487,
-    design r5 "Not here", #1546): over the port they would be the adapter's own cases again."""
+    design r5 "Not here", #1546): over the port they would be the adapter's own cases again.
+
+    And keep one port case per test function, its first parametrization: a port case starts a real post-step helper
+    process per tick (about eight times an adapter case), and the port's equivalence to the adapter is held by
+    `test_1487_tick_store_conformance.py` over every verb and flow, so each test function runs over the port once and over
+    the adapter in every parametrization. A module that names `ONLY_TICK_IMPLS` runs only what it names: not thinned."""
     kept, dropped = [], []
+    ported: set[tuple[str, str]] = set()
     for item in items:
         params = getattr(getattr(item, "callspec", None), "params", {})
         lane = next((lanes.get(params[name]) for name, lanes in LANE_PARAMS.items() if name in params), None)
-        (dropped if params.get("tick_impl") == "port" and lane is not None and lane not in PORT_LANES else kept).append(item)
+        drop = params.get("tick_impl") == "port" and lane is not None and lane not in PORT_LANES
+        if params.get("tick_impl") == "port" and not drop and getattr(item.module, "ONLY_TICK_IMPLS", None) is None:
+            function = (item.nodeid.split("::", 1)[0], getattr(item, "originalname", item.name))
+            drop = function in ported
+            ported.add(function)
+        (dropped if drop else kept).append(item)
     if dropped:
         config.hook.pytest_deselected(items=dropped)
         items[:] = kept
@@ -129,3 +143,15 @@ def post_step_helper(request, tmp_path, monkeypatch):
     yield start
     for helper in made:
         helper.close()
+
+
+@pytest.fixture
+def child_env(monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}")
+
+
+@pytest.fixture
+def tenant(tmp_path, data_root):
+    with B.run_tenant(tmp_path, data_root) as t:
+        bind_forge(t)
+        yield t

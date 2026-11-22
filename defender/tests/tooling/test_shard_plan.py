@@ -71,3 +71,11 @@ def test_the_refresher_reads_a_ci_log_whose_results_are_coloured():
            "2026-11-15T20:37:32.5000000Z [gw0] [  1%] \x1b[32mPASSED\x1b[0m tests/api/test_x.py::test_one ",
            "2026-11-15T20:37:33.0000000Z [gw0] [  2%] \x1b[32mPASSED\x1b[0m tests/api/test_x.py::test_two "]
     assert file_costs(log) == {"tests/api/test_x.py": 3.0}
+
+
+def test_files_are_ordered_heaviest_first_and_a_file_keeps_its_tests_together():
+    weights = {"tests/test_a.py": 1.0, "tests/test_d.py": 9.0, "tests/test_c.py": 4.0}
+    order = _shard.heaviest_first(NODEIDS, weights)
+    assert order[:3] == ["tests/test_d.py", "tests/test_c.py", "tests/test_a.py"]
+    assert set(order) == {_shard.file_of(n) for n in NODEIDS}
+    assert order == _shard.heaviest_first(NODEIDS[::-1], weights)

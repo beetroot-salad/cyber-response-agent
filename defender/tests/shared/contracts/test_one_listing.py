@@ -15,6 +15,9 @@ from defender.tests.storage import test_lint_scopes_fail_loud as T
 from defender.tests.support.shared.contracts._by_path import DEFENDER, LINT_DIR, import_lint_lib, load_lint_gate
 from defender.tests.support.shared.contracts._repo import seed_repo
 
+#: Reads the source tree (ast, mypy, a repo-wide walk) rather than running the product: CI's `lint` job runs it (`-m gate`).
+pytestmark = pytest.mark.gate
+
 #: Lints that list through an external tool by design, exempt from the census by their path
 #: under `tooling/lint/`; adding one is a deliberate edit.
 NON_OBLIGATIONS: dict[str, str] = {

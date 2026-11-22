@@ -659,8 +659,12 @@ def test_p8b_a_lookup_met_by_a_setup_refusal_refuses_the_pass_naming_our_setup_f
 
 # --- #1363: a token request in flight on a thread the oracle abandoned (O6, O1, D8) -------------------------
 
-#: The oracle's turn deadline (seconds), set through the environment: shorter than the slow sign below.
+#: The oracle's turn deadline (seconds), set through the environment: shorter than the slow sign below, and the sign
+#: slower than the deadline by a full second, so a healthy world (milliseconds of work) has the deadline's whole length
+#: to spare on a loaded runner. At 0.3 against a 1.0 s sign, a stall of 0.3 s anywhere failed two healthy worlds'
+#: calibration ("the turn deadline passed before a submission") and the pass came out `unusable`.
 KNOB_TURN_DEADLINE = "ORACLE_TURN_DEADLINE"
+TURN_DEADLINE_SEC, SLOW_SIGN_SEC = "2.0", 3.0
 
 
 @pytest.mark.parametrize("sign_answer", [503, None], ids=["fails", "succeeds"])
@@ -671,7 +675,7 @@ def test_p7_a_slow_sign_in_flight_when_the_outcome_is_decided_is_counted_and_not
     the pass records its own result (`accepted`, the one world listed unservable). Either way exactly the
     two signs were asked, even after the outcome. #1363 O6, O1, D8"""
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
-    monkeypatch.setenv(KNOB_TURN_DEADLINE, "0.3")
+    monkeypatch.setenv(KNOB_TURN_DEADLINE, TURN_DEADLINE_SEC)
     clock = Clock()
     start = clock.now
 
@@ -681,7 +685,7 @@ def test_p7_a_slow_sign_in_flight_when_the_outcome_is_decided_is_counted_and_not
 
     run, outcome, bao, _tap, _merged, _wt = _preflight(
         tmp_path, monkeypatch, data_root, oracle=_side_lookups("user:bob"),
-        on_read=first_read_leaves_no_life, clock=clock, sign_script=[(0, None), (1.0, sign_answer)])
+        on_read=first_read_leaves_no_life, clock=clock, sign_script=[(0, None), (SLOW_SIGN_SEC, sign_answer)])
     assert outcome is not None, run.message
     if sign_answer is None:
         assert outcome["outcome"] == "accepted", outcome
@@ -700,7 +704,7 @@ def test_p7_an_adapter_that_asks_again_after_the_outcome_exists_is_refused_and_t
     file exists and then makes a second request: it raises, and the proxy is sent nothing for it (the pass shut
     its access holder when it decided). #1363 O6, N1."""
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
-    monkeypatch.setenv(KNOB_TURN_DEADLINE, "0.3")
+    monkeypatch.setenv(KNOB_TURN_DEADLINE, TURN_DEADLINE_SEC)
     result = tmp_path / "late-result.txt"
     monkeypatch.setenv("LATE_OUTCOME", str(data_root / "*" / "episodes" / "*" / S.OUTCOME_NAME))
     monkeypatch.setenv("LATE_RESULT", str(result))

@@ -180,3 +180,10 @@ def test_1161_s2_a_member_respelled_by_slash_case_or_escape_is_no_member_in_the_
     assert len(values) > 15 and not [v for v in values if v not in members and S.classify(v) is not None], values
     problems = _outcomes(world, context, browser, phase, values)
     assert not problems, "\n".join(problems)
+
+
+@pytest.fixture
+def world(shared_world_fresh):
+    """These tests change nothing on the server, so the module's tests share one running system (conftest
+    `shared_world`), each with a fresh front channel, instead of starting a database, API child and ingress apiece."""
+    return shared_world_fresh

@@ -1,6 +1,8 @@
 """#1359 one transport; the comment action is never a verb; the committed tenants carry no retired case folder."""
 from __future__ import annotations
 
+import pytest
+
 import ast
 from pathlib import Path
 
@@ -49,6 +51,7 @@ def test_o2_a_tenant_with_no_case_system_is_accepted_and_runs(tmp_path, monkeypa
     assert "lifecycle" in rec.order, rec.order
 
 
+@pytest.mark.gate  # reads the source tree: CI's `lint` job runs it
 def test_o3_no_second_copy_of_a_transport_route():
     """Only the shared transport and the proxy client reference the route functions. O3."""
     seen: dict[str, set[str]] = {}

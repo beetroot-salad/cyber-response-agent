@@ -21,6 +21,7 @@ from defender.tests.tenancy.tenant_1108_p4.test_1278_feedback import (
     _files,
 )
 from defender.tests.tenancy.tenant_1108_p4 import test_1278_feedback as _1278_feedback
+from defender.tests.tenancy.tenant_1108_p4._drain_support import own_store
 
 pytestmark = [pytest.mark.postgres, pytest.mark.usefixtures("tick_impl")]  # the tick over each store implementation (conftest)
 
@@ -105,6 +106,7 @@ def test_h15_a_server_error_or_a_lost_connection_is_unknown_and_never_counts(wor
     assert (b.phase, b.refusals) == ("in_review", 0)
 
 
+@own_store("five ticks over the port were ~140 s; the count rule over the port is `test_1278_feedback_every_answer_{pull,reviews}.py`'s")
 def test_h15_a_good_read_resets_the_refusals(world, caplog):
     """Two refusals, one good read, two more: the count restarts and the batch stays in review. (H15)"""
     w = world

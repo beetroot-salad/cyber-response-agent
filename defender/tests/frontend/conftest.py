@@ -11,6 +11,7 @@ closes, however a test opens it (fixture, its own, the dev server's):
 A new suite-wide guard goes into `GuardedContext`, not into an opt-in fixture."""
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import datetime as dt
 from collections.abc import Callable, Iterator
@@ -43,6 +44,7 @@ from defender.tests.support.frontend._browser1161 import (
 )
 from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, job_store, register_tenant
 from defender.tests.support.shared._postgres1339 import (  # noqa: F401 — fixtures for this directory
+    database,
     migrated_database,
 )
 
@@ -234,10 +236,9 @@ class World:
         return httpx.get(f"{self.origin}{path}", **kwargs)
 
 
-@pytest.fixture
-def world(built_frontend: Path, migrated_database: str, tmp_path: Path) -> Iterator[World]:  # noqa: F811 — the imported fixture
-    """API child + ingress launcher + front channel over a database of this test's own."""
-    dsn = migrated_database
+@contextlib.contextmanager
+def _running(built_frontend: Path, dsn: str, tmp_path: Path) -> Iterator[World]:
+    """API child + ingress launcher + front channel over the database `dsn`."""
     register_tenant(dsn, A)
     register_tenant(dsn, B)
     seeded = run_async(seed_identity, dsn)
@@ -256,3 +257,36 @@ def world(built_frontend: Path, migrated_database: str, tmp_path: Path) -> Itera
     finally:
         api.kill()
         front.close()
+
+
+@pytest.fixture
+def world(built_frontend: Path, migrated_database: str, tmp_path: Path) -> Iterator[World]:  # noqa: F811 — the imported fixture
+    """API child + ingress launcher + front channel over a database of this test's own."""
+    with _running(built_frontend, migrated_database, tmp_path) as running:
+        yield running
+
+
+@pytest.fixture(scope="module")
+def shared_world(built_frontend: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[World]:
+    """One running system for every test of a module whose tests change nothing on the server (they drive a browser and
+    the front channel only): the database, API child and ingress start once instead of once per test, which was most of
+    such a test's cost. A module uses it through its own `world` fixture, which resets the front channel."""
+    with database(migrated=True) as dsn, _running(built_frontend, dsn, tmp_path_factory.mktemp("world")) as running:
+        yield running
+
+
+@pytest.fixture
+def shared_world_fresh(shared_world: World) -> World:
+    """What such a module names `world` (`world = shared_world_fresh`): the shared world with a fresh front channel, Ann
+    signing in."""
+    shared_world.front.reset(default=shared_world.accounts[ANN])
+    return shared_world
+
+
+@pytest.fixture
+def checked(built_frontend, tmp_path) -> Path:
+    """A pristine copy of the frontend for this test alone (the same helper as every build case: `_copy`), so no verdict
+    depends on what an earlier test ran in it, such as whether `generated/` already exists."""
+    from defender.tests.frontend._gate_support import _copy
+
+    return _copy(tmp_path, built_frontend)

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE
+from defender.tests.support.api._server1083 import free_port  # noqa: F401 — re-exported: `H.free_port()`
 
 CANARY_KEY = "canary-static-key-1163-7f3a9c"
 CANARY_SECRET = "canary-client-secret-1163-b2e4d8"
@@ -110,13 +111,6 @@ def upstream() -> Iterator[Upstream]:
         yield server
     finally:
         server.close()
-
-
-def free_port() -> int:
-    """A loopback port nothing listens on once this returns (a closed proxy, a foreign port)."""
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 GAUGE_PATH = "/__gauge"

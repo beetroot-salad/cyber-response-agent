@@ -26,6 +26,7 @@ Run as `python -m defender.tests.support.api._server1083` it is the test-support
 from __future__ import annotations
 
 import base64
+import collections
 import contextlib
 import dataclasses
 import datetime as dt
@@ -109,8 +110,71 @@ OPENBAO_ADDR = "http://127.0.0.1:1"
 
 # --- ports ------------------------------------------------------------------------------------------
 
+#: The lowest port the kernel hands to an outgoing connection or a bind to port 0 (Linux's `ip_local_port_range`).
+#: A port picked below it cannot be taken by the sockets the tests themselves open (HTTP clients, database
+#: connections, another test's bind to port 0), which is how the earlier bind-to-0 pick lost its port between
+#: this call and the program's own bind ("Address already in use").
+def _ephemeral_floor() -> int:
+    try:
+        return int(Path("/proc/sys/net/ipv4/ip_local_port_range").read_text().split()[0])
+    except (OSError, ValueError, IndexError):
+        return 32768
+
+
+_PORT_FLOOR, _SLOTS = 10000, 64
+#: Ports Chromium refuses to navigate to (`net::ERR_UNSAFE_PORT`; its `kRestrictedPorts`): a browser test whose origin
+#: lands on one fails at `goto`. Only 10080 is above `_PORT_FLOOR`; the rest are kept so the floor can move.
+_UNSAFE_PORTS = frozenset({
+    1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110,
+    111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532,
+    540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061,
+    6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080})
+_RECENT: collections.deque[int] = collections.deque(maxlen=64)
+_PORT_LOCK = threading.Lock()
+
+
+def _slot_of(worker: str) -> int:
+    """This pytest-xdist worker's share of the range (`gw3` -> 3; no xdist -> 0), so two workers never draw from the
+    same ports."""
+    digits = "".join(c for c in worker if c.isdigit())
+    return int(digits) % _SLOTS if digits else 0
+
+
+def _bindable(port: int) -> bool:
+    with socket.socket() as s:
+        try:
+            s.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _slice_port(randbelow: Callable[[int], int]) -> int | None:
+    """A bindable port from this worker's slice below the ephemeral range, none of the last 64 handed out and none a
+    browser refuses; None where the system's range leaves no room, or no draw fits. `randbelow` is the draw."""
+    floor = _ephemeral_floor()
+    if floor - _PORT_FLOOR < _SLOTS * 8:
+        return None
+    width = (floor - _PORT_FLOOR) // _SLOTS
+    start = _PORT_FLOOR + _slot_of(os.environ.get("PYTEST_XDIST_WORKER", "")) * width
+    with _PORT_LOCK:
+        for _ in range(200):
+            port = start + randbelow(width)
+            if port not in _RECENT and port not in _UNSAFE_PORTS and _bindable(port):
+                _RECENT.append(port)
+                return port
+    return None
+
+
 def free_port() -> int:
-    """A port nothing listens on right now (a small race; the program binds it itself)."""
+    """A loopback port nothing listens on when this returns (a closed proxy, a foreign port, the port a program is
+    about to bind). Drawn from this xdist worker's own slice of the ports below the kernel's ephemeral range, and never
+    the same as one of the last 64 handed out, so no other worker, no test client and no earlier call can take it
+    before the caller does; never a port a browser refuses to open. Where the system leaves no such range, a bind to
+    port 0, as before."""
+    port = _slice_port(secrets.randbelow)
+    if port is not None:
+        return port
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])

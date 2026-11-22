@@ -64,19 +64,27 @@ def _answer_with(w: Scene, target_suffix: str, answer) -> None:
                                  if r.method == "GET" and r.url.path.rstrip("/").endswith(target_suffix) else None)
 
 
-@pytest.mark.parametrize("target", ["reviews", "pull"])
-def test_h15_each_answer_the_forge_can_give_counts_or_not_as_the_rule_says_and_a_person_is_called_exactly_at_the_ceiling(
-        world, caplog, target):
-    """Every status 400..599, a lost connection, a timeout and good reads, one per tick, on the reviews read and on `GET /pulls/N`: 4xx but 408 and 429 count one; 5xx, 408, 429 and network faults leave the count; a good read zeroes it; the third counted refusal makes the batch needs_person, no sooner. (H15, D7)"""
+def port_answers(first: int = 60) -> list:
+    """What the port runs of `_answers()`: its first `first`, and the two 4xx codes that are not refusals (408, 429), which
+    the shuffle puts late. Every class is in it (counted 4xx, 5xx, a good read, a lost connection and a timeout), and the
+    ceiling is reached; the model in `check_h15` takes any sequence."""
+    return [*_answers()[:first], 408, 429]
+
+
+def check_h15(world, caplog, target: str, answers: list | None = None) -> None:
+    """Each of `answers` (all of `_answers()` by default), one per tick, on the reviews read or on `GET /pulls/N`: 4xx but
+    408 and 429 count one; 5xx, 408, 429 and network faults leave the count; a good read zeroes it; the third counted
+    refusal makes the batch needs_person, no sooner. (H15, D7)"""
     from defender.tests.support.shared._postgres1339 import execute
 
+    mine = _answers() if answers is None else answers
     w = world
     w.seed("f1")
     batch_id, _branch, number = opened(w, FeedbackCurator(_files("f1")), caplog)
     suffix = "/reviews" if target == "reviews" else f"/pulls/{number}"
     writer = FeedbackCurator()
     count, previous = 0, None
-    for answer in _answers():
+    for answer in mine:
         if count == 0 and not _counts_as_refusal(answer):
             _answer_with(w, suffix, 403)  # a primer: something for an unknown or a good read to leave or zero
             tick(w, writer)
@@ -97,3 +105,10 @@ def test_h15_each_answer_the_forge_can_give_counts_or_not_as_the_rule_says_and_a
                     (batch_id,))
             count = 0
     assert w.statuses() == {"f1": "in_batch"}, "a refusal lost the item"
+
+
+@pytest.mark.parametrize("target", ["reviews", "pull"])
+def test_h15_each_answer_the_forge_can_give_counts_or_not_as_the_rule_says_and_a_person_is_called_exactly_at_the_ceiling(
+        world, caplog, target):
+    """Every status 400..599, a lost connection, a timeout and good reads, one per tick, on the reviews read and on `GET /pulls/N`: 4xx but 408 and 429 count one; 5xx, 408, 429 and network faults leave the count; a good read zeroes it; the third counted refusal makes the batch needs_person, no sooner. (H15, D7)"""
+    check_h15(world, caplog, target)

@@ -864,3 +864,10 @@ def test_1540_am5_every_exit_leaves_once_and_the_leaving_load_shows_nothing_afte
     assert len(aborted) == 1, f"{exit_}: the load navigated {len(aborted)} times: {aborted}"
     if exit_ == "sign-out":
         assert auth_calls(requests[mark:], world.origin, "/api/auth/logout") == [("POST", "/api/auth/logout")]
+
+
+@pytest.fixture
+def world(shared_world_fresh):
+    """These tests change nothing on the server, so the module's tests share one running system (conftest
+    `shared_world`), each with a fresh front channel, instead of starting a database, API child and ingress apiece."""
+    return shared_world_fresh

@@ -208,6 +208,21 @@ class FrontChannel:
         """Where the form's button sends the browser for request `index` (a redirect target), for tests with no browser."""
         return answer(self.seen[index].url, self._choice(self.seen[index]))
 
+    def reset(self, default: str | None = None) -> None:
+        """Back to a fresh channel for the next test of a module that shares one: nothing parked, queued, seen or
+        faulted. A fault the previous test caused is raised here, as `close()` would have; `default` is the account every
+        attempt signs in as unless a test says otherwise."""
+        self.release_all()
+        with self._lock:
+            errors, self.errors = self.errors, []
+            self.queued.clear()
+            self.seen.clear()
+            self._parked = 0
+            self.hold = False
+            self.form = False
+            self.default = Choice(account=default) if default is not None else None
+        assert not errors, f"the front channel faulted: {errors}"
+
     def close(self) -> None:
         self.release_all()
         self._server.shutdown()
