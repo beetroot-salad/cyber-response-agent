@@ -1001,8 +1001,7 @@ def _acceptance_args(ns: argparse.Namespace, data_root: DataRoot) -> dict[str, A
     wiring, its folder accepted. A sibling's arm container is mounted by its box, so the tenant's
     settings must not sit under it; its path is drawn by the folder rules, and nothing is opened
     by it."""
-    return {"defender_dir": DEFENDER_DIR, "box_mounted": _sibling_box_mounted(ns, data_root),
-            "clone_tree": False}
+    return {"defender_dir": DEFENDER_DIR, "box_mounted": _sibling_box_mounted(ns, data_root)}
 
 
 
@@ -1476,11 +1475,11 @@ def _launch_tenant_active(launch: Mapping[str, Any], *, label: str) -> None:
 def _container_tenant(ns: argparse.Namespace, data_root: DataRoot, *,
                       defender_dir: Path | None = None) -> tenancy.Tenant:
     """The job's tenant inside its container: the folder rules only, over its own tenant folder (the
-    one the container mounts), as run start judges them (`clone_tree=False`). No host lock and no
+    one the container mounts). No host lock and no
     admission: the job's host helper holds the one and ran the other, and their verdict is in the
     launch facts (#1170 A6, C19). `defender_dir`: the code tree the entry reads (`DEFENDER_DIR`)."""
     try:
-        return tenancy.accept_tenant(data_root, ns.tenant, clone_tree=False,
+        return tenancy.accept_tenant(data_root, ns.tenant,
                                      defender_dir=defender_dir if defender_dir is not None else DEFENDER_DIR)
     except TenantRefused as refused:
         sys.exit(f"[run.py] job {ns.job}: this run's tenant cannot be used: {refused}")
@@ -1916,7 +1915,7 @@ def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the siblin
     data_root = _request_data_root(ns)
     try:
         accepted = tenancy.accept_tenant(data_root, ns.tenant, defender_dir=DEFENDER_DIR,
-                                         box_mounted=_sibling_box_mounted(ns, data_root), clone_tree=False)
+                                         box_mounted=_sibling_box_mounted(ns, data_root))
     except TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
     episode_runs = _open_episode_runs(ns, accepted)

@@ -530,7 +530,8 @@ class FetchSeam(Protocol):
     """The one fetch seam every reader of knowledge takes (#1618 flow 1): `fetch(tenant_id, dest, *, data_root,
     commit=None)` fills the caller's empty folder `dest` and answers the child's one report line (`ok <commit>` or
     `refused <transient|lasting> <reason>`). The default runs the real child (`default_fetch`); an in-process caller
-    passes a stand-in. `trigger` is who asked, when it matters (`readiness`, `onboarding`: they also check protection)."""
+    passes a stand-in. `trigger` is who asked, when it matters (`readiness`, `onboarding`: the child also checks main's
+    branch protection, D9); a stand-in takes it too."""
 
     def __call__(self, tenant_id: TenantId, dest: Path, *, data_root: Path, commit: str | None = ...,
                  trigger: str = ...) -> object: ...
@@ -578,32 +579,40 @@ def stopped_by_sigterm() -> Iterator[None]:
         signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
 
 
+def fetch_report(fetch: FetchSeam | None, tenant_id: TenantId, dest: Path, data_root: DataRoot, *,
+                 commit: str | None = None, trigger: str | None = None) -> PublishReport:
+    """The one fetch seam (the real child when `None`) asked to fill the caller's empty owned folder `dest` with `main`'s
+    knowledge (or `commit`'s, by id); its one report line read (O8: no login material passes through here). A seam
+    that raises is a lasting refusal (U11); a stop (a `SystemExit` from `stopped_by_sigterm`) goes on up."""
+    from defender.tenancy import run_knowledge
+
+    launch = fetch if fetch is not None else default_fetch()
+    named = {} if trigger is None else {"trigger": trigger}
+    try:
+        with stopped_by_sigterm():
+            line = launch(tenant_id, dest, data_root=tenancy.data_root_for_child(data_root), commit=commit, **named)
+    except Exception as failed:  # noqa: BLE001 — U11's failed child
+        line = run_knowledge.failed_line(f"{type(failed).__name__}: {failed}")
+    return run_knowledge.read_publish_report(line)
+
+
 def publish_report(
     fetch: FetchSeam | None, tenant: tenancy.Tenant, data_root: DataRoot,
     records: tenancy.TenantDirectory, *, run_id: str, commit: str | None = None, trigger: str | None = None,
     into: Path | None = None,
 ) -> PublishReport:
-    """SPIKE #1618 (D5). The CALLER makes an owned empty folder beside the copy's final place (`<T>/run-knowledge/` or
-    `into`), hands the fetch child only its path (and a pin's commit; O8: no login material passes through here), reads
-    its one report line, and on `ok` renames the folder into place as `run_id` with this process as its owner; on a
-    refusal it discards the folder. A seam that raises is a lasting refusal, recorded as the launcher records."""
+    """D5: the CALLER makes an owned empty folder beside the copy's final place (`<T>/run-knowledge/` or `into`), has
+    the fetch child fill it (`fetch_report`), and on `ok` renames it into place as `run_id` with this process as its
+    owner; on a refusal it discards the folder."""
     from defender.tenancy import run_knowledge
 
-    named = {} if trigger is None else {"trigger": trigger}
     parent = tenant.run_knowledge if into is None else into
     temporary = run_knowledge.make_owned_empty(parent, run_id)
     try:
-        launch = fetch if fetch is not None else default_fetch()
-        with stopped_by_sigterm():
-            line = launch(tenant.id, temporary, data_root=tenancy.data_root_for_child(data_root), commit=commit,
-                          **named)
-    except BaseException as failed:  # noqa: BLE001 — discarded below; an Exception is U11's failed child
+        report = fetch_report(fetch, tenant.id, temporary, data_root, commit=commit, trigger=trigger)
+    except BaseException:
         _discard(temporary)
-        if not isinstance(failed, Exception):
-            raise
-        line = run_knowledge.failed_line(f"{type(failed).__name__}: {failed}")
-        return run_knowledge.read_publish_report(line)
-    report = run_knowledge.read_publish_report(line)
+        raise
     if report.kind != run_knowledge.OK:
         _discard(temporary)
         return report
@@ -623,32 +632,35 @@ def _discard(temporary: Path) -> None:
 
 @contextlib.contextmanager
 def temporary_copy(
-    tenant: tenancy.Tenant, *, data_root: DataRoot, records: tenancy.TenantDirectory,
-    fetch: FetchSeam | None = None, commit: str | None = None,
-) -> Iterator[RunCopy]:
-    """SPIKE #1618 (flow 5): a copy of `main` (or `commit`) for an operator tool, removed on exit; `KnowledgeRefused`
-    when the fetch is refused."""
-    import uuid
+    tenant_id: TenantId, *, data_root: DataRoot, fetch: FetchSeam | None = None, commit: str | None = None,
+) -> Iterator[Path]:
+    """Flows 4 and 5: `main`'s knowledge (or `commit`'s, by id) fetched by the fetch child into an empty folder this
+    process makes in its own temporary folder (outside `<T>`); the folder, holding `agent/` and `settings/`, is yielded
+    and removed on exit. `KnowledgeRefused` naming why when the fetch is refused (no stale fallback, D3)."""
+    import shutil
+    import tempfile
 
     from defender.tenancy import run_knowledge
 
-    run_id = str(uuid.uuid4())
-    report = publish_report(fetch, tenant, data_root, records, run_id=run_id, commit=commit)
-    run_knowledge.resolve_source(tenant, report=report, pinned=commit)
-    copy = run_knowledge.adopt_copy(tenant, run_id)
+    dest = Path(tempfile.mkdtemp(prefix="defender-knowledge-"))
     try:
-        yield copy
+        report = fetch_report(fetch, tenant_id, dest, data_root, commit=commit)
+        if report.kind != run_knowledge.OK:
+            raise run_knowledge.KnowledgeRefused(f"tenant {tenant_id}'s knowledge could not be fetched: {report.reason}")
+        if commit is not None and report.commit != commit:
+            raise run_knowledge.KnowledgeRefused(f"tenant {tenant_id}: asked for {commit}, the fetch brought {report.commit}")
+        yield dest
     finally:
-        copy.remove()
+        shutil.rmtree(dest, ignore_errors=True)
 
 
 def resolve_knowledge(
     tenant: tenancy.Tenant, *, pin: str | None, fetch: FetchSeam | None,
     data_root: DataRoot, records: tenancy.TenantDirectory, run_id: str, trigger: str | None = None,
 ) -> KnowledgeSource:
-    """Which export this run reads and why: the pinned one (no publish), else `current` after
-    the launch-time publish (`trigger`: who asked for it, `publish_report`) — or the refusal
-    before the box (O-A, O9), a `KnowledgeExit` holding the report it was refused on."""
+    """Which commit this run reads and why: the pinned one, else `main`'s tip, fetched by the fetch child into the run's
+    own copy `run_id` (`publish_report`) — or the refusal before the box (O-A, O9), a `KnowledgeExit` holding the
+    report it was refused on."""
     from defender.tenancy import run_knowledge
 
     report = publish_report(fetch, tenant, data_root, records, run_id=run_id, commit=pin, trigger=trigger)

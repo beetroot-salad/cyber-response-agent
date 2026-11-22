@@ -15,7 +15,7 @@ from defender.learning.core.state import (  # noqa: E402
     QUESTIONER_FINDINGS,
     Channel,
 )
-from defender.learning.judge._errors import JudgeRefused  # noqa: E402
+from defender.learning.judge._errors import JudgeRefused, KnowledgeRefused  # noqa: E402
 
 from defender.records.formats import Episode  # noqa: E402
 from defender._io import Bound, NotPlainEntry
@@ -327,7 +327,7 @@ def _default_judge_seam(episode_dir: Path, *, make_model: Any = None) -> Any:
 def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration surface
     runs: RunsRepository[Tenant], episode_id: str, *, judge: Any = None,
     store: Any = None, state: object = None, draws: int | None = None, git_show: Any = None,
-    job_lane: bool = False,
+    job_lane: bool = False, copy: Any = None,
 ) -> EpisodeGrade:
     """Grade episode `episode_id` of `runs`'s tenant (#1105 PR 2: the judge takes the
     repository and an id). Its door is `runs.episode_files(episode_id)`, held for the whole
@@ -341,6 +341,9 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
     to the episode's own findings records through the job lane's sink
     (`enqueue.EpisodeFindings`), which the job's post-step publishes once the job's row has
     ended; `store` is never touched, and no drain is called. The fence is here, in code.
+
+    `copy` makes a knowledge copy at a commit for a post-move lesson body (`render.KnowledgeCopy`); by default the job helper's
+    over the job socket (#1618 F3), and a copy refused refuses the pass (`KnowledgeRefused`).
 
     `state` is the retired file queue's handle (#1278 replaced it with `store`): accepted so an
     older caller's keyword is not a `TypeError`, and never read or written."""
@@ -368,8 +371,7 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
                 enqueue_mod.EpisodeFindings(episode) if job_lane
                 else enqueue_mod.StoreFindings(store, str(runs.tenant.id), Path(episode.dir).name))
             return _grade_episode(episode, judge=resolved_judge, draws=configured,
-                                  git_show=git_show, state=sink, tenant=runs.tenant,
-                                  job_lane=job_lane,
+                                  git_show=git_show, state=sink, job_lane=job_lane, copy=copy,
                                   episode_runs=_judged_episode_runs(runs, episode_id, episode))
     except JudgeRefused:
         raise
@@ -424,15 +426,19 @@ def _refuse_queueing(prior: EpisodeGrade) -> None:
 
 def _grade_episode(  # noqa: PLR0913 — the pass's whole configuration, one keyword each
     episode: Episode, *, judge: Any, draws: int, git_show: Any, state: enqueue_mod.FindingsSink,
-    episode_runs: Any, tenant: Any = None, job_lane: bool = False,
+    episode_runs: Any, job_lane: bool = False, copy: Any = None,
 ) -> EpisodeGrade:
     # A not-graded stamp never short-circuits, so a repaired episode can still be graded. A
     # recorded grade — a stamp's included, which carries the committed rows it met — is carried
     # row by row: `queued` rows are final, a `queueing` row refuses the grade (after the gates,
     # so a stamp pass still writes its stamp), every other row is re-graded (A6).
-    return _Pass(episode, judge=judge, draws=draws, git_show=git_show, state=state,
-                 prior=read_grade(episode), tenant=tenant, job_lane=job_lane,
-                 episode_runs=episode_runs).grade()
+    graded = _Pass(episode, judge=judge, draws=draws, git_show=git_show, state=state,
+                   prior=read_grade(episode), job_lane=job_lane, episode_runs=episode_runs, copy=copy)
+    try:
+        return graded.grade()
+    finally:
+        if graded.knowledge is not None:
+            graded.knowledge.close()
 
 
 def _label_of(finding_id: str) -> str | None:
@@ -494,7 +500,7 @@ class _Pass:
 
     def __init__(self, episode: Episode, *, judge: Any, draws: int, git_show: Any,  # noqa: PLR0913 — the pass's whole configuration
                  state: enqueue_mod.FindingsSink, prior: EpisodeGrade | None, tenant: Any = None,
-                 job_lane: bool = False, episode_runs: Any) -> None:
+                 job_lane: bool = False, episode_runs: Any, copy: Any = None) -> None:
         self.episode = episode
         #: The episode's run view (#1534): each world's verdict is its arm's closing record.
         self.episode_runs = episode_runs
@@ -503,8 +509,8 @@ class _Pass:
         #: Judge calls of this pass that completed a draw, and that raised (`_count_draws`).
         self.draws_completed = 0
         self.calls_raised = 0
-        #: The runs repository's tenant: whose exports a post-move lesson body is read from (O6).
-        self.tenant = tenant
+        #: How a post-move lesson body's knowledge copy is made (`render_mod.KnowledgeCopy`); the job helper's by default.
+        self.copy = copy if copy is not None else render_mod.helper_copy
         self.bound = episode.view()
         self.judge = judge
         self.draws = draws
@@ -638,8 +644,7 @@ class _Pass:
         if self.lessons_commit is None and prior is not None:
             self.lessons_commit = prior.lessons_commit
         self.knowledge = render_mod.KnowledgeBodies(
-            tenant=self.tenant, knowledge=_pass_knowledge(
-                bound, [runs.usable[label].token for label in runs.planted]))
+            knowledge=_pass_knowledge(bound, [runs.usable[label].token for label in runs.planted]), copy=self.copy)
         for label in self.order:
             if label in kept:
                 continue
@@ -684,6 +689,8 @@ class _Pass:
                 episode_runs=self.episode_runs)
             prompt, placed = run_mod._build_prompt(ctx, self.manifest)
             self.episode.world(self.run_set.usable[label].token).draws.ensure()
+        except KnowledgeRefused:
+            raise
         except (JudgeRefused, OSError, ValueError, TimeoutError) as world_failed:
             reason = f"{type(world_failed).__name__}: {world_failed}"
             row.update(completed_draws=0, malformed_replies=0, bucket=None, measured=False,

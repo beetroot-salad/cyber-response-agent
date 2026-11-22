@@ -105,7 +105,6 @@ def _materialize(session: Session, accepted: Any, run: Any, launch: Any, mapping
 
 def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:
     from defender import run_common
-    from defender.investigation.publish_launch import LAUNCH_TRIGGER
     from defender.records import job_lane
 
     inv = str(session.job_id)
@@ -124,8 +123,7 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:
 
     # The tenant-level steps, the readiness check's too (#1471 P-1), with the launch check after the admission; then
     # the investigation's own: the run folder and the records beside it.
-    facts = tenant_launch_steps(session, hold, copy_id=inv, facts=LaunchFacts(), trigger=LAUNCH_TRIGGER,
-                                launch=check_launch)
+    facts = tenant_launch_steps(session, hold, copy_id=inv, facts=LaunchFacts(), launch=check_launch)
     accepted, launch, source, copy, current = facts.accepted, facts.launched, facts.source, facts.copy, facts.current
     cleanup, passes, reads = facts.cleanup, facts.passes, facts.reads
     try:

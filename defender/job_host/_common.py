@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from defender.job_socket import Refused
+from defender.tenancy.run_knowledge import RunCopy
 
 from ._session import KINDS, Box, PassMint, Registry, Session, SetupRefused, Signing, StartFailed, setup_step
 
@@ -228,16 +229,17 @@ def mirror_run_page(run: Run, tenant: Any) -> None:
         mirror_page(page, run.run_dir.name, tenant)
 
 
-def settle_knowledge(session: Session, accepted: Any, records: Any, *, trigger: str, run_id: str) -> Any:
-    """The export the job reads (O5): the launch-time publish run under this helper's hold (C19), told who asked for it
-    (`trigger`, #1471), then the export it settled on, by run setup's shared step (`run_common.resolve_knowledge`, the
-    operator command's too, A6). Told to stop while the publish ran, the helper starts no container (A1); any other
-    refusal is `setup: refused` (`StepRefused` at `publish`, holding the report it was refused on)."""
+def settle_knowledge(session: Session, accepted: Any, records: Any, *, run_id: str, trigger: str | None = None) -> Any:
+    """The knowledge the job reads (O5): `main` fetched by the fetch child (`session.fetch`) into the run copy `run_id`
+    (the job's own folder under `<T>/run-knowledge/`, owned by this helper), by run setup's shared step
+    (`run_common.resolve_knowledge`, the operator command's too, A6). `trigger` (`readiness`) is who asked, when the child
+    must also check main's branch protection (D9). Told to stop while the fetch ran, the helper starts no container
+    (A1); any other refusal is `setup: refused` (`StepRefused` at `publish`, holding the report it was refused on)."""
     from defender import run_common
 
     try:
-        return run_common.resolve_knowledge(accepted, pin=None, publish=session.publish, data_root=session.root,
-                                            records=records, trigger=trigger, run_id=run_id)
+        return run_common.resolve_knowledge(accepted, pin=None, fetch=session.fetch, data_root=session.root,
+                                            records=records, run_id=run_id, trigger=trigger)
     except SystemExit as refused:
         if refused.code == 128 + signal.SIGTERM:
             session.signalled.set()
@@ -328,11 +330,11 @@ def _launch_step(step: str, call: Callable[..., Any], *args: Any, **kwargs: Any)
 
 
 def tenant_launch_steps(session: Session, hold: contextlib.ExitStack, *, copy_id: str, facts: LaunchFacts,
-                        trigger: str, launch: Callable[[], Any] | None = None) -> LaunchFacts:
+                        trigger: str | None = None, launch: Callable[[], Any] | None = None) -> LaunchFacts:
     """The launch's tenant-level steps (#1471 P-1, C2, R12-1), in order and as one code for an investigation and a
     readiness check: the tenant's lock and admission (entered on `hold`), its current records, its alert mapping, the
-    launch-time publish (`trigger`: who asked), the runs-folder check, the run copy (named `copy_id`), the tenant over
-    the copy, the roster, the grants x records verdict, the grant, the signing set-up (every job, W-D8) and the first
+    knowledge fetch (`publish`, #1618: `main` fetched into the run copy named `copy_id`, whose own check belongs to it; `trigger`
+    is who asked, for a readiness check's D9 protection check), the runs-folder check, the tenant over the copy, the roster, the grants x records verdict, the grant, the signing set-up (every job, W-D8) and the first
     pass (a non-empty grant only, signed under the job's id). An investigation's launch check, read after the
     admission as it always was, is `launch` (`job_lane.JobLane.check_launch` under its own refusal): its run is then
     built at the runs-folder step (`RunsRepository.launched`, which asks the same check); with none the runs-folder
@@ -344,7 +346,7 @@ def tenant_launch_steps(session: Session, hold: contextlib.ExitStack, *, copy_id
 
     try:
         admitted = host_tenant(session.root, session.tenant_id, directory=session.directory,
-                               defender_dir=session.defender_dir, clone_tree=False)
+                               defender_dir=session.defender_dir)
     except TenantRefused as refused:
         raise StepRefused("tenant", f"this job's tenant cannot be used: {refused}") from None
     hold.enter_context(admitted)
@@ -356,16 +358,17 @@ def tenant_launch_steps(session: Session, hold: contextlib.ExitStack, *, copy_id
     # refused before its alert mapping is read. The container reads no database; it is handed these in the launch facts.
     facts.current = _launch_step("records", run_common.read_records, facts.records, facts.accepted.id)
     facts.mapping = _launch_step("alert_mapping", run_common.read_alert_mapping, facts.records, facts.accepted.id)
-    facts.source = settle_knowledge(session, facts.accepted, facts.records, trigger=trigger, run_id=copy_id)
-    repository = facts.accepted.runs_repository()
+    facts.source = settle_knowledge(session, facts.accepted, facts.records, run_id=copy_id, trigger=trigger)
+    facts.cleanup.callback(RunCopy(facts.accepted.run_knowledge / copy_id).remove)  # the fetch made it; whoever refuses below removes it
     try:
-        if facts.launched is not None:
-            facts.run = repository.launched(facts.launched)
-        else:
-            repository.require_runs_folder()
-    except TenantRefused as refused:
-        raise StepRefused(RUNS_FOLDER, str(refused)) from None
-    try:
+        repository = facts.accepted.runs_repository()
+        try:
+            if facts.launched is not None:
+                facts.run = repository.launched(facts.launched)
+            else:
+                repository.require_runs_folder()
+        except TenantRefused as refused:
+            raise StepRefused(RUNS_FOLDER, str(refused)) from None
         _copied_steps(session, facts, copy_id)
     except BaseException:
         facts.cleanup.close()
@@ -379,8 +382,7 @@ def _copied_steps(session: Session, facts: LaunchFacts, copy_id: str) -> None:
     from defender.records.formats import TenantRefused
     from defender.systems.catalog import Catalog
 
-    facts.copy = _launch_step("knowledge_copy", run_common.copy_knowledge, facts.accepted, facts.source, copy_id)
-    facts.cleanup.callback(facts.copy.remove)
+    facts.copy = _launch_step("publish", run_common.copy_knowledge, facts.accepted, facts.source, copy_id)  # D10: the copy's check is the fetch's step
     # The catalog's roster, read once and cold (no adapter code runs here, N7): the records' reads are judged against
     # its adapters' lists (#1504 O3), then the tenant's systems are narrowed to it.
     facts.roster = _launch_step("roster", run_common.run_roster, session.defender_dir)

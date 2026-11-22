@@ -5,23 +5,25 @@ their boxes.
 tenant's lock, waited for at most 30 s (still busy: the learning entry's `stopped` word, which the worker hands back,
 A3, C24), the admission (`host_tenant`), the tenant's current records read once (#1366 O6: a tenant that is not active is
 refused, #1470 O8; the container, which reads no database, and every sibling's run are handed them in the launch facts), the
-launch-time publish under the helper's cover (C19), the grant over the export it settled on (the granted systems
-declared `http-proxy`, narrowed to those the tenant has enabled records of; down systems not subtracted, O5) and the first pass,
+knowledge fetch (the grant read: `main` fetched by the fetch child into a copy the helper owns and removes once the
+grant is read, #1618 F3), the grant over it (the granted systems declared `http-proxy`, narrowed to those the tenant
+has enabled records of; down systems not subtracted, O5) and the first pass,
 signed for the learning job's own id (pre-flight's pass names the row the worker fences; O5, C12 replaced). `--source`
 is not checked here: the entry checks it in the container, over the tenant's own records (design correction).
 
 Its requests: `pass` for an id this helper minted (the job's own, or a sibling's run); `copy.make(world=)`, a sibling's
 run id, run copy and materialized run folder (input, stamp, knowledge record), all made here (A6, C20, C23): the world is looked up in the job's own episode only
 (`<T>/episodes/<job id>`, never found by `--source`), its id is the arm roster's canonical id for it, its folder is
-`<episode>/runs/<run>/`, made with no link followed out of the episode (H10), and its copy is owned by this helper.
-`export.materialise(commit=)`, the export of the commit the launch pins its family to (its source's), materialised
-here from the tenant's clone under the knowledge lock if absent: the container writes no export (P-A).
+`<episode>/runs/<run>/`, made with no link followed out of the episode (H10), and its copy, of the commit the family's
+episode pins (else the grant read's), is owned by this helper. `copy.make(commit=)` (no world; no commit is main's tip),
+a copy of that commit's knowledge in the claim's scratch folder, fetched by the fetch child (the helper holds no
+credential): the judge's bodies, #1618 F3. The container writes no copy of its own.
 Boxes: `shell` (a sibling's run box over its run folder and copy) and `oracle` (the learning job's own: the
 oracle's box, its bind folders in a per-claim folder under the data root, never host `/tmp`, C21).
 
 **The post-step and the family-less check** (`--kind post-step [--job <id>] --tenant T`). Its host half: the tenant's
-lock and admission (waiting as today). Its requests: `batch.start(lanes=)`, the drain's publish and draft, made here
-(the draft owned by this helper, C23), its id minted here; `forge.token(min_validity=)`, a fresh token of the tenant's
+lock and admission (waiting as today). Its requests: `batch.start(lanes=)`, the drain's draft of `main`'s `agent/` (read through a delivery
+of the helper's own, no fetch child call), made here (the draft owned by this helper, C23), its id minted here; `forge.token(min_validity=)`, a fresh token of the tenant's
 forge credential, for at most 150 s (C25: fail closed above it); `record.published(commit=)` and
 `record.refusal(kind=, reason=)`, the drain's publish outcomes written to the tenant records (O3, O4); and the tick's
 store, `store.*` (#1487 Flow 2, `_store_relay`). Box: `batch`, over a draft this helper made.
@@ -93,7 +95,6 @@ class _Learning:
     records: Any = None
     siblings: dict[str, _Sibling] = field(default_factory=dict)  # by run id
     by_world: dict[str, str] = field(default_factory=dict)  # world id -> run id
-    exports: dict[str, Any] = field(default_factory=dict)  # commit -> the copy `export.materialise` fetched
 
 
 @dataclass
@@ -180,7 +181,6 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     from defender.records.formats import TenantRefused
     from defender.systems.catalog import Catalog
     from defender.systems.run_tenant import run_tenant_for
-    from defender.investigation.publish_launch import LAUNCH_TRIGGER
     from defender.tenancy import run_knowledge
 
     job = str(session.job_id)
@@ -190,29 +190,29 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     # The tenant's current records, read once for the whole job (#1366 O6; a tenant not active refused, #1470 O8): the
     # container, which reads no database, is handed them in the launch facts, and so is each sibling's run.
     current = setup_step(run_common.read_records, records, accepted.id)
-    # SPIKE #1618: the grant read needs a copy too; minted id (the design names none), removed after the read.
-    grant_copy_id = f"{job}-grant"
-    source = settle_knowledge(session, accepted, records, trigger=LAUNCH_TRIGGER, run_id=grant_copy_id)
-    grant_copy = run_knowledge.adopt_copy(accepted, grant_copy_id)
-    # The catalog's roster, read cold (no adapter code, N7) once: the records' reads are judged against it (#1504 O3)
-    # and the tenant's systems are narrowed to it (#1366 R12).
+    # The roster, read cold (no adapter code, N7) once: the records' reads are judged against it (#1504 O3) and the
+    # tenant's systems are narrowed to it (#1366 R12).
     roster = setup_step(run_common.run_roster, session.defender_dir)
-    try:
-        ready = run_tenant_for(accepted, dispatches_lead_zero=False, records=current, catalog=Catalog(roster),
-                               agent_root=grant_copy.agent, settings_root=grant_copy.settings)
-    except (TenantRefused, Refused) as refused:
-        raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
-    # Narrowed to the systems the tenant has enabled records of (#1366 R12), over the same roster.
-    ready = setup_step(run_common.tenant_verdict, ready, roster, warn=False).tenant
-    # The grant is the launch export's, not the family's pinned commit (which the container settles later): the proxy
-    # serves a system only by its declaration in the tenant's `current` export, and this helper holds the tenant's
-    # lock for the whole job, so no publish moves `current` under it. A grant from an older pin could only add systems
-    # the proxy refuses, and would miss none it serves.
-    reads = grant(ready)
-    grant_copy.remove()  # SPIKE #1618: scratch; a refusal above leaves it to the owner sweep
-    passes = first_pass(session, accepted, records, reads)
     cleanup = contextlib.ExitStack()
     try:
+        # The grant is `main`'s (F3, r5.1-a): its copy is fetched by the fetch child into a folder this helper owns, read
+        # once and removed, so a Forgejo that cannot serve `main` refuses the job here, before any container (K4). The
+        # proxy serves a system only by its declaration in `main`'s settings; a grant from an older pin could only add
+        # systems the proxy refuses, and would miss none it serves.
+        grant_id = f"{job}-grant"
+        source = settle_knowledge(session, accepted, records, run_id=grant_id)
+        grant_copy = run_knowledge.adopt_copy(accepted, grant_id)
+        cleanup.callback(grant_copy.remove)
+        try:
+            ready = run_tenant_for(accepted, dispatches_lead_zero=False, records=current, catalog=Catalog(roster),
+                                   agent_root=grant_copy.agent, settings_root=grant_copy.settings)
+        except (TenantRefused, Refused) as refused:
+            raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
+        # Narrowed to the systems the tenant has enabled records of (#1366 R12), over the same roster.
+        ready = setup_step(run_common.tenant_verdict, ready, roster, warn=False).tenant
+        reads = grant(ready)
+        grant_copy.remove()
+        passes = first_pass(session, accepted, records, reads)
         scratch = _scratch(session, cleanup)
         shared = _shared(scratch)
     except BaseException:
@@ -400,7 +400,7 @@ def _roster_id(state: _Learning, session: Session, world: str) -> str:
 
 
 def _pinned_commit(state: _Learning, session: Session, default: str) -> str:
-    """The family's knowledge pin (its siblings read that export, O-PIN), else the export the helper settled on."""
+    """The family's knowledge pin (its siblings read that commit, O-PIN), else the commit the grant read fetched."""
     from defender.records import RunRefused
     from defender.records.formats import PinUnreadable, TenantRefused, read_pin
 
@@ -413,14 +413,47 @@ def _pinned_commit(state: _Learning, session: Session, default: str) -> str:
 
 
 def _copy_make(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
-    """A sibling's run id (the roster's), its run copy and its run folder `<episode>/runs/<run>/`, made and owned here:
-    the run materialized (its input, the episode's copy of the source alert, and its stamp) as an investigation's is,
-    and its host-held knowledge record beside it (A6, C20). The sibling's run half opens it."""
+    """`copy.make(world=)`: a sibling's run id (the roster's), its run copy and its run folder `<episode>/runs/<run>/`,
+    made and owned here: the run materialized (its input, the episode's copy of the source alert, and its stamp) as an
+    investigation's is, and its host-held knowledge record beside it (A6, C20). The sibling's run half opens it.
+    `copy.make(commit=)` (or neither): a copy of that commit's (else `main`'s) knowledge in the claim's scratch folder
+    (F3). A sibling's pin is the family's, chosen here and never named by the container."""
+    state = _state(session, _Learning)
+    world, commit = fields.get("world"), fields.get("commit")
+    if world is None:
+        return _scratch_copy(session, state, commit)
+    if commit is not None:
+        raise Refused("copy.make takes a world or a commit, not both: a sibling's commit is its family's", "bad-fields")
+    return _sibling_copy(session, state, world)
+
+
+def _scratch_copy(session: Session, state: _Learning, commit: Any) -> dict[str, Any]:
+    """The fetch child's copy of `commit` (`main` when none) in a folder of the claim's scratch this helper owns, which
+    goes with the claim (F3). The helper holds no credential: the child mints its own."""
+    from defender import run_common
+    from defender.tenancy import run_knowledge
+    from defender.tenancy._owner import owned_temporary
+
+    if commit is not None and (not isinstance(commit, str) or not _COMMIT.fullmatch(commit)):
+        raise Refused("copy.make takes a full commit id", "bad-fields")
+    dest = state.scratch / owned_temporary("copy")
+    try:
+        _io.guarded_mkdir(dest, base=state.scratch)
+        dest.chmod(0o700)
+    except (OSError, ValueError) as e:
+        raise Refused(f"the copy's folder could not be made: {e}", "internal") from None
+    report = run_common.fetch_report(session.fetch, state.tenant.id, dest, session.root, commit=commit)
+    if report.kind != run_knowledge.OK or (commit is not None and report.commit != commit):
+        shutil.rmtree(dest, ignore_errors=True)
+        why = report.reason if report.kind != run_knowledge.OK else f"the fetch brought {report.commit}"
+        raise Refused(f"the knowledge of {commit or 'main'} could not be fetched: {why}", "delivery")
+    return {"path": str(dest), "commit": report.commit}
+
+
+def _sibling_copy(session: Session, state: _Learning, world: object) -> dict[str, Any]:
     from defender import run_common
     from defender.tenancy import run_knowledge
 
-    state = _state(session, _Learning)
-    world = fields["world"]
     if not isinstance(world, str):
         raise Refused("copy.make takes a world id", "bad-fields")
     with session.lock:
@@ -434,13 +467,11 @@ def _copy_make(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     session.inside_tenant(run_dir, must_exist=False)
     source = run_knowledge.KnowledgeSource(kind=run_knowledge.PINNED,
                                            commit=_pinned_commit(state, session, state.commit))
-    try:
-        # SPIKE #1618: the fetch child (this helper's launcher, `session.publish`) fetches the pin by id and writes the
-        # sibling's copy; the helper holds no credential of its own (the child mints one).
-        report = run_common.publish_report(session.publish, state.tenant, session.root, state.records,
-                                           run_id=run, commit=source.commit, into=state.scratch / "copies")
+    try:  # the fetch child fetches the pin by id into the sibling's own copy (owned by this helper)
+        report = run_common.publish_report(session.fetch, state.tenant, session.root, state.records, run_id=run,
+                                           commit=source.commit)
         run_knowledge.resolve_source(state.tenant, report=report, pinned=source.commit)
-        copy = run_knowledge.adopt_copy(state.tenant, run, into=state.scratch / "copies")
+        copy = run_knowledge.adopt_copy(state.tenant, run)
     except (run_knowledge.KnowledgeRefused, OSError) as refused:
         raise Refused(f"the sibling's run copy could not be made: {refused}", "internal") from None
     try:
@@ -457,33 +488,6 @@ def _copy_make(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
         state.by_world[world] = run
         session.minted.add(run)
     return _copy_answer(sibling)
-
-
-def _export_materialise(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
-    """`export.materialise(commit=)` (SPIKE #1618): a copy of the named commit fetched from Forgejo by the fetch child
-    (this helper's launcher) into the claim's folder (`<T>/run-knowledge/<job>-x-<commit>`, FORCED: no path is
-    designed), kept for the job and removed with its copies. Answers the copy's `stage/` (holding `agent/`)."""
-    from defender import run_common
-    from defender.tenancy import run_knowledge
-
-    commit = fields["commit"]
-    if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
-        raise Refused("export.materialise takes a full commit id", "bad-fields")
-    state = _state(session, _Learning)
-    with session.lock:
-        held = state.exports.get(commit)
-    if held is None:
-        run_id = f"{session.job_id}-x-{commit[:12]}"
-        try:
-            report = run_common.publish_report(session.publish, state.tenant, session.root, state.records,
-                                               run_id=run_id, commit=commit, into=_shared(state.scratch) / "copies")
-            run_knowledge.resolve_source(state.tenant, report=report, pinned=commit)
-            held = run_knowledge.adopt_copy(state.tenant, run_id, into=_shared(state.scratch) / "copies")
-        except (run_knowledge.KnowledgeRefused, OSError) as refused:
-            raise Refused(f"the knowledge of {commit} could not be fetched: {refused}", "delivery") from None
-        with session.lock:
-            state.exports[commit] = held
-    return {"commit": commit, "path": str(held.stage)}  # under the claim's `shared/`, outside `<T>` (C21)
 
 
 def _source_alert(episode: Episode) -> Path:
@@ -629,17 +633,19 @@ def _record_refusal(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
 
 
 def _drain_delivery(session: Session, state: _PostStep) -> Any:
-    if state.delivery is None:
-        from defender.learning.author.version_control import opened_delivery
+    """A delivery of this helper's own, opened afresh (a private repository fetched at the moment: `main`'s tip then),
+    held open to the helper's end; the batch's box is started through the latest."""
+    from defender.learning.author.version_control import opened_delivery
 
-        state.delivery = state.opened.enter_context(opened_delivery(
-            state.tenant, defender_dir=session.defender_dir, directory=state.records, purpose="drain",
-            client=session.client, identity=_drain_credential(session, state)))
+    state.delivery = state.opened.enter_context(opened_delivery(
+        state.tenant, defender_dir=session.defender_dir, directory=state.records, purpose="drain",
+        client=session.client, identity=_drain_credential(session, state)))
     return state.delivery
 
 
 def _batch_start(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
-    """The drain's publish and its draft (`TenantDelivery.start_batch`), at an id minted here."""
+    """The drain's draft (`TenantDelivery.start_batch`) of `main`'s `agent/` as this helper's own delivery fetched it, at
+    an id minted here. No fetch child is asked: the helper holds the drain credential its delivery fetches with (F6)."""
     from defender.learning.author.version_control import DeliveryRefused, ForgejoAuthError
     from defender.records.formats import TenantRefused
 
@@ -668,7 +674,7 @@ def _batch_box(session: Session, ident: str) -> Any:
     # component from `<T>/` down (H10), not only the draft's folder.
     request = batch.box_request()
     session.judge_binds(m.source for m in request.mounts)
-    return _drain_delivery(session, state).start_box(request, docker=session.docker)
+    return state.delivery.start_box(request, docker=session.docker)
 
 
 def register(registry: Registry) -> None:
@@ -676,8 +682,7 @@ def register(registry: Registry) -> None:
     registry.kind(LEARNING, KindSpec(prepare=_prepare_learning, end=_learning_end))
     registry.kind(POST_STEP, KindSpec(prepare=_prepare_post_step, end=_post_step_end))
     registry.add("pass", kinds=(LEARNING,), handler=answer_pass, required=("id",))
-    registry.add("copy.make", kinds=(LEARNING,), handler=_copy_make, required=("world",))
-    registry.add("export.materialise", kinds=(LEARNING,), handler=_export_materialise, required=("commit",))
+    registry.add("copy.make", kinds=(LEARNING,), handler=_copy_make, optional=("world", "commit"))
     registry.add("batch.start", kinds=(POST_STEP,), handler=_batch_start, required=("lanes",))
     registry.add("forge.token", kinds=(POST_STEP,), handler=_forge_token, required=("min_validity",),
                  after_signal=True)
