@@ -8,11 +8,15 @@ admission: it asks the job socket for its `launch` facts (`container.JobContaine
 (the job lane's door), installs its own SIGTERM handler, and runs the launcher's job lane (`cli.launch_job`): the fork
 pick (O3), the questioner, pre-flight, the siblings one at a time with the control first (O4), verification and the
 judge's job-lane pass. Its passes and boxes are the helper's, asked over the socket. With no job socket (a host shell)
-it does nothing and exits non-zero (A6: there is no host mode). It writes two host-held records the worker copies
-(`records.job_lane`): the progress record (fork, stage, sibling cost), replaced whole as each changes, and the
-create-only end record, written at every exit with the outcome table's status and reason; a `completed` one carries
-the findings the judge's pass left in the episode (#1487 Flow 1 step 1: `findings`, `ok` with their text, or why not),
-which the worker stores with the job's ending. The entry opens no store.
+it does nothing and exits non-zero (A6: there is no host mode).
+
+It writes no record to a folder (#1546 PR2): first it pulls its source's bundle, the one input of its claim, and unpacks
+it into its root (`<T>/runs/<source>/`, A-O1); it sends the `progress` record (fork, stage, sibling cost) as each
+changes, the `arms` roster before the first sibling starts and each arm's `arm/<run id>` fact (scrub, page) once its
+sibling has exited (D12; an arm that never ran is sent `not_run` at the end), its page's bytes when it rendered; then
+the one `outcome` at every exit, with the outcome table's status and reason (a `completed` one carries the findings the
+judge's pass left in the episode, #1487 Flow 1 step 1), and only after it the episode page and the job's bundle (PR8):
+its tenant folder in the root, without the pulled source. The entry opens no store.
 
 **The ending.** A reason is never read from message text: every ending the outcome table gives
 the entry is raised typed where it is decided (`endings.JobEnding`), and anything else is
@@ -34,9 +38,10 @@ import signal
 import sys
 import threading
 from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
-from defender import tenancy
+from defender import job_socket, tenancy
 from defender.investigation import branch
 from defender.learning.branch import cli
 from defender.learning.branch.container import JobContainer, NotInContainer, sigterm_on_stdin_eof
@@ -52,17 +57,14 @@ from defender.learning.branch.endings import (
 )
 from defender.learning.branch.fork_pick import fork_candidates, pick_fork
 from defender.records import EpisodeRuns, Run, RunRefused, session_store
-from defender.records.formats import TenantRefused
+from defender.records.formats import TenantRefused, unwrap_data_root
 from defender.records.job_lane import (
     LEARNING_COMPLETED,
     LEARNING_FAILED,
     LEARNING_SKIPPED,
     LEARNING_STOPPED,
     CostUnreadable,
-    JobLane,
-    JobLaneRefused,
     LearningEnd,
-    LearningProgress,
     sibling_cost,
     unreadable_findings,
 )
@@ -92,8 +94,12 @@ class _Job:
     """One job's records and its ending: what the hooks learn, the SIGTERM handler, and the end
     record written once, whatever ends the entry."""
 
-    def __init__(self, lane: JobLane, job_id: str) -> None:
-        self.lane, self.job_id = lane, job_id
+    def __init__(self, ask: Callable[..., dict[str, Any]], job_id: str) -> None:
+        self.ask, self.job_id = ask, job_id
+        #: The arm roster once written (`{world id: arm id}`), the arms whose fact was sent, and the episode's view.
+        self.roster: dict[str, Any] = {}
+        self.arms_sent: set[str] = set()
+        self.view: EpisodeRuns | None = None
         self.fork: str | None = None
         self.stage: str | None = None
         self.cost = 0.0
@@ -116,10 +122,14 @@ class _Job:
     # -- the progress record ---------------------------------------------------------------
 
     def progress(self) -> None:
-        """Replace the progress record. A write that fails raises: the pick must be durable
-        before any spend (O3), so the entry ends `failed: entry_error` there."""
-        self.lane.write_learning_progress(
-            self.job_id, LearningProgress(self.fork, self.stage, self.cost))
+        """Send the progress record (#1546: staged by the helper, replaced whole). Progress is advisory (the outcome
+        carries the fork, stage and cost again): a helper that refuses it is logged and the job goes on; a socket that
+        fails raises, so the entry ends `failed: entry_error` there."""
+        cost = self.cost if math.isfinite(self.cost) and self.cost >= 0 else 0.0
+        try:
+            self.ask("progress", record={"fork_message_id": self.fork, "stage": self.stage, "sibling_cost_usd": cost})
+        except job_socket.Refused as refused:
+            _logger.warning(f"job {self.job_id}: the helper did not take its progress ({refused})")
 
     def at_stage(self, name: str) -> None:
         self.stage = str(name)
@@ -144,8 +154,18 @@ class _Job:
         self.progress()
         return picked
 
+    def runs_started(self, arms: Mapping[str, Any]) -> None:
+        """The arm roster, sent as the `arms` record before the first sibling starts (#1546 D12)."""
+        self.roster = dict(arms)
+        self.ask("arms", record={"roster": [{"run_id": str(arm), "world_id": str(world)}
+                                            for world, arm in self.roster.items()]})
+
     def sibling_ended(self, view: EpisodeRuns, world_ids: Sequence[str]) -> None:
-        """What the siblings that have run cost so far, carried to the progress record."""
+        """What the siblings that have run cost so far, carried to the progress record; the arm that just exited sent
+        as its `arm` fact (and its page, when it rendered)."""
+        self.view = view
+        if world_ids:
+            self.send_arm(world_ids[-1])
         try:
             cost = _family_cost(view, world_ids)
         except Exception as unreadable:  # noqa: BLE001 — a cost the entry cannot read keeps the last one
@@ -200,13 +220,73 @@ class _Job:
         return self._end(LEARNING_FAILED, ENTRY_ERROR,
                          f"the family step failed with {type(raised).__name__}")
 
-    def write_end(self, end: LearningEnd) -> bool:
+    # -- the arms' facts ----------------------------------------------------------------------
+
+    def _arm_dir(self, arm: Any) -> Path | None:
+        if self.view is None:
+            return None
         try:
-            self.lane.write_learning_end(self.job_id, end)
-        except (OSError, JobLaneRefused) as unwritten:
-            _logger.error(f"job {self.job_id}: the end record could not be written ({unwritten!r})")
+            return Path(self.view.open(arm).run_dir)
+        except (RunRefused, OSError):
+            return None
+
+    def send_arm(self, world_id: str) -> None:
+        """`arm/<id>` for `world_id`'s arm, once: its tree's scrub (its verdict, else walked here once its sibling has
+        exited) and its page, then the page's bytes when it rendered (PR8: the fact first)."""
+        arm = self.roster.get(world_id)
+        if arm is None or str(arm) in self.arms_sent:
+            return
+        self.arms_sent.add(str(arm))
+        run_dir = self._arm_dir(arm)
+        scrub, page = _arm_scrub(run_dir), "none"
+        page_file = None if run_dir is None else run_dir / "runtime.html"  # lint-run-records: ok — the arm's own page
+        if page_file is not None and page_file.is_file() and scrub == "clean":
+            page = "rendered"
+        try:
+            self.ask("arm", run_id=str(arm), record={"scrub": scrub, "page": page})
+            if page == "rendered" and page_file is not None:
+                job_socket.push_object(self.ask, f"page/runs/{arm}/runtime.html", page_file.read_bytes())
+        except (job_socket.Refused, OSError, ValueError) as unsent:
+            _logger.error(f"job {self.job_id}: arm {arm}'s fact or page was not sent ({unsent!r})")
+
+    def send_remaining_arms(self) -> None:
+        """Every roster arm whose sibling never ran (an unservable world, a stop) sent too: each arm stages a fact."""
+        for world_id in self.roster:
+            self.send_arm(world_id)
+
+    # -- the outcome ------------------------------------------------------------------------
+
+    def send_end(self, end: LearningEnd) -> bool:
+        """The ending, sent once as the `outcome` record (#1546 PR2); False when the helper did not take it."""
+        record = {"status": end.status, "reason": end.reason, "message": end.message,
+                  "fork_message_id": end.fork_message_id, "stage": end.stage,
+                  "sibling_cost_usd": end.sibling_cost_usd, "findings": end.findings}
+        try:
+            self.ask("outcome", record=record)
+        except (job_socket.Refused, OSError, ValueError) as unsent:
+            _logger.error(f"job {self.job_id}: the outcome was not taken ({unsent!r})")
             return False
         return True
+
+
+def _arm_scrub(run_dir: Path | None) -> str:
+    """An arm tree's scrub: its verdict when its sibling walked it, else walked here (the sibling has exited, its box
+    with it); no tree is `not_run`."""
+    from defender import box
+
+    if run_dir is None or not run_dir.is_dir():
+        return "not_run"
+    verdict = box.verdict_state(run_dir)
+    if verdict in ("clean", "tainted", "not_run"):
+        return str(verdict)
+    try:
+        # Judged, not recorded: the walk writes no verdict, so family verification reads only the sibling's own.
+        return str(box.scrub(run_dir, write_verdict=lambda _doc: None))
+    except box.RunTainted:
+        return "tainted"
+    except Exception as unwalked:  # noqa: BLE001 — a walk that faults judged nothing
+        _logger.warning(f"arm {run_dir.name}: its tree could not be walked ({unwalked!r})")
+        return "not_run"
 
 
 def _refusal_kinds(found: Any) -> list[str]:
@@ -322,34 +402,89 @@ def main(  # noqa: PLR0913 — the entry's inputs plus the launcher's seams
     except NotInContainer as outside:
         sys.exit(f"[learning job] job {ns.job}: {outside}; nothing was done")
     try:
-        data_root = tenancy.resolve_data_root()
-        lane = JobLane.open(data_root, ns.tenant)
-    except (TenantRefused, JobLaneRefused) as refused:
-        sys.exit(f"[learning job] job {ns.job}: the job lane cannot be opened: {refused}")
+        data_root = unwrap_data_root(tenancy.resolve_data_root())
+    except TenantRefused as refused:
+        sys.exit(f"[learning job] job {ns.job}: its root cannot be used: {refused}")
     on_main = threading.current_thread() is threading.main_thread()
-    with lane:
-        job = _Job(lane, ns.job)
-        previous = signal.signal(signal.SIGTERM, job.on_term) if on_main else None
-        raised: BaseException | None = None
-        try:
-            if watch_stdin:
-                sigterm_on_stdin_eof()
-            _run(job, ns, ask, candidates=candidates, grade=grade, preflight=preflight, **seams)
-        except BaseException as caught:  # noqa: BLE001 — every exit is recorded, then decided below
-            raised = caught
-        finally:
-            # No signal interrupts the record: from here a SIGTERM is ignored.
-            if on_main:
-                signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        end = job.ending_for(raised)
-        if raised is not None and not isinstance(raised, (JobEnding, JobStopped)):
-            _logger.error(f"job {ns.job}: the family step raised", exc_info=raised)
-        written = job.write_end(end)
+    job = _Job(ask, ns.job)
+    pulled: set[str] = set()
+    previous = signal.signal(signal.SIGTERM, job.on_term) if on_main else None
+    raised: BaseException | None = None
+    try:
+        if watch_stdin:
+            sigterm_on_stdin_eof()
+        pulled = _pull_source(ask, data_root, ns)
+        _run(job, ns, ask, candidates=candidates, grade=grade, preflight=preflight, **seams)
+    except BaseException as caught:  # noqa: BLE001 — every exit is recorded, then decided below
+        raised = caught
+    finally:
+        # No signal interrupts the record: from here a SIGTERM is ignored.
         if on_main:
-            signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
-    if not written:
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    end = job.ending_for(raised)
+    if raised is not None and not isinstance(raised, (JobEnding, JobStopped)):
+        _logger.error(f"job {ns.job}: the family step raised", exc_info=raised)
+    job.send_remaining_arms()
+    sent = job.send_end(end)
+    _push_episode(ask, data_root, ns, pulled)
+    if on_main:
+        signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
+    if not sent:
         return 1
     return 1 if end.status == LEARNING_FAILED else 0
+
+
+def _tenant_files(top: Path) -> set[str]:
+    return {p.relative_to(top).as_posix() for p in top.rglob("*") if p.is_file() and not p.is_symlink()} \
+        if top.is_dir() else set()
+
+
+def _pull_source(ask: Callable[..., dict[str, Any]], data_root: Path, ns: argparse.Namespace) -> set[str]:
+    """The source's bundle, the one input of the job's claim (#1546 A-O1), pulled through the helper and unpacked into
+    the job's root (`<T>/runs/<source>/`, its session store beside it); the files it placed, root-relative. A source the
+    helper cannot hand over is `failed: source_unavailable`."""
+    from defender.evidence import bundle
+
+    tenant_root = data_root / ns.tenant
+    spool = data_root / f".{ns.job}.source"
+    before = _tenant_files(tenant_root)
+    try:
+        job_socket.pull_object(ask, ns.source, "bundle", spool)
+        bundle.unpack(spool, tenant_root)
+    except (job_socket.Refused, bundle.BundleRefused, OSError, ValueError) as unusable:
+        code = getattr(unusable, "code", type(unusable).__name__)
+        brief = f"the source run's evidence could not be read ({code})"
+        raise ending(f"[learning job] {brief}", reason=SOURCE_UNAVAILABLE, brief=brief, cause=unusable) from unusable
+    finally:
+        spool.unlink(missing_ok=True)
+    return _tenant_files(tenant_root) - before
+
+
+def _push_episode(ask: Callable[..., dict[str, Any]], data_root: Path, ns: argparse.Namespace,
+                  pulled: set[str]) -> None:
+    """After the outcome (PR8): the episode page when it rendered, then the job's bundle: its tenant folder in the root
+    without the pulled source, the launch record and the helper's copies (those are in the inputs, never the root)."""
+    from defender.evidence import bundle
+
+    tenant_root = data_root / ns.tenant
+    page = tenant_root / "episodes" / ns.job / "learning.html"  # lint-run-records: ok — the episode's own page
+    try:
+        if page.is_file():
+            job_socket.push_object(ask, "page/learning.html", page.read_bytes())
+    except (job_socket.Refused, OSError, ValueError) as unsent:
+        _logger.error(f"job {ns.job}: the episode page was not pushed ({unsent!r})")
+    packed = data_root / f".{ns.job}.bundle"
+    # The pulled source's run folder and listing are left out; the pulled session store is kept: the arms fork into it,
+    # and every arm's session database rides in the bundle (D12).
+    excludes = sorted({f"runs/{ns.source}", f"runs/{ns.job}.launch.json", "run-knowledge", "exports",
+                       "scrub-findings.json", *(rel for rel in pulled if not rel.startswith("sessions/"))})
+    try:
+        bundle.pack(tenant_root, packed, exclude=excludes)
+        job_socket.push_object(ask, "bundle", packed)
+    except (bundle.BundleRefused, job_socket.Refused, OSError, ValueError) as unsent:
+        _logger.error(f"job {ns.job}: the job's bundle was not pushed ({unsent!r})")
+    finally:
+        packed.unlink(missing_ok=True)
 
 
 def _run(job: _Job, ns: argparse.Namespace, ask: Callable[..., dict[str, Any]], *,
@@ -361,6 +496,6 @@ def _run(job: _Job, ns: argparse.Namespace, ask: Callable[..., dict[str, Any]], 
     container = JobContainer.connect(ask, tenant=ns.tenant)
     hooks = JobLaneHooks(
         job_id=ns.job, pick=lambda source: job.pick(source, candidates), stage=job.at_stage,
-        sibling_ended=job.sibling_ended, judged=job.judged, grade=grade)
+        runs_started=job.runs_started, sibling_ended=job.sibling_ended, judged=job.judged, grade=grade)
     cli.launch_job(tenant=ns.tenant, source_run_id=ns.source, lane=hooks, preflight=preflight,
                    container=container, **seams)

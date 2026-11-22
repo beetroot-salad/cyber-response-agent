@@ -4,7 +4,8 @@ Inside the job container it takes no host lock, runs no admission and opens no d
 `launch` and `forge.token` over the job socket. The entry asks `launch`, checks the facts are this request's (kind, tenant, job,
 a rendering, a digest and the forge origin the helper read), accepts the tenant's folder by the folder rules alone, opens the
 tenant's repository against the recorded forge origin with the socket's credential, runs `adopt()` (which fetches, decides and
-delivers, `learning.author.version_control.adoption`) and writes the one create-only record `<runs>/<job>.adoption.json`:
+delivers, `learning.author.version_control.adoption`) over the helper's own clone in the job's root, and sends its one result to the
+helper as the `result` record (#1546: staged, never a file):
 
 - `{outcome, pr_number}` from `adopt()`;
 - `{failed, handover}`: the launch is unanswered or refused, or its facts are not this request's (R13-1.3, .4);
@@ -20,6 +21,7 @@ import argparse
 import base64
 import binascii
 import contextlib
+import json
 import logging
 import re
 import signal
@@ -119,9 +121,8 @@ def _outcome(ns: argparse.Namespace, environ: Mapping[str, str], root: Any, clie
 
 
 def main(argv: list[str], *, environ: Mapping[str, str] | None = None, client: httpx.Client | None = None) -> int:
-    """Run one adoption and write its record (module doc); 0 once a record is written. A host shell (no job socket) does
-    nothing and returns non-zero; a record that cannot be written raises, so the process ends non-zero and the worker reads
-    no record."""
+    """Run one adoption and send its result (module doc); 0 once it was sent. A host shell (no job socket) does nothing and
+    returns non-zero; a socket that is gone raises, so the process ends non-zero and the worker reads no result."""
     import os
 
     ns = _parse_args(argv)
@@ -137,11 +138,13 @@ def main(argv: list[str], *, environ: Mapping[str, str] | None = None, client: h
         sys.stderr.write(f"[adoption] job {ns.job}: {refused}\n")
         return 2
     record = _outcome(ns, env, root, client)
+    request = job_socket.from_environ(env)
+    if request is None:
+        raise RuntimeError("the job socket went away")
     try:
-        with job_lane.JobLane.open(root, ns.tenant) as lane:
-            lane.write_adoption(ns.job, record)
-    except FileExistsError:
-        _logger.error("adoption %s: a record is already there; it is kept", ns.job)
+        request("result", record=json.loads(record.text()))
+    except job_socket.Refused as refused:
+        _logger.error("adoption %s: the helper did not take its result (%s): %s", ns.job, refused.code, refused)
     return 0
 
 

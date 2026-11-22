@@ -1,24 +1,12 @@
 """The job lane's door to one tenant's runs container (#1342 M1): every host file the worker and
 the job entry share, keyed by `(data root, tenant id)` and opened without accepting the tenant.
 
-Learning jobs (#1344) share two host-held records here, keyed by the learning job's id and
-written by the job entry, read by the worker: its progress record (`LearningProgress`, replaced
-whole) and its end record (`LearningEnd`, create-only), which carries the job's findings in an
-optional field of its own (#1487, `findings_of`). Each has one parser, and text that is not a
-record of its shape parses as no record (`None`), which the worker treats like an absent one.
-
-The worker writes a job's launch record and alert file here before it starts the child; the
-child's job entry opens the same door first thing — before tenant acceptance, so a refusal there
-still leaves its job-end record — checks the launch record, and writes the job-end record as it
-exits; the worker then reads the job-end record, the knowledge record and the session pointer
-through it, and the run's closing record and cost from the session database the pointer's case id
-derives.
-
-Host requests (#1471: readiness checks and adoptions) share two records here, keyed by the request id: the result
-record (`ReadinessRecord`, `AdoptionRecord`), written create-only by the request's helper or its container, one writer
-per request, and, for a readiness check whose publish gave a source, the knowledge record its helper writes
-(`write_request_knowledge`). The worker reads each into three states: absent, malformed (present, but not of a record's
-shape, or over its cap), or the record; the vocabulary they are judged by lives here, so writer and worker share it.
+Since #1546 (A-O2) the worker reads no file a job wrote and opens no SQLite under a job root: a job's end is what its
+helper staged in the jobs database. What is left here is the vocabulary the job's writers share (`JobEnd`,
+`LearningEnd`, `LearningProgress`, `ReadinessRecord`, `AdoptionRecord`, the findings field's measure), the in-container
+reads of a run's own records (the launch record, the session pointer, the closing record and the spend ledger the
+pointer's case id derives, `knowledge`), and the door the worker opens only to check that a tenant's runs folder is
+usable before it claims for it.
 
 `<data root>/<T>/runs` is held no-follow from the tenant's folder and never made (#1342 R1: tenant
 setup makes it): absent, a link or anything but a folder is `JobLaneRefused`. Every read is a
@@ -34,7 +22,7 @@ import sys
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, ClassVar, Protocol
+from typing import Any
 
 from defender import _io
 from defender._text import postgres_can_hold
@@ -45,7 +33,7 @@ from defender.records.job_facts import (  # noqa: F401 — the worker's reasons,
     EXITED_WITHOUT_RESULT, EXPIRED, LEASE_LAPSED, RETRY_CAP, WORKER_ERROR,
     BOX_NOT_STARTED, BOX_START_FAILED, BOX_STARTED, SETUP_CRASHED, SETUP_DONE, SETUP_REFUSED,
 )
-from defender.records._knowledge_status import PINNED, UNREADABLE, _record_status, api_knowledge, knowledge_status
+from defender.records._knowledge_status import api_knowledge, knowledge_status
 from defender.records._layout import RunPaths, SessionPaths
 from defender.records._locations import DataRoot, RunsBase, unwrap_data_root
 from defender.records._store_errors import StoreError
@@ -384,8 +372,6 @@ REFUSED, READY, FAILED = "refused", "ready", "failed"
 #: the container's tenant step and its systems step.
 READINESS_STEPS = ("tenant", "records", "alert_mapping", "publish", "knowledge_copy", "run_tenant", "roster",
                    "tenant_verdict", "signing", "first_pass", "container_tenant", "systems")
-#: The steps after `publish`: a refusal there carries the knowledge record's status, as `ready` does (R3, R13-1.5).
-READINESS_STEPS_WITH_KNOWLEDGE = frozenset(READINESS_STEPS[READINESS_STEPS.index("publish") + 1:])
 
 
 def is_readiness_step(step: object) -> bool:
@@ -422,16 +408,6 @@ def _holds_sentence(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip()) and postgres_can_hold(value)
 
 
-class MalformedRecord:
-    """A host-request record that is present but not one its writers write (`JobLane.read_readiness`,
-    `read_adoption`): not of its shape, not readable text, or over its cap. One value, `MALFORMED`."""
-
-    def __repr__(self) -> str:
-        return "MALFORMED"
-
-
-MALFORMED = MalformedRecord()
-
 
 @dataclass(frozen=True)
 class ReadinessWarning:
@@ -461,18 +437,6 @@ class ReadinessRecord:
     def __post_init__(self) -> None:
         if not self._holds():
             raise ValueError(f"not a readiness record: {self!r}")
-
-    @property
-    def is_failed(self) -> bool:
-        return self.outcome == FAILED
-
-    @property
-    def is_refused(self) -> bool:
-        return self.outcome == REFUSED
-
-    @property
-    def is_ready(self) -> bool:
-        return self.outcome == READY
 
     def _holds(self) -> bool:
         if self.outcome == REFUSED:
@@ -550,10 +514,6 @@ class AdoptionRecord:
         if not self._holds():
             raise ValueError(f"not an adoption record: {self!r}")
 
-    @property
-    def is_failed(self) -> bool:
-        return self.outcome == FAILED
-
     def _holds(self) -> bool:
         if self.outcome == FAILED:
             return (self.pr_number is None and isinstance(self.reason, str)
@@ -593,30 +553,6 @@ class AdoptionRecord:
             return cls(obj["outcome"], pr_number=obj.get("pr_number"), reason=obj.get("reason"))
         except (TypeError, ValueError):
             return None
-
-
-class _HostRecorded(Protocol):
-    """What the knowledge record is written from: a `tenancy.run_knowledge.KnowledgeSource` (records sits below
-    tenancy, so the type is not named)."""
-
-    def host_record(self) -> dict[str, Any]: ...
-
-
-@dataclass(frozen=True)
-class RequestKnowledge:
-    """A host request's knowledge record as the worker reads it (`JobLane.read_request_knowledge`, R13-1.5): one of
-    `RequestKnowledge.ABSENT`, `RequestKnowledge.MALFORMED` (present, but no knowledge status), or a present status,
-    whose `knowledge` is its `api_knowledge` shape. Unlike `JobLane.knowledge`, an absent record is not read as stale."""
-
-    knowledge: dict[str, str | None] | None
-    state: str = "present"
-
-    ABSENT: ClassVar[RequestKnowledge]
-    MALFORMED: ClassVar[RequestKnowledge]
-
-
-RequestKnowledge.ABSENT = RequestKnowledge(None, "absent")
-RequestKnowledge.MALFORMED = RequestKnowledge(None, "malformed")
 
 
 def _run_id(raw: object) -> RunId:
@@ -733,91 +669,6 @@ class JobLane:
                                  "is absent or not a plain file")
         return Launched(record=record, alert=alert)
 
-    # -- the job-end record -----------------------------------------------------------------------
-
-    def write_job_end(self, run_id: object, end: JobEnd) -> None:
-        """The job-end record, create-only: one already there is `FileExistsError` and is kept."""
-        self._held.write(self._paths(_run_id(run_id)).job_end().name, end.text(),
-                         mode="create")
-
-    def read_job_end(self, run_id: object) -> JobEnd | None:
-        """The job-end record, or `None` when it is absent, unreadable or not one the job entry
-        writes (the worker treats all three alike)."""
-        read = self._held.view().read(self._paths(_run_id(run_id)).job_end().name)
-        return None if read.text is None else JobEnd.parse(read.text)
-
-    # -- a learning job's two records (#1344) ------------------------------------------------------
-
-    def write_learning_progress(self, job_id: object, progress: LearningProgress) -> None:
-        """The progress record, replaced whole (a reader sees the old record or the new one)."""
-        self._held.write(self._paths(_run_id(job_id)).learning_progress().name, progress.text(),
-                         mode="replace")
-
-    def read_learning_progress(self, job_id: object) -> LearningProgress | None:
-        """The progress record, or `None` when it is absent, unreadable or not of its shape."""
-        read = self._held.view().read(self._paths(_run_id(job_id)).learning_progress().name)
-        return None if read.text is None else LearningProgress.parse(read.text)
-
-    def write_learning_end(self, job_id: object, end: LearningEnd) -> None:
-        """The end record, create-only: one already there is `FileExistsError` and is kept."""
-        self._held.write(self._paths(_run_id(job_id)).learning_end().name, end.text(),
-                         mode="create")
-
-    def read_learning_end(self, job_id: object) -> LearningEnd | None:
-        """The end record, or `None` when it is absent, unreadable or not one the job entry
-        writes (the worker treats all three alike)."""
-        read = self._held.view().read(self._paths(_run_id(job_id)).learning_end().name)
-        return None if read.text is None else LearningEnd.parse(read.text)
-
-    # -- a host request's records (#1471) ----------------------------------------------------------
-
-    def write_readiness(self, request_id: object, record: ReadinessRecord) -> None:
-        """A readiness check's result record, create-only: one already there is `FileExistsError` and is kept."""
-        self._held.write(self._paths(_run_id(request_id)).readiness_record().name, record.text(), mode="create")
-
-    def read_readiness(self, request_id: object) -> ReadinessRecord | MalformedRecord | None:
-        """A readiness check's result record: `None` when nothing is at its name, `MALFORMED` when something is that is
-        not a readable record of its shapes within its cap (R13-4), else the record."""
-        return self._host_record(self._paths(_run_id(request_id)).readiness_record().name,
-                                 READINESS_RECORD_TEXT_CAP_BYTES, ReadinessRecord.parse)
-
-    def write_adoption(self, request_id: object, record: AdoptionRecord) -> None:
-        """An adoption's result record, create-only: one already there is `FileExistsError` and is kept."""
-        self._held.write(self._paths(_run_id(request_id)).adoption_record().name, record.text(), mode="create")
-
-    def read_adoption(self, request_id: object) -> AdoptionRecord | MalformedRecord | None:
-        """An adoption's result record, read as `read_readiness` reads its own."""
-        return self._host_record(self._paths(_run_id(request_id)).adoption_record().name,
-                                 _ADOPTION_RECORD_CAP_BYTES, AdoptionRecord.parse)
-
-    def _host_record(self, name: str, cap: int, parse: Any) -> Any:
-        """One host-request record, no-follow, at most `cap` bytes plus one taken off the file (so one over its cap is
-        seen over it and refused): absent `None`, anything unreadable or refused by `parse` `MALFORMED`."""
-        read = self._held.view().read(name, max_bytes=cap + 1)
-        if read.text is None:
-            return None if read.absent else MALFORMED
-        found = parse(read.text)
-        return MALFORMED if found is None else found
-
-    def write_request_knowledge(self, request_id: object, source: _HostRecorded) -> None:
-        """A readiness check's knowledge record (R13-1.2): the source its publish step gave, in the host record's
-        format (`tenancy.run_knowledge.write_host_record`), at `<request id>.knowledge-source.json`, create-only."""
-        text = json.dumps(source.host_record(), indent=2, sort_keys=True) + "\n"
-        self._held.write(self._paths(_run_id(request_id)).knowledge_source().name, text, mode="create")
-
-    def read_request_knowledge(self, request_id: object) -> RequestKnowledge:
-        """A host request's knowledge record, with no run-started gate (R13-1.5): `RequestKnowledge.ABSENT` when nothing
-        is at its name, `MALFORMED` when what is there is not a knowledge status (or is a pinned one), else its status in
-        the API's shape."""
-        read = self._held.view().read(self._paths(_run_id(request_id)).knowledge_source().name)
-        if read.text is None:
-            return RequestKnowledge.ABSENT if read.absent else RequestKnowledge.MALFORMED
-        status = _record_status(read.text)
-        # A request's knowledge is never pinned: its helper publishes (surface §2), so a pinned status is no record of it.
-        if status is None or status.kind == PINNED:
-            return RequestKnowledge.MALFORMED
-        return RequestKnowledge(api_knowledge(status))
-
     # -- what the run left ------------------------------------------------------------------------
 
     def run_started(self, run_id: object) -> bool:
@@ -835,13 +686,6 @@ class JobLane:
             return None
         read = self._held.view().read(self._paths(run_id).knowledge_source().name)
         return api_knowledge(knowledge_status(read.text, stamp_names_source=True))
-
-    @staticmethod
-    def unreadable_knowledge() -> dict[str, str | None] | None:
-        """A started run's knowledge when its record cannot be read (OD22'), in the API's shape:
-        stale, operator kind, no commit. What `knowledge` gives for a missing or garbled record, and
-        what the worker records when the read itself faults (#1396)."""
-        return api_knowledge(UNREADABLE)
 
     def closing_disposition(self, run_id: object) -> Any:
         """The run's closing record through the job-lane route (#1534): the pointer read through the held view, then

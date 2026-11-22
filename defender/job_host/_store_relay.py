@@ -21,7 +21,7 @@ _logger = logging.getLogger(__name__)
 
 def _bound_adapter(session: Session, opened: Any) -> Any:
     """The adapter the helper answers with: `blocking` over its own database address, entered on `opened`."""
-    from defender.learning.core.store_tick import AUTHOR_LANE, DSN_ENV, owner_name, store_knobs, thresholds
+    from defender.learning.core.store_tick import AUTHOR_LANE, DSN_ENV, LEAD_LANE, owner_name, store_knobs, thresholds
     from defender.learning_store import blocking
     from defender.learning_store.tick import StoreAdapter, StoreUnavailable
 
@@ -30,12 +30,15 @@ def _bound_adapter(session: Session, opened: Any) -> Any:
         raise StoreUnavailable(f"the helper has no learning store address ({DSN_ENV} is not set)")
     limits, knobs = thresholds(), store_knobs()
     store = opened.enter_context(blocking(dsn, **knobs))
-    return StoreAdapter(store, tenant=str(session.tenant_id), lane=AUTHOR_LANE,
-                        owner=owner_name(f"post-step:{session.claim}"), thresholds=limits)
+    # A drain request's tick is the lead lane's (#1546 D7); a post-step's the author lane's.
+    lane = LEAD_LANE if session.kind == "drain" else AUTHOR_LANE
+    return StoreAdapter(store, tenant=str(session.tenant_id), lane=lane,
+                        owner=owner_name(f"{session.kind}:{session.claim}"), thresholds=limits)
 
 
 def _relay(session: Session) -> Any:
     from defender.learning.core.drains import AUTHOR_DRAIN_RECONCILES
+    from defender.learning.core.store_tick import LEAD_LANE
     from defender.learning_store.tick_port import TickRelay
 
     from ._learning import post_step_state
@@ -44,7 +47,8 @@ def _relay(session: Session) -> Any:
     with session.lock:
         if state.relay is None:
             state.relay = TickRelay(lambda: _bound_adapter(session, state.opened), signalled=session.signalled.is_set,
-                                    stop_window=STOP_GRACE, reconcile_lanes=AUTHOR_DRAIN_RECONCILES)
+                                    stop_window=STOP_GRACE,
+                                    reconcile_lanes=(LEAD_LANE,) if session.kind == "drain" else AUTHOR_DRAIN_RECONCILES)
         return state.relay
 
 
@@ -85,4 +89,4 @@ def register_store(registry: Registry) -> None:
     from ._learning import POST_STEP
 
     for name, fields in REQUESTS.items():
-        registry.add(name, kinds=(POST_STEP,), handler=_store_handler(name), required=fields, after_signal=True)
+        registry.add(name, kinds=(POST_STEP, "drain"), handler=_store_handler(name), required=fields, after_signal=True)

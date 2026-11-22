@@ -26,17 +26,24 @@ from typing import Any
 
 __all__ = [
     "CLAIM_ROOTS", "FORGE_TOKEN_CAP", "HELPER_LABEL", "IMAGE_ENV", "JOB_LABEL", "MAX_MESSAGE", "NETWORK_ENV",
-    "OWNERS_ROOT", "SCRATCH_ROOT", "SOCKETS_ROOT", "SOCKET_ENV", "Refused", "ask",
-    "from_environ", "read_message", "sigterm_on_stdin_eof", "write_message",
+    "INPUTS_ROOT", "OWNERS_ROOT", "PUSH_PART", "ROOTS_ROOT", "SCRATCH_ROOT", "SOCKETS_ROOT", "SOCKET_ENV", "SPOOL_ROOT",
+    "Refused", "ask", "from_environ", "pull_object", "push_object", "read_message", "sigterm_on_stdin_eof",
+    "write_message",
 ]
 
 #: Where under the data root each claim's folders live, outside every tenant's folder and host `/tmp`: its scratch
 #: (`<root>/.job-scratch/<claim>/`, a learning job's oracle boxes' folders, C21, #1557 H3) and its socket folder
 #: (`<root>/.job-sockets/<claim>/`, every kind, H9). The helper makes and removes them; the worker removes a claim's
 #: once its child is gone, and at its start whatever a predecessor left, each only once its helper is gone (#1557 O5).
+#: #1546 adds three: the job's own data root (`<root>/.job-roots/<claim>/`, its tenant folder `<T>/` inside, the
+#: container's `DEFENDER_DATA_ROOT`), its inputs (`<root>/.job-inputs/<claim>/`, written by the helper alone, bound
+#: read-only) and the helper's private upload spool (`<root>/.job-spool/<claim>/`, bound into nothing).
 SCRATCH_ROOT = ".job-scratch"
 SOCKETS_ROOT = ".job-sockets"
-CLAIM_ROOTS = (SCRATCH_ROOT, SOCKETS_ROOT)
+ROOTS_ROOT = ".job-roots"
+INPUTS_ROOT = ".job-inputs"
+SPOOL_ROOT = ".job-spool"
+CLAIM_ROOTS = (SCRATCH_ROOT, SOCKETS_ROOT, ROOTS_ROOT, INPUTS_ROOT, SPOOL_ROOT)
 #: Where a helper records itself for its claim (`<root>/.job-owners/<claim>/owner`, `tenancy.write_owner`) before it makes
 #: the claim's folders, and removes that record last: bound into no job or box. A claim's folders are the worker's to
 #: remove only once that record's process is gone (#1557 O5 r9: a dead worker's helper still ends its job).
@@ -161,6 +168,61 @@ def from_environ(environ: Mapping[str, str]) -> Callable[..., dict[str, Any]] | 
     """The job's client bound to the socket `environ` names (`SOCKET_ENV`), or None outside a job container."""
     path = environ.get(SOCKET_ENV)
     return functools.partial(ask, path) if path else None
+
+
+#: The part size a job pushes an object in (`evidence.put`; the helper takes parts of at most 8 MiB).
+PUSH_PART = 4 * 1024 * 1024
+
+
+def push_object(request: Callable[..., dict[str, Any]], name: str, source: bytes | Path) -> dict[str, Any]:
+    """Push one evidence object (`bytes`, or a file read part by part) to the helper as `evidence.put` parts, in order,
+    the last marked and carrying the object's digest; the helper's answer to the last part (`{size, sha256}`). A refusal
+    raises `Refused`."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    if isinstance(source, (bytes, bytearray)):
+        data = bytes(source)
+        parts = [data[i:i + PUSH_PART] for i in range(0, len(data), PUSH_PART)] or [b""]
+        digest.update(data)
+        answer: dict[str, Any] = {}
+        for n, part in enumerate(parts):
+            last = n == len(parts) - 1
+            answer = request("evidence.put", object=name, part=n, last=last, data=part,
+                             **({"sha256": digest.hexdigest()} if last else {}))
+        return answer
+    with Path(source).open("rb") as read:
+        n, part = 0, read.read(PUSH_PART)
+        while True:
+            following = read.read(PUSH_PART)
+            digest.update(part)
+            last = not following
+            answer = request("evidence.put", object=name, part=n, last=last, data=part,
+                             **({"sha256": digest.hexdigest()} if last else {}))
+            if last:
+                return answer
+            n, part = n + 1, following
+
+
+def pull_object(request: Callable[..., dict[str, Any]], owner: str, name: str, dest: Path) -> int:
+    """Pull one input object of the job's claim (`evidence.pull`, part by part) into the new file `dest`; its size. A
+    refusal raises `Refused` (`out_of_claim`, `unavailable`, `store_fault`); a partial file is removed."""
+    size, n = 0, 0
+    try:
+        with Path(dest).open("xb") as out:
+            while True:
+                answer = request("evidence.pull", owner=owner, object=name, part=n)
+                data = answer.get("data")
+                if not isinstance(data, bytes):
+                    raise ValueError("the helper's pull answer holds no bytes")
+                out.write(data)
+                size += len(data)
+                if answer.get("last") is True:
+                    return size
+                n += 1
+    except BaseException:
+        Path(dest).unlink(missing_ok=True)
+        raise
 
 
 def sigterm_on_stdin_eof() -> threading.Thread:

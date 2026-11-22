@@ -867,12 +867,23 @@ def _tenant_refusal_exits() -> Iterator[None]:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
-def _request_data_root(ns: argparse.Namespace) -> DataRoot:
+def _request_data_root(ns: argparse.Namespace, environ: Mapping[str, str] | None = None) -> DataRoot:
     """The request's tenant id checked (`--tenant` is required, there is no default), then the
-    data root resolved — once, here — or a `[run.py]` refusal before the preflight."""
+    data root resolved — once, here — or a `[run.py]` refusal before the preflight. A job
+    entry's root is its container's `DEFENDER_DATA_ROOT` (`environ`, #1546: the claim's own
+    root), held to the same rule (absolute, resolved); `None` reads this process's."""
     with _tenant_refusal_exits():
         tenancy.requested_tenant_id(ns.tenant)
-        return tenancy.resolve_data_root()
+        if environ is None:
+            return tenancy.resolve_data_root()
+        raw = environ.get("DEFENDER_DATA_ROOT", "")
+        if not raw or not Path(raw).is_absolute():
+            raise TenantRefused(f"DEFENDER_DATA_ROOT={raw!r} must name an absolute path")
+        try:
+            resolved = Path(raw).resolve(strict=True)
+        except OSError as unresolved:
+            raise TenantRefused(f"DEFENDER_DATA_ROOT={raw!r} cannot be resolved: {unresolved}") from None
+        return tenancy.data_root_from_path(resolved)
 
 
 def _sibling_box_mounted(ns: argparse.Namespace, data_root: DataRoot) -> Iterator[RunsBase]:
@@ -1167,7 +1178,7 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
     visualize: Callable[..., None],
     operator_steps: Callable[[], None] | None = None, ticket_step: Callable[[], None] | None = None,
     mirror: bool = True,
-) -> None:
+) -> str:
     """The post-steps both compositions share (#1342 M4), after the lifecycle has scrubbed the
     run folder: the readers of the scrubbed tree and the run page. `operator_steps` is the
     operator composition's own (the curation enqueue and the feedback issue), run where they
@@ -1177,12 +1188,14 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
 
     None of them runs for a run whose box ending's teardown faulted (`TEARDOWN_FAULTED`, #1421):
     they assume a dead box and a scrubbed tree, and a possibly live box's writes must not be read
-    or published. The composition still returns the run's exit status."""
+    or published. The composition still returns the run's exit status.
+
+    Answers the page's state (#1546 `page` fact): `rendered`, `render_failed`, or `none` (not tried)."""
     if summary.get(TEARDOWN_FAULTED):
         _logger.error("the box could not be proven stopped after the run ended; its folder was not "
                       "scrubbed, so nothing is read from it or published (no run page, no case "
                       "comment, no curation)")
-        return
+        return "none"
     run = started.run
     run_dir = run.run_dir
     # Everything below reads the scrubbed tree; a lifecycle failure propagates uncaught.
@@ -1213,6 +1226,8 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
                   **({} if mirror else {"mirror": False}))
     except _run.VisualizeFailed:
         _logger.warning("the run page was not saved", exc_info=True)
+        return "render_failed"
+    return "rendered" if (run_dir / "runtime.html").is_file() else "none"  # lint-run-records: ok — the page's own file
 
 
 
@@ -1381,17 +1396,22 @@ def _interrupt_on_sigterm() -> None:
 
 
 class _JobFacts:
-    """The job-end record's facts (#1342 O8), each set as it becomes true, and the record
-    written create-only when the block exits, however it exits (`__exit__` records and swallows
-    nothing). Before setup completes, a `SystemExit` or the preflight's refusal is `refused`,
-    anything else `crashed`. The run's two facts are set on `held`, the holder the lifecycle is
-    handed (r5 C2), so a raise after either became true does not lose it."""
+    """The job's outcome (#1342 O8; #1546 PR2), each fact set as it becomes true, and sent to the helper as the `outcome`
+    record when the block exits, however it exits (`__exit__` records and swallows nothing): setup, box, whether the
+    report was committed, the run tree's scrub, how it was cut short, its closing lookup and its cost. Before setup
+    completes, a `SystemExit` or the preflight's refusal is `refused`, anything else `crashed`. The run's facts are set
+    on `held`, the holder the lifecycle is handed (r5 C2), so a raise after one became true does not lose it. Then the
+    objects the outcome owes are pushed: the run page when it rendered (`page` first), and the run folder's bundle."""
 
-    def __init__(self, lane: job_lane.JobLane, job: str) -> None:
+    def __init__(self, lane: job_lane.JobLane, job: str, request: Callable[..., dict[str, Any]]) -> None:
         self._lane = lane
         self._job = job
+        self._request = request
         self.setup: str | None = None
         self.held = _JobEndFacts()
+        #: The run folder once setup made it, and the page's state once the post-steps tried it.
+        self.run_dir: Path | None = None
+        self.page: str = "none"
 
     def __enter__(self) -> _JobFacts:
         return self
@@ -1405,18 +1425,96 @@ class _JobFacts:
             # Raised after setup with no box started: whatever stopped it, the box did not start
             # (r7 D-ad). A run whose box started keeps `started`, however it ended.
             self.held.box = job_facts.BOX_START_FAILED
-        end = job_lane.JobEnd(setup=self.setup, box=self.held.box,
-                             report_committed=self.held.report_committed,
-                             scrub_verified=self.held.scrub_verified,
-                             cut_short=self.held.cut_short)
         try:
-            self._lane.write_job_end(self._job, end)
-        except FileExistsError:
-            _logger.error(f"job {self._job}: a job-end record is already there; it is kept, and "
-                          f"this one ({end.text()}) is not written")
-        except (OSError, job_lane.JobLaneRefused) as e:
-            _logger.error(f"job {self._job}: the job-end record could not be written: {e}")
+            outcome = self._outcome()
+        except Exception as unread:  # noqa: BLE001 — the outcome goes out whatever its parts raised
+            _logger.error(f"job {self._job}: the outcome's facts could not all be read: {unread!r}")
+            outcome = {"setup": self.setup, "box": self.held.box, "report_committed": self.held.report_committed,
+                       "scrub": "tainted" if self.held.box == job_facts.BOX_STARTED else "not_run",
+                       "cut_short": self.held.cut_short, "closing": None, "cost_usd": None,
+                       "cost_is_lower_limit": True}
+        try:
+            self._request("outcome", record=outcome)
+        except (job_socket.Refused, OSError, ValueError) as e:
+            _logger.error(f"job {self._job}: the helper did not take the outcome ({outcome}): {e}")
+        try:
+            self._push()
+        except Exception as unpushed:  # noqa: BLE001 — what was not pushed is the evidence's loss, never the run's
+            _logger.error(f"job {self._job}: its objects were not pushed: {unpushed!r}")
         return False
+
+    def _scrub(self) -> str:
+        if self.held.box != job_facts.BOX_STARTED or self.run_dir is None:
+            return "not_run"
+        verdict = box_mod.verdict_state(self.run_dir)
+        if verdict in ("clean", "tainted"):
+            return str(verdict)
+        return "clean" if self.held.scrub_verified else "tainted"
+
+    def _closing(self) -> dict[str, Any] | None:
+        from defender.records import closing
+
+        if not self.held.report_committed or self.run_dir is None:
+            return None
+        try:
+            found = self._lane.closing_disposition(self._job)
+        except Exception as fault:  # noqa: BLE001 — a lookup that faults is the lookup's own answer
+            _logger.error(f"job {self._job}: the closing lookup faulted: {fault!r}")
+            return {"found": "could_not_look"}
+        if isinstance(found, closing.Record):
+            record = found.record
+            return {"found": "record", "disposition": record.disposition, "review_outcome": record.outcome,
+                    "summary": record.summary}
+        if isinstance(found, closing.CouldNotLook):
+            wording = closing.FAULT_WORDING.get(found.kind)
+            return {"found": "could_not_look", **({"wording": wording} if isinstance(wording, str) else {})}
+        return {"found": "never_closed"}
+
+    def _cost(self) -> tuple[float | None, bool]:
+        if self.run_dir is None:
+            return 0.0, False
+        try:
+            cost = self._lane.cost(self._job)
+        except job_lane.CostUnreadable as unreadable:
+            _logger.error(f"job {self._job}: its cost cannot be read: {unreadable}")
+            return None, True
+        return float(cost.usd), not cost.complete
+
+    def _outcome(self) -> dict[str, Any]:
+        cost, lower = self._cost()
+        return {"setup": self.setup, "box": self.held.box, "report_committed": self.held.report_committed,
+                "scrub": self._scrub(), "cut_short": self.held.cut_short, "closing": self._closing(),
+                "cost_usd": cost, "cost_is_lower_limit": lower}
+
+    def _push(self) -> None:
+        """The run page (when it rendered) and the run folder's bundle, pushed to the helper (A-O8: the page's bytes are
+        the renderer's, sent here, never read back from the run folder by the helper)."""
+        from defender.evidence import bundle
+
+        run_dir = self.run_dir
+        if run_dir is None or not run_dir.is_dir():
+            return
+        try:
+            self._request("page", record={"page": self.page})
+            if self.page == "rendered":
+                job_socket.push_object(self._request, "page/runtime.html",  # lint-run-records: ok — the object's name
+                                       (run_dir / "runtime.html").read_bytes())
+        except (job_socket.Refused, OSError, ValueError) as e:
+            _logger.error(f"job {self._job}: the run page was not pushed: {e}")
+        # The bundle is the job's tenant folder in its root (its run folder, its session store), without the helper's
+        # copies: the launch record and alert it wrote beside the run (the run's knowledge copy is in the inputs).
+        tenant_root = run_dir.parent.parent
+        paths = RunPaths(run_dir)
+        excludes = [f"runs/{paths.launch_record().name}", f"runs/{paths.launch_alert().name}", "run-knowledge",
+                    "exports"]
+        packed = tenant_root.parent / f".{run_dir.name}.bundle"
+        try:
+            bundle.pack(tenant_root, packed, exclude=excludes)
+            job_socket.push_object(self._request, "bundle", packed)
+        except (bundle.BundleRefused, job_socket.Refused, OSError, ValueError) as e:
+            _logger.error(f"job {self._job}: the run's bundle was not pushed: {e}")
+        finally:
+            packed.unlink(missing_ok=True)
 
 
 class _HelperPass:
@@ -1696,29 +1794,30 @@ def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection sea
         print(f"[run.py] job {ns.job}: no job socket ({job_socket.SOCKET_ENV} is unset): the job entry runs "
               "only inside its job container, started by its host helper; nothing was done", file=sys.stderr)
         return 2
-    data_root = _request_data_root(ns)
+    data_root = _request_data_root(ns, environ)
     try:
         lane = job_lane.JobLane.open(data_root, ns.tenant)
     except job_lane.JobLaneRefused as refused:
         sys.exit(f"[run.py] job {ns.job}: {refused}")
     try:
-        with lane, _JobFacts(lane, ns.job) as facts:
+        with lane, _JobFacts(lane, ns.job, request) as facts:
             launch = _launch_facts(request, kind="investigation", tenant=ns.tenant, job=ns.job,
                                     label=f"job {ns.job}")
             started = _set_up_in_container(ns, data_root, launch, request, preflight=preflight, roster=roster)
             facts.setup = job_facts.SETUP_DONE
             run = started.run
+            facts.run_dir = Path(run.run_dir)
             with _log.run_context(run.run_dir.name, started.tenant.tenant_id, logger=_logger):
                 _logger.info(f"run_dir={run.run_dir} model={started.model}")
                 _announce_provenance(run.run_dir)
                 token = launch.get("box_token")
                 summary = lifecycle(**started.lifecycle_kwargs(ns), job_lane=True, job_facts=facts.held,
                                     relay=request, **({"start_token": token} if token else {}))
-                # The page is saved in the run's own folder only: the helper copies it to the shared
-                # publish folder once this container has exited (#1170 A10).
-                _post_steps(started, summary, visualize=visualize, mirror=False,
-                            ticket_step=(lambda: _job_ticket_step(started, summary, launch, request, ns.job))
-                            if launch.get("post_ticket") is True else None)
+                # The page is saved in the run's own folder only, and pushed to the helper as the job ends
+                # (#1546 A-O8): nothing reaches the shared publish folder.
+                facts.page = _post_steps(started, summary, visualize=visualize, mirror=False,
+                                         ticket_step=(lambda: _job_ticket_step(started, summary, launch, request, ns.job))
+                                         if launch.get("post_ticket") is True else None)
                 return _exit_code(summary)
     except _PreflightRefused as refused:
         return refused.rc
@@ -1752,7 +1851,7 @@ def readiness_main(argv: list[str], *, environ: Mapping[str, str] | None = None,
     """The readiness check's container entry (#1471 C5): `run.py --readiness <id> --tenant <T>`, the process its host
     helper starts, answered `launch` alone. It judges what an investigation's container judges at its start, through
     the same steps (`_container_tenant_steps`), then the case system (W8) and the census over the published copy
-    (R13-3), and writes the one readiness record, create-only, in the tenant's job lane: `refused` at the container's
+    (R13-3), and sends the one readiness result to its helper (#1546: staged, never a file): `refused` at the container's
     tenant step or the systems check, `ready` with its warnings, or `failed` (`handover`: the helper and this container
     do not agree; `census_unavailable`). `environ` is the container's environment (`None`: this process's); without a
     job socket nothing is done. `defender_dir` is the one code tree read (`DEFENDER_DIR`), its census's and, when
@@ -1764,19 +1863,26 @@ def readiness_main(argv: list[str], *, environ: Mapping[str, str] | None = None,
         print(f"[run.py] readiness {ns.job}: no job socket ({job_socket.SOCKET_ENV} is unset): the readiness entry "
               "runs only inside its job container, started by its host helper; nothing was done", file=sys.stderr)
         return 2
-    data_root = _request_data_root(ns)
+    data_root = _request_data_root(ns, environ)
+    record = _readiness_record(ns, data_root, request, roster=roster, defender_dir=tree)
+    return _send_readiness(request, ns.job, record)
+
+
+def _send_readiness(request: Callable[..., dict[str, Any]], job: str, record: job_lane.ReadinessRecord) -> int:
+    """The check's knowledge (the launch facts' source, when the helper served one) and its result, sent to the helper as
+    the `knowledge` and `result` records (#1546 PR2): 0 once the result was taken."""
     try:
-        lane = job_lane.JobLane.open(data_root, ns.tenant)
-    except job_lane.JobLaneRefused as refused:
-        sys.exit(f"[run.py] readiness {ns.job}: {refused}")
-    with lane:
-        record = _readiness_record(ns, data_root, request, roster=roster, defender_dir=tree)
-        try:
-            lane.write_readiness(ns.job, record)
-        except FileExistsError:
-            _logger.error(f"readiness {ns.job}: a result record is already there; it is kept, and this one "
-                          f"({record.text()}) is not written")
-            return 1
+        launch = request("launch")
+        knowledge = launch.get("knowledge") if isinstance(launch, dict) else None
+        if isinstance(knowledge, dict):
+            request("knowledge", record=knowledge)
+    except (job_socket.Refused, OSError, ValueError) as e:
+        _logger.warning(f"readiness {job}: its knowledge was not sent: {e}")
+    try:
+        request("result", record=json.loads(record.text()))
+    except (job_socket.Refused, OSError, ValueError) as e:
+        _logger.error(f"readiness {job}: the helper did not take its result ({record.text()}): {e}")
+        return 1
     return 0
 
 

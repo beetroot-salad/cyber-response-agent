@@ -5,7 +5,7 @@ SIGTERM (A5).
 The steps are the job entry's (`learning/branch/job_entry.py`). This entry sits above learning,
 as the operator's launch command does, because it supplies what learning may not import: the
 role-model preflight (`run.py`), over every role the family reaches, the siblings' investigation
-roles as well as the questioner, oracle, verifier and judge.
+roles as well as the questioner, oracle, verifier and judge, and the episode page's renderer (`presentation`).
 """
 from __future__ import annotations
 
@@ -22,9 +22,17 @@ def _preflight(model: str | None = None, **kwargs: Any) -> int:
     return preflight_role_models(model, **kwargs)
 
 
+def _render_page(runs: Any, episode_id: str) -> Any:
+    """The episode page (`learning.html`, in the episode's own folder), which the entry pushes to its helper (#1546)."""
+    from defender.presentation.visualize_episode import render_episode
+
+    return render_episode(runs, episode_id)
+
+
 def main(argv: list[str], **seams: Any) -> int:
-    """The job entry with the real role preflight unless one is injected."""
+    """The job entry with the real role preflight and the episode page's renderer unless one is injected."""
     seams.setdefault("preflight", _preflight)
+    seams.setdefault("render_page", _render_page)
     return job_entry.main(argv, **seams)
 
 

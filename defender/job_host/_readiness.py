@@ -6,15 +6,15 @@ runs-folder check, the run copy named by the check's id, the tenant over the cop
 grant, the signing set-up and the first pass, signed under the check's id and thrown away), and none of the
 investigation's own (the launch check, the alert, the run folder, the versions record).
 
-What it computed it writes once, create-only, in the tenant's job lane, keyed by the check's id:
+What it decided before the container it stages under the check's claim (#1546), create-once:
 
-- when the publish gave a source, the knowledge record (`JobLane.write_request_knowledge`), before anything below;
+- a step's refusal after the publish gave a source: the source's `knowledge` (served shape), before the result;
 - a step's refusal: `{refused, step, sentence}`, our own sentence (P-2: a publish refusal names only its kind), and
   no container;
 - a container that cannot be started (or its socket opened): `{failed, start_failed}`; a crash, or a refusal before
   the container that is no step's: `{failed, worker_error}` (R13-1.2; the shared ending, `_host_request`);
-- otherwise nothing: the readiness container (`run.py --readiness <id>`, `run.readiness_main`) writes the result,
-  answered `launch` alone (C4).
+- otherwise nothing: the readiness container (`run.py --readiness <id>`, `run.readiness_main`) sends its `knowledge`
+  (the launch facts' source) and its `result`, answered `launch` and those verbs alone (C4).
 
 The runs folder gone after the worker's pre-open, or a knowledge record that cannot be written, is the helper's own
 failure (`HelperFault`): no record, and a non-zero exit the worker reads (R13-1.1, .2)."""
@@ -38,10 +38,7 @@ def _readiness_lane() -> _host_request.ResultLane:
     from defender.records import job_lane
 
     # A refusal before the container that wrote no record is no step's refusal the check can name: the helper's error.
-    return _host_request.ResultLane(
-        kind=KIND, read=lambda lane, rid: lane.read_readiness(rid),
-        write=lambda lane, rid, rec: lane.write_readiness(rid, rec), failed=job_lane.ReadinessRecord.failed,
-        refused_reason=job_lane.WORKER_ERROR)
+    return _host_request.ResultLane(kind=KIND, failed=job_lane.ReadinessRecord.failed, refused_reason=job_lane.WORKER_ERROR)
 
 
 _LANE = _readiness_lane()
@@ -71,15 +68,15 @@ def _readiness_sentence(refused: StepRefused) -> str:
 
 
 def _write_knowledge(session: Session, source: Any) -> None:
-    """The knowledge record of the source the publish gave (R13-1.2), create-only; a fault writing it is the helper's
-    own failure."""
-    from defender.records import job_lane
+    """The knowledge of the source the publish gave (R13-1.2), staged by the helper in the served shape when it ends the
+    check before its container; a source it cannot map is the helper's own failure."""
+    from . import _evidence
+    from ._records import served_knowledge
 
-    try:
-        with job_lane.JobLane.open(session.root, session.tenant_id) as lane:
-            lane.write_request_knowledge(session.job_id, source)
-    except (OSError, job_lane.JobLaneRefused) as fault:
-        raise HelperFault(f"the check's knowledge record could not be written: {type(fault).__name__}: {fault}") from None
+    served = served_knowledge(source.host_record())
+    if served is None:
+        raise HelperFault("the check's knowledge could not be mapped to its served shape")
+    _evidence.state(session).stage("knowledge", served)
 
 
 def _readiness_refused(session: Session, facts: LaunchFacts, refused: StepRefused) -> None:
@@ -96,17 +93,21 @@ def _readiness_refused(session: Session, facts: LaunchFacts, refused: StepRefuse
 
 def _prepare_readiness(session: Session, hold: contextlib.ExitStack) -> Prepared:
     """The host half (module doc): the shared steps, the knowledge record, then the container's launch facts."""
+    from defender import tenancy
+
+    from ._folders import copy_tenant
+
     rid = _host_request.request_id(session)
     facts = LaunchFacts()
+    if session.job_root is None or session.job_inputs is None:
+        raise HelperFault("the claim's root and inputs were not made")
+    job_tenant = tenancy.JobTenant(id=session.tenant_id, data_root=tenancy.data_root_from_path(session.job_root),
+                             inputs=session.job_inputs)
     try:
-        tenant_launch_steps(session, hold, copy_id=rid, facts=facts, trigger=TRIGGER)
+        tenant_launch_steps(session, hold, copy_id=rid, facts=facts, trigger=TRIGGER, job_tenant=job_tenant,
+                            copy_tenant=lambda accepted: copy_tenant(session, accepted))
     except StepRefused as refused:
         _readiness_refused(session, facts, refused)
-        raise
-    try:
-        _write_knowledge(session, facts.source)
-    except BaseException:
-        facts.cleanup.close()
         raise
     try:
         source, copy, current = facts.source, facts.copy, facts.current
@@ -115,6 +116,7 @@ def _prepare_readiness(session: Session, hold: contextlib.ExitStack) -> Prepared
         launch = {
             "kind": KIND, "tenant": session.tenant_id, "job": rid, "tenant_state": "active",
             "export_commit": source.commit, "knowledge": source.host_record(), "run_copy": str(copy.root),
+            "inputs_dir": str(session.job_inputs),
             # The records read above (#1366 O6), which the container builds its tenant from (it reads no database).
             "records": current.as_wire(),
         }

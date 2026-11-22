@@ -9,21 +9,29 @@ tied to the worker's pid, a stop or fence is its SIGTERM (it stops the container
 kill of its group ends it and, with it, the container. The worker's start removes the job containers a
 dead worker's helpers left (`serve`).
 
-Per claimed row, as a task: a box token is minted for the claim, the tenant's state, read by the
-claim itself, must be `active` (#1342 r7 R7-1: no host lock is taken and the worker is recorded as
-no holder, so a teardown never waits for it or signals it), the launch record (carrying the token)
-and alert file are written beside the run folder (the tenant's runs container must exist; the
-worker never makes it), the child is spawned from the event loop's thread in a session of its own
-with its output inherited, its exit awaited, every container its process tree started removed
-(the sweep, by the child's claim label), and the job-end record read for the stage. The task owns
-its child: however the row ends once the child exists (its exit, a stop, a fence, even mid-spawn),
-the child's process group is killed and the sweep runs (r7 D-ac).
+Every claim is the store's (#1546 PR7): the store mints its token in the claim's own transaction, with the claim row
+that names the row, its launch facts and its fixed input set. The child is handed that token (`box.CLAIM_ENV`), so every
+container its process tree starts carries it and its per-claim folders are named by it; its helper writes the job's
+copies of the launch facts and alert into the claim's own root (the worker writes nothing beside the run).
+
+Per claimed row, as a task: the tenant's state, read by the claim itself, must be `active` (#1342 r7 R7-1: no host lock
+is taken and the worker is recorded as no holder, so a teardown never waits for it or signals it), the tenant's runs
+container must be usable (opened and let go; the worker never makes it), the child is spawned from the event loop's
+thread in a session of its own with its output inherited, its exit awaited, every container its process tree started
+removed (the sweep, by the claim's label), then the claim's folders (once its helper is gone, link-safe). The task owns
+its child: however the row ends once the child exists (its exit, a stop, a fence, even mid-spawn), the child's process
+group is killed and the sweep runs (r7 D-ac).
+
+The row's end is a decision, then one write (#1546 PR9, A-O2): the worker reads what the claim's helper staged and
+uploaded (`JobStore.staged`), never a file the job wrote and never a session database, has `jobs.ending.decide` decide
+the ending from those rows and what ended the child (its exit, or this worker's stop), and hands the decision to the
+store's one applier (`JobStore.apply`). A decision the store refuses is weakened (`ending.lesser`) and applied again.
 
 A row belongs to the worker that keeps renewing its lease (B-P1) and stays its worker's until the
-last write for it lands (B-P2): the one end write (B4) is the terminal stage, or, if someone else
-already ended the row, its final cost and knowledge; a deliberate stop ends the children and hands
-their rows back (B11). A write that fails as an outage is retried each second and nothing new is
-claimed meanwhile (B5).
+last write for it lands (B-P2): the one end write (B4) is the applied decision; a row someone else already ended
+(a cancel, an offboard, a take-over) keeps that ending and its staged cost (D15), and a deliberate stop ends the
+children and hands back the rows that decided nothing (B11). A write that fails as an outage is retried each second
+and nothing new is claimed meanwhile (B5).
 
 A database outage ends no child, however long it lasts (T2): a renewal that fails, or outlives
 `store_call_limit`, is tried again, and a late renewal revives a row nobody took over. A worker whose
@@ -33,11 +41,11 @@ in the same outage, and their next renewal has not had its chance.
 Learning jobs (#1344) share the slots: a worker with a free slot claims the oldest queued job when
 fewer than `learning_slots` learning-class tasks (family steps and post-steps) run, and otherwise
 the oldest investigation. A job runs as the job entry's child, with the same death tie, stop and
-fence as an investigation; the worker copies the entry's progress record onto the row on its
-renewal loop, and decides the row from the end record alone. A `completed` record's findings
-(#1487) are screened by the worker and stored by the row's own end write, in its transaction, or
-refused whole while the ending stands. After a job whose child started, a post-step child runs the
-drain gate, in the same slot and the same supervision registry, with no lease of its own. Its helper
+fence as an investigation; the worker copies its staged progress onto the row on its renewal loop, and the row's end
+is decided from its staged outcome, whose findings its helper screened on receipt (#1546 D11) and the applier stores
+with the ending. After a job whose child started, a post-step child runs the
+drain gate, in the same slot and the same supervision registry, with no lease of its own: its claim is the tenant's
+check-clock hold, whose token the store mints (PR7). Its helper
 says by its exit status whether work still waits (Flow 3, #1487 Amendment r5.2: `job_host.NOTHING_WAITS`
 or `WORK_WAITS`); the worker opens no learning store, and the tenant's check clock goes idle only on
 `NOTHING_WAITS`.
@@ -49,18 +57,16 @@ runs the same child without a job, and so the drain's own gate: a retained deliv
 and findings at threshold are each decided there, never by a second gate here. An overdue check is
 claimed before a queued job, within the learning slots, so sustained load cannot starve it.
 
-Host requests (#1471: readiness checks and adoptions) have a pool of their own, `host_request_slots`, outside `slots`:
-while fewer host requests run, the oldest queued one of either kind is claimed. Before its helper starts, the tenant's
-job lane is opened as an investigation's is (R13-1.1: an unusable one ends the row `worker_error`, and no helper
-starts). Once the helper has exited, its result record decides the row whatever the exit status (R13-1.5), read and
-validated here (P-2, R13-4): a record present but not of its shapes is `bad_record`, none is `worker_error` after a
-failed helper or `no_record` after one that exited 0. A host request is never handed back: a stop ends it
-`worker_stopped` unless a valid record is there once its child has ended (R13-5)."""
+Host requests (#1471: readiness checks and adoptions; #1546 D7: the lead-author drain) have a pool of their own,
+`host_request_slots`, outside `slots`: while fewer host requests run, the oldest queued one of any kind is claimed.
+Before its helper starts, the tenant's runs container is opened as an investigation's is (R13-1.1: an unusable one ends
+the row `worker_error`, and no helper starts). Once the helper has exited, its staged `result` decides the row whatever
+the exit status and a stop (R13-1.5, R13-5); a `refused/result` is `bad_record`; none is `worker_error` after a failed
+helper, `worker_stopped` after a stop, or `no_record` after one that exited 0. A host request is never handed back."""
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import dataclasses
 import datetime as _dt
 import logging
 import os
@@ -69,26 +75,24 @@ import signal
 import subprocess
 import sys
 import time
-import uuid
-from collections.abc import Awaitable, Callable, Coroutine, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from defender import _log
 from defender._url import check_origin
-from defender.jobs import FindingsNotStored, LearningProgress, is_outage, is_refusal
+from defender.jobs import FindingsNotStored, LearningProgress, ending, is_outage, is_refusal
 from defender.jobs.audit import SYSTEM, announce
 from defender.box import CLAIM_ENV, container_name
 from defender.execution import kill_group, wait_group_gone
 from defender.job_socket import CLAIM_ROOTS, OWNERS_ROOT
-from defender.records import job_facts, job_lane
-from defender.records.job_facts import BAD_RECORD, NO_RECORD, WORKER_STOPPED
+from defender.records import job_lane
 from defender.records.formats import DataRoot, digest_of
 from defender.tenancy import data_root_for_child, data_root_from_path, owner_alive
 
 from ._containers import Containers, DockerContainers
-from ._held import HOST_REQUEST, INVESTIGATION, LEARNING, POST_STEP, End, Ending, Held, HostEnding, LearningOutcome
+from ._held import HOST_REQUEST, INVESTIGATION, LEARNING, POST_STEP, Held, StagedProgress
 
 if TYPE_CHECKING:
     from defender.jobs import Claim, HostRequestClaim, LearningClaim
@@ -114,10 +118,8 @@ POST_STEP_LIMIT = 4 * 3600.0
 #: code tree's root (the worker's code copy, as `child_cwd`).
 JOB_HOST_MODULE = "defender.job_host"
 
-_FAILED, _COMPLETED, _UNPARSEABLE = "failed", "completed", "unparseable"
-_SETUP_REFUSED, _NO_REPORT, _WORKER_ERROR = "setup_refused", "no_report", "worker_error"
-#: The host-request kinds (#1471), as the store's rows name them.
-_READINESS, _ADOPTION = "readiness", "adoption"
+#: The host-request kinds (#1471, #1546 D7), as the store's rows name them.
+_READINESS, _ADOPTION, _DRAIN = "readiness", "adoption", "drain"
 
 #: The worker's words for a job whose tenant's runs container cannot be opened before its child starts (#1342 R1):
 #: one sentence, the investigation's and a host request's alike (#1471 R13-1.1).
@@ -127,23 +129,12 @@ _RUNS_UNUSABLE = "the tenant's runs container cannot be used on this host"
 #: its queue was not asked (a drain is not over then).
 _CLAIMED, _NOTHING, _NO_SLOT = "claimed", "nothing", "no_slot"
 
-#: The worker's own words for each reason a host request's row can end with (#1471 surface §6, P-2): a fixed sentence
-#: per reason, never a record's text.
-_HOST_WORDS = {
-    "start_failed": "the request's helper could not start its container or open its socket",
-    _WORKER_ERROR: "the request's helper failed while preparing it",
-    "handover": "the request's helper and its container did not agree on the request",
-    "census_unavailable": "the request's container could not take the tenant's census",
-    "system_gone": "the system's record was gone when the request ran",
-    "no_base_files": "this release ships no base files for the system",
-    "tenant_not_active": "the tenant was not active when the request ran",
-    _SETUP_REFUSED: "the request's helper refused to set it up",
-    "repository_busy": "the tenant's repository clone was busy with another change",
-    "delivery_failed": "the adoption could not be delivered to the tenant's repository",
-    BAD_RECORD: "the request's record is not one its helper or container writes; none of it is kept",
-    NO_RECORD: "the request's helper served it to its end and left no record",
-    WORKER_STOPPED: "the worker stopped before the request recorded its end",
-}
+#: The kind `ending.decide` reads for each held kind (a post-step decides nothing: it holds no row).
+_DECIDES = {INVESTIGATION: ending.INVESTIGATION, LEARNING: ending.LEARNING, HOST_REQUEST: ending.HOST_REQUEST}
+
+#: The one staged fact a helper replaces as the job runs: its cost so far (an investigation) or its progress (a
+#: learning job's fork pick, stage and siblings' cost).
+_PROGRESS = "progress"
 
 
 @dataclass(frozen=True)
@@ -201,6 +192,15 @@ class AdoptionLaunch:
     tenant_id: str
     parent_pid: int
     system_id: str
+
+@dataclass(frozen=True)
+class DrainLaunch:
+    """What a lead-author drain's helper is started for (#1546 D7): the request, its tenant and the worker's pid."""
+
+    request_id: str
+    tenant_id: str
+    parent_pid: int
+
 
 
 @dataclass(frozen=True)
@@ -269,6 +269,10 @@ def adoption_argv(launch: AdoptionLaunch) -> list[str]:
     return _helper_argv(_ADOPTION, job=launch.request_id, tenant=launch.tenant_id, parent_pid=launch.parent_pid,
                         extra=["--system", launch.system_id])
 
+def drain_argv(launch: DrainLaunch) -> list[str]:
+    """A drain's child: the helper of kind `drain`, `--job` the request id (#1546 D7)."""
+    return _helper_argv(_DRAIN, job=launch.request_id, tenant=launch.tenant_id, parent_pid=launch.parent_pid)
+
 
 def _exit_words(returncode: int) -> str:
     return (f"was killed by signal {-returncode}" if returncode < 0
@@ -283,60 +287,43 @@ def _post_step_answer(returncode: int | None) -> bool | None:
     return None if returncode is None else {NOTHING_WAITS: False, WORK_WAITS: True}.get(returncode)
 
 
-def _helper_failure(returncode: int, held: Held) -> int | None:
-    """The helper's exit status when the job's helper itself failed (#1170), else None: any status but 0, which the
-    helper gives exactly when it served the job to its end, whatever its container's status (the helper logs that).
-    A stop or fence of this worker's is not the helper's failure."""
-    return None if returncode == 0 or held.fenced or held.signalled else returncode
+def _ended_by(held: Held, returncode: int) -> ending.EndedBy:
+    """What ended the child, as `decide` reads it: this worker's deliberate stop, else the helper's own exit (0 once it
+    served the job to its end, whatever its container's status; anything else its own failure)."""
+    return ending.Stopped() if held.signalled else ending.Exited(returncode)
 
 
-def _helper_failed_words(helper_exit: int) -> str:
-    return f"the job's helper {_exit_words(helper_exit)} before the job recorded its end"
+def _not_launched(kind: str, words: str) -> ending.Decision:
+    """The ending of a row whose helper never ran (the worker's own fault, a fence before the start): `failed` /
+    `worker_error` in the worker's `words`, nothing staged."""
+    return ending.decide({}, {}, ending.NotLaunched(words), kind=_DECIDES[kind])
 
 
-def _host_failed(reason: str, words: str | None = None) -> HostEnding:
-    """A host request's `failed` end: the reason, in the worker's own words for it (P-2)."""
-    return HostEnding(_FAILED, failure_reason=reason, failure_message=words if words is not None else _HOST_WORDS[reason])
+def _host_stopped() -> ending.Decision:
+    """A host request this worker's stop ended before its helper staged a result (R13-5): `worker_stopped`."""
+    return ending.decide({}, {}, ending.Stopped(), kind=ending.HOST_REQUEST)
 
 
-def _readiness_ending(record: job_lane.ReadinessRecord, knowledge: Callable[[], job_lane.RequestKnowledge]) -> HostEnding:
-    """A valid readiness record's end (R3, R13-1.5): `failed` with its reason, or `completed` with the stored result.
-    The knowledge record is read (`knowledge`) only for `ready` and a refusal after `publish`; there, one absent or
-    malformed is `bad_record`. The result carries no commit: `knowledge.commit` is the commit judged (R13-1.6)."""
-    if record.is_failed:
-        assert record.reason is not None  # the record's shape
-        return _host_failed(record.reason)
-    shown = None
-    if record.is_ready or record.step in job_lane.READINESS_STEPS_WITH_KNOWLEDGE:
-        shown = knowledge().knowledge
-        if shown is None:
-            return _host_failed(BAD_RECORD, "the request's knowledge record is absent or not a knowledge status")
-    if record.is_refused:
-        return HostEnding(_COMPLETED, result={"outcome": record.outcome, "step": record.step,
-                                              "sentence": record.sentence, "knowledge": shown})
-    return HostEnding(_COMPLETED, result={"outcome": record.outcome, "knowledge": shown,
-                                          "warnings": record.body()["warnings"]})
+def _is_cost(value: object) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
-def _adoption_ending(record: job_lane.AdoptionRecord) -> HostEnding:
-    """A valid adoption record's end (A3): `failed` with its reason, or `completed` with `{outcome, pr_number}`."""
-    if record.is_failed:
-        assert record.reason is not None  # the record's shape
-        return _host_failed(record.reason)
-    return HostEnding(_COMPLETED, result={"outcome": record.outcome, "pr_number": record.pr_number})
+def _staged_progress(body: object) -> StagedProgress | None:
+    """A learning job's staged `progress` fact as the renewal copies it, or None for a body not of its shape."""
+    if not isinstance(body, Mapping) or not _is_cost(body.get("sibling_cost_usd")):
+        return None
+    pick, stage = body.get("fork_message_id"), body.get("stage")
+    if not all(v is None or isinstance(v, str) for v in (pick, stage)):
+        return None
+    return StagedProgress(pick, stage, float(body["sibling_cost_usd"]))
 
 
-def _host_without_record(found: object, returncode: int, held: Held) -> HostEnding:
-    """A host request whose helper left no valid record (R13-1.5, R13-5): the stop's `worker_stopped` after a deliberate
-    stop; else `bad_record` for a record present but not of its shapes; else, with none, the worker's error after a
-    helper that failed on its own, or `no_record` after one that exited 0."""
-    if held.signalled:
-        return _host_failed(WORKER_STOPPED)
-    if found is job_lane.MALFORMED:
-        return _host_failed(BAD_RECORD)
-    if (helper_exit := _helper_failure(returncode, held)) is not None:
-        return _host_failed(_WORKER_ERROR, _helper_failed_words(helper_exit))
-    return _host_failed(NO_RECORD)
+def _progress_kw(progress: LearningProgress | None) -> dict[str, Any]:
+    """A learning job's hand-back values from its last staged progress; with none, the row keeps what it was given."""
+    if progress is None:
+        return {"sibling_cost_usd": None}
+    return {"sibling_cost_usd": progress.sibling_cost_usd, "fork_message_id": progress.fork_message_id,
+            "family_stage": progress.stage}
 
 
 class _SpawnAbandoned(Exception):
@@ -350,84 +337,6 @@ def _end_late_child(spawn: asyncio.Future[asyncio.subprocess.Process]) -> None:
     proc = spawn.result()
     _logger.warning("a child (pid %d) started after its worker stopped waiting for it; killing its group", proc.pid)
     kill_group(proc.pid)
-
-
-def _learning_without_end(held: Held, returncode: int, progress: LearningProgress | None) -> LearningOutcome:
-    """A learning job whose child left no readable end record: handed back after a stop (a stop never permanently
-    fails or skips a job), the worker's error when its helper failed on its own, else exited without a result."""
-    if held.signalled:
-        return LearningOutcome(None, progress=progress)
-    if (helper_exit := _helper_failure(returncode, held)) is not None:
-        return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.WORKER_ERROR, _helper_failed_words(helper_exit),
-                               progress)
-    return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.EXITED_WITHOUT_RESULT,
-                           "the job left no readable end record; its container's status is in the helper's log",
-                           progress)
-
-
-def _ending_from(end: job_lane.JobEnd | None, record: Callable[[], Any], *,
-                 helper_exit: int | None = None) -> Ending:
-    """Rules 1-5 (O8, M9): the stage from the job-end record alone, and, once the host committed
-    its close and the scrub walked the tree, the disposition of the run's closing record (read only
-    then, through the job lane: `closing.Record | NeverClosed | CouldNotLook`). With no record, a
-    helper that failed on its own (`helper_exit`, its status: `_helper_failure`) is the worker's
-    error, not the run's."""
-    if end is None and helper_exit is not None:
-        return Ending(_FAILED, failure_reason=_WORKER_ERROR, failure_message=_helper_failed_words(helper_exit))
-    if end is None:
-        return Ending(_FAILED, failure_reason=_NO_REPORT,
-                       failure_message="the run left no job-end record; its container's status is in the helper's log")
-    if end.setup == job_facts.SETUP_REFUSED:
-        return Ending(_FAILED, failure_reason=_SETUP_REFUSED,
-                       failure_message="run setup refused the job", decided_by_run=True)
-    if end.box == job_facts.BOX_START_FAILED:
-        return Ending(_FAILED, failure_reason=_WORKER_ERROR,
-                       failure_message="the run's box did not start")
-    if end.report_committed and end.scrub_verified:
-        return _ending_of_record(record())
-    if end.setup != job_facts.SETUP_DONE:
-        why = "run setup crashed"
-    elif not end.report_committed:
-        why = "the host committed no report"
-    else:
-        why = "the scrub did not verify the run folder after the box stopped"
-    if end.cut_short is not None:
-        # A vocabulary word, never a child's text (`JobEnd.parse` refuses anything else): the
-        # class the run ended by, beside the existing words (#1421). The run log names the rest.
-        why = f"{why}; the run was cut short ({end.cut_short})"
-    return Ending(_FAILED, failure_reason=_NO_REPORT, failure_message=why)
-
-
-def _ending_of_record(found: Any) -> Ending:
-    """A committed run's ending from its closing record: its disposition; `unparseable` with the
-    fixed wording of the fault (never its detail, which may name a path), or of a committed close
-    with no record."""
-    from defender.records import closing
-
-    if isinstance(found, closing.Record):
-        return Ending(_COMPLETED, disposition=found.record.disposition, decided_by_run=True)
-    if isinstance(found, closing.CouldNotLook):
-        return Ending(_UNPARSEABLE, failure_message=found.wording, decided_by_run=True)
-    return Ending(_UNPARSEABLE, failure_message=closing.FAULT_WORDING[closing.COMMITTED_WITHOUT_RECORD],
-                  decided_by_run=True)
-
-
-def _closing_record_or_fault(lane: job_lane.JobLane, inv: str) -> Any:
-    """The run's closing-record lookup; a fault nobody planned for reads as a store that could not
-    be read, so the run is `unparseable` as with any other fault, never `worker_error` (#1396)."""
-    from defender.records import closing
-
-    try:
-        found = lane.closing_disposition(inv)
-    except Exception as e:  # noqa: BLE001 — the stage is decided by the job-end record (#1396)
-        _logger.error("investigation %s: reading its closing record failed; it is unparseable",
-                      inv, exc_info=True)
-        return closing.fault(closing.STORE_UNREADABLE, f"the job lane's read raised {e!r}", run_id=inv)
-    if isinstance(found, closing.CouldNotLook):
-        # The detail (it may name a path) goes to the worker's log, never the row.
-        _logger.warning("investigation %s: its closing record could not be looked up (%s): %s",
-                        inv, found.kind, found.detail)
-    return found
 
 
 def _remove_claim_entry(entry: Path) -> None:
@@ -500,8 +409,8 @@ class Worker:
     queued and waits for every row's last write; `serve()` polls until SIGTERM/SIGINT and also
     takes over rows whose holders were lost. A tenant's state comes with its claim (#1342 r7
     R7-1); the children read their tenant records from `DEFENDER_DATABASE_DSN`, which they
-    inherit. Cadences (#1343): the lease is renewed every `renewal_interval`, the cost so far is
-    read per row every `cost_interval` and copied by the renewal that follows, and take-over
+    inherit. Cadences (#1343): the lease is renewed every `renewal_interval`, the cost so far (the claim's staged
+    `progress`, #1546) is read per row every `cost_interval` and copied by the renewal that follows, and take-over
     runs every `takeover_interval`.
 
     `learning_slots` (#1344 O5) is both the guarantee and the limit of learning-class tasks; a bare
@@ -511,13 +420,10 @@ class Worker:
     checks it (amendment 1); each tenant's clock starts at the start of `serve` or `drain`.
     `post_step_limit` (seconds, above 0) is how long a post-step runs before the worker ends it, SIGTERM then SIGKILL
     after `stop_grace`, and leaves its tenant's clock not idle (#1487 Amendment r5.4).
-    `screen_findings(kind, rows, job_id)` (#1487) screens a completed job's findings, channel by
-    channel, before its end write; it refuses by raising, and defaults to the channel rules' door,
-    `learning.judge.enqueue.screen_findings`.
 
-    `host_request_slots` (#1471 R13-6, at least 1) caps the host requests (readiness checks and adoptions) that run at
-    once, outside `slots` and with no share of `learning_slots`: every worker claims both kinds, through
-    `readiness_argv` and `adoption_argv`."""
+    `host_request_slots` (#1471 R13-6, at least 1) caps the host requests (readiness checks, adoptions and drains) that
+    run at once, outside `slots` and with no share of `learning_slots`: every worker claims every kind, through
+    `readiness_argv`, `adoption_argv` and `drain_argv` (#1546 D7)."""
 
     def __init__(  # noqa: PLR0913 — the ratified signature
         self, store: Any, *, data_root: Path | DataRoot,
@@ -535,10 +441,10 @@ class Worker:
         learning_check_interval: float = LEARNING_CHECK_INTERVAL,
         post_step_limit: float = POST_STEP_LIMIT,
         wait_group: Callable[[int], bool] = wait_group_gone,
-        screen_findings: Callable[[str, object, str], object] | None = None,
         host_request_slots: int = 1,
         readiness_argv: Callable[[ReadinessLaunch], list[str]] = readiness_argv,
         adoption_argv: Callable[[AdoptionLaunch], list[str]] = adoption_argv,
+        drain_argv: Callable[[DrainLaunch], list[str]] = drain_argv,
     ) -> None:
         try:
             self._frontend_origin = check_origin(frontend_origin)
@@ -560,6 +466,7 @@ class Worker:
         self._host_request_slots = host_request_slots
         self._readiness_argv = readiness_argv
         self._adoption_argv = adoption_argv
+        self._drain_argv = drain_argv
         # The host requests' tasks (#1471 R13-6): in `_tasks` with every other, and counted apart from `slots`.
         self._host_tasks: set[asyncio.Task[None]] = set()
         self._learning_slots = learning_slots
@@ -571,9 +478,6 @@ class Worker:
         # this is only when a failed claim of one lets the next claim try again (monotonic).
         self._learning_check_interval = learning_check_interval
         self._checks_resume_at = 0.0
-        # A completed job's findings screen (#1487 r5.1 items 6, 11): `learning.judge.enqueue.screen_findings` unless
-        # one is handed in, loaded at its first use.
-        self._screen_findings = screen_findings
         self._store = store
         self._data_root = data_root if isinstance(data_root, DataRoot) else data_root_from_path(data_root)
         self._child_argv = child_argv
@@ -752,7 +656,7 @@ class Worker:
         claim = await self._store.claim_host_request()
         if claim is None:
             return False
-        held = Held(claim.record, kind=HOST_REQUEST)
+        held = Held(claim.record, kind=HOST_REQUEST, token=claim.token)
         self._held[claim.record.request_id] = held
         self._start_task(self._run_host_request(claim, held), on_done=on_done, pool=HOST_REQUEST)
         return True
@@ -768,14 +672,14 @@ class Worker:
                 return True
             learning = await self._store.claim_learning_job()
             if learning is not None:
-                held = Held(learning.record, kind=LEARNING)
+                held = Held(learning.record, kind=LEARNING, token=learning.token)
                 self._held[learning.record.learning_job_id] = held
                 self._start_task(self._run_learning(learning, held), on_done=on_done, pool=LEARNING)
                 return True
         claim = await self._store.claim()
         if claim is None:
             return False
-        held = Held(claim.record)
+        held = Held(claim.record, token=claim.token)
         self._held[claim.record.investigation_id] = held
         self._start_task(self._run_row(claim, held), on_done=on_done, pool=INVESTIGATION)
         return True
@@ -944,21 +848,31 @@ class Worker:
     def _store_settled(self) -> bool:
         return self._store_outage_at is None or time.monotonic() - self._store_outage_at >= self._lease
 
-    async def _cost_loop(self, held: Held) -> None:
-        """Every `cost_interval`, read the row's cost so far into `held.cost_so_far`, in a thread
-        of its own, so a read that hangs delays nothing else (r5 item 4). A read that fails keeps
-        the last good figure (B2)."""
-        inv = held.record.investigation_id
+    async def _progress_loop(self, held: Held) -> None:
+        """Every `cost_interval`, read the claim's last staged `progress` (#1546: a row its helper typed, never a file or
+        a session database) into `held.cost_so_far` (an investigation) or `held.progress` (a learning job), bounded by
+        `store_call_limit`, so a read that hangs delays nothing else (r5 item 4). The renewal copies it to the row (B2,
+        O13). A read that fails, or a body not of its shape, keeps the last good figure."""
         while True:
             await asyncio.sleep(self._cost_interval)
             try:
-                held.cost_so_far = await asyncio.to_thread(self._cost_so_far, held.record)
-            except Exception:  # noqa: BLE001 — keep the last good figure
-                _logger.debug("investigation %s: its cost so far could not be read", inv, exc_info=True)
+                async with asyncio.timeout(self._store_call_limit):  # not `wait_for`: on 3.11 it can lose a cancel
+                    facts, _uploads = await self._store.staged(held.token)
+            except Exception as fault:  # noqa: BLE001 — keep the last good figure
+                self._note_store_fault(fault)
+                _logger.debug("%s: its staged progress could not be read", _what(held), exc_info=True)
+                continue
+            body = facts.get(_PROGRESS)
+            if held.kind == LEARNING:
+                held.progress = _staged_progress(body) or held.progress
+            elif isinstance(body, Mapping) and _is_cost(body.get("cost_usd")):
+                held.cost_so_far = float(body["cost_usd"])
 
-    def _cost_so_far(self, record: Any) -> float:
-        with self._open_lane(self._data_root, record.tenant_id) as lane:
-            return lane.cost(record.investigation_id).usd
+    async def _decided(self, held: Held, returncode: int) -> ending.Decision:
+        """The row's ending once its child is gone (#1546 PR9): decided from what the claim's helper staged and uploaded,
+        and what ended the child. Nothing the job wrote is read (A-O2)."""
+        facts, uploads = await self._store.staged(held.token)
+        return ending.decide(facts, uploads, _ended_by(held, returncode), kind=_DECIDES[held.kind])
 
     # -- one row ----------------------------------------------------------------------------------
 
@@ -967,15 +881,15 @@ class Worker:
         inv, tenant = record.investigation_id, record.tenant_id
         with _log.log_context(run_id=inv, tenant_id=tenant):
             try:
-                end = await self._decide(held, claim.tenant_state)
-                await self._write_end(held, end)
+                decision = await self._decide(held, claim.tenant_state)
+                await self._write_end(held, decision)
             except Exception:  # noqa: BLE001 — one row's fault never ends the worker
                 _logger.exception("investigation %s: the worker failed while ending it", inv)
             finally:
                 self._held.pop(inv, None)
                 self._end_failing.discard(inv)
 
-    async def _decide(self, held: Held, tenant_state: str) -> End:
+    async def _decide(self, held: Held, tenant_state: str) -> ending.Decision:
         """Run one claimed row and decide its last write; the caller makes it (`_write_end`)."""
         inv = held.record.investigation_id
         try:
@@ -983,33 +897,29 @@ class Worker:
         except Exception as fault:  # noqa: BLE001 — one row's fault never ends the worker
             _logger.exception("investigation %s: the worker failed while running it", inv)
             if is_outage(fault) or held.signalled:
-                # Nothing about the job failed: it is handed back, with what it had spent.
-                # Nothing launched: exactly 0. A child that ran with no figure read yet is handed back with an unknown
-                # cost (null), as before #1377: a lower limit stands only beside a number (r6 S2, S4).
-                return End(None, 0.0 if held.proc is None and held.cost_so_far is None else held.cost_so_far, None)
-            return End(Ending(_FAILED, failure_reason=_WORKER_ERROR,
-                              failure_message="the worker failed while running the job"), None, None)
+                # Nothing about the job failed: it is handed back, with what it had spent. Nothing launched: exactly 0. A
+                # child that ran with no figure read yet is handed back with an unknown cost (null); its take-over
+                # decides it from its staged rows (D8, D15).
+                return ending.HandBack(ending.INVESTIGATION, cost_usd=(
+                    0.0 if held.proc is None and held.cost_so_far is None else held.cost_so_far))
+            return _not_launched(INVESTIGATION, "the worker failed while running the job")
 
-    async def _run_claimed(self, held: Held, tenant_state: str) -> End:
+    async def _run_claimed(self, held: Held, tenant_state: str) -> ending.Decision:
         record = held.record
         inv, tenant = record.investigation_id, record.tenant_id
         if self._stopping:  # claimed as the stop landed: handed back with nothing launched or spent
-            return End(None, 0.0, None)
+            return ending.HandBack(ending.INVESTIGATION, cost_usd=0.0)
         started = self._clock()
-        # This claim's box token (#1342 r5 C1): the child's box is stamped with it, so the box's own
-        # start-fault cleanup removes only a container that carries it.
-        token = uuid.uuid4().hex
         try:
-            digest = await self._write_launch(record, token, tenant_state)
+            digest = await self._admit(record, tenant_state)
         except _WorkerFault as fault:
             _logger.error("investigation %s: %s", inv, fault)
-            return End(Ending(_FAILED, failure_reason=_WORKER_ERROR, failure_message=str(fault)), 0.0, None)
+            return _not_launched(INVESTIGATION, str(fault))
         if self._stopping:  # claimed but not started when the stop landed: handed back, nothing spent
-            return End(None, 0.0, None)
-        if held.fenced:  # B3: ended before its child exists; the write that follows is final accounting
+            return ending.HandBack(ending.INVESTIGATION, cost_usd=0.0)
+        if held.fenced:  # B3: ended before its child exists; the write that follows is fenced
             _logger.info("investigation %s: it was fenced before its child started; not launched", inv)
-            return End(Ending(_FAILED, failure_reason=_WORKER_ERROR, failure_message="the job was ended before it started"),
-                       0.0, None)
+            return _not_launched(INVESTIGATION, "the job was ended before it started")
         flagged = record.update_ticket
         launch = Launch(inv, tenant, os.getpid(), alert_digest=digest, update_ticket=flagged,
                         ticket_link=screen_link(self._frontend_origin, tenant, inv) if flagged else None)
@@ -1017,20 +927,14 @@ class Worker:
         async def name_left() -> None:
             await self._name_left(inv)
 
-        proc = await self._run_child(held, lambda: self._child_argv(launch), watch=self._cost_loop,
+        proc = await self._run_child(held, lambda: self._child_argv(launch), watch=self._progress_loop,
                                      after_sweep=name_left)
         if proc is None:
-            return End(Ending(_FAILED, failure_reason=_WORKER_ERROR,
-                              failure_message="the worker could not start the job's child process"), 0.0, None)
+            return _not_launched(INVESTIGATION, "the worker could not start the job's child process")
         returncode = await proc.wait()
         _logger.info("investigation %s: child %d %s after %s", inv, proc.pid,
                      _exit_words(returncode), self._clock() - started)
-        ending, cost, exact, knowledge = await asyncio.to_thread(
-            self._read_ending, record, _helper_failure(returncode, held))
-        held.read_exact = exact
-        if held.signalled and not ending.decided_by_run:  # R1: an ending the run itself decided wins over the stop
-            return End(None, cost, knowledge)
-        return End(ending, cost, knowledge)
+        return await self._decided(held, returncode)
 
     async def _run_child(
         self, held: Held, argv: Callable[[], list[str]], *,
@@ -1042,8 +946,8 @@ class Worker:
         child could not be started. `watch` runs beside the child (the cost or progress reads).
         The task owns its child: cancelled, it ends the child and writes nothing.
 
-        Every child, of every kind, is handed a fresh claim (`box.CLAIM_ENV`): each box started
-        anywhere in its process tree carries it, and once the child is gone every container
+        Every child, of every kind, is handed its claim's token (`box.CLAIM_ENV`), the store's (#1546 PR7): each box
+        started anywhere in its process tree carries it, and once the child is gone every container
         carrying it is removed (`_sweep`), so nothing a killed or crashed child started is left
         behind. `after_sweep` is a kind's own step after it (an investigation's check of its box's
         name). With `abandon_on_stop` (a host request, which a stop ends rather than hands back: #1471 R13-5), a stop
@@ -1052,7 +956,8 @@ class Worker:
         what = _what(held)
         proc: asyncio.subprocess.Process | None = None
         watch_task: asyncio.Task[None] | None = None
-        claim = uuid.uuid4().hex
+        claim = held.token
+        assert claim is not None  # every held entry carries its claim's token (#1546 PR7)
         # The start runs as its own task, so a cancel cannot land inside it and lose the child
         # it makes (r7 D-ac): a cancelled row waits for it, and the child is ended below.
         spawn = asyncio.ensure_future(self._spawn(argv, claim))
@@ -1144,21 +1049,18 @@ class Worker:
             env={**os.environ, "DEFENDER_DATA_ROOT": str(data_root_for_child(self._data_root)), CLAIM_ENV: claim},
             **where)
 
-    async def _write_launch(self, record: Any, token: str, tenant_state: str) -> str:
-        """The launch record (carrying this claim's box token) and the alert file, create-only,
-        in the tenant's runs container, for a tenant whose state at the claim was `active`
-        (r7 R7-1; a teardown always wins, and a job racing it fails)."""
+    async def _admit(self, record: Any, tenant_state: str) -> str:
+        """Before an investigation's child starts: its tenant's state at the claim was `active` (r7 R7-1; a teardown
+        always wins, and a job racing it fails), its alert is in the store, and the tenant's runs container can be used
+        (`_preopen_lane`). Answers the alert's digest, which the helper is handed at its start (#1471 P-5). Nothing is
+        written beside the run: the claim row carries the launch facts, and the helper writes the job's copies (#1546)."""
         if tenant_state != "active":
             raise _WorkerFault(f"the tenant is {tenant_state}, not active; the job was not started")
         alert = await self._store.get_alert(record.tenant_id, record.alert_id)
         if alert is None:
             raise _WorkerFault("the job's alert is not in the store")
-        launch = job_lane.LaunchRecord(
-            investigation_id=record.investigation_id, tenant_id=record.tenant_id,
-            alert_id=record.alert_id, digest=digest_of(alert.raw), label=alert.title or alert.vendor_ticket_id,
-            box_token=token)
-        await asyncio.to_thread(self._write_launch_files, launch, alert.raw)
-        return launch.digest
+        await asyncio.to_thread(self._preopen_lane, record.tenant_id, f"investigation {record.investigation_id}")
+        return digest_of(alert.raw)
 
     def _usable_lane(self, tenant: str, what: str) -> job_lane.JobLane:
         """The tenant's job lane, opened before a child starts; a refusal is `_WorkerFault` in the one sentence an
@@ -1169,19 +1071,11 @@ class Worker:
             _logger.error("%s: %s", what, refused)
             raise _WorkerFault(_RUNS_UNUSABLE) from None
 
-    def _write_launch_files(self, launch: job_lane.LaunchRecord, raw: bytes) -> None:
-        lane = self._usable_lane(launch.tenant_id, f"investigation {launch.investigation_id}")
-        with lane:
-            try:
-                lane.write_launch(launch, raw)
-            except FileExistsError:
-                raise _WorkerFault("a launch record for this job already exists") from None
-            except job_lane.JobLaneRefused as refused:
-                _logger.error("investigation %s: %s", launch.investigation_id, refused)
-                raise _WorkerFault(f"the job's launch files cannot be written: {refused}") from None
-            except OSError as fault:
-                _logger.error("investigation %s: writing the launch files: %s", launch.investigation_id, fault)
-                raise _WorkerFault("the worker could not write the job's launch files") from None
+    def _preopen_lane(self, tenant: str, what: str) -> None:
+        """The tenant's job lane opened and closed before the helper starts (R13-1.1): `_WorkerFault` when it cannot be
+        used, so no helper ever runs over a runs container that cannot be used. The worker never makes the runs folder,
+        and reads nothing in it."""
+        self._usable_lane(tenant, what).close()
 
     async def _name_left(self, inv: str) -> None:
         """After the sweep removed every container the child's tree started, a container still
@@ -1197,52 +1091,7 @@ class Worker:
             _logger.warning("investigation %s: a container named %s is not this job's (the sweep of what its "
                             "child started left it); left in place", inv, name)
 
-    def _read_ending(self, record: Any, helper_exit: int | None = None
-                     ) -> tuple[Ending, float | None, bool, dict | None]:  # ending, cost, cost is exact, knowledge
-        """The stage, cost and knowledge from the host records, through the job lane (in a thread).
-        A cost that cannot be read is None, the final figure's own meaning (R2). The cost is
-        exact exactly when the ledger read is complete (#1377 r7.3 T2: sealed at its last row, no
-        unseen request, no unpriced model); `Held.lower_limit` turns that into the mark at the one
-        write. A run that never opened its store costs exactly 0."""
-        inv = record.investigation_id
-        try:
-            lane = self._open_lane(self._data_root, record.tenant_id)
-        except job_lane.JobLaneRefused as refused:
-            _logger.error("investigation %s: reading its records: %s", inv, refused)
-            return (Ending(_FAILED, failure_reason=_WORKER_ERROR,
-                           failure_message="the tenant's runs container could not be read after the run"),
-                    None, True, None)
-        try:
-            job_end = lane.read_job_end(inv)
-            ending = _ending_from(job_end, lambda: _closing_record_or_fault(lane, inv), helper_exit=helper_exit)
-            # #1396: the ending is decided; from here no fault turns it into `worker_error`
-            cost: float | None
-            exact = True
-            try:
-                spent = lane.cost(inv)
-                cost, exact = spent.usd, spent.complete
-            except job_lane.CostUnreadable as unreadable:
-                _logger.warning("investigation %s: its cost is unknown: %s", inv, unreadable)
-                cost = None
-            except Exception:  # noqa: BLE001 — the decided ending stands (#1396)
-                _logger.error("investigation %s: reading its cost failed; its %s ending stands and its "
-                              "cost is unknown", inv, ending.stage, exc_info=True)
-                cost = None
-            knowledge: dict | None
-            try:
-                knowledge = lane.knowledge(inv)
-            except Exception:  # noqa: BLE001 — the decided ending stands (#1396)
-                _logger.error("investigation %s: reading its knowledge failed; its %s ending stands and "
-                              "its knowledge is unreadable", inv, ending.stage, exc_info=True)
-                knowledge = job_lane.JobLane.unreadable_knowledge()
-        finally:
-            try:
-                lane.close()
-            except Exception:  # noqa: BLE001 — a fault before the ending still raises; one after keeps it (#1396)
-                _logger.error("investigation %s: closing its records failed", inv, exc_info=True)
-        return ending, cost, exact, knowledge
-
-    # -- one host request (#1471) ------------------------------------------------------------------
+    # -- one host request (#1471, #1546 D7) ----------------------------------------------------------
 
     async def _run_host_request(self, claim: HostRequestClaim, held: Held) -> None:
         """One claimed host request: its helper as the child, then the row's one end write. Its tenant's state is not
@@ -1257,7 +1106,7 @@ class Worker:
                 self._held.pop(record.request_id, None)
                 self._end_failing.discard(record.request_id)
 
-    async def _decide_host_request(self, held: Held) -> HostEnding:
+    async def _decide_host_request(self, held: Held) -> ending.Decision:
         """Run one claimed host request and decide its end; a fault of the worker's is `worker_error`, or, during a
         stop, `worker_stopped` (a host request is never handed back, B2)."""
         try:
@@ -1265,35 +1114,31 @@ class Worker:
         except Exception:  # noqa: BLE001 — one row's fault never ends the worker
             _logger.exception("%s: the worker failed while running it", _what(held))
             if self._stopping or held.signalled:
-                return _host_failed(WORKER_STOPPED)
-            return _host_failed(_WORKER_ERROR, "the worker failed while running the request")
+                return _host_stopped()
+            return _not_launched(HOST_REQUEST, "the worker failed while running the request")
 
-    async def _run_host(self, held: Held) -> HostEnding:
+    async def _run_host(self, held: Held) -> ending.Decision:
         record = held.record
         if self._stopping:  # claimed as the stop landed: ended, nothing started (R13-5)
-            return _host_failed(WORKER_STOPPED)
+            return _host_stopped()
         try:
-            await asyncio.to_thread(self._preopen_lane, record)
+            await asyncio.to_thread(self._preopen_lane, record.tenant_id, f"{record.kind} {record.request_id}")
         except _WorkerFault as fault:
             _logger.error("%s: %s; no helper started", _what(held), fault)
-            return _host_failed(_WORKER_ERROR, str(fault))
+            return _not_launched(HOST_REQUEST, str(fault))
         if self._stopping:
-            return _host_failed(WORKER_STOPPED)
+            return _host_stopped()
         if held.fenced:  # ended (an offboard) before its child exists: never launched; the finish below is fenced
-            return _host_failed(_WORKER_ERROR, "the request was ended before it started")
+            return _not_launched(HOST_REQUEST, "the request was ended before it started")
         proc = await self._run_child(held, self._host_argv(record), abandon_on_stop=True)
         if proc is None:
             if self._stopping:
-                return _host_failed(WORKER_STOPPED)
-            return _host_failed(_WORKER_ERROR, "the worker could not start the request's child process")
+                return _host_stopped()
+            return _not_launched(HOST_REQUEST, "the worker could not start the request's child process")
         returncode = await proc.wait()
         _logger.info("%s: child %d %s", _what(held), proc.pid, _exit_words(returncode))
-        return await asyncio.to_thread(self._read_host_ending, held, returncode)
-
-    def _preopen_lane(self, record: Any) -> None:
-        """The tenant's job lane opened and closed before the helper starts (R13-1.1): `_WorkerFault` when it cannot be
-        used, so no helper ever runs over a lane its records could not reach. The worker never makes the runs folder."""
-        self._usable_lane(record.tenant_id, f"{record.kind} {record.request_id}").close()
+        # The staged `result` decides, whatever the exit status and a stop (R13-1.5, R13-5).
+        return await self._decided(held, returncode)
 
     def _host_argv(self, record: Any) -> Callable[[], list[str]]:
         """The request's child command, by its kind (surface §4)."""
@@ -1303,40 +1148,10 @@ class Worker:
         if record.kind == _ADOPTION and record.system_id is not None:
             adoption = AdoptionLaunch(record.request_id, record.tenant_id, os.getpid(), record.system_id)
             return lambda: self._adoption_argv(adoption)
+        if record.kind == _DRAIN:
+            drain = DrainLaunch(record.request_id, record.tenant_id, os.getpid())
+            return lambda: self._drain_argv(drain)
         raise ValueError(f"not a host request this worker runs: {record.kind!r}")
-
-    def _read_host_ending(self, held: Held, returncode: int) -> HostEnding:
-        """The request's end from its records, through the job lane (in a thread), once its child has ended: a valid
-        result record decides, whatever the exit status and a stop (R13-1.5, R13-5); else `_host_without_record`."""
-        record = held.record
-        try:
-            lane = self._open_lane(self._data_root, record.tenant_id)
-        except job_lane.JobLaneRefused as refused:
-            _logger.error("%s: reading its records: %s", _what(held), refused)
-            return _host_failed(_WORKER_ERROR, "the tenant's runs container could not be read after the request")
-        with lane:
-            rid = record.request_id
-            if record.kind == _READINESS:
-                found: Any = lane.read_readiness(rid)
-                if isinstance(found, job_lane.ReadinessRecord):
-                    return _readiness_ending(found, lambda: lane.read_request_knowledge(rid))
-            else:
-                found = lane.read_adoption(rid)
-                if isinstance(found, job_lane.AdoptionRecord):
-                    return _adoption_ending(found)
-        return _host_without_record(found, returncode, held)
-
-    async def _host_end_once(self, held: Held, end: HostEnding) -> None:
-        """One try: the request's end, fenced on its row still `running` (an offboard or a take-over that ended it
-        first keeps its own end)."""
-        record = held.record
-        written = await self._store.finish_host_request(
-            record.tenant_id, record.request_id, stage=end.stage, result=end.result,
-            failure_reason=end.failure_reason, failure_message=end.failure_message)
-        if written is None:
-            _logger.info("%s: the row is no longer this worker's; nothing written", _what(held))
-        else:
-            _logger.info("%s: %s", _what(held), _what_end(end))
 
     # -- one learning job (#1344) -----------------------------------------------------------------
 
@@ -1347,23 +1162,23 @@ class Worker:
         record = claim.record
         job, tenant = record.learning_job_id, record.tenant_id
         with _log.log_context(tenant_id=tenant):
-            outcome: LearningOutcome | None = None
+            decision: ending.Decision | None = None
             started = False
             try:
-                outcome, started = await self._decide_learning(held, claim.tenant_state)
-                await self._write_end(held, outcome)
+                decision, started = await self._decide_learning(held, claim.tenant_state)
+                await self._write_end(held, decision)
             except Exception:  # noqa: BLE001 — one row's fault never ends the worker
                 _logger.exception("learning job %s: the worker failed while ending it", job)
             finally:
                 self._held.pop(job, None)
                 self._end_failing.discard(job)
-            if started and not self._stopping and outcome is not None and outcome.status is not None:
+            if started and not self._stopping and isinstance(decision, ending.End):
                 try:
                     await self._post_step(tenant, job)
                 except Exception:  # noqa: BLE001 — a post-step's fault leaves the job's row as it is
                     _logger.exception("learning job %s: its post-step failed", job)
 
-    async def _decide_learning(self, held: Held, tenant_state: str) -> tuple[LearningOutcome, bool]:
+    async def _decide_learning(self, held: Held, tenant_state: str) -> tuple[ending.Decision, bool]:
         """Run one claimed job's family step and decide its last write; also whether its child
         started."""
         try:
@@ -1371,148 +1186,49 @@ class Worker:
         except Exception as fault:  # noqa: BLE001 — one row's fault never ends the worker
             _logger.exception("learning job %s: the worker failed while running it", _key(held))
             started = held.proc is not None
-            if is_outage(fault) or held.signalled:
-                return LearningOutcome(None, progress=held.progress), started
-            return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.WORKER_ERROR, "the worker failed while running the job"), started
+            if is_outage(fault) or held.signalled:  # a stop can never permanently fail or skip a job: handed back
+                return ending.HandBack(ending.LEARNING, **_progress_kw(held.progress)), started
+            return _not_launched(LEARNING, "the worker failed while running the job"), started
 
-    async def _run_family(self, held: Held, tenant_state: str) -> tuple[LearningOutcome, bool]:
+    async def _run_family(self, held: Held, tenant_state: str) -> tuple[ending.Decision, bool]:
         record = held.record
         job, tenant = record.learning_job_id, record.tenant_id
         if self._stopping:  # claimed as the stop landed: handed back with nothing started
-            return LearningOutcome(None), False
+            return ending.HandBack(ending.LEARNING, sibling_cost_usd=None), False
         if tenant_state != "active":
-            return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.WORKER_ERROR,
-                                   f"the tenant is {tenant_state}, not active; the job was not started"), False
+            return _not_launched(LEARNING, f"the tenant is {tenant_state}, not active; the job was not started"), False
         if held.fenced:
-            return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.WORKER_ERROR, "the job was ended before it started"), False
+            return _not_launched(LEARNING, "the job was ended before it started"), False
         learning_argv = self._learning_argv
         assert learning_argv is not None  # a worker with learning slots has it (constructor)
         launch = LearningLaunch(job, tenant, os.getpid(), record.investigation_id)
         started = self._clock()
         proc = await self._run_child(held, lambda: learning_argv(launch), watch=self._progress_loop)
         if proc is None:
-            return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.WORKER_ERROR, "the worker could not start the job's child process"), False
+            return _not_launched(LEARNING, "the worker could not start the job's child process"), False
         returncode = await proc.wait()
         _logger.info("learning job %s: child %d %s after %s", job, proc.pid, _exit_words(returncode),
                      self._clock() - started)
-        try:
-            end = await asyncio.to_thread(self._read_learning_strict, tenant, lambda lane: lane.read_learning_end(job))
-        except (job_lane.JobLaneRefused, OSError) as fault:
-            # The worker's own failure, as an investigation's records that cannot be read are
-            # (`_read_ending`): the child may have left a good record, so not `exited_without_result`.
-            _logger.error("learning job %s: reading its end record: %s", job, fault)
-            if held.signalled:  # a stop can never permanently fail or skip a job: handed back
-                return LearningOutcome(None, progress=held.progress), True
-            return LearningOutcome(job_lane.LEARNING_FAILED, job_lane.WORKER_ERROR, "the tenant's runs container could not be read after the job",
-                                   held.progress), True
-        if end is None:
-            progress = await asyncio.to_thread(
-                self._read_learning, tenant, lambda lane: lane.read_learning_progress(job)) or held.progress
-            return _learning_without_end(held, returncode, progress), True
-        if end.status == job_lane.LEARNING_STOPPED:  # ends nothing: the job is handed back (#1344 r5)
-            return LearningOutcome(None, progress=end), True
-        # The record decided the ending, so a stop that landed after it does not override it.
-        findings = None
-        if end.status == job_lane.LEARNING_COMPLETED:
-            findings = await asyncio.to_thread(self._accepted_findings, job, end.findings)
-        # The progress the end write reads is the record's cost and stage, not its findings text: the parsed rows stand
-        # in for it, and the text is not kept alive through the end write's retries.
-        progress = dataclasses.replace(end, findings=None)
-        return LearningOutcome(end.status, end.reason, end.message, progress, findings), True
-
-    def _accepted_findings(self, job: str, found: object) -> dict[str, Any] | None:
-        """A completed record's findings as the end write stores them, `{kind: rows}`, or None, refused (#1487 Flow 1
-        step 2), in a thread: anything but `ok` text within the cap that the bounded parser accepts
-        (`job_lane.findings_of`), then each channel's rows through the screen, the first refusal refusing them all.
-        Total: any exception here is a refusal. Each refusal is logged with the job and its kind, never the job's
-        text."""
-        channels: dict[str, Any] | None = None
-        try:
-            channels, why = job_lane.findings_of(found)
-            refusal = f"the record's findings are {why}" if channels is None else self._screened(job, channels)
-        except Exception as failed:  # noqa: BLE001 — reading the findings is total: a fault refuses them
-            refusal = f"reading them failed ({type(failed).__name__})"
-        if refusal is not None or channels is None:
-            _logger.warning("learning job %s: its findings are refused: %s; the job ends completed and none of them "
-                            "is stored", job, refusal)
-            return None
-        return {kind: channels[kind] for kind in job_lane.FINDINGS_CHANNELS}
-
-    def _screened(self, job: str, channels: dict[str, Any]) -> str | None:
-        """Each channel's rows through the screen: why the first one refused (its kind, never its text), or None."""
-        screen = self._screen_findings if self._screen_findings is not None else _default_screen()
-        for kind in job_lane.FINDINGS_CHANNELS:
-            try:
-                screen(kind, channels[kind], job)
-            except Exception as refused:  # noqa: BLE001 — a screen that raises anything refuses
-                return f"the {kind} rows failed the screen ({type(refused).__name__})"
-        return None
-
-    async def _progress_loop(self, held: Held) -> None:
-        """Every `cost_interval`, read the job entry's progress record into `held.progress`, in a
-        thread; the renewal copies it to the row (O13). A record that cannot be read keeps the
-        last good one."""
-        record = held.record
-        job = record.learning_job_id
-        while True:
-            await asyncio.sleep(self._cost_interval)
-            found = await asyncio.to_thread(
-                self._read_learning, record.tenant_id, lambda lane: lane.read_learning_progress(job))
-            if found is not None:
-                held.progress = found
-
-    def _read_learning_strict(self, tenant: str, read: Callable[[job_lane.JobLane], Any]) -> Any:
-        """One of a learning job's records, through the job lane; a runs container that cannot be
-        used, or an OS error reading it, raises (`JobLaneRefused`, `OSError`). A record absent,
-        unreadable or not of its shape is the lane's `None`."""
-        with self._open_lane(self._data_root, tenant) as lane:
-            return read(lane)
-
-    def _read_learning(self, tenant: str, read: Callable[[job_lane.JobLane], Any]) -> Any:
-        """`_read_learning_strict`, where a runs container that cannot be used counts as the
-        record absent (progress and post-step records: nothing is decided on their absence)."""
-        try:
-            return self._read_learning_strict(tenant, read)
-        except (job_lane.JobLaneRefused, OSError) as fault:
-            _logger.warning("tenant %s: a learning record could not be read: %s", tenant, fault)
-            return None
-
-    async def _learning_end_once(self, held: Held, end: LearningOutcome) -> None:
-        """One try: the terminal status, or the hand-back, if the row is still this worker's
-        (running, not handed back); a row that moved is not written (O2, P1)."""
-        record = held.record
-        job, tenant = record.learning_job_id, record.tenant_id
-        if end.status is None:
-            written = await self._store.hand_back_learning_job(tenant, job, progress=end.progress)
-            what = "handed back"
-        else:
-            written = await self._store.finish_learning_job(
-                tenant, job, status=end.status, reason=end.reason, message=end.message, progress=end.progress,
-                **({"findings": end.findings} if end.findings is not None else {}))
-            what = end.status + (f" ({end.reason})" if end.reason else "")
-            if written is not None and end.status == job_lane.LEARNING_COMPLETED:
-                what += f", findings {written.publish_state}"
-        if written is None:
-            _logger.info("learning job %s: the row is no longer this worker's; nothing written", job)
-        else:
-            _logger.info("learning job %s: %s", job, what)
+        # The staged outcome decides (its findings screened by the helper on receipt, D11); a stop that landed after it
+        # does not override it, and an outcome that says the job stopped hands it back (#1344 r5).
+        return await self._decided(held, returncode), True
 
     async def _claim_check(self) -> tuple[str, str] | None:
         """A tenant due a family-less check, held for it, and the hold's token (#1344 amendments 1,
-        3), or None: the store picks the most overdue one no post-step holds. A claim that fails
-        is logged and the next is tried an interval later: it never stops a job's claim."""
+        3; minted by the store with the post-step's claim row, #1546 PR7), or None: the store picks the most overdue one
+        no post-step holds. A claim that fails is logged and the next is tried an interval later: it never stops a job's
+        claim."""
         if time.monotonic() < self._checks_resume_at:
             return None
-        holder = uuid.uuid4().hex
         try:
-            tenant = await self._store.claim_learning_check(self._learning_check_interval, holder)
+            held = await self._store.claim_learning_check(self._learning_check_interval)
         except Exception as fault:  # noqa: BLE001 — a failed claim delays the checks, never the jobs
             self._note_store_fault(fault)
             _logger.warning("the worker could not claim a tenant's learning check; retrying in %gs",
                             self._learning_check_interval, exc_info=True)
             self._checks_resume_at = time.monotonic() + self._learning_check_interval
             return None
-        return None if tenant is None else (tenant, holder)
+        return None if held is None else (str(held.tenant_id), held.token)
 
     async def _check_tenant(self, tenant: str, holder: str) -> None:
         """One family-less post-step for `tenant` under the hold `holder` (#1344 amendment 1),
@@ -1531,7 +1247,8 @@ class Worker:
 
     async def _post_step(self, tenant: str, job: str | None, *, holder: str | None = None) -> None:
         """The post-step after `job` (O8, O14), or, with `job` None, a family-less one under the
-        hold `holder` (amendment 1): a child in the one supervision registry, handed nothing. A
+        hold `holder` (amendment 1): a child in the one supervision registry, handed nothing but its claim, whose token
+        is the hold's (#1546 PR7: the store mints it with the post-step's claim row, whose inputs are empty). A
         job's post-step first holds the tenant's check clock; when another post-step holds it, this
         one does not start and the tenant is checked at the next claim instead (amendment 3).
         Either kind restarts the tenant's check clock when it ends, idle only when its helper exited
@@ -1541,13 +1258,13 @@ class Worker:
         post_step = self._post_step_argv
         assert post_step is not None  # a worker with learning slots has it (constructor)
         if holder is None:
-            holder = uuid.uuid4().hex
-            if not await self._store.hold_learning_check(tenant, holder):
+            holder = await self._store.hold_learning_check(tenant)
+            if holder is None:
                 _logger.info("learning job %s: no post-step started: another post-step of its tenant is running "
                              "(the tenant is checked again once it ends), or the tenant is being removed (nothing "
                              "new starts for it)", job)
                 return
-        held = Held(_PostStepOf(tenant, job), kind=POST_STEP, check_holder=holder)
+        held = Held(_PostStepOf(tenant, job), kind=POST_STEP, token=holder, check_holder=holder)
         key = f"{POST_STEP}:{job if job is not None else 'tenant:' + tenant}"
         idle = False
         try:
@@ -1588,47 +1305,56 @@ class Worker:
 
     # -- the last write ---------------------------------------------------------------------------
 
-    async def _write_end(self, held: Held, end: End | LearningOutcome | HostEnding) -> None:
-        """The row's one end write (B4), made until it lands or there is nothing left to write.
-        A failure that is an outage is retried each second while claims wait (B5). A value the
-        store refuses never drops the decided ending, since a dropped one would lapse into a
-        take-over that re-runs the job: it is written again with less (`_lesser_ends`). Any other
-        failure decides nothing about the job: it is logged and the row left to lapse, as it is
-        when even the barest end is refused. During a deliberate stop an outage gets one try: the
-        stop gives up on it (B11). A learning job's findings the store could not store for a reason
-        neither their content nor an outage explains (`FindingsNotStored`, #1487 Amendment r5.3) are
-        retried the same way, logged once as an error, without pausing claims: only the job's slot
-        waits."""
+    async def _write_end(self, held: Held, decision: ending.Decision) -> None:
+        """The row's one end write (B4): `decision` applied by the store's one applier (#1546 PR9), made until it lands
+        or there is nothing left to write. A failure that is an outage is retried each second while claims wait (B5). A
+        decision the store refuses is never dropped, since a dropped one would lapse into a take-over that re-runs the
+        job: it is applied again weakened (`ending.lesser`), down to the barest end. Any other failure decides nothing
+        about the job: it is logged and the row left to lapse, as it is when even the barest end is refused. During a
+        deliberate stop an outage gets one try: the stop gives up on it (B11). A learning job's findings the store could
+        not store for a reason neither their content nor an outage explains (`FindingsNotStored`, #1487 Amendment
+        r5.3) are retried the same way, logged once as an error, without pausing claims: only the job's slot waits."""
         what = _what(held)
-        key = _key(held)
-        told: set[str] = set()
-        attempts, once = self._end_writes(end)
-        for attempt in attempts:
-            if attempt is not end:
-                _logger.error("%s: the store refused its end; writing it with less: %s", what, _what_end(attempt))
-            while True:
-                tried_stopping = self._stopping
-                try:
-                    await once(held, attempt)
-                    return
-                except Exception as fault:  # noqa: BLE001 — classified below
-                    if is_refusal(fault):
-                        _logger.error("%s: the store refused its end (%s)", what, _what_end(attempt), exc_info=True)
-                        break
-                    if not self._end_retries(what, key, fault, stopping=tried_stopping, told=told):
-                        return
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(self._stop_signal.wait(), timeout=END_RETRY_DELAY)
-        _logger.error("%s: the store refused even its barest end; it is dropped, and its "
-                      "lease will lapse and it will be taken over", what)
+        attempt = decision
+        while not await self._applied(held, attempt):
+            weaker = ending.lesser(attempt)
+            if weaker == attempt:
+                _logger.error("%s: the store refused even its barest end; it is dropped, and its "
+                              "lease will lapse and it will be taken over", what)
+                return
+            _logger.error("%s: the store refused its end; writing it with less: %s", what, _what_end(weaker))
+            attempt = weaker
 
-    def _end_writes(self, end: End | LearningOutcome | HostEnding) -> tuple[list[Any], Callable[[Held, Any], Awaitable[None]]]:
-        """The end writes `_write_end` tries in turn for `end`'s kind, and the one try that makes each."""
-        if isinstance(end, LearningOutcome):
-            return _lesser_learning_ends(end), self._learning_end_once
-        if isinstance(end, HostEnding):
-            return _lesser_host_ends(end), self._host_end_once
-        return _lesser_ends(end), self._end_once
+    async def _applied(self, held: Held, attempt: ending.Decision) -> bool:
+        """`attempt` applied, tried again while `_end_retries` says so: True once it landed or the write is given up,
+        False when the store refused it (the caller weakens it)."""
+        what, key = _what(held), _key(held)
+        told: set[str] = set()
+        while True:
+            tried_stopping = self._stopping
+            try:
+                await self._apply_once(held, attempt)
+                return True
+            except Exception as fault:  # noqa: BLE001 — classified below
+                if is_refusal(fault):
+                    _logger.error("%s: the store refused its end (%s)", what, _what_end(attempt), exc_info=True)
+                    return False
+                if not self._end_retries(what, key, fault, stopping=tried_stopping, told=told):
+                    return True
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._stop_signal.wait(), timeout=END_RETRY_DELAY)
+
+    async def _apply_once(self, held: Held, attempt: ending.Decision) -> None:
+        """One try: the decision on the row if it is still this worker's (the applier's fence); a row that moved (a
+        cancel, an offboard, a take-over ended it, or it is gone) keeps its own ending and its staged cost (D15), and
+        nothing is written."""
+        written = await self._store.apply(held.record.tenant_id, _key(held), attempt)
+        if written is None:
+            _logger.info("%s: the row is no longer this worker's; nothing written", _what(held))
+            return
+        found = getattr(written, "publish_state", None)
+        _logger.info("%s: %s%s", _what(held), _what_end(attempt),
+                     f", findings {found}" if held.kind == LEARNING and found is not None else "")
 
     def _end_retries(self, what: str, key: str, fault: Exception, *, stopping: bool, told: set[str]) -> bool:
         """Whether a failed end write that the store did not refuse is tried again, logged: an outage pauses claims while
@@ -1660,90 +1386,17 @@ class Worker:
         _logger.warning("%s: its end could not be recorded (%s); retrying", what, fault)
         return True
 
-    async def _end_once(self, held: Held, end: End) -> None:
-        """One try: the terminal stage (or hand-back) if the row is still `running`, else the
-        holder's final cost and knowledge on the row someone else ended; a row that is gone or
-        already accounted for needs nothing."""
-        record = held.record
-        inv, tenant = record.investigation_id, record.tenant_id
-        if end.ending is not None:
-            ending = end.ending
-            written = await self._store.finish(
-                tenant, inv, stage=ending.stage, disposition=ending.disposition, cost_usd=end.cost,
-                cost_is_lower_limit=held.lower_limit(end.cost), knowledge=end.knowledge, failure_reason=ending.failure_reason,
-                failure_message=ending.failure_message)
-            what = ending.stage + (f" ({ending.failure_reason})" if ending.failure_reason else "")
-        else:
-            written = await self._store.hand_back(tenant, inv, cost_usd=end.cost, cost_is_lower_limit=held.lower_limit(end.cost),
-                                                  knowledge=end.knowledge)
-            what = "handed back"
-        if written is not None:
-            _logger.info("investigation %s: %s", inv, what)
-            return
-        accounted = await self._store.write_accounting(tenant, inv, cost_usd=end.cost, cost_is_lower_limit=held.lower_limit(end.cost),
-                                                     knowledge=end.knowledge)
-        if accounted is not None:
-            _logger.info("investigation %s: the row had already ended; its final cost and knowledge are recorded", inv)
-        else:
-            _logger.info("investigation %s: the row is gone or already accounted for; nothing to write", inv)
 
-
-def _lesser_ends(end: End) -> list[End]:
-    """The end writes to try in turn when the store refuses one outright (#1343 review): the end
-    as decided; then with its knowledge replaced by the unreadable-knowledge marker, a value the
-    store is known to take; then the barest end, with no cost or knowledge, and for a decided
-    ending `worker_error`, naming the refusal (a hand-back stays a hand-back)."""
-    marker = job_lane.JobLane.unreadable_knowledge()
-    ends = [end]
-    if end.knowledge is not None and end.knowledge != marker:
-        ends.append(End(end.ending, end.cost, marker))
-    barest = End(None if end.ending is None else Ending(
-        _FAILED, failure_reason=_WORKER_ERROR, failure_message="the store refused the job's ending as decided"),
-        None, None)
-    if barest != ends[-1]:
-        ends.append(barest)
-    return ends
-
-
-def _lesser_learning_ends(end: LearningOutcome) -> list[LearningOutcome]:
-    """`_lesser_ends` for a learning job: the end as decided; for a `completed` one carrying
-    findings, the same ending with its findings refused (#1487 Flow 1 step 4: a store that refuses
-    the findings never costs the job its ending); then the barest, which keeps the row's copied
-    progress and, for a decided ending, is `worker_error` naming the refusal."""
-    ends = [end]
-    if end.findings is not None:
-        ends.append(dataclasses.replace(end, findings=None))
-    barest = (LearningOutcome(None) if end.status is None else LearningOutcome(
-        _FAILED, _WORKER_ERROR, "the store refused the job's ending as decided"))
-    if barest != ends[-1]:
-        ends.append(barest)
-    return ends
-
-
-def _lesser_host_ends(end: HostEnding) -> list[HostEnding]:
-    """`_lesser_ends` for a host request: the end as decided, then the barest, `worker_error` naming the refusal."""
-    barest = _host_failed(_WORKER_ERROR, "the store refused the request's ending as decided")
-    return [end] if end == barest else [end, barest]
-
-
-def _default_screen() -> Callable[[str, object, str], object]:
-    """The channel rules' one public door (#1487), loaded at its first use."""
-    from defender.learning.judge.enqueue import screen_findings
-
-    return screen_findings
-
-
-def _what_end(end: End | LearningOutcome | HostEnding) -> str:
-    if isinstance(end, HostEnding):
-        return end.stage + (f" ({end.failure_reason})" if end.failure_reason else "")
-    if isinstance(end, LearningOutcome):
-        if end.status is None:
-            return "a hand-back"
-        what = end.status + (f" ({end.reason})" if end.reason else "")
-        return what + (", findings refused" if end.status == _COMPLETED and end.findings is None else "")
-    what = "a hand-back" if end.ending is None else end.ending.stage + (
-        f" ({end.ending.failure_reason})" if end.ending.failure_reason else "")
-    return f"{what}, cost {end.cost}, knowledge {'kept' if end.knowledge is not None else 'none'}"
+def _what_end(decision: ending.Decision) -> str:
+    if isinstance(decision, ending.HandBack):
+        return "a hand-back"
+    what = decision.stage + (f" ({decision.failure_reason})" if decision.failure_reason else "")
+    if decision.kind == ending.HOST_REQUEST:
+        return what
+    if decision.kind == ending.LEARNING:
+        return what + (", findings refused" if decision.stage == "completed" and decision.findings is None else "")
+    return (f"{what}, cost {decision.cost_usd}, knowledge {'kept' if decision.knowledge is not None else 'none'}, "
+            f"evidence {decision.evidence_state}")
 
 
 def _key(held: Held) -> str:

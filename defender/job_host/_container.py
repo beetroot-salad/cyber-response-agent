@@ -3,9 +3,10 @@
 
 One container per job, the helper's child: started attached (`docker run -i`), its input a pipe the helper holds, so it
 ends when the helper does (A5); labelled with its tenant, its claim and the job-container label; running as the uid
-that owns the data root (H9), with exactly three binds, each at its own path: the tenant's folder (read-write), the
-code the helper runs from (read-only, A7: the worker's code copy, holding no `.env`) and the job socket's folder
-(read-write, holding only the socket). Its
+that owns the data root (H9), with exactly its kind's binds (`binds`, #1546 A-O9), each at its own path: its own root
+(read-write) and inputs (read-only), or for the post-step and the drain the tenant's folder (read-write), the code the
+helper runs from (read-only, A7: the worker's code copy, holding no `.env`) and the job socket's folder (read-write,
+holding only the socket). Its
 environment is every setting the job reads minus secrets and cross-tenant addresses (A8), plus the provider keys the
 helper resolved (N2)."""
 from __future__ import annotations
@@ -38,6 +39,8 @@ _DENIED = frozenset({
     "DEFENDER_DATABASE_DSN", "DEFENDER_RUN_VISUALIZATIONS_DIR", "DEFENDER_ENV_FILE", "DEFENDER_ALLOW_UNSANDBOXED",
     "DEFENDER_DIR", SOCKET_ENV,
 })
+#: The evidence store's settings (#1546): the helper's alone; the job reaches the store only through its socket.
+_EVIDENCE_PREFIX = "DEFENDER_EVIDENCE_"
 #: Words in a setting's name that mark a secret or a login (an OpenBao or vault address included).
 _SECRET_WORDS = re.compile(r"DSN|PASSWORD|PASSWD|SECRET|TOKEN|OPENBAO|VAULT|LOGIN|PRIVATE")
 #: Values that carry a database address.
@@ -102,7 +105,8 @@ def make_socket_folder(session: Session) -> Path:
 
 
 def _setting(name: str, value: str, denied_values: tuple[str, ...]) -> bool:
-    if name in _DENIED or _SECRET_WORDS.search(name) or name.endswith(("_FILE", "_KEY")):
+    if name in _DENIED or name.startswith(_EVIDENCE_PREFIX) or _SECRET_WORDS.search(name) \
+            or name.endswith(("_FILE", "_KEY")):
         return False
     if _DATABASE_VALUE.search(value):
         return False
@@ -147,7 +151,7 @@ def job_environment(session: Session, socket: Path, keys: Mapping[str, str],
             env[k] = environ[k]
     env.update(keys)
     env.update({
-        "DEFENDER_DATA_ROOT": str(session.root_folder),
+        "DEFENDER_DATA_ROOT": str(container_data_root(session)),
         CLAIM_ENV: session.claim,
         SOCKET_ENV: str(socket),
         "PYTHONPATH": str(session.defender_dir.parent),
@@ -193,6 +197,38 @@ class Launch(NamedTuple):
     runtime: str
 
 
+#: The kinds whose container works over the tenant's own folder (#1546 A-O9): the post-step's tick and the drain.
+TENANT_BOUND = ("post-step", "drain")
+
+
+def binds(session: Session, socket: Path) -> list[tuple[Path, bool]]:
+    """The container's binds, each `(source, read-only)` at its own path: exactly its kind's allowlist (#1546 A-O9). Every
+    kind but the post-step: its own root read-write and its inputs read-only; the post-step and the drain: the tenant's
+    folder read-write; a learning job: its claim's `shared/` folder read-write (its oracle boxes' scratch, #1557 H3);
+    every kind: the one code tree read-only (A7) and the socket's folder read-write (it holds only the socket)."""
+    out: list[tuple[Path, bool]] = []
+    if session.kind != "post-step":
+        if session.job_root is None or session.job_inputs is None:
+            raise StartFailed("the claim's root and inputs were not made: there is nothing to bind")
+        out += [(session.job_root, False), (session.job_inputs, True)]
+    if session.kind in TENANT_BOUND:
+        if session.tenant_folder is None:
+            raise StartFailed("the job's tenant was not accepted: there is no tenant folder to bind")
+        out.append((session.tenant_folder, False))
+    out += [(session.defender_dir, True), (socket.parent, False)]
+    shared = session.prepared.shared if session.prepared is not None else None
+    if shared is not None:
+        out.append((shared, False))
+    return out
+
+
+def container_data_root(session: Session) -> Path:
+    """The container's `DEFENDER_DATA_ROOT`: its own root, or the data root for a kind bound to the tenant's folder."""
+    if session.kind in TENANT_BOUND or session.job_root is None:
+        return session.root_folder
+    return session.job_root
+
+
 def container_launch(session: Session, socket: Path, command: list[str], environ: Mapping[str, str] = os.environ
                      ) -> Launch:
     """The job container's attached `docker run` (module doc), built in one step so its command line and its
@@ -219,9 +255,6 @@ def container_launch(session: Session, socket: Path, command: list[str], environ
     except OSError as unreadable:
         raise StartFailed(f"the helper cannot name itself on its container: {unreadable}") from None
     uid, gid = owner(session)
-    tenant = str(session.tenant_folder)
-    code = str(session.defender_dir)
-    sockets = str(socket.parent)
     argv = [
         "docker", "run", "-i", "--rm", "--init", "--name", session.container,
         "--user", f"{uid}:{gid}",
@@ -229,20 +262,10 @@ def container_launch(session: Session, socket: Path, command: list[str], environ
         "--label", f"{JOB_LABEL}={session.kind}", "--label", f"{HELPER_LABEL}={helper}",
         "--pull=never", "--runtime", runtime, "--read-only", "--tmpfs", "/tmp:rw,nosuid,size=256m",
         "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
-    ]
-    argv += [
         "--network", network,
-        "--mount", f"type=bind,source={tenant},target={tenant}",
-        "--mount", f"type=bind,source={code},target={code},readonly",
-        # Read-write (a connect needs no write on the folder, but the code bind is the one read-only bind, A7);
-        # the folder holds only the socket, made and removed by the helper.
-        "--mount", f"type=bind,source={sockets},target={sockets}",
     ]
-    shared = session.prepared.shared if session.prepared is not None else None
-    if shared is not None:
-        # The kind's job-writable folder outside the tenant's (a learning job's `shared/`, where it saves the oracle's
-        # reads for its boxes, #1557 H3), read-write at its own path.
-        argv += ["--mount", f"type=bind,source={shared},target={shared}"]
+    for source, readonly in binds(session, socket):
+        argv += ["--mount", f"type=bind,source={source},target={source}" + (",readonly" if readonly else "")]
     argv += [
         "--workdir", str(session.defender_dir.parent),
     ]

@@ -75,6 +75,8 @@ class JobLaneHooks:
       agrees (the job entry's fork pick, which opens the source's session store itself); `None`
       keeps the command line's.
     - `stage(name)`: a step is starting.
+    - `runs_started(arms)`: the arm roster was written (`{world id: arm id}`, every manifest world), before the first
+      sibling starts (#1546 D12).
     - `sibling_ended(view, world_ids)`: a sibling has exited; `view` is the episode's
       `EpisodeRuns`, `world_ids` the worlds of every sibling that has run so far.
     - `judged(grade, held)`: the judge's pass returned `grade`; from here the ending is
@@ -85,6 +87,7 @@ class JobLaneHooks:
     job_id: str
     pick: Callable[..., int] | None = None
     stage: Callable[[str], None] = _nothing
+    runs_started: Callable[..., None] = _nothing
     sibling_ended: Callable[..., None] = _nothing
     judged: Callable[..., None] = _nothing
     grade: Callable[..., Any] | None = None

@@ -1016,7 +1016,9 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
         # unservable and the `role: null` replicate included — before the first sibling
         # starts: each sibling's run start checks the roster names its world, and takes its
         # run id from it.
-        view.start_runs([world.world_id for world in family.worlds])
+        arm_ids = view.start_runs([world.world_id for world in family.worlds])
+        if lane is not None:
+            lane.runs_started(dict(arm_ids))
         ran: list[str] = []
 
         def sibling_ended(world_id: str, _code: int) -> None:

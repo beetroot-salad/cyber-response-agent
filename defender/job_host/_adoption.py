@@ -7,7 +7,8 @@ handed the tenant, the system, the rendering and its digest, and the tenant's re
 answered `launch` and `forge.token` and nothing else (N-A1: no pass, no box, no signing), and its entry is
 `python3 -m defender.adoption --job <id> --tenant <T>`, which fetches, decides and delivers (`adoption/__main__.py`).
 
-An ending the helper decides before the container is written here as the one create-only `{failed, reason}` record, in the
+Before the container, the helper makes the job's own clone of the tenant's repository in the job's root (`--no-hardlinks`,
+origin the forge). An ending the helper decides before the container is staged here as the one `{failed, reason}` result, in the
 kind's own vocabulary (`job_lane.ADOPTION_HELPER_REASONS`): the record gone (`system_gone`), the release shipping none
 (`no_base_files`), a tenant that is not active at claim (`tenant_not_active`), any other refusal of a setup step, the lock, the
 credential or a tenant with no forge wiring (`setup_refused`), a container that cannot be started (`start_failed`), a crash
@@ -29,9 +30,7 @@ KIND = "adoption"
 def _adoption_lane() -> _host_request.ResultLane:
     from defender.records import job_lane
 
-    return _host_request.ResultLane(
-        kind=KIND, read=lambda lane, rid: lane.read_adoption(rid), write=lambda lane, rid, rec: lane.write_adoption(rid, rec),
-        failed=job_lane.AdoptionRecord.failed, refused_reason="setup_refused")
+    return _host_request.ResultLane(kind=KIND, failed=job_lane.AdoptionRecord.failed, refused_reason="setup_refused")
 
 
 _LANE = _adoption_lane()
@@ -107,6 +106,25 @@ def _adoption_credential(session: Session, admitted: Any, cleanup: contextlib.Ex
         _refuse_adoption(session, "setup_refused", f"the tenant's forge credential cannot be made: {type(failed).__name__}: {failed}")
 
 
+def _clone_into_root(session: Session, tenant: Any, origin: str) -> None:
+    """The job's own clone of the tenant's repository at `<root>/<T>/knowledge` (#1546 A-O9, G11): made by the helper from
+    the tenant's knowledge clone with `--no-hardlinks` (a local clone shares its object files otherwise) and no
+    alternates, its `origin` the forge the tenant's clone names. The job's delivery fetches and pushes over it."""
+    from defender import _git
+
+    from ._folders import give_tree
+
+    if session.job_root is None:
+        raise SetupRefused("the claim's root was not made")
+    target = session.job_root / session.tenant_id / "knowledge"
+    try:
+        _git.git(["clone", "--quiet", "--no-hardlinks", str(tenant.knowledge), str(target)], cwd=session.job_root)
+        _git.git(["remote", "set-url", "origin", origin], cwd=target)
+        give_tree(session, target)
+    except Exception as failed:  # noqa: BLE001 — a clone that cannot be made is a refused setup
+        _refuse_adoption(session, "setup_refused", f"the job's clone could not be made: {type(failed).__name__}: {failed}")
+
+
 def prepare_adoption(session: Session, hold: contextlib.ExitStack) -> Prepared:
     admitted = _admit_adoption_tenant(session, hold)
     rendering, digest = _render_for_system(session, admitted)
@@ -119,11 +137,16 @@ def prepare_adoption(session: Session, hold: contextlib.ExitStack) -> Prepared:
     except BaseException:
         cleanup.close()
         raise
+    try:
+        _clone_into_root(session, admitted.tenant, wiring.origin)
+    except BaseException:
+        cleanup.close()
+        raise
     job = _host_request.request_id(session)
     command = session.command or ["python3", "-m", "defender.adoption", "--job", job, "--tenant", session.tenant_id]
     facts = {"kind": KIND, "tenant": session.tenant_id, "job": job, "tenant_state": "active", "system": session.system,
              "digest": digest, "rendering": {path: base64.b64encode(data).decode("ascii") for path, data in rendering.items()},
-             "forge_origin": wiring.origin, "forge_repo": wiring.repo}
+             "forge_origin": wiring.origin, "forge_repo": wiring.repo, "inputs_dir": str(session.job_inputs)}
     return Prepared(launch=facts, command=list(command), state=_Adoption(credential), cleanup=cleanup, exited=_host_request.after_container(_LANE))
 
 

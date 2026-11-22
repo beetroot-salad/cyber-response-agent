@@ -504,27 +504,10 @@ class RunPaths:
         """The job lane's alert file (#1342): the alert's exact bytes, beside the launch record."""
         return self._container(runs_base) / f"{self.run_dir.name}{_LAUNCH_ALERT_SUFFIX}"
 
-    def job_end(self, runs_base: RunsBase | None = None) -> Path:
-        """The job entry's job-end record (#1342): the facts the worker classifies the run's
-        ending by, written create-only as the job entry exits."""
-        return self._container(runs_base) / f"{self.run_dir.name}{_JOB_END_SUFFIX}"
-
     def learning_progress(self, runs_base: RunsBase | None = None) -> Path:
         """A learning job's progress record (#1344), when this name is a job id: the fork it
         picked, its stage and its siblings' cost, replaced whole by the job entry."""
         return self._container(runs_base) / f"{self.run_dir.name}{_LEARNING_PROGRESS_SUFFIX}"
-
-    def learning_end(self, runs_base: RunsBase | None = None) -> Path:
-        """A learning job's end record (#1344): how the job entry ended, written create-only."""
-        return self._container(runs_base) / f"{self.run_dir.name}{_LEARNING_END_SUFFIX}"
-
-    def readiness_record(self, runs_base: RunsBase | None = None) -> Path:
-        """A readiness check's result record (#1471), when this name is its request id: written create-only."""
-        return self._container(runs_base) / f"{self.run_dir.name}{_READINESS_SUFFIX}"
-
-    def adoption_record(self, runs_base: RunsBase | None = None) -> Path:
-        """An adoption's result record (#1471), when this name is its request id: written create-only."""
-        return self._container(runs_base) / f"{self.run_dir.name}{_ADOPTION_SUFFIX}"
 
     def session_pointer(self, runs_base: RunsBase | None = None) -> Path:
         """The run -> case link: which case's session store this run belongs to. Beside the

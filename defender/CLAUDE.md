@@ -66,6 +66,10 @@ encrypted under a data key wrapped by the tenant's OpenBao transit key `evidence
    `DEFENDER_EVIDENCE_REGION`, default `garage`). It makes each generation's evidence login and the tenant's key, empties a
    tenant's objects and rows when it is offboarded (the host step `evidence`, between `teardown` and `finish`, repeated each
    pass for an offboarded tenant), and sweeps expired evidence every five minutes.
+5. `loop.py --lead-author-drain --tenant <T>` no longer runs the lead-author lane on the host: with
+   `DEFENDER_DATABASE_DSN` set it queues a `drain` host request (printing `drain_request=<id>`; one queued or running per
+   tenant), which a worker runs in a job container over the runs its helper pulls. A worker reads a job's end only from
+   the rows its helper staged: it writes no launch files and reads no job-end, progress, readiness or adoption file.
 
 ## Upgrade: the sign-in screens' name and wording
 
