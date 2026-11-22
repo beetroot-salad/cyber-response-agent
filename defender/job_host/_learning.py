@@ -93,6 +93,8 @@ class _Learning:
     scratch: Path
     #: The tenant's current records, read once at the job's start (#1366 O6): every sibling's run reads these.
     records: Any = None
+    #: Where `copy.make` makes its copies: the claim's scratch folder (they go with the claim, F3).
+    copies: Path | None = None
     siblings: dict[str, _Sibling] = field(default_factory=dict)  # by run id
     by_world: dict[str, str] = field(default_factory=dict)  # world id -> run id
 
@@ -219,7 +221,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
         cleanup.close()
         raise
     session.minted.add(job)
-    state = _Learning(accepted, source.commit, scratch, records=current)
+    state = _Learning(accepted, source.commit, scratch, records=current, copies=scratch)
     cleanup.callback(_remove_copies, state)
     command = session.command or ["python3", "-m", "defender.cli.learning.job", "--job", job,
                                   "--tenant", session.tenant_id, "--source", str(session.source)]
@@ -432,13 +434,14 @@ def _scratch_copy(session: Session, state: _Learning, commit: Any) -> dict[str, 
     goes with the claim (F3). The helper holds no credential: the child mints its own."""
     from defender import run_common
     from defender.tenancy import run_knowledge
-    from defender.tenancy._owner import owned_temporary
+    from defender.tenancy import owned_temporary
 
     if commit is not None and (not isinstance(commit, str) or not _COMMIT.fullmatch(commit)):
         raise Refused("copy.make takes a full commit id", "bad-fields")
-    dest = state.scratch / owned_temporary("copy")
+    assert state.copies is not None
+    dest = state.copies / owned_temporary("copy")
     try:
-        _io.guarded_mkdir(dest, base=state.scratch)
+        _io.guarded_mkdir(dest, base=state.copies)
         dest.chmod(0o700)
     except (OSError, ValueError) as e:
         raise Refused(f"the copy's folder could not be made: {e}", "internal") from None

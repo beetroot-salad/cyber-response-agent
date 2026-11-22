@@ -16,6 +16,7 @@ from defender.learning.core.state import (  # noqa: E402
     Channel,
 )
 from defender.learning.judge._errors import JudgeRefused, KnowledgeRefused  # noqa: E402
+from defender.learning.judge.knowledge import KnowledgeBodies, helper_copy  # noqa: E402
 
 from defender.records.formats import Episode  # noqa: E402
 from defender._io import Bound, NotPlainEntry
@@ -342,7 +343,7 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
     (`enqueue.EpisodeFindings`), which the job's post-step publishes once the job's row has
     ended; `store` is never touched, and no drain is called. The fence is here, in code.
 
-    `copy` makes a knowledge copy at a commit for a post-move lesson body (`render.KnowledgeCopy`); by default the job helper's
+    `copy` makes a knowledge copy at a commit for a post-move lesson body (`knowledge.KnowledgeCopy`); by default the job helper's
     over the job socket (#1618 F3), and a copy refused refuses the pass (`KnowledgeRefused`).
 
     `state` is the retired file queue's handle (#1278 replaced it with `store`): accepted so an
@@ -509,8 +510,8 @@ class _Pass:
         #: Judge calls of this pass that completed a draw, and that raised (`_count_draws`).
         self.draws_completed = 0
         self.calls_raised = 0
-        #: How a post-move lesson body's knowledge copy is made (`render_mod.KnowledgeCopy`); the job helper's by default.
-        self.copy = copy if copy is not None else render_mod.helper_copy
+        #: How a post-move lesson body's knowledge copy is made (`knowledge.KnowledgeCopy`); the job helper's by default.
+        self.copy = copy if copy is not None else helper_copy
         self.bound = episode.view()
         self.judge = judge
         self.draws = draws
@@ -537,7 +538,7 @@ class _Pass:
         self.world_queue_malformed = 0
         self.knobs: dict[str, Any] = {}
         self.lessons_commit: str | None = None
-        self.knowledge: render_mod.KnowledgeBodies | None = None
+        self.knowledge: KnowledgeBodies | None = None
         self.run_id = Path(episode.dir).name
 
     # -- the gates -----------------------------------------------------------------------
@@ -643,7 +644,7 @@ class _Pass:
         self.lessons_commit = _pass_lessons_commit(bound, [runs.usable[label].token for label in runs.planted])
         if self.lessons_commit is None and prior is not None:
             self.lessons_commit = prior.lessons_commit
-        self.knowledge = render_mod.KnowledgeBodies(
+        self.knowledge = KnowledgeBodies(
             knowledge=_pass_knowledge(bound, [runs.usable[label].token for label in runs.planted]), copy=self.copy)
         for label in self.order:
             if label in kept:

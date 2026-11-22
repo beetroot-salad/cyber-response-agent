@@ -404,7 +404,7 @@ def _copy_of(tenant_id: TenantId, commit: str | None, *, container: JobContainer
     yield Path(str(answer.get("path")))
 
 
-def _pinned_commit(source: Run) -> str:
+def _source_pin(source: Run) -> str:
     """The knowledge commit every sibling is pinned to and the questioner's corpus is read from (flow 7, O-PIN): the one the
     source run's HOST-HELD knowledge record names (U12, beside the run folder, where no box writes) — never its provenance
     stamp, which sits in the box's rw bind (the stamp is compared against this pin at pre-flight, never read for it). A record
@@ -818,7 +818,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         source = _open_launch_source(runs, ns.source_run_id)
         _source_stamp_agrees(source, admitted.tenant.id)
         # What the family is pinned to is decided from the source alone, before anything is fetched or spent.
-        commit = _pinned_commit(source)
+        commit = _source_pin(source)
         try:
             # The tenant's grants and settings are `main`'s at this moment (K8: the tenant has no knowledge folder), read from
             # a copy fetched for the check.
