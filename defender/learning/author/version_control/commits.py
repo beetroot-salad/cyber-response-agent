@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from defender.tenancy import Tenant
 
@@ -30,7 +30,7 @@ class _Line:
 
 #: Where the commit-maker records a commit before its branch moves: the learning store's verb for a
 #: batch's commit (#1278 D5, its holder's token checked in the same transaction). A batch with none
-#: (a `propose`, which has no learning batch) keeps only `CommitMaker.made`.
+#: (a `propose`, which has no learning batch) records nothing.
 Recorder = Callable[[_Made], None]
 
 
@@ -39,8 +39,6 @@ class CommitMaker:
     tenant: Tenant
     repository: GitRepository
     recorder: Recorder | None = None
-    #: Every commit this maker made, oldest first: what `finish` checks a branch's commits against.
-    made: list[_Made] = field(default_factory=list)
 
     def commit(
         self,
@@ -55,7 +53,7 @@ class CommitMaker:
         built in a private index), records the commit, and moves the branch by compare-and-swap
         from its own last commit, the first commit expecting no branch at all (so it creates
         it, and never takes one over). No lock: the compare-and-swap is enough, and it never
-        touches `main`, the clone's index or its checkout."""
+        touches `main`."""
         if not isinstance(change_set, ChangeSet):
             raise TypeError(
                 f"the commit-maker takes a ChangeSet, not {type(change_set).__name__}"
@@ -112,7 +110,6 @@ class CommitMaker:
                 # Recorded before the branch moves (P2'): a recorder that refuses (a holder whose
                 # lease is gone, `LeaseLost`) leaves a commit object no branch holds.
                 self.recorder(made)
-            self.made.append(made)
             self.repository.move_branch(branch, commit, tip)
             line.tip = commit
             return commit

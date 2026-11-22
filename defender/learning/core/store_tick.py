@@ -687,12 +687,8 @@ class Tick:
                 self._fault(b, RuntimeError(f"merged PR #{number} names no merge commit"), "reading the merge")
                 return None
             try:
-                if not repository.holds_commit(merge):
-                    repository.fetch()  # the merge landed after this tick's open: heads again (still this tick's fetch)
-                if not repository.holds_commit(merge):
-                    raise RuntimeError(f"the merge commit {merge} of PR #{number} is not in this tick's fetch")
-                # K12: the PR's tip is read from `refs/pull/<n>/head`, never from the record's own commits.
-                tip = repository.pull_head(int(number))
+                repository.require_commit(merge)  # a merge that landed after this tick opened: fetched once, by id (K12)
+                tip: str | None = None
                 changed = record.changed_paths(str(b.id))
                 # Each corpus folder is read once per merge, whatever the number of members citing into it.
                 in_merge: dict[str, set[str]] = {}
@@ -706,9 +702,10 @@ class Tick:
                     if i.key in in_merge[folder]:
                         published.append((i.kind, i.key))
                         continue
-                    if tip is not None and folder not in at_tip:
+                    if folder not in at_tip:
+                        tip = tip or _pr_tip(repository, pr, int(number))
                         at_tip[folder] = cited_in_paths(repository, tip, changed, folder, CITE_FIELD)
-                    if tip is not None and i.key in at_tip[folder]:
+                    if i.key in at_tip[folder]:
                         held.append((i.kind, i.key))
             except _forge_faults() + (RuntimeError,) as fault:
                 self._fault(b, fault, "reading the merge commit")
@@ -1047,7 +1044,8 @@ class Tick:
                     self._stopped(delivery, held, hold, "cancel")
                 except _forge_faults() as fault:
                     _logger.error(f"{self.label}: batch {held.batch_id} could not be delivered "
-                                  f"({one_line(str(fault))}): its commits stay on its branch for a takeover")
+                                  f"({one_line(str(fault))}): a takeover delivers what its branch on the forge "
+                                  "holds, else abandons it")
                     with contextlib.suppress(Exception):
                         hold.ending(self.store.expire_own, held)
                 return 0
@@ -1061,9 +1059,10 @@ class Tick:
                 raise
             except BaseException:
                 # A fault the tick does not contain is a crash of the holder. With commits on the branch the batch is
-                # left for a takeover (its own lease expired, so it need not wait), which delivers them and never runs
-                # the curator again. With none, its items go back as a recovery abandon returns them: the attempt
-                # charged, and held for a person at the ceiling, never dead.
+                # left for a takeover (its own lease expired, so it need not wait), which delivers what the forge's
+                # branch holds and never runs the curator again; with nothing pushed it abandons the batch (D4: the
+                # unpushed work is redone). With none, its items go back as a recovery abandon returns them: the
+                # attempt charged, and held for a person at the ceiling, never dead.
                 with contextlib.suppress(Exception):
                     if repository.branch_tip(held.branch) is None:
                         hold.ending(self.store.abandon_crashed, held)
@@ -1077,8 +1076,9 @@ class Tick:
     def _stopped(self, delivery: TenantDelivery, held: Any, hold: Holding, why: str) -> None:
         """The stop path (D4): a lost lease does nothing more; otherwise no commits ends the batch at once
         (the attempt forgiven), and commits are pushed within the stop budget with the holder's own lease
-        expired, so a takeover delivers them at once. The lease's renewer is halted first, whichever path
-        stopped: renewing a lease this path expires would signal a second stop into its push."""
+        expired, so a takeover delivers them at once (a push that did not land leaves it nothing: it abandons).
+        The lease's renewer is halted first, whichever path stopped: renewing a lease this path expires would
+        signal a second stop into its push."""
         from dataclasses import replace
 
         from defender.learning_store import LeaseLost
@@ -1101,9 +1101,28 @@ class Tick:
             replace(repository, network_timeout=STOP_PUSH_SECONDS).push(tip, held.branch)
             _logger.warning(f"{self.label}: batch {held.batch_id} stopped ({why}): its commits were pushed, a "
                             "takeover opens its PR")
-        except Exception as unpushed:  # noqa: BLE001 — the stop must end; the takeover pushes the local branch
+        except Exception as unpushed:  # noqa: BLE001 — the stop must end; the takeover reads the forge's branch
             _logger.warning(f"{self.label}: batch {held.batch_id} stopped ({why}); its push did not finish "
-                            f"({one_line(str(unpushed))}): a takeover delivers it")
+                            f"({one_line(str(unpushed))}): a takeover delivers what landed, else abandons it")
+
+
+def _pr_tip(repository: Any, pr: Any, number: int) -> str:
+    """The merged PR's branch tip, read only from what this tick fetches for it (K12): `refs/pull/<n>/head`, which the
+    forge keeps after the branch is deleted (C-F5), else the PR's head commit by id; refused, naming it, when the forge
+    serves neither (never the record's own commits)."""
+    tip = repository.pull_head(number)
+    if tip is not None:
+        return tip
+    head = getattr(pr, "head_sha", None)
+    if not head:
+        raise RuntimeError(f"merged PR #{number} has no pull ref and names no head commit")
+    try:
+        repository.require_commit(head)
+    except Exception as unserved:
+        _logger.error(f"merged PR #{number}: its tip {head} is on no ref the forge serves and cannot be fetched "
+                      f"by id ({one_line(str(unserved))}): the merge is not settled from a tip this tick never held")
+        raise
+    return str(head)
 
 
 def _recorder(store: Any, held: Any) -> Callable[[Any], None]:

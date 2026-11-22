@@ -1,7 +1,7 @@
-"""Tenant knowledge delivery: publish, batch and deliver.
+"""Tenant knowledge delivery: one operation's private repository, its batches and their boxes.
 
 GitRepository owns git and Forgejo operations. The orchestrator supplies a tenant-bound
-Vault identity; boxes receive only host-made copies. Production drain/run wiring is P4.
+Vault identity; boxes receive only host-made drafts.
 """
 
 from __future__ import annotations
@@ -27,12 +27,7 @@ from defender.box import DockerFn, run_docker
 from .auth import ForgeCredential
 from .batch import Batch
 from .commits import CommitMaker, Recorder, _Line
-from .exports import (
-    DRAFT_STAGE,
-    draft_path,
-    TenantExport,
-    build_draft,
-)
+from .exports import DRAFT_STAGE, build_draft, draft_path
 from .credential import forge_credential
 from .model import (
     DeliveryRefused,
@@ -65,9 +60,9 @@ def opened_delivery(  # noqa: PLR0913 — the tenant, its records, and the in-pr
     (`forge_credential`, minting through its live generation; `credential_config` and
     `issuer_transport` are the host's issuer configuration and an in-process stand-in transport);
     `client`, else a new forge client; `relay`, inside a job container, the job socket's client (#1170: the batch's
-    publish, draft and box are the per-job host helper's, `TenantDelivery.relay`). A client or credential made here is closed on exit; a
-    given one stays its caller's. No wiring recorded is `TenantRefused`; a refused open,
-    `DeliveryRefused` or `ForgejoAuthError`. Publish outcomes are recorded through `directory`."""
+    draft and box are the per-job host helper's, `TenantDelivery.relay`). The delivery's private repository, and a
+    client or credential made here, are closed on exit; a given one stays its caller's. No wiring recorded is
+    `TenantRefused`; a refused open, `DeliveryRefused` or `ForgejoAuthError`."""
     wiring = directory.forge_wiring(tenant.id)
     if wiring is None:
         raise TenantRefused(f"tenant {tenant.id} has no forge wiring recorded: its repository is not bound to "
@@ -82,26 +77,25 @@ def opened_delivery(  # noqa: PLR0913 — the tenant, its records, and the in-pr
             import httpx
 
             client = owned.enter_context(httpx.Client())
-        delivery = TenantDelivery.open(tenant, defender_dir=defender_dir, client=client,
-                                       identity=identity, origin=wiring.origin, directory=directory, relay=relay)
-        owned.callback(delivery.close)
-        yield delivery
+        yield owned.enter_context(TenantDelivery.open(
+            tenant, defender_dir=defender_dir, client=client, identity=identity, origin=wiring.origin,
+            directory=directory, relay=relay))
 
 
 @dataclass(frozen=True, eq=False)
 class TenantDelivery:
-    """Host-side delivery for one tenant, opened with its explicit Vault identity."""
+    """Delivery for one tenant, opened with its explicit Vault identity over one private repository (its operation's:
+    a context manager, whose exit removes it)."""
 
     tenant: Tenant
     defender_dir: Path
     repository: GitRepository = field(repr=False)
     branch_prefix: str = LESSONS_BRANCH_PREFIX
-    #: Where this delivery's publish outcomes are recorded (`None`: an in-process caller with no
-    #: tenant records records none).
+    #: The tenant's records (`None`: an in-process caller with none).
     directory: TenantDirectory | None = field(default=None, repr=False)
-    #: Inside a job container (#1170 C23, A6): the job socket's client. The batch's publish and draft are then the
-    #: per-job host helper's (`batch.start`: it publishes, builds the draft and owns it), and so is its box
-    #: (`box.start` of the `batch` kind at the draft's id); this process makes no draft or owner record.
+    #: Inside a job container (#1170 C23, A6): the job socket's client. The batch's draft is then the per-job host
+    #: helper's (`batch.start`: it builds the draft from its own delivery and owns it), and so is its box (`box.start`
+    #: of the `batch` kind at the draft's id); this process makes no draft or owner record.
     relay: Callable[..., dict[str, Any]] | None = field(default=None, repr=False)
 
     @property
@@ -122,36 +116,48 @@ class TenantDelivery:
         relay: Callable[..., dict[str, Any]] | None = None,
     ) -> TenantDelivery:
         with _refusals():
-            # One private repository for this delivery's life: history and every branch fetched once, here (D4/K12).
-            repository = GitRepository.open(
+            # One private repository for this delivery's life: history and every branch fetched once, here (D4/K12); a job
+            # container's in its own temporary folder (it never makes an owned folder), a host's under `.repo-scratch/`.
+            repository = GitRepository.open(  # lint-text-io: ok — a repository's constructor, not a file open
                 tenant_id=str(accepted_tenant.id),
                 identity=identity,
                 origin=origin,
                 client=client,
                 network_timeout=network_timeout,
+                data_root=None if relay is not None else data_root_for_child(accepted_tenant.data_root),
             )
-            return cls(
-                tenant=accepted_tenant, defender_dir=defender_dir, repository=repository,
-                directory=directory, relay=relay,
-            )
+            try:
+                return cls(
+                    tenant=accepted_tenant, defender_dir=defender_dir, repository=repository,
+                    directory=directory, relay=relay,
+                )
+            except BaseException:
+                repository.close()
+                raise
 
     def close(self) -> None:
-        """The delivery's private repository is its tick's: removed when the tick ends."""
+        """Remove the delivery's private repository (its operation's: a tick's ends with the tick)."""
         self.repository.close()
+
+    def __enter__(self) -> TenantDelivery:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
 
     def start_batch(self, batch_id: str, *, lanes: Sequence[str], branch: str | None = None,
                     recorder: Recorder | None = None) -> Batch:
         """Flow 3: refuse at once an id whose draft or branch exists (ids are never retried, so
-        a reused one is caught before any box runs); publish; then, under the same lock hold,
-        build the git-free draft of the export commit's `agent/` in a dot-named temporary
-        under `<T>/drafts/` and rename it to `<T>/drafts/<batch_id>`. A build that fails leaves
-        nothing. No checkout is made, and the branch exists from the first commit on. With a
-        `relay` the helper does all of this at an id it mints (`batch_id` is not sent).
+        a reused one is caught before any box runs); sweep dead owners' folders (flow 8, host
+        side only); then build the git-free draft of `agent/` at this delivery's fetched `main`
+        (the batch's base) in an owned temporary under `<T>/drafts/` and rename it to
+        `<T>/drafts/<batch_id>`. A build that fails leaves nothing. No checkout is made, and the
+        branch exists from the first commit on. With a `relay` the helper does all of this at an
+        id it mints (`batch_id` is not sent).
 
         `branch` is the learning store's (#1278 D5: set at claim, never re-derived; else the
         prefix and the id), and `recorder` where each commit is recorded before its branch
-        moves (else the commit-maker keeps its commits in memory for `finish`); a relayed batch
-        takes both too, its commits being made in this process."""
+        moves; a relayed batch takes both too, its commits being made in this process."""
         if self.relay is not None:
             return self._relayed_batch(lanes, branch=branch, recorder=recorder)
         with _refusals():
@@ -160,20 +166,17 @@ class TenantDelivery:
             branch = branch if branch is not None else f"{self.branch_prefix}{batch_id}"
             self._refuse_taken(batch_id, branch)
             sweep_dead_owners(data_root_for_child(self.tenant.data_root), self.tenant.id)  # flow 8: a batch start sweeps
-            # The draft is the tick's own fetch of `main` (D4): nothing is fetched or published here.
+            # The draft is the tick's own fetch of `main` (D4): nothing is fetched here.
             commit = self.repository.revision("refs/heads/main")
             build_draft(self.tenant, self.repository, batch_id, commit, declared)
-            export = TenantExport(commit=commit, path=draft_path(self.tenant, batch_id))
             line = _Line(
-                batch=_BatchKey(
-                    branch=branch, base=export.commit, start=secrets.token_hex(8)
-                ),
+                batch=_BatchKey(branch=branch, base=commit, start=secrets.token_hex(8)),
                 lanes=declared,
             )
             return Batch(
                 id=batch_id,
                 branch=branch,
-                export=export,
+                base_commit=commit,
                 draft_root=draft_path(self.tenant, batch_id) / DRAFT_STAGE,
                 lanes=declared,
                 tenant=self.tenant,
@@ -204,7 +207,7 @@ class TenantDelivery:
         with _refusals():
             self.repository.require_commit(commit)  # the helper's base, fetched by id when this tick's fetch lacks it
         line = _Line(batch=_BatchKey(branch=branch, base=commit, start=secrets.token_hex(8)), lanes=declared)
-        return Batch(id=batch_id, branch=branch, export=TenantExport(commit=commit, path=Path(answer["export"])),
+        return Batch(id=batch_id, branch=branch, base_commit=commit,
                      draft_root=folder / DRAFT_STAGE, lanes=declared, tenant=self.tenant,
                      defender_dir=self.defender_dir, repository=self.repository,
                      committer=CommitMaker(self.tenant, self.repository, recorder), _line=line)
@@ -224,9 +227,8 @@ class TenantDelivery:
             )
         if self.repository.branch_tip(branch) is not None:
             raise DeliveryRefused(
-                f"the branch {branch} already exists in the tenant clone: "
-                "its commits are deliver's to pick up, and its id is not used "
-                "again"
+                f"the branch {branch} already exists (on the forge, or committed by this delivery): "
+                "its commits are a takeover's to pick up, and its id is not used again"
             )
 
     def start_box(

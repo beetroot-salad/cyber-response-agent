@@ -1,6 +1,7 @@
 """The adoption delivery step (#1471 A3, P-9): a carried adapter's base files offered to a tenant's repository as one pull request.
 
-`adopt(repository, *, system, rendering, digest)` fetches `origin/main` itself, reads the repository's pull requests in every state,
+`adopt(repository, *, system, rendering, digest)` reads `main` as the operation's private repository fetched it, and the
+repository's pull requests in every state,
 and answers one `AdoptionRecord`, deciding in A3's order from the digest `d` of the current rendering:
 
 1. any pull request of the system (head label `adopt/<system>/...`, any digest) is open: `already_open`;
@@ -13,8 +14,7 @@ and answers one `AdoptionRecord`, deciding in A3's order from the digest `d` of 
 A pull request is matched by its head label, which keeps the branch name after the branch is deleted (G-A11). A refused push or a
 refused or lost pull-request create is settled by reading the forge again: a pull request that now names the branch is answered by
 steps 1-4; none, and the branch (when it is pushed) holds the rendering at every path, opens it; anything else is `delivery_failed`.
-The step never merges, closes, deletes or force-pushes, and makes no store record. Fetching has one owner, here, and a ref-lock
-collision on the shared clone is `repository_busy`.
+The step never merges, closes, deletes or force-pushes, and makes no store record.
 """
 from __future__ import annotations
 
@@ -31,8 +31,7 @@ from .repository import GitRepository
 
 _logger = logging.getLogger(__name__)
 
-#: The fixed reasons `adopt` answers (`job_lane.ADOPTION_CONTAINER_REASONS`).
-REPOSITORY_BUSY = "repository_busy"
+#: The fixed reason `adopt` answers on a failure (`job_lane.ADOPTION_CONTAINER_REASONS`).
 DELIVERY_FAILED = "delivery_failed"
 #: How many times a pull-request create is made (a refused or lost first one is read back, then made once more).
 _CREATE_ATTEMPTS = 2
@@ -62,10 +61,11 @@ def adopt(repository: GitRepository, *, system: str, rendering: dict[str, bytes]
         return AdoptionRecord.failed(DELIVERY_FAILED)
 
 
-def _fetch(repository: GitRepository) -> AdoptionRecord | None:
-    """The refetch after a refused push (the racer's branch): None when it succeeded, else the failed record."""
+def _fetch(repository: GitRepository, branch: str) -> AdoptionRecord | None:
+    """The fetch after a refused push, by name (`main` and the racer's `branch`): None when it succeeded, else the failed
+    record."""
     try:
-        repository.fetch()
+        repository.fetch("refs/heads/main", f"refs/heads/{branch}")
     except Exception:  # noqa: BLE001 — A3: any fetch fault, the forge token's refusal included, is a fixed reason
         _logger.exception("adoption: the fetch of origin failed")
         return AdoptionRecord.failed(DELIVERY_FAILED)
@@ -125,7 +125,7 @@ def _after_refused_push(repository: GitRepository, system: str, branch: str, ren
     """The branch refused our push (git refuses a non-fast-forward: a racer's commit of the same tree has another id).
     The branch is fetched; a pull request now naming it is answered by steps 1-4; none, and its tip holding the rendering at
     every path, the pull request is opened on that tip; anything else fails. The branch is never moved."""
-    refused = _fetch(repository)
+    refused = _fetch(repository, branch)
     if refused is not None:
         return refused
     decided = _decide(repository, system, branch, rendering)
