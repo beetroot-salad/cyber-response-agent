@@ -162,6 +162,8 @@ EXISTING_ROUTES = {
     ("POST", API + "/tenants/{tenant_id}/learning/items/{item_id}/release"),
     ("POST", API + "/tenants/{tenant_id}/learning/batches/{batch_id}/release"),
     ("POST", API + "/tenants/{tenant_id}/learning/batches/{batch_id}/abandon"),
+    # Home redesign: where a browser opens the tenant's knowledge repository
+    ("GET", API + "/tenants/{tenant_id}/repository"),
 }
 #: What #1306 adds (design "Endpoints"; param names pinned by this suite).
 IDENTITY_ROUTES = {
@@ -381,11 +383,15 @@ CONFIG = {route for route in EXISTING_ROUTES if any(w in route[1] for w in ("/sy
 #: refusals, audit, roles), so they are not scripted here; the sweeps over `EXISTING_ROUTES` (declared problems) still cover them.
 LEARNING_ACTIONS = {route for route in EXISTING_ROUTES
                     if route[0] == "POST" and route[1].endswith(("/release", "/abandon")) and "/learning/" in route[1]}
+#: The home redesign's repository read answers from the tenant store's record (`test_1083_real_server`'s `home_` tests:
+#: served, refused forms, another tenant's 404), so it is not scripted here.
+REPOSITORY = {("GET", API + "/tenants/{tenant_id}/repository")}
 
 
 def test_the_happy_path_table_covers_every_existing_route() -> None:
     """Every route is scripted here, answered by the real store (`CONFIG`, `LEARNING_ACTIONS`), or refused with its owner's number."""
-    assert {route for route, *_ in HAPPY} == EXISTING_ROUTES - CONFIG - LEARNING_ACTIONS
+    assert {route for route, *_ in HAPPY} == EXISTING_ROUTES - CONFIG - LEARNING_ACTIONS - REPOSITORY
+    assert REPOSITORY <= EXISTING_ROUTES
     assert len(CONFIG) == 10
     assert len(LEARNING_ACTIONS) == 3
 

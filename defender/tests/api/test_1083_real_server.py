@@ -843,6 +843,7 @@ PERMISSION_OF = {
     ("GET", f"{TENANT}/readiness/{{}}"): "config.read",  # #1471 R2
     ("POST", f"{TENANT}/systems/{{}}/adoptions"): "config.write",  # #1471 A1
     ("GET", f"{TENANT}/adoptions/{{}}"): "config.read",  # #1471 A2
+    ("GET", f"{TENANT}/repository"): "work.read",  # home redesign: where the knowledge repo opens
     ("GET", f"{TENANT}/learning/items"): "work.read",  # #1485 O3
     ("GET", f"{TENANT}/learning/parked-batches"): "work.read",  # #1485 O3
     ("POST", f"{TENANT}/learning/items/{{}}/release"): "learning.manage",  # #1537 O7 (r3.1 forced choice)
