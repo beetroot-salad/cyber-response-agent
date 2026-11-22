@@ -168,7 +168,7 @@ def _peel(record: StoreRecord, path: str, current: str | None,
 def revert_lesson(delivery: TenantDelivery, store: Any, *, lesson_path: str, lesson_name: str,
                   owner: str, lanes: Sequence[str]) -> Delivered:
     """Flow 4, D-peel, over the learning store (sync facade `store`): undo the newest batch's net change
-    to `lesson_path` that `origin/main` still holds exactly, as a revert batch's one commit on `main`,
+    to `lesson_path` that `main` (the operation's fetch) still holds exactly, as a revert batch's one commit on `main`,
     pushed to the batch's own branch with its PR, the batch then in review.
 
     The change's last revert decides first: in review, its PR is the answer; closed unmerged, a

@@ -96,7 +96,7 @@ def _deliver(container: JobContainer, ns: argparse.Namespace, root: Any, client:
                 import httpx
 
                 client = owned.enter_context(httpx.Client())
-            repository = owned.enter_context(contextlib.closing(GitRepository.open(
+            repository = owned.enter_context(contextlib.closing(GitRepository.open(  # lint-text-io: ok — a repository's constructor
                 tenant_id=str(tenant.id), origin=str(facts["forge_origin"]), identity=container.forge_credential(),
                 client=client)))
             return adopt(repository, system=str(facts["system"]), rendering=rendering, digest=str(facts["digest"]))

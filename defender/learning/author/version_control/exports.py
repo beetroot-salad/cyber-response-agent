@@ -1,5 +1,4 @@
-"""Knowledge validation, dead-owner sweep and atomic draft construction (SPIKE #1618: the lock, exports and the
-`current` pointer are gone)."""
+"""Knowledge validation at one commit, and atomic draft construction."""
 
 from __future__ import annotations
 
@@ -8,7 +7,6 @@ from defender.records.formats import unwrap_drafts_root
 from pathlib import Path
 
 from defender import _io
-from defender.tenancy import TenantExport as TenantExport
 from defender.tenancy import owned_temporary
 from defender.tenancy import remove_entry as _remove_entry
 from defender.tenancy import Tenant, parse_tenant_id_bytes
@@ -26,11 +24,6 @@ from .repository import LocalRepository
 #: What a draft is built under (`.<id>-<rand>`) before it is renamed into place: a leading dot
 #: is outside the batch-id grammar, so no draft is ever named so.
 _DRAFT_TEMPORARY = "."
-
-
-def scratch_name(prefix: str) -> str:
-    """A name for scratch this process is about to make: carries its owner from its first instant."""
-    return owned_temporary(prefix)
 
 
 def knowledge_at(
@@ -80,7 +73,7 @@ def build_draft(
     refusing any entry already there. `repository` is the caller's private repository, outside `<T>`."""
     files = agent_blobs(repository, commit)
     drafts = unwrap_drafts_root(tenant.drafts)
-    temporary = scratch_name(f"{_DRAFT_TEMPORARY}{batch_id}")
+    temporary = owned_temporary(f"{_DRAFT_TEMPORARY}{batch_id}")
     try:
         with _io.hold_new(drafts, temporary, exclusive=True) as draft:
             write_owner(drafts / temporary)
@@ -102,7 +95,7 @@ def build_draft(
 def agent_blobs(repository: LocalRepository, commit: str) -> dict[str, bytes]:
     """`agent/` at `commit`, by path below it, each file's exact stored bytes, from git's
     objects: what the draft is copied from, derived against and reset to. An entry that is
-    not a regular blob refuses (publish refused it already for an export commit)."""
+    not a regular blob refuses."""
     entries = repository.entries(commit, ["agent"], recursive=True)
     for mode, kind, _oid, path in entries:  # lint-stale-ref: ok — a local name that only shares its spelling with a symbol the retired importer defined
         if kind != "blob" or mode not in _REGULAR_MODES:

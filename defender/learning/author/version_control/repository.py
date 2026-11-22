@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import math
 import secrets
-import shutil
 import tempfile
+import weakref
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,7 +19,7 @@ from defender import _git
 from .auth import CLOCK_SKEW, TOKEN_TTL, ForgeCredential
 from .forgejo import ForgejoForge, OpenedPullRequest, PullRequest
 from .model import _REGULAR_MODES, ChangeSet, DeliveryRefused
-from .transport import _NO_BACKGROUND_GIT, GitTransport, clone_main, fetch_private, init_for_commit, init_private
+from .transport import _NO_BACKGROUND_GIT, GitTransport, clone, init_for_commit
 
 
 def _local_env() -> dict[str, str]:
@@ -84,26 +85,12 @@ def _tree_entries(
 NETWORK_TIMEOUT = 120.0
 
 
-def _require_own_repository(path: Path, env: dict[str, str]) -> None:
-    top = _git.git(["rev-parse", "--show-toplevel"], cwd=path, env=env)
-    if Path(top).resolve() != path.resolve():
-        raise DeliveryRefused(
-            f"tenant knowledge is not its own versioned git repository: {path}"
-        )
-
-
 @dataclass(frozen=True, repr=False)
 class LocalRepository:
-    """Git's local semantics for one tenant clone: its objects, refs, index and checkout, with
-    no forge, no identity and no network (flow 2's materialise reads through this alone)."""
+    """Git's local semantics for one private bare repository: its objects and refs, with no forge, no identity and no
+    network."""
 
     path: Path
-
-    @classmethod
-    def open_local(cls, path: Path) -> LocalRepository:
-        """The clone at `path`, refused unless it is its own git repository."""
-        _require_own_repository(path, _local_env())
-        return cls(path)
 
     def _git(
         self,
@@ -123,19 +110,19 @@ class LocalRepository:
         return self._git(["rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}"])
 
     def holds_commit(self, commit: str) -> bool:
-        """Whether the clone's objects hold `commit` as a commit (no fetch is made)."""
+        """Whether the repository holds `commit` as a commit (no fetch is made)."""
         return _git.git_ok(
             ["cat-file", "-e", f"{commit}^{{commit}}"], cwd=self.path, env=_local_env()
         )
 
     def holds_ref(self, ref: str) -> bool:
-        """Whether the clone has the full ref `ref` (no fetch is made)."""
+        """Whether the repository has the full ref `ref` (no fetch is made)."""
         return _git.git_ok(
             ["show-ref", "--verify", "--quiet", ref], cwd=self.path, env=_local_env()
         )
 
     def branch_tip(self, branch: str) -> str | None:
-        """The commit `refs/heads/<branch>` names, or `None` when the clone has no such
+        """The commit `refs/heads/<branch>` names, or `None` when the repository has no such
         branch."""
         tip = _git.git(
             ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}^{{commit}}"],
@@ -251,7 +238,7 @@ class LocalRepository:
 
 @dataclass(frozen=True, repr=False)
 class GitRepository(LocalRepository):
-    """Git semantics for one tenant clone, with an explicit Forgejo client and identity.
+    """Git semantics for one private bare repository, with an explicit Forgejo client and identity.
     Raw git syntax and remote authentication stay here; delivery coordinates domain steps.
     """
 
@@ -269,11 +256,12 @@ class GitRepository(LocalRepository):
         identity: ForgeCredential,
         client: httpx.Client,
         network_timeout: float = NETWORK_TIMEOUT,
-        path: Path | None = None,
+        data_root: Path | None = None,
     ) -> GitRepository:
-        """SPIKE (#1618): a drain tick's, revert's, adoption's or feedback's one private bare repository, in its own temporary
-        folder (never under `<T>`; `close()` removes it) holding history and every branch of `origin` as local heads
-        (`+refs/heads/*:refs/heads/*`): its local tip of a branch IS the remote's."""
+        """One operation's private bare repository (a drain tick's, revert's, adoption's or feedback's), never under
+        `<T>`: on the host (`data_root`) an owned 0700 folder under `<data root>/.repo-scratch/`; in a job container
+        (`None`) its temporary folder, which dies with it. Opened by one clone of every branch with history, each as the
+        same local head, so its tip of a branch is the remote's. `close()` removes it (so does dropping it)."""
         if (
             isinstance(network_timeout, bool)
             or not isinstance(network_timeout, (int, float))
@@ -288,19 +276,27 @@ class GitRepository(LocalRepository):
             raise DeliveryRefused("The Forgejo identity belongs to a different tenant")
         forge = ForgejoForge(origin=origin, identity=identity, client=client)
         forge.repository_id()
-        forge.verify_main_protection()
-        path = path or Path(tempfile.mkdtemp(prefix="defender-repo-"))
+        forge.verify_main_protection()  # D9: delivery checks main's protection
+        from defender.tenancy import private_folder
+
+        scratch = contextlib.ExitStack()
         try:
-            init_private(path, origin=origin, identity=identity, timeout=float(network_timeout))
-            repository = cls(path, origin, forge, identity, float(network_timeout))
-            repository.fetch()
+            folder = (scratch.enter_context(private_folder(data_root, tenant_id)) if data_root is not None
+                      else Path(scratch.enter_context(tempfile.TemporaryDirectory(prefix="defender-repo-"))))
+            path = folder / "repo.git"
+            clone(path, origin=origin, identity=identity, timeout=float(network_timeout), main_only=False)
         except BaseException:
-            shutil.rmtree(path, ignore_errors=True)
+            scratch.close()
             raise
+        repository = cls(path, origin, forge, identity, float(network_timeout))
+        object.__setattr__(repository, "_close", weakref.finalize(repository, scratch.close))
         return repository
 
     def close(self) -> None:
-        shutil.rmtree(self.path, ignore_errors=True)
+        """Remove the repository (a fetch child's has no closer: its caller owns the folder)."""
+        closer = getattr(self, "_close", None)
+        if closer is not None:
+            closer()
 
     @classmethod
     def open_private(
@@ -314,36 +310,38 @@ class GitRepository(LocalRepository):
         network_timeout: float = NETWORK_TIMEOUT,
         commit: str | None = None,
     ) -> tuple[GitRepository, str]:
-        """SPIKE (#1618): the fetch child's repository: a fresh bare repository at `path` holding one depth-1 fetch of
-        `main`, or of `commit` by id; answers it and the commit the fetch brought."""
+        """The fetch child's repository: a fresh bare repository at `path` holding one depth-1 fetch of `main`, or of
+        `commit` by id; answers it and the commit the fetch brought. No forge API call is made (D9)."""
         if identity.tenant_id != tenant_id:
             raise DeliveryRefused("The Forgejo identity belongs to a different tenant")
         forge = ForgejoForge(origin=origin, identity=identity, client=client)
-        pass  # D9: the fetch reads no forge API (protection only when asked)
+        timeout = float(network_timeout)
+        repository = cls(path, origin, forge, identity, timeout)
         try:
             if commit is None:
-                got = clone_main(path, origin=origin, identity=identity, timeout=float(network_timeout))
-            else:
-                init_for_commit(path, commit, timeout=float(network_timeout))
-                got = fetch_private(path, origin=origin, identity=identity, timeout=float(network_timeout),
-                                    commit=commit)
+                clone(path, origin=origin, identity=identity, timeout=timeout, main_only=True)
+                return repository, repository.revision("refs/heads/main")
+            init_for_commit(path, commit, timeout=timeout)
+            repository._transport().fetch_commit(commit, depth=1)
+            return repository, repository.revision(f"refs/fetched/{commit}")
         except _git.GitError as refused:
             what = f"commit {commit}" if commit else "main"
             raise DeliveryRefused(f"Forgejo did not serve {what}: {refused}") from None
-        return cls(path, origin, forge, identity, float(network_timeout)), got
 
     def _transport(self) -> GitTransport:
         return GitTransport(self.path, self.origin, self.identity, self.network_timeout)
 
     def fetch(self, *refs: str) -> None:
+        """A later fetch into this repository, by name (`main` when none is named; `GitTransport.fetch`)."""
         self._transport().fetch(*refs)
 
     def pull_head(self, number: int) -> str | None:
         """The tip of PR `number` (`refs/pull/<n>/head`, which Forgejo keeps after the branch is deleted: C-F5),
-        fetched now; `None` when Forgejo does not serve it."""
+        fetched now by name; `None` when it cannot be fetched (a caller that needs a tip then fetches one by id, which
+        refuses when the forge is unreachable)."""
         ref = f"refs/pull/{number}/head"
         try:
-            self._transport().fetch(ref)
+            self.fetch(ref)
         except _git.GitError:
             return None
         return self.revision(ref)

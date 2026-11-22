@@ -1,87 +1,17 @@
-"""A tenant's published knowledge, read from files alone: what a run (which has no git, no
-network and never imports the delivery package, #1108 P4 P-3) needs to find the export it
-copies, its files read whole with no link followed, and who holds the tenant's knowledge lock.
-Writing exports is the delivery package's (`learning/author/version_control/exports.py`); this
-module only reads."""
+"""File reads and removals the delivery package and the run side share, with no link followed: no git, no network."""
 from __future__ import annotations
 
 import os
 import shutil
 import stat
-from dataclasses import dataclass
 from pathlib import Path
 
 from defender import _io
-from defender.records.formats import unwrap_exports_root
-from defender.records.formats import OID
-from defender.tenancy._tenant import Tenant
+from defender.records.formats import OID as OID  # run_knowledge's import (owed: from records.formats directly)
 
 
 class DeliveryRefused(Exception):
     """The tenant cannot safely author or deliver this; the message names why."""
-
-
-#: The pointer file in `<T>/exports/` naming the latest published export.
-POINTER = "current"
-
-
-@dataclass(frozen=True)
-class TenantExport:
-    """The tenant's knowledge at one commit: `path` (`<T>/exports/<commit>/`) holds exactly that
-    commit's `agent/` and `settings/` regular blobs, written from git objects by the host and
-    never changed once published."""
-
-    commit: str
-    path: Path
-
-
-def read_export_text(export: TenantExport, rel: str) -> tuple[str | None, str | None]:
-    """`(text, None)` for the file `rel` (relative to the export folder, e.g. `agent/...`) of
-    `export`, or `(None, why)`: read below the export folder with no link followed."""
-    with _io.bind(export.path) as root:
-        got = root.read(rel)
-    if got.text is None:
-        return None, "it is absent" if got.absent else got.reason
-    return got.text, None
-
-
-def current_export(tenant: Tenant) -> TenantExport:
-    """The export `<T>/exports/current` names, read from the files alone: no git and no process
-    (P4's runs have neither). An absent or empty pointer, one that is not an object id (one
-    leading out of `exports/` included), or one naming a missing export is `DeliveryRefused`."""
-    return _current_at(unwrap_exports_root(tenant.exports), tenant.id)
-
-
-def current_export_at(exports: Path, tenant_id: object) -> TenantExport:
-    """`current_export` over an exports folder named by path (`<T>/exports/`), for a reader that
-    holds folders and no `Tenant` (the credential proxy). Same refusals."""
-    return _current_at(exports, tenant_id)
-
-
-def _current_at(exports: Path, tenant_id: object) -> TenantExport:
-    with _io.bind(exports) as folder:
-        # Text, decoded with replacement: an oid is ASCII, so any byte that is not fails the
-        # match below rather than the read.
-        pointer = folder.read(POINTER, errors="replace")
-        if pointer.text is None:
-            why = "it is absent" if pointer.absent else pointer.refusal
-            raise DeliveryRefused(
-                f"no export is published for tenant {tenant_id}: "
-                f"{exports / POINTER}: {why}"
-            )
-        commit = pointer.text.removesuffix("\n")
-        if not OID.fullmatch(commit):
-            raise DeliveryRefused(
-                f"the export pointer {exports / POINTER} names no published "
-                f"export: {pointer.text[:80]!r}"
-            )
-        found = _io.stat_entry(folder, commit)
-    if found.st is None or not stat.S_ISDIR(found.st.st_mode):
-        raise DeliveryRefused(
-            f"the export pointer {exports / POINTER} names {commit}, which is "
-            "not a published export folder"
-        )
-    return TenantExport(commit=commit, path=exports / commit)
 
 
 def regular_files(root: Path) -> dict[str, bytes]:
