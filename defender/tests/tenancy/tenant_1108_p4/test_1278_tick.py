@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+import os
 import signal
 from datetime import timedelta
 from pathlib import Path
@@ -51,6 +52,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     lead_author_drain,
     own_store,
     remote_branches,
+    run_stage,
     without_clone,
 )
 from defender.tests.tenancy.knowledge_1618 import _repos_1618 as R
@@ -788,7 +790,9 @@ def test_1618_b12_a_container_tick_builds_its_batch_on_the_base_the_helper_answe
     # K7, container side: its private repository is in its own tmpfs, never an entry of the host's `.repo-scratch/` (whose sweep a
     # container never runs) and never under `<T>`; the fetch by id and the push both reached the listener while watched
     assert watch.snapshots, "premise: the container's fetch and push were not observed"
-    assert all(snap["names"] == [] for snap in watch.snapshots), [snap["names"] for snap in watch.snapshots]
+    # (the container runs in this process; an entry of the helper's own host-side delivery, a live host owner, may stand)
+    mine = f".owner-{os.getpid()}-"
+    assert not [n for snap in watch.snapshots for n in snap["names"] if mine in n], [snap["names"] for snap in watch.snapshots]
     assert all(snap["under_tenant"] == [] for snap in watch.snapshots), [snap["under_tenant"] for snap in watch.snapshots]
 
 
@@ -808,8 +812,11 @@ def test_1618_b12_a_container_tick_refuses_a_base_it_cannot_fetch_by_id_and_auth
         return {**answer, "base": K.ABSENT_COMMIT} if name == "batch.start" else answer
 
     writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
-    _relay_tick(w, helper, ask, writer)
+    # through the stage runner, as every drain case here runs its tick (`_drain_support.author_drain`): the tick's
+    # configuration refusal is logged `critical` and is the stage's exit 2
+    rc = run_stage(lambda: _relay_tick(w, helper, ask, writer))
 
+    assert rc == 2, f"the tick did not refuse ({critical_text(caplog)})"
     assert "batch.start" in asked, "premise: the helper answered the batch start (the tick did not die earlier)"
     refusal = critical_text(caplog)
     assert K.ABSENT_COMMIT in refusal, f"the tick did not refuse naming the base it could not fetch (K5): {refusal!r}"
