@@ -14,7 +14,7 @@ import pytest
 from defender.tests.support.learning.core._store1278 import ONE, finding
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture the store needs
 
-from ._support import LANES, ForgeHTTP, close_on_remote, delivery, merge_on_remote, target
+from ._support import LANES, ForgeHTTP, close_on_remote, delivery, merge_on_remote, push_and_open, target
 
 OWNER = "revert-test"
 
@@ -69,19 +69,19 @@ def wrote(repo, tmp_path, store, name, commits, *, style="merge", merge=True):
     (a list of `{path: bytes or None}`, `None` deleting the file) are made by the batch's commit-maker, each
     recorded, then delivered as a PR and (`merge`) merged by a person in `style`, the batch then ended merged.
     Unmerged, the batch stays in review. Returns the batch id."""
-    d = delivery(repo, ForgeHTTP())
-    batch, held = claimed_batch(repo, store, d, name)
-    for files in commits:
-        for path, content in files.items():
-            file = batch.draft_root / path
-            if content is None:
-                file.unlink()
-            else:
-                file.parent.mkdir(parents=True, exist_ok=True)
-                file.write_bytes(content)
-        batch.commit(batch.change_set(), f"learning {name}")
-        batch.reset()
-    result = d.finish(batch)
+    with delivery(repo, ForgeHTTP()) as d:
+        batch, held = claimed_batch(repo, store, d, name)
+        for files in commits:
+            for path, content in files.items():
+                file = batch.draft_root / path
+                if content is None:
+                    file.unlink()
+                else:
+                    file.parent.mkdir(parents=True, exist_ok=True)
+                    file.write_bytes(content)
+            batch.commit(batch.change_set(), f"learning {name}")
+            batch.reset()
+        result = push_and_open(batch)  # #1618: the tick's end push and PR (`finish` is deleted, test-only)
     assert result.status == "opened", result
     reviewed(store, held, result)
     if merge:
