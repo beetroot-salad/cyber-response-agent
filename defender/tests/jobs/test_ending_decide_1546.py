@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.evidence._facts1546 import inv_progress, learning_progress
 from defender.tests.support.jobs._ending1546 import (
     BUNDLE,
     EPISODE_PAGE,
@@ -225,7 +226,7 @@ def test_a_cost_after_a_cancel_offboard_or_take_over_is_the_last_staged_progress
     """D15: not the outcome's figure; the last `progress` and the lower-limit mark. After a normal exit, the outcome's
     figure with its own mark. (D15)"""
     facts, ups = _inv_input(True, "complete_clean", UP, "rendered", UP)
-    facts["progress"] = {"cost_usd": 0.17}
+    facts["progress"] = inv_progress(0.17)
     cut = decide("investigation", facts, ups, by)
     assert (cut.cost_usd, cut.cost_is_lower_limit) == (0.17, True)
     done = decide("investigation", facts, ups, "exited")
@@ -235,7 +236,7 @@ def test_a_cost_after_a_cancel_offboard_or_take_over_is_the_last_staged_progress
 def test_a_learning_cost_after_take_over_is_its_last_staged_sibling_cost_as_a_lower_limit():
     """D15 for a learning job: the last `progress` sibling cost. (D15)"""
     facts = {"started": STARTED, "outcome": learning_outcome(cost=9.0),
-             "progress": {"stage": "judge", "fork_message_id": "m-1", "sibling_cost_usd": 2.5}}
+             "progress": learning_progress(2.5)}
     got = decide("learning", facts, {}, "lapsed")
     assert got.sibling_cost_usd == 2.5
 
@@ -244,10 +245,10 @@ def test_a_learning_cost_after_take_over_is_its_last_staged_sibling_cost_as_a_lo
 def test_a_stop_gives_the_job_back_only_when_it_decided_nothing(kind):
     """`stopped` and undecided -> `HandBack` (cost and knowledge, no state); stopped and decided -> an `End`. (PR9)"""
     if kind == "investigation":
-        undecided = {"started": STARTED, "knowledge": KNOWLEDGE, "progress": {"cost_usd": 0.3}}
+        undecided = {"started": STARTED, "knowledge": KNOWLEDGE, "progress": inv_progress(0.3)}
         decided = {**undecided, "outcome": inv_outcome()}
     else:
-        undecided = {"started": STARTED, "progress": {"stage": "judge", "fork_message_id": "m", "sibling_cost_usd": 0.3}}
+        undecided = {"started": STARTED, "progress": learning_progress(0.3)}
         decided = {**undecided, "outcome": learning_outcome()}
     hand = decide(kind, undecided, {BUNDLE: up()}, "stopped")
     assert type(hand).__name__ == "HandBack"
@@ -275,9 +276,10 @@ def test_a_lapsed_learning_job_that_decided_keeps_its_screened_findings_and_one_
                                                       ("expired_in_queue", "skipped", "expired"),
                                                       ("lapsed", "failed", "lease_lapsed")])
 def test_a_learning_ending_by_the_system_has_its_own_status_and_reason_and_no_evidence(by, status, reason):
-    """Queue expiry, offboarding and an undecided take-over end by their words; state `none`. (rule 2, 3)"""
+    """Queue expiry, offboarding and an undecided take-over end by their words (an `End` reads `stage`/`failure_reason` for
+    every kind; the row's `status`/`reason` take them); state `none`. (rule 2, 3)"""
     got = decide("learning", {"started": STARTED}, {BUNDLE: up()}, by)
-    assert (got.status, got.reason, got.evidence_state) == (status, reason, "none")
+    assert (got.stage, got.failure_reason, got.evidence_state) == (status, reason, "none")
 
 
 @pytest.mark.parametrize(("facts", "by", "stage", "reason"), [
@@ -352,5 +354,5 @@ def test_a_lesser_hand_back_stays_a_hand_back():
     """A hand-back is never turned into an ending. (PR9)"""
     from defender.jobs import ending
 
-    hand = decide("investigation", {"started": STARTED, "progress": {"cost_usd": 1.0}}, {}, "stopped")
+    hand = decide("investigation", {"started": STARTED, "progress": inv_progress(1.0)}, {}, "stopped")
     assert type(ending.lesser(hand)).__name__ == "HandBack"

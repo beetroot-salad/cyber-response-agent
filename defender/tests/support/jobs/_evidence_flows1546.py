@@ -30,25 +30,25 @@ from typing import Any
 
 from defender.tests.support.shared._postgres1339 import execute
 
-ROOTS, INPUTS, SPOOL = ".job-roots", ".job-inputs", ".job-spool"
-RUN_PAGE = "page/runtime.html"
-EPISODE_PAGE = "page/learning.html"
-STARTED = {"container": "started"}
-KNOWLEDGE = {"kind": "fresh", "commit": "c" * 40, "stale_kind": None, "reason": None}
-KNOWLEDGE_SERVED = {"status": "current", "commit": "c" * 40, "stale_kind": None}
+from defender.tests.support.evidence._facts1546 import (  # noqa: E402, F401 — re-exported: one owner of the fact bodies
+    EPISODE_PAGE,
+    KNOWLEDGE,
+    REFERENCE,
+    RUN_PAGE,
+    STARTED,
+    arm_page,
+    screened,
+    staged_inv_outcome,
+    staged_learning_outcome,
+)
 
-#: The claim's reference column per kind (the design: owner row; host-request row for readiness, adoption and drain; the
-#: tenant's learning-check hold for the post-step).
-REFERENCE = {"investigation": "investigation_id", "learning": "learning_job_id", "readiness": "host_request_id",
-             "adoption": "host_request_id", "drain": "host_request_id", "post-step": "hold_tenant_id"}
+ROOTS, INPUTS, SPOOL = ".job-roots", ".job-inputs", ".job-spool"
+inv_outcome = staged_inv_outcome
+learning_outcome = staged_learning_outcome
 
 
 def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-def arm_page(run_id: str) -> str:
-    return f"page/runs/{run_id}/runtime.html"
 
 
 # --- the rows ---------------------------------------------------------------------------------------------------------
@@ -113,26 +113,6 @@ def attempts_of(dsn: str, investigation: str) -> list[tuple[str, str]]:
     return [(str(i), s) for i, s in execute(
         dsn, "SELECT id, stage FROM jobs.investigations WHERE alert_id = (SELECT alert_id FROM jobs.investigations "
              "WHERE id = %s) ORDER BY attempt", (investigation,))]
-
-
-# --- staged values -----------------------------------------------------------------------------------------------------
-
-def inv_outcome(**over: Any) -> dict[str, Any]:
-    """An investigation's staged `outcome`: today's job-end facts with `scrub`, the #1534 closing lookup result, cost and
-    its lower-limit mark. A completed, benign, clean run costing 0.42 unless `over`."""
-    return {"setup": "done", "box": "started", "report_committed": True, "scrub": "clean", "cut_short": None,
-            "closing": {"found": "record", "disposition": "benign", "review_outcome": None, "summary": "the summary"},
-            "cost_usd": 0.42, "cost_is_lower_limit": False, **over}
-
-
-def screened(finding: list | None = None, questioner: list | None = None) -> dict[str, Any]:
-    return {"state": "screened", "rows": {"finding": finding or [], "questioner_finding": questioner or []}}
-
-
-def learning_outcome(status: str = "completed", *, findings: Any = None, cost: float = 0.0, **over: Any) -> dict[str, Any]:
-    """A learning job's staged `outcome`: the end fields, cost and `findings` (`screened{rows}` or `refused{reason}`)."""
-    return {"status": status, "reason": None, "message": None, "fork_message_id": "m-1", "stage": "judge",
-            "sibling_cost_usd": cost, "findings": findings if findings is not None else screened(), **over}
 
 
 # --- the stand-in helper ---------------------------------------------------------------------------------------------

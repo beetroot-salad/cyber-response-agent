@@ -15,6 +15,7 @@ import pytest
 
 from defender.job_host import Refused
 from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — fixtures
+from defender.tests.support.evidence._facts1546 import OUT_OF_CLAIM, STORE_FAULT, UNAVAILABLE, sent_arm, sent_arms, sent_page
 from defender.tests.support.jobs import _helper_evidence1546 as H
 from defender.tests.support.jobs import _job_helper as J
 from defender.tests.support.jobs._helper_evidence1546 import (
@@ -75,7 +76,7 @@ def test_an_investigations_pushes_are_stored_under_its_claim_wrapped_by_the_tena
         (root / "runs" / planted.owner / "runtime.html").write_bytes(TAMPERED)
         got["during"] = [p.is_dir() for p in (job_root(scene), job_inputs(scene), job_spool(scene))]
         c.request("outcome", record=inv_outcome())
-        c.request("page", record={"page": "rendered"})
+        c.request("page", record=sent_page())
         got["page"] = put_object(c, RUN_PAGE, PAGE)
         got["bundle"] = put_object(c, "bundle", BUNDLE)
         got["spool"] = spool_bytes(scene)
@@ -121,8 +122,8 @@ def test_an_arm_pages_stored_bytes_are_the_ones_the_job_pushed_not_the_arm_folde
         folder = root / "episodes" / planted.owner / "runs" / arm
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "runtime.html").write_bytes(TAMPERED)
-        c.request("arms", record={"roster": [{"run_id": arm, "world_id": world}]})
-        c.request("arm", run_id=arm, record={"scrub": "tainted", "page": "rendered"})
+        c.request("arms", record=sent_arms((arm, world)))
+        c.request("arm", run_id=arm, record=sent_arm("tainted"))
         put_object(c, H.arm_page(arm), PAGE)
         c.request("outcome", record=learning_outcome())
         put_object(c, EPISODE_PAGE, b"episode page")
@@ -171,7 +172,7 @@ def test_an_object_streamed_with_a_gap_a_repeat_no_end_or_a_wrong_digest_is_refu
             for n, chunk in enumerate(chunks):
                 _part(c, "bundle", n, n == 2, chunk, **({"sha256": sha(b"other")} if n == 2 else {}))
         got["spool"] = spool_bytes(scene)
-        send(c, "page", record={"page": "rendered"})
+        send(c, "page", record=sent_page())
         put_object(c, RUN_PAGE, PAGE)
         return 0
 
@@ -214,7 +215,7 @@ def test_each_object_is_put_once_with_its_row_pending_first_and_never_by_multipa
 
         def job(c) -> int:
             send(c, "outcome", record=inv_outcome())
-            send(c, "page", record={"page": "rendered"})
+            send(c, "page", record=sent_page())
             put_object(c, RUN_PAGE, PAGE)
             put_object(c, "bundle", BUNDLE)
             return 0
@@ -336,7 +337,7 @@ def test_a_learning_job_pulls_its_input_and_everything_else_is_out_of_claim_with
 
     drive(scene, planted, job, **store.seams)
     assert got["own"] == data
-    assert got["refused"] == ["out_of_claim"] * 4
+    assert got["refused"] == [OUT_OF_CLAIM] * 4
 
 
 @pytest.mark.parametrize("why", ["tainted", "expired", "offboarded"])
@@ -350,14 +351,14 @@ def test_a_pull_of_a_set_member_that_is_unusable_is_unavailable_never_its_bytes(
         execute(scene.dsn, "UPDATE jobs.investigations SET stage = 'failed', failure_reason = 'no_report', "
                            "evidence_state = 'partial', scrub = 'tainted' WHERE id = %s", (source,))
     else:
-        execute(scene.dsn, "DELETE FROM jobs.uploads WHERE token IN (SELECT claim_token FROM jobs.investigations "
-                           "WHERE id = %s)", (source,))
+        execute(scene.dsn, "DELETE FROM jobs.uploads WHERE token IN (SELECT token FROM jobs.claims "
+                           "WHERE investigation_id = %s)", (source,))
         execute(scene.dsn, "UPDATE jobs.investigations SET evidence_state = %s WHERE id = %s",
                 ("expired" if why == "expired" else "none", source))
     got: dict = {}
     drive(scene, planted, lambda c: got.update(code=c.refused("evidence.pull", owner=source, object="bundle", part=0).code)
           or 0, **store.seams)
-    assert got["code"] == "unavailable"
+    assert got["code"] == UNAVAILABLE
 
 
 def test_an_accepted_object_that_is_missing_or_does_not_match_its_digest_is_a_store_fault_never_wrong_bytes(scene,
@@ -371,7 +372,7 @@ def test_an_accepted_object_that_is_missing_or_does_not_match_its_digest_is_a_st
     store.plant_accepted(scene, scene.tenant, other, "bundle", b"the untouched bundle")
     gone = another_investigation(scene)
     gone_claim = store.plant_accepted(scene, scene.tenant, gone, "bundle", b"a bundle later deleted")
-    [(tampered_claim,)] = execute(scene.dsn, "SELECT claim_token FROM jobs.investigations WHERE id = %s",
+    [(tampered_claim,)] = execute(scene.dsn, "SELECT token FROM jobs.claims WHERE investigation_id = %s",
                                   (planted.source,))
     wrapped = uploads(scene.dsn, tampered_claim)["bundle"]["wrapped_key"]
     store.garage.put(object_key(scene.tenant, "investigation", planted.source, tampered_claim, "bundle"),
@@ -389,8 +390,8 @@ def test_an_accepted_object_that_is_missing_or_does_not_match_its_digest_is_a_st
 
     drive(scene, planted, job, **store.seams)
     assert got["control"] == b"the untouched bundle"
-    assert got["tampered"].code == "store_fault"
-    assert got["missing"].code == "store_fault"
+    assert got["tampered"].code == STORE_FAULT
+    assert got["missing"].code == STORE_FAULT
 
 
 @pytest.mark.parametrize("kind", ["investigation", "post-step"])
@@ -407,7 +408,7 @@ def test_a_job_with_an_empty_input_set_has_every_pull_refused(scene, evidence_st
           **seams)
     assert got["refusal"].code
     if kind == "investigation":
-        assert got["refusal"].code == "out_of_claim"
+        assert got["refusal"].code == OUT_OF_CLAIM
     assert uploads(scene.dsn, scene.claim) == {}
 
 
@@ -434,7 +435,7 @@ def test_a_job_that_claims_an_upload_it_did_not_make_or_another_claims_object_ch
         for name in (f"{planted.owner}.job-end.json", f"{planted.owner}.receipt.json", "receipt"):
             (root / "runs" / name).write_text('{"uploaded": ["bundle"], "outcome": "forged"}', encoding="utf-8")
         send(c, "outcome", record={**inv_outcome(), "uploads": [{"object": "bundle", "status": "uploaded"}]})
-        send(c, "page", record={"page": "rendered"})
+        send(c, "page", record=sent_page())
         got["forged"] = [send(c, "evidence.put", object=name, part=0, last=True, data=b"forged") for name in forged]
         got["pull"] = c.refused("evidence.pull", owner=other, object="bundle", part=0).code
         put_object(c, "bundle", b"my own bundle")
@@ -445,7 +446,7 @@ def test_a_job_that_claims_an_upload_it_did_not_make_or_another_claims_object_ch
     assert "outcome" not in staged, "a forged outcome was staged"
     assert "refused/outcome" in staged
     assert all(isinstance(r, Refused) for r in got["forged"])
-    assert got["pull"] == "out_of_claim"
+    assert got["pull"] == OUT_OF_CLAIM
     rows = uploads(scene.dsn, scene.claim)
     assert set(rows) == {"bundle"}, f"an upload row exists that the helper did not make from a legitimate put: {sorted(rows)}"
     assert rows["bundle"]["sha256"] == sha(b"my own bundle")

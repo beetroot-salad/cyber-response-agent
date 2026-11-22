@@ -14,7 +14,7 @@ listed in the slice's return:
   retried; design: 120).
 - Refusal codes of a pull: `out_of_claim`, `unavailable`, `store_fault`.
 - Tables as the sketch spelled them: `jobs.claims`, `jobs.staged_facts`, `jobs.uploads` (see `_support` of the sketch).
-- Fact and record shapes are the sketch's (`inv_outcome`, `learning_outcome`, `closing`, `KNOWLEDGE`), copied here verbatim."""
+- Fact and record shapes: `support/evidence/_facts1546.py` owns them (the picks are listed at its top); re-exported here as sent forms."""
 from __future__ import annotations
 
 import asyncio
@@ -34,6 +34,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.evidence._facts1546 import closing_found  # noqa: E402
 from defender.tests.support.jobs._job_helper import (
     ContainerStandIn,
     ForgeCredentialRecorder,
@@ -44,13 +45,7 @@ from defender.tests.support.jobs._job_helper import (
 from defender.tests.support.shared._postgres1339 import execute
 
 ROOTS, INPUTS, SPOOL, SCRATCH = ".job-roots", ".job-inputs", ".job-spool", ".job-scratch"
-RUN_PAGE = "page/runtime.html"
-EPISODE_PAGE = "page/learning.html"
 KINDS = ("investigation", "learning", "readiness", "adoption", "post-step", "drain")
-
-
-def arm_page(run_id: str) -> str:
-    return f"page/runs/{run_id}/runtime.html"
 
 
 def sha(data: bytes) -> str:
@@ -74,39 +69,27 @@ def job_spool(scene: HelperScene, claim: str | None = None) -> Path:
     return scene.root / SPOOL / (claim or scene.claim)
 
 
-# --- record shapes (the sketch's, verbatim) ------------------------------------------------------------------------------
+# --- record shapes: one owner, `support/evidence/_facts1546.py` (sent builders: what the job puts on the socket) ----------
 
-def closing(disposition: str = "benign") -> dict[str, Any]:
-    return {"found": "record", "disposition": disposition, "review": None, "summary": "the summary"}
+from defender.tests.support.evidence._facts1546 import (  # noqa: E402, F401 — re-exported: one owner of the fact bodies
+    ADOPTION_RESULT,
+    EPISODE_PAGE,
+    KNOWLEDGE,
+    READINESS_RESULT,
+    RUN_PAGE,
+    VALID,
+    arm_page,
+    inv_progress,
+    learning_progress,
+    sent_inv_outcome,
+    sent_learning_outcome,
+)
 
-
-def inv_outcome(**over: Any) -> dict[str, Any]:
-    return {"setup": "done", "box": "started", "report_committed": True, "scrub": "clean", "cut_short": None,
-            "closing": closing(), "cost_usd": 0.42, "cost_is_lower_limit": False, **over}
-
-
-def learning_outcome(status: str = "completed", *, findings: Any = None, cost: float = 0.0) -> dict[str, Any]:
-    return {"status": status, "reason": None, "message": None, "fork_message_id": "m-1", "stage": "judge",
-            "sibling_cost_usd": cost, "findings": findings if findings is not None else {
-                "state": "ok", "text": '{"finding": [], "questioner_finding": []}'}}
-
-
-KNOWLEDGE = {"kind": "fresh", "commit": "c" * 40, "stale_kind": None, "reason": None}
-READINESS_RESULT = {"outcome": "ready", "knowledge": {"status": "current", "commit": "c" * 40, "stale_kind": None},
-                    "warnings": []}
-ADOPTION_RESULT = {"outcome": "nothing_to_adopt", "pr_number": None}
-INV_PROGRESS = {"cost_usd": 0.1}
-LEARNING_PROGRESS = {"fork_message_id": "m-1", "stage": "judge", "sibling_cost_usd": 0.1}
-
-#: Each verb a job stages a fact through, with a valid record (the control of every malformed-record case).
-VALID: dict[str, tuple[str, dict[str, Any], dict[str, Any]]] = {
-    # id: (kind, verb fields, the fact name it stages)
-    "investigation-outcome": ("investigation", {"verb": "outcome", "record": inv_outcome()}, {"name": "outcome"}),
-    "learning-outcome": ("learning", {"verb": "outcome", "record": learning_outcome()}, {"name": "outcome"}),
-    "investigation-page": ("investigation", {"verb": "page", "record": {"page": "rendered"}}, {"name": "page"}),
-    "readiness-result": ("readiness", {"verb": "result", "record": READINESS_RESULT}, {"name": "result"}),
-    "adoption-result": ("adoption", {"verb": "result", "record": ADOPTION_RESULT}, {"name": "result"}),
-}
+closing = closing_found
+inv_outcome = sent_inv_outcome
+learning_outcome = sent_learning_outcome
+INV_PROGRESS = inv_progress()
+LEARNING_PROGRESS = learning_progress()
 
 
 # --- the new rows, by SQL -------------------------------------------------------------------------------------------------
@@ -183,7 +166,7 @@ def plant(scene: HelperScene, kind: str, *, inputs: list[dict[str, str]] | None 
         launch = {"investigation_id": inv, "tenant_id": t, "alert_id": alert, "digest": _alert_digest(),
                   "label": _alert_title(), "box_token": uuid.uuid4().hex}
         execute(dsn, "UPDATE jobs.investigations SET stage = 'running', started_at = now(), "
-                     "lease_expires_at = now() + interval '1 hour', claim_token = %s WHERE id = %s", (claim, inv))
+                     "lease_expires_at = now() + interval '1 hour' WHERE id = %s", (inv,))
         execute(dsn, "INSERT INTO jobs.claims (token, tenant_id, kind, investigation_id, launch, inputs) "
                      "VALUES (%s, %s, 'investigation', %s, %s::jsonb, '[]'::jsonb)", (claim, t, inv, json.dumps(launch)))
         return Planted(kind, inv, claim, None, "investigations", "investigation")
@@ -193,9 +176,9 @@ def plant(scene: HelperScene, kind: str, *, inputs: list[dict[str, str]] | None 
                      "evidence_state = 'complete', scrub = 'clean' WHERE id = %s", (source,))
         job = str(uuid.uuid4())
         execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, "
-                     "trigger, status, created_at, started_at, lease_expires_at, sibling_cost_usd, publish_state, "
-                     "claim_token) VALUES (%s, %s, %s, %s, 'k-learn', 1, 'auto', 'running', now(), now(), "
-                     "now() + interval '1 hour', 0, 'none', %s)", (job, t, alert, source, claim))
+                     "trigger, status, created_at, started_at, lease_expires_at, sibling_cost_usd, publish_state) "
+                     "VALUES (%s, %s, %s, %s, 'k-learn', 1, 'auto', 'running', now(), now(), "
+                     "now() + interval '1 hour', 0, 'none')", (job, t, alert, source))
         execute(dsn, "INSERT INTO jobs.claims (token, tenant_id, kind, learning_job_id, launch, inputs) "
                      "VALUES (%s, %s, 'learning', %s, %s::jsonb, %s::jsonb)",
                 (claim, t, job, json.dumps({"knowledge_commit": scene.t.commit}),
@@ -328,8 +311,8 @@ class Store:
         execute(scene.dsn, "INSERT INTO jobs.uploads (token, object, size, sha256, wrapped_key, status, created_at, "
                            "accepted_at) VALUES (%s, %s, %s, %s, %s, 'uploaded', now(), now())",
                 (claim, obj, len(data), sha(data), made.wrapped))
-        execute(scene.dsn, "UPDATE jobs.investigations SET evidence_state = %s, scrub = %s, claim_token = %s "
-                           "WHERE id = %s", (state, scrub, claim, owner))
+        execute(scene.dsn, "UPDATE jobs.investigations SET evidence_state = %s, scrub = %s "
+                           "WHERE id = %s", (state, scrub, owner))
         return claim
 
     def read(self, tenant: str, owner_kind: str, owner: str, claim: str, obj: str, wrapped: str) -> bytes:

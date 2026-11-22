@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pytest
 
+from defender.tests.support.evidence._facts1546 import inv_progress, roster, staged_page
 from defender.tests.support.jobs import _findings1487 as F
 from defender.tests.support.jobs._ending1546 import (
     BUNDLE,
@@ -37,7 +38,7 @@ from defender.tests.support.shared._postgres1339 import execute
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
-DONE = {"started": STARTED, "knowledge": KNOWLEDGE, "page": {"page": "rendered"}, "outcome": inv_outcome()}
+DONE = {"started": STARTED, "knowledge": KNOWLEDGE, "page": staged_page(), "outcome": inv_outcome()}
 BOTH = {BUNDLE: up(), RUN_PAGE: up()}
 
 
@@ -122,7 +123,7 @@ async def test_a_staged_outcome_does_not_survive_a_cancel_or_offboard_and_nothin
     register_tenant(dsn, T1)
     async with job_store(dsn) as store:
         inv, token = await _running(store, dsn)
-        plant_facts(dsn, token, {**DONE, "progress": {"cost_usd": 0.17}})
+        plant_facts(dsn, token, {**DONE, "progress": inv_progress(0.17)})
         plant_uploads(dsn, token, BOTH)
         if by == "cancel":
             await store.cancel_investigation(T1, inv, actor="u-1")
@@ -186,7 +187,7 @@ async def test_a_taken_over_run_ends_with_the_last_progress_as_its_cost_and_a_ro
     register_tenant(dsn, T1)
     async with job_store(dsn) as store:
         inv, token = await _running(store, dsn)
-        plant_facts(dsn, token, {"progress": {"cost_usd": 0.31}, "outcome": inv_outcome()})
+        plant_facts(dsn, token, {"progress": inv_progress(0.31), "outcome": inv_outcome()})
         plant_uploads(dsn, token, BOTH)
         lapse_lease(dsn, inv)
         await store.take_over()
@@ -203,7 +204,7 @@ async def test_a_decided_learning_take_over_stores_the_screened_findings_and_is_
     async with job_store(dsn) as store:
         job, token, _ = await _running_job(store, dsn)
         row = F.defender_row(job, 0)
-        plant_facts(dsn, token, {"started": STARTED, "arms": {"roster": []},
+        plant_facts(dsn, token, {"started": STARTED, "arms": roster(),
                                  "outcome": learning_outcome(findings=findings_screened(row))})
         plant_uploads(dsn, token, {BUNDLE: up(), EPISODE_PAGE: up()})
         execute(dsn, "UPDATE jobs.learning_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = %s", (job,))
@@ -223,7 +224,7 @@ async def test_a_handed_back_decided_learning_job_has_no_state_until_its_take_ov
     register_tenant(dsn, T1)
     async with job_store(dsn) as store:
         job, token, _ = await _running_job(store, dsn)
-        plant_facts(dsn, token, {"started": STARTED, "arms": {"roster": []},
+        plant_facts(dsn, token, {"started": STARTED, "arms": roster(),
                                  "outcome": learning_outcome(findings=findings_screened(F.defender_row(job, 0)))})
         plant_uploads(dsn, token, {BUNDLE: up()})
         hand = await end_row(store, dsn, kind="learning", tenant=T1, owner=job, token=token, by="stopped")
@@ -249,7 +250,7 @@ async def test_a_handed_back_investigation_is_not_terminal_and_is_then_taken_ove
     register_tenant(dsn, T1)
     async with job_store(dsn) as store:
         inv, token = await _running(store, dsn)
-        plant_facts(dsn, token, {"started": STARTED, "progress": {"cost_usd": 0.5}})
+        plant_facts(dsn, token, {"started": STARTED, "progress": inv_progress(0.5)})
         decision, record = await end_row(store, dsn, kind="investigation", tenant=T1, owner=inv, token=token, by="stopped")
         assert type(decision).__name__ == "HandBack"
         assert record is not None

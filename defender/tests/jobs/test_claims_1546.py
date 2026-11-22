@@ -8,6 +8,7 @@ import asyncio
 
 import pytest
 
+from defender.tests.support.evidence._facts1546 import inv_progress
 from defender.tests.support.jobs._ending1546 import (
     BUNDLE,
     STARTED,
@@ -186,7 +187,7 @@ async def test_a_write_before_the_ender_is_kept_and_counted_and_one_after_it_is_
         with pytest.raises(Conflict):
             await _fact(store, token, "knowledge", KNOWLEDGE)
         with pytest.raises(Conflict):
-            await _fact(store, token, "progress", {"cost_usd": 9.0})
+            await _fact(store, token, "progress", inv_progress(9.0))
         with pytest.raises(Conflict):
             await _upload(store, token, "page/late")
         with pytest.raises(Conflict):
@@ -285,15 +286,15 @@ async def test_the_progress_fact_is_the_one_replaced_fact_and_every_other_is_cre
     register_tenant(dsn, T1)
     async with job_store(dsn) as store:
         _, token = await _running(store, dsn)
-        await _fact(store, token, "progress", {"cost_usd": 0.1})
-        await _fact(store, token, "progress", {"cost_usd": 0.2})
+        await _fact(store, token, "progress", inv_progress(0.1))
+        await _fact(store, token, "progress", inv_progress(0.2))
         await _fact(store, token, "outcome", inv_outcome())
         with pytest.raises(Conflict):
             await _fact(store, token, "outcome", inv_outcome(scrub="tainted"))
         with pytest.raises(Conflict):
             await store.stage_fact("ffffffffffffffffffffffffffffffff", "started", STARTED)  # no such claim
     got = facts_of(dsn, token)
-    assert got["progress"] == {"cost_usd": 0.2}
+    assert got["progress"] == inv_progress(0.2)
     assert got["outcome"]["scrub"] == "clean"
 
 

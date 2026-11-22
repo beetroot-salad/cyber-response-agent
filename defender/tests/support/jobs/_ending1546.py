@@ -42,51 +42,30 @@ def decide(kind: str, facts: dict[str, Any], uploads: dict[str, dict[str, Any]],
 
 # --- staged-fact bodies (the helper's closed shapes, r8 "Staged facts"; the spelling is pinned here) ------------------------
 
-STARTED = {"container": "started"}
-#: The `knowledge` fact is the served shape itself (the helper maps once, r8: "mapped once to the served shape").
-KNOWLEDGE = {"status": "current", "commit": "c" * 40, "stale_kind": None}
-UP, PENDING, REFUSED = ("uploaded", "pending", "refused")
-BUNDLE, RUN_PAGE, EPISODE_PAGE = "bundle", "page/runtime.html", "page/learning.html"
+from defender.tests.support.evidence._facts1546 import (  # noqa: E402, F401 — re-exported: one owner of the fact bodies
+    BUNDLE,
+    EPISODE_PAGE,
+    KNOWLEDGE,
+    PENDING,
+    REFUSED,
+    RUN_PAGE,
+    STARTED,
+    UP,
+    arm_page,
+    closing_found,
+    findings_refused,
+    refused,
+    screened,
+    staged_inv_outcome,
+    staged_learning_outcome,
+    up,
+)
 
-
-def arm_page(run_id: str) -> str:
-    return f"page/runs/{run_id}/runtime.html"
-
-
-def closing_found(disposition: str = "benign") -> dict[str, Any]:
-    """PINNED spelling of r8's `closing: found{disposition, review_outcome, summary} | never_closed | could_not_look`."""
-    return {"found": "record", "disposition": disposition, "review_outcome": None, "summary": "the summary"}
-
-
-def inv_outcome(**over: Any) -> dict[str, Any]:
-    """The investigation `outcome` fact: today's job-end facts with `scrub` for `scrub_verified`, `closing`, cost and
-    its lower-limit mark. A completed benign run costing 0.42 unless `over`."""
-    return {"setup": "done", "box": "started", "report_committed": True, "scrub": "clean", "cut_short": None,
-            "closing": closing_found(), "cost_usd": 0.42, "cost_is_lower_limit": False, **over}
-
-
-def findings_screened(*rows: dict[str, Any], questioner: tuple[dict[str, Any], ...] = ()) -> dict[str, Any]:
-    """PINNED spelling of `findings: screened{rows by channel}`; channels are the store's kind names."""
-    return {"state": "screened", "rows": {"finding": list(rows), "questioner_finding": list(questioner)}}
-
-
-FINDINGS_REFUSED = {"state": "refused", "reason": "malformed"}
-
-
-def learning_outcome(status: str = "completed", *, findings: Any = None, cost: float = 0.0,
-                     reason: str | None = None) -> dict[str, Any]:
-    """The learning `outcome` fact: learning-end fields, cost, `findings` (screened rows by default, none)."""
-    return {"status": status, "reason": reason, "message": None, "fork_message_id": "m-1", "stage": "judge",
-            "sibling_cost_usd": cost, "findings": findings if findings is not None else findings_screened()}
-
-
-def refused(name: str, reason: str = "malformed") -> dict[str, Any]:
-    """The fact `refused/<name>` (r8: create-once, owes nothing)."""
-    return {f"refused/{name}": {"reason": reason}}
-
-
-def up(status: str = UP, scrub: str | None = None) -> dict[str, Any]:
-    return {"status": status, "scrub": scrub}
+#: The staged forms: what the worker reads (the decide and apply tests build their facts with these).
+inv_outcome = staged_inv_outcome
+learning_outcome = staged_learning_outcome
+findings_screened = screened
+FINDINGS_REFUSED = findings_refused()
 
 
 # --- SQL planters and readers: the rows by SQL, never through the code under test -----------------------------------------

@@ -11,8 +11,7 @@ staged rows; (5) root, inputs and spool of the claim are gone (A-O1). NOT verifi
 protocol script `_job_container1546.py`, so the replay driver is not in the container), the alias probe at `/tmp` (G18's
 other half: `test_box_boundary_e2e`/`test_scrub_lifecycle` own it), cross-tenant refusals (slice SB).
 
-Seam picks, all in `support/jobs/_job_container1546.py`/here: the helper's store configuration env `DEFENDER_EVIDENCE_*`
-(the design does not name it) and the verbs `outcome`, `page`, `evidence.put`."""
+Seam picks (store env, verbs, record shapes): `support/evidence/_facts1546.py`."""
 from __future__ import annotations
 
 import io
@@ -27,6 +26,7 @@ import pytest
 
 from defender.box import BoxSpec
 from defender.tests.support.evidence._evidence1546 import evidence_keys, garage, new_sse_key  # noqa: F401 — fixtures
+from defender.tests.support.evidence._facts1546 import evidence_env
 from defender.tests.support.jobs._evidence_flows1546 import INPUTS, ROOTS, SPOOL, accepted, claim_of, owner, sha
 from defender.tests.support.jobs._job_helper import ensure_job_network, no_proxy_records
 from defender.tests.support.jobs._jobs1342 import StandInContainers, an_alert, job_store, make_worker, register_tenant
@@ -86,9 +86,8 @@ async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_moun
         monkeypatch.setenv("DOCKER_LOG", str(log))
         monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
         monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)
-        for name, value in {"ENDPOINT": garage.endpoint, "BUCKET": garage.bucket, "ACCESS_KEY": garage.access_key,
-                            "SECRET_KEY": garage.secret_key, "REGION": garage.region}.items():
-            monkeypatch.setenv(f"DEFENDER_EVIDENCE_{name}", value)
+        for name, value in evidence_env(garage).items():
+            monkeypatch.setenv(name, value)
         from defender.box import run_docker
 
         ensure_job_network(run_docker)

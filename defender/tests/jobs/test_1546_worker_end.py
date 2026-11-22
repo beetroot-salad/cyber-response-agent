@@ -16,11 +16,11 @@ from defender.tests.jobs.test_1344_learning_jobs import (
     learning_worker,
     post_child,
 )
+from defender.tests.support.evidence._facts1546 import arm_facts, arm_page, staged_arm, staged_page
 from defender.tests.support.jobs._evidence_flows1546 import (
     EPISODE_PAGE,
     INPUTS,
     KNOWLEDGE,
-    KNOWLEDGE_SERVED,
     ROOTS,
     RUN_PAGE,
     SPOOL,
@@ -63,7 +63,7 @@ def _staging(world, child, *, outcome=None, page="rendered", objects=None, extra
     if outcome is not None:
         staged["outcome"] = outcome
     if page is not None:
-        staged["page"] = page
+        staged["page"] = staged_page(page)
     return Staging(world["dsn"], world["root"], "investigation", lambda launch: launch.investigation_id, child,
                    staged=staged, objects={"bundle": BUNDLE, RUN_PAGE: PAGE} if objects is None else objects, **kw)
 
@@ -85,7 +85,7 @@ async def test_a_normal_end_is_complete_clean_and_accepts_exactly_its_claims_upl
 
     assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("completed", "benign", None), stored
     assert stored["cost_usd"] == pytest.approx(0.42)
-    assert stored["knowledge"] == KNOWLEDGE_SERVED
+    assert stored["knowledge"] == KNOWLEDGE
     assert owner(world["dsn"], "investigations", inv, "scrub", "evidence_state") == ("clean", "complete")
     assert accepted(world["dsn"], staging.token) == sorted(["bundle", RUN_PAGE])
     claim = claim_row(world["dsn"], staging.token)
@@ -161,7 +161,7 @@ async def test_a_staged_outcome_wins_over_every_file_the_job_leaves(world):
     follows the staged rows. (A-O2, PR4)"""
     staging = _staging(world, _child(world, files=dict(DECOYS)), outcome=inv_outcome())
     _, stored = await _drain(world, staging)
-    assert (stored["stage"], stored["disposition"], stored["knowledge"]) == ("completed", "benign", KNOWLEDGE_SERVED)
+    assert (stored["stage"], stored["disposition"], stored["knowledge"]) == ("completed", "benign", KNOWLEDGE)
 
 
 async def test_the_worker_opens_no_file_under_a_job_root_or_a_tenant_folder_and_no_sqlite_database(world):
@@ -277,7 +277,7 @@ async def test_screened_findings_are_stored_with_the_ending(world):
         def stage(token: str) -> None:
             return None
 
-        outcome = learning_outcome(findings=screened([F.defender_row(job, 0)], [F.world_row(job, 0)]))
+        outcome = learning_outcome(findings=screened(F.defender_row(job, 0), questioner=(F.world_row(job, 0),)))
         staging = Staging(dsn, world["root"], "learning", lambda launch: launch.job_id, job_child(world),
                           staged={"started": STARTED, "outcome": outcome}, objects={EPISODE_PAGE: PAGE, "bundle": BUNDLE})
         await learning_worker(world, store, job=staging, post=post_child(world)).drain()
@@ -292,12 +292,8 @@ async def test_a_learning_jobs_arms_databases_ride_in_its_bundle_and_a_non_clean
     """The job's outcome stays `completed` and the evidence `complete` when an arm's page was `render_failed` (its fact says
     so, the page owed is only the rendered arms'); an arm with `scrub = tainted` is left out, not `lost`. (D3, D12, D14,
     PR8)"""
-    from defender.tests.support.jobs._evidence_flows1546 import arm_page
-
-    arms = {"arms": ["a-1", "a-2", "a-3"],
-            "arm/a-1": {"scrub": "clean", "page": "rendered"},
-            "arm/a-2": {"scrub": "clean", "page": "render_failed"},
-            "arm/a-3": {"scrub": "tainted", "page": "none"}}
+    arms = arm_facts(**{"a-1": staged_arm("clean", "rendered"), "a-2": staged_arm("clean", "render_failed"),
+                        "a-3": staged_arm("tainted", "none")})
     from defender.tests.jobs.test_1344_learning_jobs import queued_job
 
     dsn = world["dsn"]

@@ -271,7 +271,6 @@ async def test_the_grace_sweep_removes_store_objects_no_upload_row_names(migrate
         execute(dsn, "UPDATE jobs.uploads SET status = 'pending' WHERE token = %s", (live["claim"],))
         execute(dsn, "DELETE FROM jobs.uploads WHERE token = %s", (deleted["claim"],))
         execute(dsn, "DELETE FROM jobs.claims WHERE token = %s", (deleted["claim"],))
-        execute(dsn, "UPDATE jobs.investigations SET claim_token = NULL WHERE id = %s", (deleted["owner"],))
         assert present(garage, deleted["key"]), "premise: the object outlived its rows"
         await _run(store, garage)
     assert gone(garage, deleted["key"])

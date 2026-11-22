@@ -1,7 +1,7 @@
 # ruff: noqa: PLR0913
 """#1546 slice SE test machinery (retention, offboarding) — NO test functions.
 
-The store-side rows (`jobs.claims`, `jobs.staged_facts`, `jobs.uploads`, owner columns `evidence_state`, `claim_token`) are
+The store-side rows (`jobs.claims`, `jobs.staged_facts`, `jobs.uploads`, owner columns `evidence_state`; the claim names its owner, never the reverse) are
 planted by SQL as the end transaction leaves them, and the evidence store is the real Garage (`_evidence1546.garage`).
 Pinned names (design r8 leaves them open; the sketch's picks): those tables and columns, `tenancy.evidence_retention
 (tenant_id, investigation_days, learning_days)`, `defender.evidence.BlobStore(endpoint=, bucket=, access_key=, secret_key=,
@@ -104,16 +104,15 @@ def make_owner(dsn: str, garage: Garage, tenant: str, ticket: str, *, kind: str 
                      "VALUES (%s, %s, %s, %s, %s, 1, 'explicit', 'completed', now(), 0, 'none', %s, "
                      "now() - %s * interval '1 day')", (owner_id, tenant, alert, inv_id, f"k-{ticket}-l", state, ended_days_ago))
         insert_claim(dsn, token=claim, tenant=tenant, kind="learning", ref=owner_id)
-        execute(dsn, "UPDATE jobs.learning_jobs SET claim_token = %s WHERE id = %s", (claim, owner_id))
     else:
         insert_claim(dsn, token=claim, tenant=tenant, kind="investigation", ref=inv_id)
         if live:
-            execute(dsn, "UPDATE jobs.investigations SET stage = 'running', started_at = now(), claim_token = %s, "
-                         "lease_expires_at = now() + interval '1 hour' WHERE id = %s", (claim, inv_id))
+            execute(dsn, "UPDATE jobs.investigations SET stage = 'running', started_at = now(), "
+                         "lease_expires_at = now() + interval '1 hour' WHERE id = %s", (inv_id,))
         else:
             execute(dsn, f"UPDATE jobs.investigations SET stage = 'completed', disposition = 'benign', {ended}, "  # noqa: S608
-                         "evidence_state = %s, scrub = 'clean', claim_token = %s WHERE id = %s",
-                    (ended_days_ago, state, claim, inv_id))
+                         "evidence_state = %s, scrub = 'clean' WHERE id = %s",
+                    (ended_days_ago, state, inv_id))
     key = object_key(tenant, kind, owner_id, claim)
     garage.tenant_prefix(tenant)  # tracked: emptied at teardown
     if put_object:

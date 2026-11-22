@@ -11,9 +11,9 @@ import psycopg
 import pytest
 
 from defender.tests.support.jobs import _worker1342 as _shared
+from defender.tests.support.evidence._facts1546 import KNOWLEDGE, RESULTS
 from defender.tests.support.jobs._evidence_flows1546 import (
     INPUTS,
-    KNOWLEDGE,
     ROOTS,
     SPOOL,
     Staging,
@@ -44,8 +44,7 @@ world = _shared.world
 _no_database_address_in_the_workers_environment = _shared._no_database_address_in_the_workers_environment
 
 KINDS = ("readiness", "adoption", "drain")
-RESULTS = {"readiness": {"outcome": "ready", "warnings": []}, "adoption": {"outcome": "opened", "pr_number": 7},
-           "drain": {"outcome": "drained"}}
+RESULTS = {**RESULTS, "adoption": {"outcome": "opened", "pr_number": 7}}  # a result the control distinguishes from the default
 #: A file that contradicts the staged result, per kind (and a stale knowledge record for readiness).
 DECOYS = {"readiness": {READINESS: failed("handover"), "{id}.knowledge-source.json": STALE_OPERATOR},
           "adoption": {ADOPTION: adopted("nothing_to_adopt")}, "drain": {"{id}.drain.json": '{"outcome": "failed"}'}}

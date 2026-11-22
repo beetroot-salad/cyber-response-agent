@@ -12,10 +12,10 @@ import uuid
 import pytest
 
 from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — fixtures
+from defender.tests.support.evidence._facts1546 import screened, sent_arm, sent_arms, sent_findings, sent_page, staged_arms, staged_knowledge
 from defender.tests.support.jobs import _job_helper as J
 from defender.tests.support.jobs._helper_evidence1546 import (
     INV_PROGRESS,
-    KNOWLEDGE,
     LEARNING_PROGRESS,
     RUN_PAGE,
     EPISODE_PAGE,
@@ -66,17 +66,17 @@ def _refused(staged: dict, name: str) -> dict:
 def test_a_valid_record_of_each_kind_is_staged_as_the_closed_shape_it_was(scene, evidence_store, case):
     """The control of every malformed-record case: a valid outcome/page/result, sent on its verb, is staged whole under its
     name, and no `refused/` fact exists. (PR2)"""
-    kind, send_as, name = VALID[case][0], VALID[case][1], VALID[case][2]["name"]
+    kind, verb, record, name, want = VALID[case]
     planted = plant(scene, kind)
     got: dict = {}
 
     def job(c) -> int:
-        got["answer"] = send(c, send_as["verb"], record=send_as["record"])
+        got["answer"] = send(c, verb, record=record)
         return 0
 
     drive(scene, planted, job, **evidence_store.seams)
     staged = facts(scene.dsn, scene.claim)
-    assert staged[name] == send_as["record"]
+    assert staged[name] == want
     assert not [n for n in staged if n.startswith("refused/")], staged
 
 
@@ -96,15 +96,15 @@ def test_the_helper_stages_started_and_the_served_knowledge_itself(scene, eviden
     drive(scene, planted, lambda c: 0, **evidence_store.seams)
     staged = facts(scene.dsn, scene.claim)
     assert "started" in staged
-    assert staged["knowledge"] == {**KNOWLEDGE, "commit": scene.t.commit}
+    assert staged["knowledge"] == staged_knowledge(scene.t.commit)
 
 
 # --- PR2: whole-class malformed records ------------------------------------------------------------------------------------
 
 def _malformed_cases():
     out = []
-    for case, (_kind, spec, _name) in sorted(VALID.items()):
-        pool = [*mutants(spec["record"], seed=1546, n=5), *non_records(seed=len(case), n=2)[:3]]
+    for case, (_kind, _verb, record, _name, _staged) in sorted(VALID.items()):
+        pool = [*mutants(record, seed=1546, n=5), *non_records(seed=len(case), n=2)[:3]]
         for i, bad in enumerate(pool[:8]):
             out.append(pytest.param(case, bad, id=f"{case}-{i}"))
     return out
@@ -114,9 +114,9 @@ def _malformed_cases():
 def test_a_malformed_outcome_page_or_result_is_staged_refused_and_owes_nothing(scene, evidence_store, case, bad):
     """A record of any malformed shape (a key dropped, an unknown key, a wrong type, non-records, raw bytes) on any verb is
     staged `refused/<name>{reason}` and never as `<name>`. (PR2, "Done when")"""
-    kind, spec, name = VALID[case][0], VALID[case][1], VALID[case][2]["name"]
+    kind, verb, _record, name, _staged = VALID[case]
     planted = plant(scene, kind)
-    drive(scene, planted, lambda c: send(c, spec["verb"], record=bad) and 0, **evidence_store.seams)
+    drive(scene, planted, lambda c: send(c, verb, record=bad) and 0, **evidence_store.seams)
     staged = facts(scene.dsn, scene.claim)
     _refused(staged, name)
     assert name not in staged, "a malformed record was staged as a fact"
@@ -193,10 +193,10 @@ def test_findings_that_pass_the_screen_are_staged_screened_by_channel(scene, evi
     """A learning outcome whose findings pass #1487's screen stages `findings = screened{rows by channel}`. (PR2, D11)"""
     planted = plant(scene, "learning")
     rows = [_finding_row(planted.owner, 0), _finding_row(planted.owner, 1)]
-    outcome = learning_outcome(findings={"state": "ok", "text": _findings_text(rows)})
+    outcome = learning_outcome(findings=sent_findings(_findings_text(rows)))
     drive(scene, planted, lambda c: send(c, "outcome", record=outcome) and 0, **evidence_store.seams)
     staged = facts(scene.dsn, scene.claim)["outcome"]
-    assert staged["findings"] == {"state": "screened", "rows": {"finding": rows, "questioner_finding": []}}
+    assert staged["findings"] == screened(*rows)
     assert staged["status"] == "completed"
 
 
@@ -207,9 +207,9 @@ def test_findings_that_fail_the_screen_or_the_cap_are_staged_refused_inside_a_va
     planted = plant(scene, "learning")
     mine = planted.owner
     findings = {
-        "foreign-id": {"state": "ok", "text": _findings_text([_finding_row(str(uuid.uuid4()), 0)])},
-        "not-a-row": {"state": "ok", "text": json.dumps({"finding": ["text"], "questioner_finding": []})},
-        "over-cap": {"state": "ok", "text": _findings_text([_finding_row(mine, 0, subject_topic="x" * (8 * 1024 * 1024))])},
+        "foreign-id": sent_findings(_findings_text([_finding_row(str(uuid.uuid4()), 0)])),
+        "not-a-row": sent_findings(json.dumps({"finding": ["text"], "questioner_finding": []})),
+        "over-cap": sent_findings(_findings_text([_finding_row(mine, 0, subject_topic="x" * (8 * 1024 * 1024))])),
         "malformed-state": {"state": "malformed"},
     }[why]
     outcome = learning_outcome(findings=findings)
@@ -230,11 +230,11 @@ def test_an_arm_fact_is_staged_only_for_a_run_on_the_roster_and_its_malformed_re
     planted = plant(scene, "learning")
     roster = [{"run_id": str(uuid.uuid4()), "world_id": str(uuid.uuid4())} for _ in range(14)]
     good, stranger = roster[0]["run_id"], str(uuid.uuid4())
-    valid = {"scrub": "clean", "page": "rendered"}
+    valid = sent_arm()
     bad = [*mutants(valid, seed=5, n=6), *non_records(seed=9, n=6)]
 
     def job(c) -> int:
-        send(c, "arms", record={"roster": roster})
+        send(c, "arms", record=sent_arms(*[(a["run_id"], a["world_id"]) for a in roster]))
         send(c, "arm", run_id=good, record=valid)
         send(c, "arm", run_id=stranger, record=valid)
         for arm, b in zip(roster[1:], bad, strict=False):
@@ -243,7 +243,7 @@ def test_an_arm_fact_is_staged_only_for_a_run_on_the_roster_and_its_malformed_re
 
     drive(scene, planted, job, **evidence_store.seams)
     staged = facts(scene.dsn, scene.claim)
-    assert staged["arms"] == {"roster": roster}
+    assert staged["arms"] == staged_arms(*[(a["run_id"], a["world_id"]) for a in roster])
     assert staged[f"arm/{good}"] == valid
     assert f"arm/{stranger}" not in staged
     for arm in roster[1:1 + len(bad)]:
@@ -255,7 +255,7 @@ def test_an_arm_fact_before_any_roster_is_not_staged(scene, evidence_store):
     """With no `arms` roster staged no run is on it: an `arm/<id>` fact is not staged. (PR2)"""
     planted = plant(scene, "learning")
     run = str(uuid.uuid4())
-    drive(scene, planted, lambda c: send(c, "arm", run_id=run, record={"scrub": "clean", "page": "rendered"}) and 0,
+    drive(scene, planted, lambda c: send(c, "arm", run_id=run, record=sent_arm()) and 0,
           **evidence_store.seams)
     assert f"arm/{run}" not in facts(scene.dsn, scene.claim)
 
@@ -311,7 +311,7 @@ def test_an_investigation_page_is_accepted_only_with_its_page_fact_rendered(scen
     def job(c) -> int:
         send(c, "outcome", record=inv_outcome())
         if page_state is not None:
-            send(c, "page", record={"page": page_state})
+            send(c, "page", record=sent_page(page_state))
         got["page"] = send(c, "evidence.put", object=RUN_PAGE, part=0, last=True, data=PAGE)
         put_object(c, "bundle", BUNDLE)
         return 0
@@ -333,9 +333,9 @@ def test_an_arm_page_is_accepted_only_with_its_arm_fact_rendered(scene, evidence
     arm, world = str(uuid.uuid4()), str(uuid.uuid4())
 
     def job(c) -> int:
-        send(c, "arms", record={"roster": [{"run_id": arm, "world_id": world}]})
+        send(c, "arms", record=sent_arms((arm, world)))
         if arm_state is not None:
-            send(c, "arm", run_id=arm, record={"scrub": "clean", "page": arm_state})
+            send(c, "arm", run_id=arm, record=sent_arm("clean", arm_state))
         send(c, "evidence.put", object=arm_page(arm), part=0, last=True, data=PAGE)
         send(c, "outcome", record=learning_outcome())
         put_object(c, EPISODE_PAGE, PAGE)
@@ -405,7 +405,7 @@ def test_a_write_after_the_references_end_is_refused_and_one_before_it_was_not_l
         seen["before"] = facts(scene.dsn, scene.claim)
         (_end_by_cancel if ender == "cancel" else _end_by_take_over)(scene, planted)
         send(c, "progress", record=late)
-        send(c, "arms", record={"roster": []})
+        send(c, "arms", record=sent_arms())
         send(c, "evidence.put", object=EPISODE_PAGE if kind == "learning" else RUN_PAGE, part=0, last=True, data=PAGE)
         seen["after"] = facts(scene.dsn, scene.claim)
         return 0
