@@ -72,12 +72,23 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Drop the port cases whose tick is of a lane the port does not serve (the lead lane's port is not in #1487,
-    design r5 "Not here", #1546): over the port they would be the adapter's own cases again."""
+    design r5 "Not here", #1546): over the port they would be the adapter's own cases again.
+
+    And keep one port case per test function, its first parametrization: a port case starts a real post-step helper
+    process per tick (about eight times an adapter case), and the port's equivalence to the adapter is held by
+    `test_1487_tick_store_conformance.py` over every verb and flow, so each test function runs over the port once and over
+    the adapter in every parametrization. A module that names `ONLY_TICK_IMPLS` runs only what it names: not thinned."""
     kept, dropped = [], []
+    ported: set[tuple[str, str]] = set()
     for item in items:
         params = getattr(getattr(item, "callspec", None), "params", {})
         lane = next((lanes.get(params[name]) for name, lanes in LANE_PARAMS.items() if name in params), None)
-        (dropped if params.get("tick_impl") == "port" and lane is not None and lane not in PORT_LANES else kept).append(item)
+        drop = params.get("tick_impl") == "port" and lane is not None and lane not in PORT_LANES
+        if params.get("tick_impl") == "port" and not drop and getattr(item.module, "ONLY_TICK_IMPLS", None) is None:
+            function = (item.nodeid.split("::", 1)[0], getattr(item, "originalname", item.name))
+            drop = function in ported
+            ported.add(function)
+        (dropped if drop else kept).append(item)
     if dropped:
         config.hook.pytest_deselected(items=dropped)
         items[:] = kept
