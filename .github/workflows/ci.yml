@@ -374,7 +374,12 @@ jobs:
       - name: Forgejo's, Keycloak's and the ingress's logs
         if: failure()
         run: |
-          docker compose -f .devcontainer/docker-compose.yml logs forgejo keycloak | tail -300
+          # One tail per service: a shared `tail` keeps only the last service's lines (run 3 lost Keycloak's).
+          for service in keycloak forgejo; do
+            echo "::group::$service"
+            docker compose -f .devcontainer/docker-compose.yml logs --no-log-prefix "$service" | tail -200
+            echo "::endgroup::"
+          done
           tail -100 "$RUNNER_TEMP/ingress.log"
 
   # The #540 boundary suite on a NATIVE daemon — the same collection the `test` job used to

@@ -94,6 +94,17 @@ class Visit:
         return str(urllib.parse.urlsplit(str(self.client.base_url)).hostname)
 
 
+def _as_a_browser_on_loopback(client: httpx.Client) -> None:
+    """Send `Secure` cookies to loopback hosts over plain http, as Chromium does: `http://localhost` and `*.localhost` are
+    potentially trustworthy origins. Keycloak marks AUTH_SESSION_ID and its siblings `Secure` even over http, and
+    `http.cookiejar` (httpx's jar) never sends a `Secure` cookie over http, so without this Keycloak answers the password
+    POST 400 (its log: LOGIN_ERROR error="cookie_not_found"). The jar spells a dotless host `localhost.local`."""
+    for cookie in client.cookies.jar:
+        host = cookie.domain.lstrip(".")
+        if host in ("localhost.local", "localhost", "127.0.0.1") or host.endswith(".localhost"):
+            cookie.secure = False
+
+
 _FORM_ACTION = re.compile(r'<form[^>]*id="kc-form-login"[^>]*action="([^"]+)"')
 
 
@@ -172,6 +183,7 @@ class Live1592:
         visit = Visit(client)
         response = client.get(path)
         for _ in range(hops):
+            _as_a_browser_on_loopback(client)
             visit.trail.append((response.request.method, str(response.request.url), response.status_code))
             visit.final = response
             if response.is_redirect:
@@ -190,6 +202,14 @@ class Live1592:
         """A person's sign-in at Forgejo through the edge: the start path, Keycloak's form, the callback."""
         visit = self.browse("/user/oauth2/product", username=username)
         assert visit.cookie_header(), f"no Forgejo session cookie after sign-in: {visit.trail}"
+        # A cookie alone proves nothing (Forgejo gives an anonymous visitor one): the sign-in re-keys the row, and the
+        # trigger stamps it (r15.2 "Forgejo sessions database"), so a signed-in cookie names a stamped row.
+        key = next(c.value for c in visit.client.cookies.jar if c.name == "session" and c.domain.split(":")[0] == visit.host())
+        from defender.tests.support.shared._postgres1339 import execute
+
+        stamped = execute(self.sessions.dsn, "SELECT signed_in_at FROM session WHERE key = %s", (key,))
+        assert stamped, f"{username} has no Forgejo session row: {visit.trail}"
+        assert stamped[0][0] is not None, f"{username} is not signed in at Forgejo: {visit.trail}"
         return visit
 
 

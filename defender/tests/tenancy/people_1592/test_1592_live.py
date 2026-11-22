@@ -197,8 +197,9 @@ SIGN_IN_PREFIXES = ("/user/oauth2/", "/realms/")
 
 def no_session_answer_ok(method: str, path: str, status: int, where: str, hosts: frozenset[str]) -> bool:
     """F10's no-session set for one allowlisted path: a 4xx refusal anywhere; a redirect (to no host, or to `hosts`, the
-    edge and Keycloak) only to the sign-in page or start or the realm, or from a public asset to a public asset; a 200
-    only for the sign-in page or a public asset; a 500 only for the callback."""
+    edge and Keycloak) only to the sign-in page or start or the realm, from a public asset to a public asset, or from a
+    POST back to the site's landing page; a 200 only for a GET of the landing page, the sign-in page or a public asset;
+    a 500 only for the callback."""
     if 400 <= status < 500:
         return True
     if 300 <= status < 400:
@@ -207,9 +208,11 @@ def no_session_answer_ok(method: str, path: str, status: int, where: str, hosts:
             return False
         if target.path == "/user/login" or target.path.startswith(SIGN_IN_PREFIXES):
             return True
+        if method == "POST" and target.path in ("", "/") and not target.query:
+            return True
         return path.startswith(PUBLIC_ASSETS) and target.path.startswith(PUBLIC_ASSETS)
     if status == 200:
-        return method == "GET" and (path == "/user/login" or path.startswith(PUBLIC_ASSETS))
+        return method == "GET" and (path in ("/", "/user/login") or path.startswith(PUBLIC_ASSETS))
     return status == 500 and path == CALLBACK
 
 
@@ -222,13 +225,16 @@ def test_s4_15_classifier_accepts_the_ruled_answers_and_rejects_the_others():
           ("GET", "/user/login", 200, ""), ("GET", "/assets/js/index.js", 200, ""), ("GET", CALLBACK, 500, ""),
           ("GET", "/avatars/ab", 303, "/user/login"),
           ("GET", "/favicon.ico", 301, "/assets/img/favicon.png"), ("GET", "/assets/a", 301, "/assets/b"),
-          ("GET", "/assets/a", 301, "http://forge.localhost:3000/assets/b")]
+          ("GET", "/assets/a", 301, "http://forge.localhost:3000/assets/b"), ("GET", "/", 200, ""),
+          ("POST", "/user/logout", 303, "/"), ("POST", "/-/fetch-redirect", 303, "")]
     bad = [("GET", "/x", 200, ""), ("GET", "/user/login/x", 200, ""), ("POST", "/user/logout", 200, ""),
            ("GET", "/", 302, "/elsewhere"), ("GET", "/x", 302, ""), ("POST", "/user/logout", 302, "https://evil/other"),
            ("GET", "/x", 500, ""), ("POST", CALLBACK, 200, ""), ("GET", "/x", 502, ""), ("GET", CALLBACK, 302, "/"),
            ("GET", "/assets/a", 301, "http://evil/assets/b"), ("GET", "/assets/a", 301, "/repo/private"),
            ("GET", "/x", 301, "/assets/b"), ("GET", "/", 302, "/user/login_x"), ("GET", "/", 302, "/user/login/x"),
-           ("GET", "/", 302, "http://evil/realms/r/auth"), ("GET", "/", 302, "http://evil/user/login")]
+           ("GET", "/", 302, "http://evil/realms/r/auth"), ("GET", "/", 302, "http://evil/user/login"),
+           ("POST", "/user/logout", 303, "http://evil/"), ("POST", "/user/logout", 303, "/repo/x"),
+           ("GET", "/x", 303, "/"), ("POST", "/", 200, "")]
     assert [c for c in ok if not no_session_answer_ok(*c, hosts)] == []
     assert [c for c in bad if no_session_answer_ok(*c, hosts)] == []
 
@@ -624,13 +630,20 @@ async def test_s4_13_resync_restores_a_hand_edited_team_and_a_hand_suspension(ri
     live.ok(live.admin.delete(f"/teams/{live.team_id(tenant)}/members/{a.login}"))
     live.ok(live.admin.patch(f"/admin/users/{b.login}", json={"login_name": b.sub, "source_id": live.source_id, "prohibit_login": True}))
     assert a.login not in live.team_members(tenant) and live.account(b.login)["prohibit_login"], "control: the hand edits are in place"
+    # The child imports `defender` as pytest does (pyproject's `pythonpath = [".."]`): the checkout root first on its path.
+    root = Path(__file__).resolve().parents[4]
+    inherited = os.environ.get("PYTHONPATH", "")
     run = subprocess.run([sys.executable, "-m", "defender.lifecycle", "resync-people"], capture_output=True, text=True, timeout=120,
-                         env={**os.environ, "DEFENDER_DATABASE_DSN": rig.world.dsn,
+                         cwd=root, env={**os.environ, "PYTHONPATH": os.pathsep.join(p for p in (str(root), inherited) if p),
+                                        "DEFENDER_DATABASE_DSN": rig.world.dsn,
                               "DEFENDER_LIFECYCLE_FORGE_URL": live.private,
                               "DEFENDER_LIFECYCLE_FORGE_ADMIN_TOKEN_FILE": str(token_file),
                               "DEFENDER_LIFECYCLE_KEYCLOAK_SOURCE_ID": str(live.source_id)})
     assert run.returncode == 0, run.stderr
-    await rig.until_quiet(6)
+    # resync-people records (U, none) for every `p-` account on the source, the earlier cases' people included, and the
+    # worker starts at most `people_concurrency` runs a poll (r15.2 "Taking work"): enough polls for all of them.
+    users = {user for user, _tenant in await rig.world.open_requests() if user is not None}
+    await rig.until_quiet(-(-len(users) // rig.world.config.people_concurrency) + 4)
     assert {a.login, b.login} <= live.team_members(tenant)
     assert not live.account(b.login)["prohibit_login"]
 
@@ -677,7 +690,12 @@ async def bot(rig: Rig, live: Live1592) -> AsyncIterator[BotWorld]:
 
     tenant = await rig.tenant()
     path = f"t-{tenant}/knowledge"
-    live.ok(live.admin.post(f"/repos/{path}/branch_protections", json={"branch_name": "main", "enable_push": False}))
+    # `main`'s rule as the lifecycle writes it (r15.2 "Who may merge T's `main`": the merge whitelist, exactly team
+    # `members`; #1163 A23): push off and the bot, a collaborator outside the team, on no whitelist.
+    live.ok(live.admin.post(f"/repos/{path}/branch_protections", json={
+        "rule_name": "main", "branch_name": "main", "enable_push": False, "enable_push_whitelist": False,
+        "enable_force_push": False, "enable_merge_whitelist": True, "merge_whitelist_usernames": [],
+        "merge_whitelist_teams": ["members"]}))
     live.ok(live.admin.post(f"/repos/{path}/labels", json={"name": "feedback", "color": "#00aabb"}))
     branch = f"learning/{uuid.uuid4().hex[:8]}"
     live.ok(live.admin.post(f"/repos/{path}/branches", json={"new_branch_name": branch, "old_branch_name": "main"}))
@@ -732,14 +750,14 @@ async def test_forge_client_ForgejoForge_comments(bot: BotWorld):
 async def test_forge_client_ForgejoForge_close_pr(bot: BotWorld):
     """S4-14: close_pr."""
     bot.forge.close_pr(bot.number)
-    assert bot.forge.pull_request(bot.number).state != "open"
+    assert bot.forge.pull_request(bot.number).status == "closed"
 
 
 async def test_forge_client_ForgejoForge_reopen_pr(bot: BotWorld):
     """S4-14: reopen_pr."""
     bot.forge.close_pr(bot.number)
     bot.forge.reopen_pr(bot.number)
-    assert bot.forge.pull_request(bot.number).state == "open"
+    assert bot.forge.pull_request(bot.number).status == "open"
 
 
 async def test_forge_client_ForgejoForge_label_id(bot: BotWorld):
