@@ -50,11 +50,6 @@ if TYPE_CHECKING:
     )
     from defender.tenancy._exports import (
         DeliveryRefused as DeliveryRefused,
-        POINTER as POINTER,
-        TenantExport as TenantExport,
-        current_export as current_export,
-        current_export_at as current_export_at,
-        read_export_text as read_export_text,
         regular_files as regular_files,
         remove_entry as remove_entry,
     )
@@ -128,7 +123,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("admit_tenant", "database_address_variable", "host_directory", "in_lifecycle_process", "mark_lifecycle_process", "still_active",), "_admission"),
     **dict.fromkeys(("open_command_line_run",), "_command_line_run"),
     **dict.fromkeys(("RecordsUnreachable", "TenantDirectory",), "_directory"),
-    **dict.fromkeys(("DeliveryRefused", "POINTER", "TenantExport", "current_export", "current_export_at", "read_export_text", "regular_files", "remove_entry",), "_exports"),
+    **dict.fromkeys(("DeliveryRefused", "regular_files", "remove_entry",), "_exports"),
     **dict.fromkeys(("OWNER_FILE", "REPO_SCRATCH", "mark_alive", "owned_temporary", "owner_alive", "private_folder", "process_mark", "process_start", "sweep_dead_owners", "write_owner",), "_owner"),
     **dict.fromkeys(("ISSUER_ROLE", "Tenant", "TenantId", "accept_tenant", "box_mounted_arm_container", "box_mounted_episodes", "check_knowledge_folder", "check_run_settings", "data_root_for_child", "data_root_from_path", "is_valid_tenant_id", "job_tenant_folder", "parse_tenant_id_bytes", "refuse_unplaceable_data_root", "requested_tenant", "requested_tenant_id", "resolve_data_root", "tenant_id_file_text",), "_tenant"),
     **dict.fromkeys(("AGENT_HALF", "SETTINGS_HALF", "TENANT_ID_FILE", "add_tenant_arguments", "template_dir",), "_tenants"),

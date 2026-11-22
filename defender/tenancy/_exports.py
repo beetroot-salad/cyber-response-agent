@@ -7,7 +7,6 @@ import stat
 from pathlib import Path
 
 from defender import _io
-from defender.records.formats import OID as OID  # run_knowledge's import (owed: from records.formats directly)
 
 
 class DeliveryRefused(Exception):

@@ -19,10 +19,8 @@ from typing import TYPE_CHECKING, Any
 
 from defender import _io
 from defender._text import one_line
-from defender.tenancy._exports import (
-    OID,
-    remove_entry,
-)
+from defender.records.formats import OID
+from defender.tenancy._exports import remove_entry
 from defender.tenancy._owner import owned_temporary, write_owner
 from defender.tenancy._tenant import Tenant
 from defender.tenancy._tenants import AGENT_HALF, SETTINGS_HALF

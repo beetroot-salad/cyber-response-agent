@@ -642,7 +642,7 @@ def _batch_start(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
         state.batches[batch.id] = batch
         session.minted.add(batch.id)
     return {"batch": batch.id, "path": str(batch.draft_root.parent), "branch": batch.branch,
-            "base": batch.export.commit, "export": str(batch.export.path), "lanes": list(batch.lanes)}
+            "base": batch.base_commit, "lanes": list(batch.lanes)}
 
 
 def _batch_box(session: Session, ident: str) -> Any:

@@ -94,7 +94,7 @@ def fetch_copy(  # noqa: PLR0913 — the child's work and its in-process stand-i
     return rest
 
 
-def _fetch_line(  # noqa: PLR0913 — `fetch_copy`'s inputs
+def _fetch_line(  # noqa: C901, PLR0913 — `fetch_copy`'s inputs: one accept, one fetch, one report
     tenant_id: str, dest: Path, commit: str | None, *, data_root: Path, directory: TenantDirectory | None,
     credential_config: Any, client: httpx.Client | None, issuer_transport: httpx.BaseTransport | None,
     identity: ForgeCredential | None, network_timeout: float | None, budget: float | None, trigger: str,
