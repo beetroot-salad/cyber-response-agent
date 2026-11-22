@@ -9,6 +9,7 @@ from __future__ import annotations
 import http.client
 import http.server
 import itertools
+import random
 import shutil
 import threading
 import urllib.parse
@@ -45,9 +46,16 @@ def _handler(echo: Echo) -> type[http.server.BaseHTTPRequestHandler]:
             self.send_response(200)
             self.send_header("Content-Length", str(len(UPSTREAM_BODY)))
             self.end_headers()
-            self.wfile.write(UPSTREAM_BODY)
+            if self.command != "HEAD":
+                self.wfile.write(UPSTREAM_BODY)
 
         do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = do_HEAD = _answer  # noqa: N815
+
+        def __getattr__(self, name: str) -> object:
+            """Any other method (OPTIONS, TRACE, a made-up token) is answered and seen too: the upstream refuses none."""
+            if name.startswith("do_"):
+                return self._answer
+            raise AttributeError(name)
 
         def log_message(self, *_args: object) -> None:
             return
@@ -149,6 +157,39 @@ def test_1592_the_allowlist_is_a_list_not_a_denylist(site):
             target = "/zz-" + "/".join(parts)
             assert site.send("GET", target)[0] == 404, target
     assert site.echo.seen[before:] == []
+
+
+def _generated_requests(seed: int) -> list[tuple[str, str]]:
+    """Every instance with every method, and each mutation of the list (`allowlist.mutations`) with GET, POST, one
+    method drawn from `MUTATION_METHODS` and one made-up token."""
+    rng = random.Random(seed)  # noqa: S311 — generated cases, not secrets
+    requests = [(m, t) for _m, t in allowlist.allowed(R) for m in (*allowlist.MUTATION_METHODS, allowlist.random_method(rng))]
+    for _why, target in allowlist.mutations(R, rng):
+        requests += [(m, target) for m in ("GET", "POST", rng.choice(allowlist.MUTATION_METHODS), allowlist.random_method(rng))]
+    return list(dict.fromkeys(requests))
+
+
+def _is_signin_start(target: str) -> bool:
+    """Whether Forgejo could read the path as the sign-in start: decoded, in any case, with or without a final slash."""
+    return urllib.parse.unquote(target.split("?", 1)[0]).lower().rstrip("/") == allowlist.SIGNIN_START
+
+
+def test_1592_a_generated_request_reaches_the_upstream_iff_the_list_allows_it_and_never_the_start_with_a_cookie(site):
+    """S3-11 / S3-12 (PP-3, OD-3): over requests generated from every entry (values outside a placeholder's group, case
+    flips, suffixes, dot-segments in every spelling; every method, a made-up one included), the upstream sees a request
+    exactly when the list's `matches` allows it and the path is in no class refused before matching; whatever reaches the sign-in start, by
+    any method, arrives without a Cookie."""
+    wrong: list[str] = []
+    for method, target in _generated_requests(1592):
+        before = len(site.echo.seen)
+        site.send(method, target, headers=COOKIE)
+        seen = site.echo.seen[before:]
+        expected = allowlist.matches(method, target) and not allowlist.refused_first(target)
+        if bool(seen) != expected:
+            wrong.append(f"{method} {target}: {'forwarded' if seen else 'refused'}, the list says {'allow' if expected else 'refuse'}")
+        wrong += [f"{method} {target}: reached the sign-in start ({s.method} {s.target}) with its Cookie"
+                  for s in seen if _is_signin_start(s.target) and "cookie" in s.headers]
+    assert wrong == [], f"{len(wrong)} wrong, e.g. " + "; ".join(wrong[:25])
 
 
 # --- S3-12: the Cookie drop on the sign-in start ------------------------------------------------------------------------

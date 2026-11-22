@@ -10,7 +10,10 @@ S4-1's old list, C9). It holds no policy of the edge: `matches` only reads these
 """
 from __future__ import annotations
 
+import random
 import re
+import string
+import urllib.parse
 from dataclasses import dataclass
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -171,6 +174,71 @@ FORGEJO_SERVES: tuple[str, ...] = ("/user/settings", "/api/v1/version")
 def off_list(repo: str) -> dict[str, list[tuple[str, str]]]:
     return {why: [(m, t.replace("{Rother}", repo[:-len("knowledge")] + "other").replace("{R}", repo)) for m, t in cases]
             for why, cases in OFF_LIST.items()}
+
+
+# --- generated requests (S3-11's mutations of the list) ----------------------------------------------------------------
+
+#: Every method a generated request is sent with: the five above, the three a browser or a scanner adds, and a token of
+#: its own (`random_method`), so no method outside the list's is assumed refused.
+MUTATION_METHODS = (*ALL_METHODS, "HEAD", "OPTIONS", "TRACE")
+#: A placeholder's value outside its group: not a number, not lower-case hex, empty where `.+` needs something.
+_OUTSIDE = {"n": ("x", "3a", "-3", "%33"), "sha": ("0123z", "ABCDEF0123", "g" * 40), "hex": ("0a1g", "0A1B2C", "xyz")}
+#: A dot-segment in every spelling: `.`/`..`, each dot as `.`, `%2e` or `%2E`.
+DOT_SEGMENTS = tuple(a + b for a in ("", ".", "%2e", "%2E") for b in (".", "%2e", "%2E")) + (".", "%2e", "%2E")
+_SUFFIXES = (".diff", ".patch", "/new", ".git", "/", ".json")
+
+
+def random_method(rng: random.Random) -> str:
+    return "".join(rng.choice(string.ascii_uppercase) for _ in range(rng.randint(3, 9)))
+
+
+def has_dot_segment(path: str) -> bool:
+    """Whether the path (before any query), once each segment is percent-decoded, holds a `.` or `..` segment."""
+    return any(urllib.parse.unquote(seg) in (".", "..") for seg in path.split("?", 1)[0].split("/"))
+
+
+def refused_first(path: str) -> bool:
+    """The design's classes refused before matching, in the path (before any query): a dot-segment, an encoded slash,
+    or two slashes in a row."""
+    head = path.split("?", 1)[0]
+    return has_dot_segment(head) or "//" in head or "%2f" in head.lower()
+
+
+def _flips(segment: str) -> list[str]:
+    variants = {segment.swapcase(), segment[:1].swapcase() + segment[1:], segment.upper()}
+    return sorted(v for v in variants if v != segment)
+
+
+def mutations(repo: str, rng: random.Random) -> list[tuple[str, str]]:
+    """`(why, path)` for paths made from each entry's instances by one change: a placeholder given a value outside its
+    group (an upper-case `{R}` uuid included), one literal segment's case flipped (`Knowledge`), a suffix on the last
+    segment, or one segment replaced by a dot-segment in every spelling. Whether each is allowed is `matches`' call."""
+    out: list[tuple[str, str]] = []
+    first = repo.split("/")[1]
+    upper_uuids = ("/t-" + first[2:].upper() + "/knowledge", "/" + first.upper() + "/knowledge")
+    for entry in ENTRIES:
+        for template in entry.instances:
+            base = render(template, repo)
+            for key, values in _OUTSIDE.items():
+                if "{" + key + "}" in template:
+                    out += [(f"{{{key}}} outside its group", render(template.replace("{" + key + "}", v), repo))
+                            for v in values]
+            if "{R}" in template:
+                out += [("{R} with an upper-case uuid", render(template, upper)) for upper in upper_uuids]
+            segments = base.split("/")
+            for i in range(1, len(segments)):
+                for flipped in _flips(segments[i]):
+                    out.append(("a segment's case flipped", "/".join([*segments[:i], flipped, *segments[i + 1:]])))
+            out += [("a suffix on the last segment", base + suffix) for suffix in _SUFFIXES]
+            for spelling in DOT_SEGMENTS:
+                if len(segments) > 1 and base != "/":
+                    i = rng.randrange(1, len(segments))
+                    out.append(("a dot-segment", "/".join([*segments[:i], spelling, *segments[i + 1:]])))
+                    j = rng.randrange(1, len(segments) + 1)
+                    out.append(("a dot-segment", "/".join([*segments[:j], spelling, *segments[j:]])))
+                else:
+                    out.append(("a dot-segment", "/" + spelling))
+    return out
 
 
 def _check() -> None:

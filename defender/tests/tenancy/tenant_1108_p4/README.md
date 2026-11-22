@@ -155,7 +155,6 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 
 **CLIs**
 - `cli/tenant.py`: `update(tenant_id, *, client=, identity=)`; `propose(tenant_id, staged, *, client=None, identity=None) -> int` (add/replace only, `agent/` only, refusals `[tenant.py] ...`). (The O-SEE tenant check retired with `check <id>` in #1471 B3.)
-- `cli/learning/revert_lesson.main(argv, *, client=None, identity=None, issuer_config=None, issuer_transport=None)`; drain lock still exit 3.
 - `validate_scaffold.py <system> --tenant <T> --staged <dir>`: the skill and template checks read the staged (agent-root-shaped) directory, the adapter checks the code tree (`DEFENDER_DIR`). `--tenant` exists today; `--staged` is the missing flag (U13).
 
 **Readers and run tenant**
@@ -250,7 +249,7 @@ Deleted (OD12 class i) or re-spelled in contract repair rounds 1–2 (merged as 
 - Deleted, class (i):
   - `learning/curation/test_drain_byte_identity.py` (whole file, above).
   - `learning/stages/test_frames_lifecycle.py::test_revert_lesson_driver_holds_shared_author_lock_and_calls_through` (`revert(branch=)`)
-    → `test_revert_cli.py::test_flow5_revert_cli_opens_a_revert_pr_on_the_tenant_forge_deleting_the_agent_lesson`, `::test_flow5_revert_cli_waits_out_a_running_author_drain`. <!-- lint-stale-ref: ok — historical record: this names the test as it was before the learning-store rewrite (#1278) -->
+    → the revert CLI's flow-5 cases, since removed with the CLI itself (#1592 F9: a member reverts a lesson in Forgejo's editor). <!-- lint-stale-ref: ok — historical record: this names the test as it was before the learning-store rewrite (#1278) -->
   - `tenant_1108_delivery/test_forgejo.py::test_the_writer_lease_is_not_held_by_a_fork_pr` (lease on `AuthorBranch`)
     → `test_drains.py::test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_lease_and_nothing_else_does` (`_LEASE_ROWS`, both drains).
   - `learning/curation/test_curator_glm_engine.py::test_marker_commit_message_with_trailer_rejected` (`commit_corpus` trailer guard; the commit-maker composes none);

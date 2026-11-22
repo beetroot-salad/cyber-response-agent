@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import random
 import uuid
 
 import pytest
@@ -12,7 +13,7 @@ import pytest
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy._twin1496 import offboard_twin
 from defender.tests.tenancy.people_1592._sessions1592 import sessions  # noqa: F401 — overrides the package fixture
-from defender.tests.tenancy.people_1592._spec1592 import KEYCLOAK_SOURCE_ID, login_of, org_of, signed_in_data
+from defender.tests.tenancy.people_1592._spec1592 import KEYCLOAK_SOURCE_ID, login_of, org_of, requests_sql, signed_in_data
 from defender.tests.tenancy.people_1592._worker1592 import accept, errors, invite, member, settled, until, use
 from defender.tests.tenancy.people_1592._world1592 import NOW, T, U2, People
 
@@ -310,6 +311,102 @@ async def test_a_failing_user_goes_to_the_back_and_does_not_hold_the_others(peop
 
     assert _a_arrivals(people) == order[:3]
     assert first[0].user in {u for u, _t in await people.open_requests()}
+
+
+# --- the turn order over generated worlds (OD-9, "Expansion keeps the request's age") -------------------------------
+
+def _due(rows: list, attempted: dict[str, int], concurrency: int) -> tuple[set[str], set[str], int]:
+    """The reference schedule of one poll, from the design's rule alone (written apart from the worker): users never
+    attempted first, by their oldest `requested_at`; then attempted users by their last attempt, oldest first; at most
+    `concurrency`. Returns (must start, may start, how many start): the rule does not order equal keys (users expanded
+    from one tenant share its age), so a tie at the cut may go either way."""
+    oldest: dict[str, dt.datetime] = {}
+    for r in rows:
+        if r.user is not None:
+            oldest[r.user] = min(oldest.get(r.user, r.requested_at), r.requested_at)
+
+    def key(user: str) -> tuple:
+        return (1, attempted[user], NOW) if user in attempted else (0, 0, oldest[user])
+
+    ranked = sorted(oldest, key=key)
+    count = min(concurrency, len(ranked))
+    if not count:
+        return set(), set(), 0
+    cut = key(ranked[count - 1])
+    return {u for u in ranked if key(u) < cut}, {u for u in ranked if key(u) <= cut}, count
+
+
+def _insert_request(dsn: str, user: str | None, tenant: str | None, at: dt.datetime) -> None:
+    from defender.tests.support.shared._postgres1339 import execute
+
+    execute(dsn, "INSERT INTO tenancy.forge_people_requests (id, user_id, tenant_id, requested_at) "
+                 "VALUES (gen_random_uuid(), %s, %s, %s)", (user, tenant, at))
+
+
+@pytest.mark.parametrize("seed", range(10))
+async def test_generated_worlds_take_users_in_the_design_turn_order_and_expansion_keeps_the_oldest_age(  # noqa: C901 — one model run
+        pg_people: People, seed: int):
+    """S2-22b (OD-9; "Expansion keeps the request's age"): seeded worlds with several requests per user, several
+    (none, T) rows per tenant, more persistently failing users than slots and concurrency 1..4: each poll starts the runs
+    the reference schedule allows, and each expanded (U, T) carries the oldest (none, T) `requested_at` of T."""
+    rng = random.Random(seed)  # noqa: S311 — generated cases, not secrets
+    people, dsn = pg_people, pg_people.dsn
+    assert dsn is not None
+    concurrency = rng.randint(1, 4)
+    plain = [fixture_uuid(f"tenant:1592-turn-{seed}-p{i}") for i in range(2)]
+    expanding = [fixture_uuid(f"tenant:1592-turn-{seed}-e{i}") for i in range(rng.randint(1, 2))]
+    for tenant in plain + expanding:
+        await people.tenant(tenant)
+    users = [await people.person(f"u{i}@x.org", *rng.sample(plain, rng.randint(1, 2)), session=False)
+             for i in range(concurrency + rng.randint(2, 5))]
+    members = {t: [await people.person(f"e{j}-{i}@x.org", t, session=False) for i in range(rng.randint(1, 3))]
+               for j, t in enumerate(expanding)}
+    await settled(people)
+
+    everyone = users + [u for group in members.values() for u in group]
+    failing = {str(u.id) for u in rng.sample(everyone, concurrency + 1 + rng.randint(0, 2))}
+    stamps = iter([NOW - dt.timedelta(minutes=m) for m in rng.sample(range(1, 50_000), 3 * len(users) + 3 * len(expanding))])
+    for user in users:  # several requests per user, each with its own age; members of E get theirs only by expansion
+        tenants = [r.tenant_id for r in await people.identity.memberships_of_user(user.id)]
+        for _ in range(rng.randint(1, 3)):
+            _insert_request(dsn, str(user.id), rng.choice([*map(str, tenants), None]), next(stamps))
+    tenant_ages: dict[str, list[dt.datetime]] = {}
+    for tenant in expanding:  # several (none, T) rows of one tenant
+        for _ in range(rng.randint(2, 3)):
+            at = next(stamps)
+            tenant_ages.setdefault(tenant, []).append(at)
+            _insert_request(dsn, None, tenant, at)
+    for user in failing:
+        people.forge.fail(f"GET /api/v1/users/{login_of(user)}", status=500)
+    use(people, people_concurrency=concurrency)
+
+    attempted: dict[str, int] = {}
+    expansions_checked = False
+    for poll in range(len(everyone) // concurrency + len(failing) + 4):
+        rows = requests_sql(dsn)
+        if poll == 1:
+            for tenant, ages_of in tenant_ages.items():
+                assert not [r for r in rows if r.user is None and r.tenant == tenant], f"seed {seed}: not expanded"
+                for member_ in members[tenant]:
+                    got = [r.requested_at for r in rows if r.user == str(member_.id) and r.tenant == tenant]
+                    assert got == [min(ages_of)], f"seed {seed}: expanded at {got}, the tenant's (none, T) ages {ages_of}"
+            expansions_checked = True
+        must, may, size = _due(rows, attempted, concurrency)
+        before = len(people.forge.arrived)
+        people.clock.advance(dt.timedelta(minutes=1))
+        await people.step()
+        arrivals = [a.rsplit("/", 1)[1] for a in people.forge.arrived[before:] if a.startswith("GET /api/v1/users/p-")]
+        started = {a.removeprefix("p-") for a in arrivals}
+        where = (f"seed {seed}, concurrency {concurrency}, poll {poll}: started {sorted(started)}, must {sorted(must)},"
+                 f" may {sorted(may)}, attempted {attempted}")
+        assert len(arrivals) == len(started) == size, where
+        assert must <= started <= may, where
+        left = {r.user for r in requests_sql(dsn) if r.user is not None}
+        for user in started:
+            attempted[user] = poll
+            assert (user in left) == (user in failing), f"{where}: {user} failing={user in failing}, kept={user in left}"
+    assert expansions_checked
+    assert {r.user for r in requests_sql(dsn) if r.user is not None} == failing, f"seed {seed}: only the failing stay"
 
 
 async def test_a_poll_never_starts_a_second_run_for_a_user_with_one_in_flight(people: People):

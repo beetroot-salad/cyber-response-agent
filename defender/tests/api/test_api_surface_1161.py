@@ -245,6 +245,16 @@ def test_the_launcher_refuses_a_misshapen_input_naming_it_before_caddy(name: str
     assert not (tmp_path / "caddy-ran").exists()
 
 
+def test_1592_the_ingress_parses_the_forge_domain_with_the_apis_one_hostname_parser() -> None:
+    """S3-9 (#1592, Amends #1471): `DEFENDER_FORGE_DOMAIN` is parsed by the same function as `artifact_domain` (one
+    shared hostname parser), so the ingress and the API judge every value alike; the five bad values above are samples."""
+    from defender.api_server import ingress
+    from defender.api_server._settings import artifact_domain
+
+    assert ingress.INPUTS["DEFENDER_FORGE_DOMAIN"] is artifact_domain
+    assert ingress.INPUTS["DEFENDER_ARTIFACT_DOMAIN"] is artifact_domain, "control: the parser named is the shared one"
+
+
 def test_the_redirect_uri_the_provider_is_sent_names_the_callback_route() -> None:
     """The path the program puts in the provider's redirect URI is the callback route's own, under `/api`. (B3, S1)"""
     from defender.api.app import SIGNIN_CALLBACK

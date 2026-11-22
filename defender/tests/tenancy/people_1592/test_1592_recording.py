@@ -13,6 +13,7 @@ import collections
 import contextlib
 import dataclasses
 import datetime as dt
+import hashlib
 import random
 import re
 from collections.abc import AsyncIterator, Callable
@@ -449,6 +450,12 @@ class Model:
     users: dict[str, Any] = dataclasses.field(default_factory=dict)
     members: dict[tuple[str, str], tuple[Any, str]] = dataclasses.field(default_factory=dict)  # live rows
     ended: list[Any] = dataclasses.field(default_factory=list)
+    programs: list[Any] = dataclasses.field(default_factory=list)
+    credentials: list[Any] = dataclasses.field(default_factory=list)
+    #: the last sequence number a `request_set_password` / `request_notification` answered, by user or membership id
+    seqs: dict[str, int] = dataclasses.field(default_factory=dict)
+    sessions: list[str] = dataclasses.field(default_factory=list)
+    attempts: list[str] = dataclasses.field(default_factory=list)
 
 
 async def _apply(w: World, model: Model, op: str, rng: random.Random, n: int) -> None:  # noqa: C901, PLR0912
@@ -503,27 +510,379 @@ async def _apply(w: World, model: Model, op: str, rng: random.Random, n: int) ->
         model.tenants[tenant] = "offboarding"
 
 
-async def run_sequence(backend: str, seed: int, length: int = 40) -> collections.Counter[Pair]:
+# --- the census of the repositories' writes (S1-11: every public write method is a generated op) ---------------------
+
+#: Every public method of the ports that reads only (or opens a hold whose writes are `HeldTenant`'s), so it is no op.
+READS = frozenset({
+    "IdentityRepository.close", "IdentityRepository.tenant_exists", "IdentityRepository.active_tenants",
+    "IdentityRepository.tenant_has_active_members", "IdentityRepository.user", "IdentityRepository.user_by_email",
+    "IdentityRepository.user_by_signin_account", "IdentityRepository.platform_admins", "IdentityRepository.membership",
+    "IdentityRepository.memberships_of_user", "IdentityRepository.memberships_of_tenant",
+    "IdentityRepository.people_of_tenant", "IdentityRepository.active_membership", "IdentityRepository.wanted_tenants",
+    "IdentityRepository.wanted_users", "IdentityRepository.program", "IdentityRepository.programs_of_tenant",
+    "IdentityRepository.credential_by_id", "IdentityRepository.admit_by_key", "IdentityRepository.admit_by_client",
+    "IdentityRepository.admit_by_credential", "IdentityRepository.tenants_of_credentials",
+    "IdentityRepository.credentials_of_program", "IdentityRepository.oauth_credentials_to_keep",
+    "IdentityRepository.warning_deliveries", "IdentityRepository.session_by_value",
+    "IdentityRepository.live_signin_attempts",
+    "TenantRepository.close", "TenantRepository.tenant", "TenantRepository.tenants", "TenantRepository.generations",
+    "TenantRepository.forge_wiring", "TenantRepository.admission", "TenantRepository.publish_status",
+    "TenantRepository.alert_mapping", "TenantRepository.current_records", "TenantRepository.claimable",
+    "TenantRepository.open_people_requests", "TenantRepository.lock",
+    "HeldTenant.generations", "HeldTenant.forge_wiring",
+})
+
+
+def port_methods() -> set[str]:
+    """The census: every public method of the identity and tenancy repository ports and of the tenant hold."""
+    from defender.identity.ports import IdentityRepository
+    from defender.tenancy.repository import HeldTenant, TenantRepository
+
+    return {f"{port.__name__}.{name}" for port in (IdentityRepository, TenantRepository, HeldTenant)
+            for name, member in vars(port).items() if not name.startswith("_") and callable(member)}
+
+
+def _users(m: Model) -> list[Any]:
+    return [m.users[e] for e in sorted(m.users)]
+
+
+def _rows(m: Model) -> list[Any]:
+    return [row for row, _status in m.members.values()] + m.ended
+
+
+def _pick(rng: random.Random, items: list[Any]) -> Any:
+    return rng.choice(items) if items else None
+
+
+def _tenants(m: Model) -> list[str]:
+    """T1, T2 and the created tenants in creation order (their ids differ between the backends; their order does not)."""
+    return [T1, T2, *(t for t in m.tenants if t not in (T1, T2))]
+
+
+def _when(rng: random.Random) -> dt.datetime:
+    return NOW + dt.timedelta(days=rng.randint(-20, 40), minutes=rng.randint(0, 59))
+
+
+#: an expiry warning's thresholds (14 and 3 days before expiry) and one that is neither
+THRESHOLDS = (dt.timedelta(days=14), dt.timedelta(days=3), dt.timedelta(days=5))
+
+
+async def _ensure_user(w: World, m: Model, r: random.Random) -> None:
+    email = r.choice(["a@x.org", "b@x.org", "c@x.org"])
+    user = await w.identity.ensure_user(email, now=NOW)
+    m.users.setdefault(email, user)
+
+
+async def _record_signin_account(w: World, m: Model, r: random.Random) -> None:
+    if user := _pick(r, _users(m)):
+        await w.identity.record_signin_account(user.id, f"sub-census-{r.randint(0, 3)}")
+
+
+async def _activate_user(w: World, m: Model, r: random.Random) -> None:
+    if user := _pick(r, _users(m)):
+        await w.identity.activate_user(user.id, display_name=f"name {r.randint(0, 9)}", now=_when(r))
+
+
+async def _set_display_name(w: World, m: Model, r: random.Random) -> None:
+    if user := _pick(r, _users(m)):
+        await w.identity.set_display_name(user.id, f"shown {r.randint(0, 9)}", now=_when(r))
+
+
+async def _set_platform_admin(w: World, m: Model, r: random.Random) -> None:
+    if user := _pick(r, _users(m)):
+        await w.identity.set_platform_admin(user.id, r.random() < 0.5)
+
+
+async def _add_program(w: World, m: Model, r: random.Random) -> None:
+    if user := _pick(r, _users(m)):
+        m.programs.append(await w.identity.add_program(r.choice([T1, T2]), display_name=f"prog {r.randint(0, 9)}",
+                                                       created_by=user.id, now=NOW))
+
+
+async def _remove_program(w: World, m: Model, r: random.Random) -> None:
+    if program := _pick(r, m.programs):
+        user = _pick(r, _users(m))
+        await w.identity.remove_program(program.id, removed_by=user.id if user else None, now=_when(r))
+
+
+async def _add_credential(w: World, m: Model, r: random.Random) -> None:
+    program, user = _pick(r, m.programs), _pick(r, _users(m))
+    if program and user:
+        key = r.random() < 0.5
+        made = await w.identity.add_credential(
+            program.id, kind="key" if key else "oauth_client", name=f"cred {r.randint(0, 9)}", created_by=user.id,
+            expires_at=NOW + dt.timedelta(days=r.randint(1, 30)), now=NOW,
+            key_hash=hashlib.sha256(f"key-{r.random()}".encode()).hexdigest() if key else None)
+        if made is not None:
+            m.credentials.append(made)
+
+
+async def _go_live(w: World, m: Model, r: random.Random) -> None:
+    if credential := _pick(r, m.credentials):
+        await w.identity.go_live(credential.id, service_account_id=f"sa-{r.randint(0, 3)}",
+                                 now=NOW + dt.timedelta(minutes=r.randint(0, 20)))
+
+
+async def _revoke_credential(w: World, m: Model, r: random.Random) -> None:
+    if credential := _pick(r, m.credentials):
+        user = _pick(r, _users(m))
+        await w.identity.revoke_credential(credential.id, revoked_by=user.id if user else None, now=_when(r))
+
+
+async def _touch_credential(w: World, m: Model, r: random.Random) -> None:
+    if credential := _pick(r, m.credentials):
+        await w.identity.touch_credential(credential.id, now=_when(r))
+
+
+async def _revoke_stale_pending(w: World, m: Model, r: random.Random) -> None:
+    await w.identity.revoke_stale_pending(now=NOW + dt.timedelta(minutes=r.randint(0, 30)))
+
+
+async def _claim_expiry_warning(w: World, m: Model, r: random.Random) -> None:
+    now = _when(r)
+    await w.identity.claim_expiry_warning(now=now, hold_until=now + dt.timedelta(minutes=5))
+
+
+async def _settle_expiry_warning(w: World, m: Model, r: random.Random) -> None:
+    if credential := _pick(r, m.credentials):
+        await w.identity.settle_expiry_warning(credential.id, r.choice(THRESHOLDS))
+
+
+async def _defer_expiry_warning(w: World, m: Model, r: random.Random) -> None:
+    if credential := _pick(r, m.credentials):
+        await w.identity.defer_expiry_warning(credential.id, r.choice(THRESHOLDS), until=_when(r))
+
+
+async def _record_warning_delivery(w: World, m: Model, r: random.Random) -> None:
+    credential, user = _pick(r, m.credentials), _pick(r, _users(m))
+    if credential and user:
+        await w.identity.record_warning_delivery(credential.id, r.choice(THRESHOLDS), user.id, sent_at=_when(r))
+
+
+async def _request_set_password(w: World, m: Model, r: random.Random) -> None:
+    if user := _pick(r, _users(m)):
+        m.seqs[str(user.id)] = await w.identity.request_set_password(user.id, now=_when(r))
+
+
+async def _request_notification(w: World, m: Model, r: random.Random) -> None:
+    if row := _pick(r, _rows(m)):
+        m.seqs[str(row.id)] = await w.identity.request_notification(row.id, now=_when(r))
+
+
+async def _claim_set_password(w: World, m: Model, r: random.Random) -> None:
+    now = _when(r)
+    await w.identity.claim_set_password(now=now, hold_until=now + dt.timedelta(minutes=r.randint(1, 30)))
+
+
+async def _claim_notification(w: World, m: Model, r: random.Random) -> None:
+    now = _when(r)
+    await w.identity.claim_notification(now=now, hold_until=now + dt.timedelta(minutes=r.randint(1, 30)))
+
+
+async def _defer_set_password(w: World, m: Model, r: random.Random) -> None:
+    if user := _pick(r, _users(m)):
+        await w.identity.defer_set_password(user.id, until=_when(r))
+
+
+async def _defer_notification(w: World, m: Model, r: random.Random) -> None:
+    if row := _pick(r, _rows(m)):
+        await w.identity.defer_notification(row.id, until=_when(r))
+
+
+async def _settle_set_password(w: World, m: Model, r: random.Random) -> None:
+    """With an `expires_at` it moves the user's invited rows' expiry: a membership write that is not of `status`."""
+    if user := _pick(r, _users(m)):
+        await w.identity.settle_set_password(user.id, m.seqs.get(str(user.id), 0) + r.randint(0, 1),
+                                             sent_at=_when(r) if r.random() < 0.7 else None,
+                                             expires_at=_when(r) if r.random() < 0.7 else None)
+
+
+async def _settle_notification(w: World, m: Model, r: random.Random) -> None:
+    if row := _pick(r, _rows(m)):
+        await w.identity.settle_notification(row.id, m.seqs.get(str(row.id), 0) + r.randint(0, 1),
+                                             sent_at=_when(r) if r.random() < 0.7 else None,
+                                             expires_at=_when(r) if r.random() < 0.7 else None)
+
+
+async def _add_session(w: World, m: Model, r: random.Random) -> None:
+    if user := _pick(r, _users(m)):
+        value = f"census-{len(m.sessions)}"
+        await w.identity.add_session(value, user.id, now=NOW, expires_at=NOW + dt.timedelta(days=r.randint(-1, 7)),
+                                     used_otp=r.random() < 0.5)
+        m.sessions.append(value)
+
+
+async def _touch_session(w: World, m: Model, r: random.Random) -> None:
+    if value := _pick(r, m.sessions):
+        await w.identity.touch_session(value, now=_when(r))
+
+
+async def _purge_expired_sessions(w: World, m: Model, r: random.Random) -> None:
+    await w.identity.purge_expired_sessions(now=_when(r), idle_since=_when(r))
+
+
+async def _add_signin_attempt(w: World, m: Model, r: random.Random) -> None:
+    from defender.identity.models import SignInAttempt
+
+    state = f"state-{r.randint(0, 3)}"  # a state already stored is refused on both backends
+    await w.identity.add_signin_attempt(SignInAttempt(
+        state=state, token_hash=hashlib.sha256(f"token-{state}".encode()).hexdigest(), nonce=f"n-{state}",
+        verifier=f"v-{state}", return_path="/", expires_at=_when(r)))
+    m.attempts.append(state)
+
+
+async def _take_signin_attempt(w: World, m: Model, r: random.Random) -> None:
+    if state := _pick(r, m.attempts):
+        await w.identity.take_signin_attempt(state, f"token-{state}" if r.random() < 0.7 else "wrong", now=_when(r))
+
+
+async def _purge_expired_signin_attempts(w: World, m: Model, r: random.Random) -> None:
+    await w.identity.purge_expired_signin_attempts(now=_when(r))
+
+
+async def _request_resume(w: World, m: Model, r: random.Random) -> None:
+    await w.tenants.request_resume(r.choice(_tenants(m)))
+
+
+async def _request_rotate(w: World, m: Model, r: random.Random) -> None:
+    await w.tenants.request_rotate(r.choice(_tenants(m)))
+
+
+async def _record_publish_status(w: World, m: Model, r: random.Random) -> None:
+    line = r.choice(["fresh 0123456789abcdef0123456789abcdef01234567", "stale:transient down", "misconfigured x"])
+    await w.tenants.record_publish_status(r.choice([T1, T2]), line, by=r.choice(["run", "drain"]))
+
+
+async def _fail(w: World, m: Model, r: random.Random) -> None:
+    tenant = r.choice(_tenants(m))
+    async with w.tenants.lock(tenant) as held:
+        if held is not None:
+            await held.fail(f"failed {r.randint(0, 9)}", step="repo", actor="service")
+
+
+async def _edit_people_requests(w: World, m: Model, r: random.Random) -> None:
+    user = _pick(r, _users(m))
+    pair = r.choice([(user.id if user else None, r.choice([T1, T2])), (None, r.choice([T1, T2])),
+                     (user.id if user else None, None), (None, None)])
+    await w.tenants.edit_people_requests(add=[pair])
+
+
+async def _people_lock(w: World, m: Model, r: random.Random) -> None:
+    await w.tenants.people_lock()
+
+
+#: Each write method of the census and the ops that call it: the hand-written sequence ops above (`OPS`) for the
+#: status and state writers, one generator each for the rest.
+GENERATED: dict[str, Callable[[World, Model, random.Random], Any]] = {
+    "IdentityRepository.ensure_user": _ensure_user,
+    "IdentityRepository.record_signin_account": _record_signin_account,
+    "IdentityRepository.activate_user": _activate_user,
+    "IdentityRepository.set_display_name": _set_display_name,
+    "IdentityRepository.set_platform_admin": _set_platform_admin,
+    "IdentityRepository.add_program": _add_program,
+    "IdentityRepository.remove_program": _remove_program,
+    "IdentityRepository.add_credential": _add_credential,
+    "IdentityRepository.go_live": _go_live,
+    "IdentityRepository.revoke_credential": _revoke_credential,
+    "IdentityRepository.touch_credential": _touch_credential,
+    "IdentityRepository.revoke_stale_pending": _revoke_stale_pending,
+    "IdentityRepository.claim_expiry_warning": _claim_expiry_warning,
+    "IdentityRepository.settle_expiry_warning": _settle_expiry_warning,
+    "IdentityRepository.defer_expiry_warning": _defer_expiry_warning,
+    "IdentityRepository.record_warning_delivery": _record_warning_delivery,
+    "IdentityRepository.request_set_password": _request_set_password,
+    "IdentityRepository.request_notification": _request_notification,
+    "IdentityRepository.claim_set_password": _claim_set_password,
+    "IdentityRepository.claim_notification": _claim_notification,
+    "IdentityRepository.defer_set_password": _defer_set_password,
+    "IdentityRepository.defer_notification": _defer_notification,
+    "IdentityRepository.settle_set_password": _settle_set_password,
+    "IdentityRepository.settle_notification": _settle_notification,
+    "IdentityRepository.add_session": _add_session,
+    "IdentityRepository.touch_session": _touch_session,
+    "IdentityRepository.purge_expired_sessions": _purge_expired_sessions,
+    "IdentityRepository.add_signin_attempt": _add_signin_attempt,
+    "IdentityRepository.take_signin_attempt": _take_signin_attempt,
+    "IdentityRepository.purge_expired_signin_attempts": _purge_expired_signin_attempts,
+    "TenantRepository.request_resume": _request_resume,
+    "TenantRepository.request_rotate": _request_rotate,
+    "TenantRepository.record_publish_status": _record_publish_status,
+    "TenantRepository.edit_people_requests": _edit_people_requests,
+    "TenantRepository.people_lock": _people_lock,
+    "HeldTenant.fail": _fail,
+}
+#: The write methods `_apply`'s ops call.
+BY_OPS: dict[str, tuple[str, ...]] = {
+    "IdentityRepository.ensure_invitation": ("invite",), "IdentityRepository.accept_invitation": ("accept",),
+    "IdentityRepository.end_membership": ("end", "end_again"), "IdentityRepository.revoke_invitation": ("revoke",),
+    "IdentityRepository.sign_out": ("sign_out",), "TenantRepository.request_create": ("create",),
+    "HeldTenant.commit": ("step", "activate", "same_state"),
+}
+#: Every op of a generated sequence: the seeders and status writers of `OPS`, then one per generated write method.
+ALL_OPS = (*OPS, *sorted(GENERATED))
+
+
+def test_the_sequences_call_every_write_method_of_the_ports():
+    """S1-11's census: each public method of the identity and tenancy ports (and the tenant hold) is a read or has a
+    generator; a write added later without one fails here."""
+    census = port_methods()
+    unclassified = census - READS - set(GENERATED) - set(BY_OPS)
+    assert unclassified == set(), f"write methods with no generator (or reads not listed): {sorted(unclassified)}"
+    assert (READS | set(GENERATED) | set(BY_OPS)) - census == set(), "classified names the ports do not have"
+    assert not READS & (set(GENERATED) | set(BY_OPS))
+    assert not set(GENERATED) & set(BY_OPS)
+    assert {op for ops in BY_OPS.values() for op in ops} <= set(OPS)
+
+
+def _outcome(error: BaseException | None) -> str | None:
+    return None if error is None else type(error).__name__
+
+
+async def run_sequence(backend: str, seed: int, length: int = 40,
+                       ops: tuple[str, ...] = OPS) -> tuple[collections.Counter[Pair], list[tuple[Any, ...]]]:
     """The requests a seeded op sequence leaves, as a multiset of (user, tenant) with each user and generated tenant
-    named by its role (ids differ between backends: users are minted by the seeders, created tenants by the store)."""
+    named by its role (ids differ between backends: users are minted by the seeders, created tenants by the store),
+    and its trace: each op with the exception it raised (or none) and the requests it recorded."""
     rng = random.Random(seed)  # noqa: S311 — generated cases, not secrets
     async with build_world(backend) as w:
         model = Model()
+
+        async def recorded() -> collections.Counter[Pair]:
+            users = {str(u.id): email for email, u in model.users.items()}
+            created = {t for t in model.tenants if t not in (T1, T2)}
+            rows = await w.log._read()  # noqa: SLF001 — every request, the seeds included (the baseline stays empty)
+            return collections.Counter(
+                (users.get(r.user, r.user), "created" if r.tenant in created else r.tenant) for r in rows)
+
+        trace: list[tuple[Any, ...]] = []
+        before = await recorded()
         for n in range(length):
-            await _apply(w, model, rng.choice(OPS), rng, n)
-        users = {str(u.id): email for email, u in model.users.items()}
-        created = {t for t in model.tenants if t not in (T1, T2)}
-        rows = await w.log._read()  # noqa: SLF001 — every request, the seeds included (the baseline stays empty)
-        return collections.Counter(
-            (users.get(r.user, r.user), "created" if r.tenant in created else r.tenant) for r in rows)
+            op = rng.choice(ops)
+            sub = random.Random(rng.getrandbits(64))  # noqa: S311 — one stream per op, so a skipped op shifts nothing
+            error: BaseException | None = None
+            try:
+                if op in OPS:
+                    await _apply(w, model, op, sub, n)
+                else:
+                    await GENERATED[op](w, model, sub)
+            except Exception as raised:  # noqa: BLE001 — the refusal itself is compared between the backends
+                error = raised
+            after = await recorded()
+            trace.append((n, op, _outcome(error), sorted((after - before).items(), key=str),
+                          sorted((before - after).items(), key=str)))
+            before = after
+        return before, trace
 
 
 @pytest.mark.postgres
 @pytest.mark.parametrize("seed", range(60))
 async def test_generated_write_sequences_leave_the_same_requests_on_the_twin_and_on_postgresql(seed):
-    """S1-11 (cross-slice): seeds included, a generated sequence of writes records the same multiset of (user, tenant)
-    in memory and on PostgreSQL, same-value writes (a state set to itself, a membership ended again) among them."""
-    twin = await run_sequence("memory", seed)
-    database_ = await run_sequence("postgres", seed)
+    """S1-11 (cross-slice): seeds included, a generated sequence over every write method of the ports (the census above)
+    records the same requests in memory and on PostgreSQL at each op, or raises the same refusal, same-value writes (a
+    state set to itself, a membership ended again) and non-status writes (a notification's claim, an expiry) among them."""
+    twin, twin_trace = await run_sequence("memory", seed, length=90, ops=ALL_OPS)
+    database_, database_trace = await run_sequence("postgres", seed, length=90, ops=ALL_OPS)
+    for mine, theirs in zip(twin_trace, database_trace, strict=True):
+        assert mine == theirs, f"seed {seed}: in memory {mine}, on PostgreSQL {theirs}"
     assert twin == database_, f"seed {seed}: only in memory {twin - database_}, only on PostgreSQL {database_ - twin}"
     assert sum(twin.values()), "control: the sequence recorded nothing, so it compares nothing"

@@ -101,15 +101,18 @@ async def until(predicate: Any, timeout: float = 5.0) -> bool:
 
 
 class ScriptedLock:
-    """A tenants object whose `people_lock` answers the bool a test sets; everything else is the real store's."""
+    """A tenants object whose `people_lock` answers the bool a test sets, or raises the exception it sets instead (a
+    lock the database could not answer for); everything else is the real store's."""
 
-    def __init__(self, real: Any, held: bool = True) -> None:
+    def __init__(self, real: Any, held: bool | BaseException = True) -> None:
         self._real = real
         self.held = held
         self.asked = 0
 
     async def people_lock(self) -> bool:
         self.asked += 1
+        if isinstance(self.held, BaseException):
+            raise self.held
         return self.held
 
     def __getattr__(self, name: str) -> Any:
