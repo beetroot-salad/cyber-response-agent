@@ -477,7 +477,6 @@ class Tick:
 
     def __post_init__(self) -> None:
         assert self.paths.tenant is not None, "a tick is a tenant's"
-        self._fetched = False
         self._counted: set[str] = set()
 
     # -- what there is to do -----------------------------------------------------------------------
@@ -579,11 +578,6 @@ class Tick:
         with contextlib.suppress(Exception):
             if b.phase != "working":
                 self.store.note_check(str(b.id), reset_refusals=False)
-
-    def _fetch(self, delivery: TenantDelivery) -> None:
-        if not self._fetched:
-            delivery.repository.fetch()
-            self._fetched = True
 
     # -- reconcile (no holder: compare-and-set on the phase, D7) -----------------------------------------
 
@@ -693,13 +687,12 @@ class Tick:
                 self._fault(b, RuntimeError(f"merged PR #{number} names no merge commit"), "reading the merge")
                 return None
             try:
-                self._fetch(delivery)
                 if not repository.holds_commit(merge):
-                    raise RuntimeError(f"the merge commit {merge} of PR #{number} is not in the clone")
-                commits = record.commits_of(str(b.id))
-                tip = pr.head_sha if pr.head_sha and repository.holds_commit(pr.head_sha) else None
-                if tip is None:
-                    tip = next((r.commit for r in reversed(record.rows) if r.commit in commits), None)
+                    repository.fetch()  # the merge landed after this tick's open: heads again (still this tick's fetch)
+                if not repository.holds_commit(merge):
+                    raise RuntimeError(f"the merge commit {merge} of PR #{number} is not in this tick's fetch")
+                # K12: the PR's tip is read from `refs/pull/<n>/head`, never from the record's own commits.
+                tip = repository.pull_head(int(number))
                 changed = record.changed_paths(str(b.id))
                 # Each corpus folder is read once per merge, whatever the number of members citing into it.
                 in_merge: dict[str, set[str]] = {}
@@ -808,7 +801,7 @@ class Tick:
 
     def _recover(  # noqa: C901 — the takeover's lookups in the order D6 settles them, kept whole
             self, delivery: TenantDelivery, b: Any, record: Any) -> None:
-        from defender.learning.author.version_control.store_delivery import remote_tip, tip_commits_recorded
+        from defender.learning.author.version_control.store_delivery import tip_commits_recorded
         from defender.learning_store import LeaseLost, NotLapsed
 
         repository = delivery.repository
@@ -817,45 +810,31 @@ class Tick:
         try:
             pr = find_pr(forge, b.branch, mine)
             number = pr.number if pr is not None else None
-            self._fetch(delivery)
-            remote = remote_tip(repository, b.branch)
-            local = repository.branch_tip(b.branch)
+            tip = repository.branch_tip(b.branch)  # this tick's fetch: the remote's tip, the only one there is
         except _forge_faults() as fault:
             self._fault(b, fault, "looking up its branch and PR")
             return
-        push: str | None = None
         if number is None:
             base = b.base
-            usable = [tip for tip in (local, remote) if tip is not None and base is not None
-                      and tip_commits_recorded(repository, base, tip, mine)]
-            if local is None and remote is None:
+            if tip is None:
                 try:
                     self.store.abandon(str(b.id))
-                    _logger.warning(f"{self.label}: batch {b.id}'s holder was lost with nothing on any branch: "
+                    _logger.warning(f"{self.label}: batch {b.id}'s holder was lost with nothing on its branch: "
                                     "abandoned, its items wait again")
                 except NotLapsed:
                     pass
                 return
-            if remote is not None and remote not in usable:
+            if base is None or not tip_commits_recorded(repository, base, tip, mine):
                 self.store.needs_person(str(b.id), Why.batch(
                     "foreign_commits_remote", f"the branch {b.branch} on the forge holds "
-                    f"commits the commit-maker did not make for batch {b.id} (tip {remote})"))
+                    f"commits the commit-maker did not make for batch {b.id} (tip {tip})"))
                 _logger.error(f"{self.label}: batch {b.id}'s branch holds a foreign tip: a person must look")
                 return
-            if not usable:
-                self.store.needs_person(str(b.id), Why.batch(
-                    "foreign_commits_local", f"the local branch {b.branch} holds commits "
-                    f"outside batch {b.id}'s record"))
-                return
-            tip = local if local in usable else remote
-            push = tip if tip != remote else None
         try:
             held = self.store.take_over(str(b.id))
         except NotLapsed:
             return
         try:
-            if push is not None:
-                repository.push(push, b.branch)
             number = self._find_or_open_pr(delivery, held, record)
             if number is None:
                 return
@@ -878,10 +857,6 @@ class Tick:
         if held.lane == LEAD_LANE:
             return {}
         tip = delivery.repository.branch_tip(held.branch)
-        if tip is None:
-            from defender.learning.author.version_control.store_delivery import remote_tip
-
-            tip = remote_tip(delivery.repository, held.branch)
         changed = record.changed_paths(str(held.batch_id))
         out: dict[tuple[str, str], Any] = {}
         cited: dict[str, set[str]] = {}  # each corpus folder read once, whatever the number of items
@@ -935,9 +910,7 @@ class Tick:
             return int(found.number)
         tip_message = None
         if held.kind == "registry":
-            from defender.learning.author.version_control.store_delivery import remote_tip
-
-            tip = repository.branch_tip(held.branch) or remote_tip(repository, held.branch)
+            tip = repository.branch_tip(held.branch)
             if tip is None:
                 raise RuntimeError(f"registry batch {held.batch_id} has no tip to describe its PR by")
             tip_message = repository.commit_message(tip)

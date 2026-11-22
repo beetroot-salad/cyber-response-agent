@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -72,101 +70,88 @@ class GitTransport:
     def __post_init__(self) -> None:
         ForgeAddress.parse(self.origin)
 
-    @contextmanager
-    def _context(self) -> Iterator[tuple[Path, dict[str, str]]]:
+    def fetch(self, *refs: str) -> None:
+        """Every branch of `origin` as the same local head (`+refs/heads/*:refs/heads/*`) and each of `refs`
+        (`refs/pull/<n>/head`) as the same local ref, into the owner's private repository. No other process touches
+        its refs, so there is nothing to collide with (C-F1)."""
         with tempfile.TemporaryDirectory(prefix="defender-git-") as temporary:
-            root = Path(temporary)
-            env = _environment(root)
-            objects = _git.git(
-                ["rev-parse", "--path-format=absolute", "--git-path", "objects"],
-                cwd=self.repository,
-                env=env,
-                timeout=self.timeout,
-            )
-            object_format = _git.git(
-                ["rev-parse", "--show-object-format"],
-                cwd=self.repository,
-                env=env,
-                timeout=self.timeout,
-            )
-            path = root / "transfer.git"
-            _git.git(
-                [
-                    "init",
-                    "--bare",
-                    "--template=",
-                    f"--object-format={object_format}",
-                    str(path),
-                ],
-                cwd=root,
-                env=env,
-                timeout=self.timeout,
-            )
-            # The temporary repository owns its config, refs, hooks and shallow state.
-            # Only objects cross the boundary; fetched objects land in the tenant database.
-            yield path, {**env, "GIT_OBJECT_DIRECTORY": objects}
-
-    def fetch(self) -> None:
-        with self._context() as (path, env):
+            env = _environment(Path(temporary))
             network_git(
-                [
-                    "fetch",
-                    "--no-tags",
-                    "--no-recurse-submodules",
-                    "--no-write-fetch-head",
-                    self.origin,
-                    "+refs/heads/*:refs/remotes/origin/*",
-                ],
-                repo=path,
-                origin=self.origin,
-                identity=self.identity,
-                env=env,
-                timeout=self.timeout,
-            )
-            refs = _git.git(
-                [
-                    "for-each-ref",
-                    "--format=%(objectname) %(refname)",
-                    "refs/remotes/origin/",
-                ],
-                cwd=path,
-                env=env,
-                timeout=self.timeout,
-            )
-            updates = [
-                f"update {ref} {oid}"
-                for oid, ref in (line.split() for line in refs.splitlines())
-            ]
-            if updates:
-                # Credential descriptor and network process group are gone before local
-                # ref updates, including any reference-transaction hook of the tenant clone.
-                local = {
-                    key: value
-                    for key, value in env.items()
-                    if key != "GIT_OBJECT_DIRECTORY"
-                }
-                _git.git(
-                    ["update-ref", "--stdin"],
-                    cwd=self.repository,
-                    env=local,
-                    input="start\n" + "\n".join(updates) + "\nprepare\ncommit\n",
-                    timeout=self.timeout,
-                )
+                ["fetch", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", self.origin,
+                 "+refs/heads/*:refs/heads/*", *(f"+{ref}:{ref}" for ref in refs)],
+                repo=self.repository, origin=self.origin, identity=self.identity, env=env, timeout=self.timeout)
+
+    def fetch_commit(self, commit: str) -> None:
+        """One commit by id (protocol v2), kept under `refs/fetched/`."""
+        with tempfile.TemporaryDirectory(prefix="defender-git-") as temporary:
+            env = _environment(Path(temporary))
+            network_git(
+                ["-c", "protocol.version=2", "fetch", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head",
+                 self.origin, f"+{commit}:refs/fetched/{commit}"],
+                repo=self.repository, origin=self.origin, identity=self.identity, env=env, timeout=self.timeout)
 
     def push(self, commit: str, branch: str) -> None:
-        with self._context() as (path, env):
+        with tempfile.TemporaryDirectory(prefix="defender-git-") as temporary:
+            env = _environment(Path(temporary))
             network_git(
-                [
-                    "push",
-                    "--quiet",
-                    "--no-follow-tags",
-                    "--no-recurse-submodules",
-                    self.origin,
-                    f"{commit}:refs/heads/{branch}",
-                ],
-                repo=path,
-                origin=self.origin,
-                identity=self.identity,
-                env=env,
-                timeout=self.timeout,
-            )
+                ["push", "--quiet", "--no-follow-tags", "--no-recurse-submodules", self.origin,
+                 f"{commit}:refs/heads/{branch}"],
+                repo=self.repository, origin=self.origin, identity=self.identity, env=env, timeout=self.timeout)
+
+
+def init_private(path: Path, *, origin: str, identity: ForgeCredential, timeout: float) -> None:
+    """SPIKE (#1618): a fresh bare repository at `path`, in the object format `origin` serves (the clone used to
+    fix it; a fresh repository must learn it, so one `ls-remote` round trip)."""
+    ForgeAddress.parse(origin)
+    with tempfile.TemporaryDirectory(prefix="defender-git-") as temporary:
+        root = Path(temporary)
+        env = _environment(root)
+        probe = root / "probe.git"
+        _git.git(["init", "--bare", "--template=", str(probe)], cwd=root, env=env, timeout=timeout)
+        out = network_git(["ls-remote", origin, "HEAD", "refs/heads/main"], repo=probe, origin=origin,
+                          identity=identity, env=env, timeout=timeout)
+        first = out.split()[0] if out.split() else ""
+        object_format = "sha256" if len(first) == 64 else "sha1"
+        _git.git(["init", "--bare", "--template=", f"--object-format={object_format}", str(path)],
+                 cwd=root, env=env, timeout=timeout)
+
+
+def init_for_commit(path: Path, commit: str, *, timeout: float) -> None:
+    """A fresh bare repository for a fetch by id: the object format is the id's length (40 sha1, 64 sha256), so no
+    network request is needed to learn it."""
+    object_format = {40: "sha1", 64: "sha256"}.get(len(commit))
+    if object_format is None:
+        raise ValueError(f"{commit!r} is not a commit id")
+    with tempfile.TemporaryDirectory(prefix="defender-git-") as temporary:
+        _git.git(["init", "--bare", "--template=", f"--object-format={object_format}", str(path)],
+                 cwd=Path(temporary), env=_environment(Path(temporary)), timeout=timeout)
+
+
+def clone_main(path: Path, *, origin: str, identity: ForgeCredential, timeout: float) -> str:
+    """`main` at depth 1 into a new bare repository at `path` (git learns the object format in the one connection);
+    answers the commit. `network_git` only needs a working directory, so the clone runs from the temp root."""
+    with tempfile.TemporaryDirectory(prefix="defender-git-") as temporary:
+        root = Path(temporary)
+        env = _environment(root)
+        network_git(["clone", "--bare", "--depth", "1", "--no-tags", "--single-branch", "--branch", "main",
+                     "--template=", origin, str(path)],
+                    repo=root, origin=origin, identity=identity, env=env, timeout=timeout)
+        return _git.git(["rev-parse", "--verify", "refs/heads/main^{commit}"], cwd=path, env=env, timeout=timeout)
+
+
+def fetch_private(path: Path, *, origin: str, identity: ForgeCredential, timeout: float,
+                  commit: str | None = None) -> str:
+    """SPIKE (#1618): fetch `refs/heads/main` (or, with `commit`, that commit by id, protocol v2, depth 1) into the
+    private bare repository `path` and answer the commit it now holds: the fetcher's own, never a shared ref."""
+    with tempfile.TemporaryDirectory(prefix="defender-git-") as temporary:
+        env = _environment(Path(temporary))
+        if commit is None:
+            args = ["fetch", "--no-tags", "--no-recurse-submodules", "--no-write-fetch-head", origin,
+                    "+refs/heads/main:refs/remotes/origin/main"]
+            ref = "refs/remotes/origin/main"
+        else:
+            args = ["-c", "protocol.version=2", "fetch", "--no-tags", "--no-recurse-submodules", "--depth", "1",
+                    "--no-write-fetch-head", origin, f"+{commit}:refs/fetched/{commit}"]
+            ref = f"refs/fetched/{commit}"
+        network_git(args, repo=path, origin=origin, identity=identity, env=env, timeout=timeout)
+        return _git.git(["rev-parse", "--verify", f"{ref}^{{commit}}"], cwd=path, env=env, timeout=timeout)

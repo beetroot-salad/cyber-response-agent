@@ -30,7 +30,9 @@ from defender.tenancy._owner import owned_temporary, owner_alive, write_owner
 from defender.tenancy._publish_status import (
     FRESH,
     MISCONFIGURED,
+    OK,
     OPERATOR,
+    REFUSED,
     STALE_OPERATOR,
     STALE_PREFIX,
     TRANSIENT,
@@ -75,26 +77,23 @@ class PublishReport:
     stale_kind: str | None = None
     reason: str | None = None
     unreadable: bool = False
+    transient: bool = False
 
 
 def child_failed(summary: object) -> PublishReport:
-    """U11: a child with no valid report line (a crash, garbage, nothing, a spawn failure) is
-    `stale:operator`, never fresh."""
+    """U11: a child with no valid report line (a crash, garbage, nothing, a spawn failure) is a refusal."""
     shown = one_line(str(summary))[:_SUMMARY_LIMIT] or "no report line"
-    return PublishReport(STALE, stale_kind=OPERATOR, reason=f"publish child failed: {shown}",
-                         unreadable=True)
+    return PublishReport(REFUSED, reason=f"fetch child failed: {shown}", unreadable=True)
 
 
 def failed_line(summary: object) -> str:
-    """U11's report line for a child with no valid one of its own (`child_failed`'s, as a
-    line): what the launcher returns, and records, in the child's place."""
-    return f"{STALE_OPERATOR} {child_failed(summary).reason}"
+    """U11's report line for a child with no valid one of its own: what the launcher returns, and records."""
+    return f"{REFUSED} lasting {child_failed(summary).reason}"
 
 
 def read_publish_report(line: object) -> PublishReport:
-    """The child's report line (OD2: `fresh <commit>`, `stale:transient <reason>`,
-    `stale:operator <reason>`, `misconfigured <reason>`), or U11's `stale:operator` for anything
-    else."""
+    """The child's report line: `ok <commit>` or `refused <reason>` (SPIKE #1618; FORCED vocabulary), or a refusal
+    for anything else."""
     if not isinstance(line, str):
         return child_failed(f"not a report line: {line!r}")
     text = line.strip()
@@ -102,41 +101,34 @@ def read_publish_report(line: object) -> PublishReport:
         return child_failed(f"more than one line: {text!r}")
     head, _sep, rest = text.partition(" ")
     rest = rest.strip()
-    if head == FRESH:
+    if head == OK:
         if OID.fullmatch(rest):
-            return PublishReport(FRESH, commit=rest)
-        return child_failed(f"fresh without a full commit id: {text!r}")
-    if head in (f"{STALE_PREFIX}{TRANSIENT}", f"{STALE_PREFIX}{OPERATOR}") and rest:
-        return PublishReport(STALE, stale_kind=head.removeprefix(STALE_PREFIX), reason=rest)
-    if head == MISCONFIGURED and rest:
-        return PublishReport(MISCONFIGURED, reason=rest)
+            return PublishReport(OK, commit=rest)
+        return child_failed(f"ok without a full commit id: {text!r}")
+    if head == REFUSED and rest:
+        klass, _sep2, why = rest.partition(" ")
+        if klass in (TRANSIENT, "lasting") and why.strip():
+            return PublishReport(REFUSED, reason=why.strip(), transient=klass == TRANSIENT)
+        return child_failed(f"refused without a class: {text!r}")
     return child_failed(f"unrecognised report line: {text!r}")
 
 
 @dataclass(frozen=True)
 class KnowledgeSource:
-    """What the run read and why (OD1): `kind` fresh, stale or pinned; `commit`, the export
-    actually copied; `stale_kind` (non-null iff stale); `reason`, the child's own words (host
-    only, U12); `reported`, the commit the child reported when it differs from the one copied
-    (A-MISMATCH: `current` moved on by fast-forward since)."""
+    """What the run read and why (OD1): `kind` fresh or pinned; `commit`, the commit its fetch brought; `reason`
+    (host only, U12). SPIKE #1618: no stale kind, no `reported` (the copy is the fetch's own)."""
 
     kind: str
     commit: str
-    stale_kind: str | None = None
     reason: str | None = None
-    reported: str | None = None
 
     def host_record(self) -> dict[str, Any]:
         """The host-held record (U12), every field."""
-        record: dict[str, Any] = {"kind": self.kind, "commit": self.commit,
-                                  "stale_kind": self.stale_kind, "reason": self.reason}
-        if self.reported is not None:
-            record["reported_commit"] = self.reported
-        return record
+        return {"kind": self.kind, "commit": self.commit, "reason": self.reason}
 
     def stamp_view(self) -> dict[str, Any]:
         """What the box-readable stamp may carry (OD17): never the reason."""
-        return {"kind": self.kind, "commit": self.commit, "stale_kind": self.stale_kind}
+        return {"kind": self.kind, "commit": self.commit}
 
 
 def pinned_commit(raw: str) -> str:
@@ -149,56 +141,19 @@ def pinned_commit(raw: str) -> str:
     return raw
 
 
-def _export_of(tenant: Tenant, commit: str) -> Path:
-    """`<T>/exports/<commit>/`, judged without following it, or `KnowledgeRefused`."""
-    try:
-        export = tenant.export_folder(commit)
-    except TenantRefused as refused:
-        raise KnowledgeRefused(f"tenant {tenant.id}'s knowledge at {commit!r}: {refused}") from refused
-    with _io.bind(export.parent) as folder:
-        found = _io.stat_entry(folder, export.name)
-    if found.st is None or not stat.S_ISDIR(found.st.st_mode):
-        why = "no export is published for it" if found.absent else (found.reason or "not a folder")
-        raise KnowledgeRefused(
-            f"tenant {tenant.id}'s knowledge at {commit} cannot be read: {why} "
-            f"({export}) — a run never materialises one (it has no git); publish or "
-            "materialise it first")
-    return export
-
-
-def _current_commit(tenant: Tenant) -> str | None:
-    """The commit `<T>/exports/current` names, or `None` when there is no usable snapshot."""
-    try:
-        return current_export(tenant).commit
-    except DeliveryRefused:
-        return None
-
-
 def resolve_source(tenant: Tenant, *, report: PublishReport | None,
                    pinned: str | None) -> KnowledgeSource:
-    """The export this run reads and how it came to read it, or `KnowledgeRefused`:
-    pinned → that export; misconfigured → refused (O9, a snapshot does not save it); otherwise
-    `current` — fresh at the copied commit, keeping the reported one when they differ
-    (A-MISMATCH), or stale with the child's kind and reason — and no `current` refuses (O-A)."""
-    if pinned is not None:
-        _export_of(tenant, pinned)
-        return KnowledgeSource(PINNED, pinned)
+    """The commit this run reads, from the fetch child's report, or `KnowledgeRefused` (a refused fetch refuses the
+    run: no stale fallback, D3). A pinned run's report must name the commit it asked for."""
     assert report is not None
-    if report.kind == MISCONFIGURED:
-        raise KnowledgeRefused(
-            f"the launch-time publish is misconfigured for tenant {tenant.id}: {report.reason}")
-    current = _current_commit(tenant)
-    if current is None:
-        said = (f"the launch-time publish reported {report.kind}"
-                + (f":{report.stale_kind} ({report.reason})" if report.kind == STALE else ""))
-        raise KnowledgeRefused(
-            f"tenant {tenant.id} has no published knowledge snapshot (`exports/current`) and "
-            f"{said}: there is nothing to start the run on")
-    _export_of(tenant, current)
-    if report.kind == FRESH:
-        reported = report.commit if report.commit != current else None
-        return KnowledgeSource(FRESH, current, reported=reported)
-    return KnowledgeSource(STALE, current, stale_kind=report.stale_kind, reason=report.reason)
+    if report.kind != OK:
+        raise KnowledgeRefused(f"tenant {tenant.id}'s knowledge could not be fetched: {report.reason}")
+    if pinned is not None:
+        if report.commit != pinned:
+            raise KnowledgeRefused(f"tenant {tenant.id}: asked for {pinned}, the fetch brought {report.commit}")
+        return KnowledgeSource(PINNED, pinned)
+    assert report.commit is not None
+    return KnowledgeSource(FRESH, report.commit)
 
 
 @dataclass(frozen=True)
@@ -234,47 +189,40 @@ def _remove_copy(folder: Path, name: str) -> None:
         remove_entry(folder, name)
 
 
-def _files_of(root: Path) -> dict[str, bytes]:
-    try:
-        return regular_files(root)
-    except DeliveryRefused as refused:
-        raise KnowledgeRefused(f"the export cannot be copied for this run: {refused}") from refused
+def make_owned_empty(parent: Path, label: str) -> Path:
+    """D5: the CALLER's owned empty folder (`owned_temporary`: this process's pid and start time in its name), a sibling
+    of the final place under `parent`. The fetch child fills it; the caller then `place`s or `discard`s it."""
+    name = owned_temporary(f"{_BUILDING_PREFIX}{label}")
+    with _io.hold_new(parent, name, exclusive=True):
+        pass
+    return parent / name
 
 
-def copy_for_run(tenant: Tenant, source: KnowledgeSource, run_id: str) -> RunCopy:
-    """Copy `source`'s export into `<T>/run-knowledge/<run_id>/`: built as a dot-named
-    temporary whose name carries its owner (`owned_temporary`: this process's pid + start time,
-    so a publish's sweep, which takes no notice of this process, keeps it while this process
-    lives and removes it once it is gone), then renamed into place with its owner record. Every file is written anew (no inode
-    is shared with the export) from a no-follow read that refuses anything but regular files.
-
-    A copy already at `<run_id>` (a resumed run id whose earlier run was killed) is replaced
-    when its owner is dead, and refused while it lives."""
-    export = _export_of(tenant, source.commit)
-    agent_files = _files_of(export / AGENT_HALF)
-    settings_files = _files_of(export / SETTINGS_HALF)
-    copies = tenant.run_knowledge
-    final = copies / run_id
+def place(temporary: Path, final: Path) -> None:
+    """Rename the filled temporary into place with an `owner` record (this process); a live owner's copy at `final`
+    refuses, a dead one's is replaced."""
+    parent = temporary.parent
     if _io.entry_present(final):
         if owner_alive(final):
-            raise KnowledgeRefused(
-                f"run id {run_id} already has a live run copy at {final}: another process is "
-                "running it")
-        _remove_copy(copies, run_id)
-    temporary = owned_temporary(f"{_BUILDING_PREFIX}{run_id}")
+            raise KnowledgeRefused(f"{final} is a live run copy: another process is running it")
+        _remove_copy(parent, final.name)
+    with _io.hold(temporary, follow=False) as held:
+        held.write(f"{STAGE}/{STAGE_TOKEN}", secrets.token_hex(16), mode="create")
+    write_owner(temporary)
+    os.rename(temporary, final)
+
+
+def adopt_copy(tenant: Tenant, run_id: str, into: Path | None = None) -> RunCopy:
+    """SPIKE #1618: the run's side. The copy the fetch child made at `<run_id>`, judged present (never made here: the
+    run has no git)."""
+    final = (tenant.run_knowledge if into is None else into) / run_id
     try:
-        with _io.hold_new(copies, temporary, exclusive=True) as held:
-            write_owner(copies / temporary)
-            for files, under in ((agent_files, f"{STAGE}/{AGENT_HALF}"),
-                                 (settings_files, SETTINGS_HALF)):
-                held.mkdir(under)  # lint-unguarded-tree-write: ok — `Held.mkdir`, no link followed below the held temporary
-                for rel, data in files.items():
-                    held.write(f"{under}/{rel}", data, mode="create")
-            held.write(f"{STAGE}/{STAGE_TOKEN}", secrets.token_hex(16), mode="create")
-        os.rename(copies / temporary, final)
-    except BaseException:
-        _remove_copy(copies, temporary)
-        raise
+        with _io.bind(final.parent) as folder:
+            found = _io.stat_entry(folder, final.name)
+    except OSError as refused:
+        raise KnowledgeRefused(f"the run copy {final} cannot be read: {refused}") from refused
+    if found.st is None or not stat.S_ISDIR(found.st.st_mode):
+        raise KnowledgeRefused(f"the fetch child made no run copy at {final}")
     return RunCopy(final)
 
 
@@ -295,6 +243,6 @@ def write_record_versions(path: Path, records: TenantRecords) -> None:
 __all__ = [
     "FRESH", "MISCONFIGURED", "OPERATOR", "PINNED", "STALE", "STAGE", "STAGE_TOKEN",
     "TRANSIENT", "KnowledgeRefused", "KnowledgeSource", "PublishReport", "RunCopy",
-    "child_failed", "copy_for_run", "failed_line", "pinned_commit", "read_publish_report", "resolve_source",
+    "adopt_copy", "make_owned_empty", "place", "child_failed", "failed_line", "pinned_commit", "read_publish_report", "resolve_source",
     "write_host_record", "write_record_versions",
 ]

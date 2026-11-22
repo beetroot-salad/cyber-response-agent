@@ -145,12 +145,6 @@ def tip_commits_recorded(repository: GitRepository, base: str, tip: str, mine: f
     return bool(sent) and all(commit in mine for commit in sent)
 
 
-def remote_tip(repository: GitRepository, branch: str) -> str | None:
-    """The tip of `branch` as the last fetch saw it on the origin, or `None`."""
-    ref = f"refs/remotes/origin/{branch}"
-    return repository.revision(ref) if repository.holds_ref(ref) else None
-
-
 # --- reverts (#1278 Reverts: a batch of kind revert, no items) ------------------------------------------
 
 
@@ -186,8 +180,7 @@ def revert_lesson(delivery: TenantDelivery, store: Any, *, lesson_path: str, les
     with _refusals():
         path = _agent_path(lesson_path)
         name = _one_word(lesson_name, "lesson name")
-        repository.fetch()
-        main = repository.revision("refs/remotes/origin/main")
+        main = repository.revision("refs/heads/main")  # the operation's one fetch (`GitRepository.open`) is the read
         record = StoreRecord.of(store.commit_record(tenant_id))
         batches = {str(b.id): b for b in store.batches(tenant_id)}
         change, last = _peel(record, path, repository.regular_blob_on(main, path), batches)
@@ -245,5 +238,5 @@ def _end_quietly(store: Any, held: Any) -> None:
                                               "it lapses for a takeover")
 
 
-__all__ = ["NetChange", "StoreRecord", "cited_in_paths", "cited_in_tree", "open_pr_on", "remote_tip",
+__all__ = ["NetChange", "StoreRecord", "cited_in_paths", "cited_in_tree", "open_pr_on",
            "revert_lesson", "tip_commits_recorded"]

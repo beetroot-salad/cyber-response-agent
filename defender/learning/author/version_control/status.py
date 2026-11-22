@@ -42,7 +42,6 @@ if TYPE_CHECKING:
 
 from .auth import CredentialMisconfigured
 from .forgejo import ForgeError
-from .model import LockBusy
 
 #: What git says when it could not reach the remote at all (no answer, not a refusal).
 _GIT_UNREACHABLE = re.compile(
@@ -86,8 +85,6 @@ def is_misconfigured(error: BaseException) -> bool:
 
 
 def _fault_kind(error: BaseException) -> str:
-    if isinstance(error, LockBusy):
-        return TRANSIENT
     for fault in _chain(error):
         if isinstance(fault, (httpx.TransportError, subprocess.TimeoutExpired, RecordsUnreachable)):
             return TRANSIENT
@@ -101,9 +98,7 @@ def _fault_kind(error: BaseException) -> str:
 
 def record_refused(directory: TenantDirectory | None, tenant_id: TenantId, error: BaseException, *,
                    by: str) -> None:
-    """A publish by `by` was refused (the lock busy is not a refusal, and is not recorded)."""
-    if isinstance(error, LockBusy):
-        return
+    """A publish by `by` was refused."""
     kind, reason = classify(error)
     record_refusal(directory, tenant_id, kind=kind, reason=reason, by=by)
 

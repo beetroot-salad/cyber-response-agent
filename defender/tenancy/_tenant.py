@@ -20,7 +20,6 @@ from defender.records.formats import (
     ScratchRoot,
     ExportsRoot,
     DraftsRoot,
-    KnowledgeLock,
     LegacyRunsRoot,
     LegacyEpisodesRoot,
     unwrap_data_root,
@@ -123,10 +122,6 @@ class _TenantLayout:
     @property
     def run_knowledge(self) -> Path:
         return self.tenant_root / "run-knowledge"
-
-    @property
-    def knowledge_lock(self) -> Path:
-        return self.tenant_root / "knowledge.lock"
 
     @property
     def settings(self) -> Path:
@@ -297,13 +292,6 @@ class Tenant(RecordTenant):
         return self._layout.exports / commit
 
     @property
-    def knowledge_lock(self) -> KnowledgeLock:
-        """The per-tenant lock over the knowledge clone and its exports: held for a
-        fast-forward, export publication, filter configuration and draft build or sweep,
-        never across network I/O, a box window or commit creation."""
-        return KnowledgeLock(self._layout.knowledge_lock)
-
-    @property
     def settings(self) -> Path:
         return self._layout.settings
 
@@ -444,8 +432,12 @@ def _accept_knowledge(
     root = paths.tenant_root.parent
     knowledge_name = paths.knowledge.relative_to(root).as_posix()
     with _real_io.bind(root) as bound:
-        _knowledge_is_real(paths, _real_io.stat_entry(bound, knowledge_name))
-        if clone_tree or _has_working_tree(bound, knowledge_name):
+        found = _real_io.stat_entry(bound, knowledge_name)
+        if found.absent:
+            pass  # SPIKE #1618: no clone is the normal case; nothing about the tenant's folder is judged here (FORCED: what acceptance checks is unspecified)
+        else:
+            _knowledge_is_real(paths, found)
+        if not found.absent and (clone_tree or _has_working_tree(bound, knowledge_name)):
             _check_knowledge(bound.under(knowledge_name), paths.knowledge,
                              tenant_id=paths.tenant_id, parse_tables=parse_tables)
     root_real = _resolve_or_refuse(root)

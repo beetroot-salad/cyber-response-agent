@@ -370,25 +370,36 @@ _UNPINNABLE = "the source run's knowledge cannot be pinned for the family"
 
 
 def _materialised(tenant: RunTenant, commit: str, container: JobContainer | None) -> Any:
-    """`<T>/exports/<commit>/`, materialised from the tenant clone when absent: by this process for an operator's
-    launch; inside a job container by its per-job host helper (#1170 P-A, C20: the container writes no export and
-    takes no knowledge lock), the folder it answers held to the one this tenant names for that commit. A helper
-    refusal, or a helper that cannot be reached, is `DeliveryRefused`."""
-    from defender import job_socket
-    from defender.learning.author.version_control import DeliveryRefused, TenantExport, materialise_export
+    """SPIKE #1618: a copy of `commit` fetched from Forgejo by id: by the fetch child for an operator's launch (the
+    copy is this process's scratch, reclaimed by the owner sweep once it exits; no records directory is threaded
+    here, so the child's outcome goes unrecorded), inside a job container by its per-job host helper
+    (`export.materialise`). The answer is held to a folder inside this tenant's `run-knowledge/`. A refusal, or a
+    helper that cannot be reached, is `DeliveryRefused`."""
+    import uuid
+
+    from defender import job_socket, run_common
+    from defender.learning.author.version_control import DeliveryRefused, TenantExport
+    from defender.tenancy import run_knowledge
 
     if container is None:
-        return materialise_export(tenant.tenant, commit)
+        run_id = str(uuid.uuid4())
+        try:
+            report = run_common.publish_report(None, tenant.tenant, tenancy.resolve_data_root(), None,
+                                               run_id=run_id, commit=commit)
+            source = run_knowledge.resolve_source(tenant.tenant, report=report, pinned=commit)
+            copy = run_knowledge.adopt_copy(tenant.tenant, run_id)
+        except run_knowledge.KnowledgeRefused as refused:
+            raise DeliveryRefused(str(refused)) from None
+        return TenantExport(commit=source.commit, path=copy.stage)
     try:
         answer = container.materialised_export(commit)
-        folder = tenant.tenant.export_folder(commit)
     except job_socket.Refused as refused:
-        raise DeliveryRefused(f"the job's host helper did not materialise it ({refused.code}): {refused}") from None
+        raise DeliveryRefused(f"the job's host helper did not fetch it ({refused.code}): {refused}") from None
     except (OSError, ValueError, TenantRefused) as lost:
-        raise DeliveryRefused(f"no export from the job's host helper: {type(lost).__name__}: {lost}") from None
-    if answer.get("commit") != commit or str(answer.get("path")) != str(folder):
-        raise DeliveryRefused(f"the job's host helper answered another export ({answer.get('path')!r}) than "
-                              f"{folder}")
+        raise DeliveryRefused(f"no copy from the job's host helper: {type(lost).__name__}: {lost}") from None
+    folder = Path(str(answer.get("path")))
+    if answer.get("commit") != commit or not folder.is_relative_to(tenant.tenant.run_knowledge):
+        raise DeliveryRefused(f"the job's host helper answered another copy ({answer.get('path')!r})")
     return TenantExport(commit=commit, path=folder)
 
 
@@ -404,11 +415,8 @@ def _pinned_export(tenant: RunTenant, source: Run, container: JobContainer | Non
     before: a commit it names, a refusal for `unversioned`/`unavailable`, or with none recorded
     the tenant's published `current` (pre-flight still refuses that unless `--allow-dirty`). Inside a job
     container the export is materialised by the job's host helper (`_materialised`)."""
-    from defender.learning.author.version_control import (
-        DeliveryRefused,
-        LockBusy,
-        current_export,
-    )
+    from defender.learning.author.version_control import DeliveryRefused
+
     status = source.knowledge_status()
     commit = None if status is None else status.commit
     try:
@@ -417,7 +425,7 @@ def _pinned_export(tenant: RunTenant, source: Run, container: JobContainer | Non
             revision = formats.KnowledgeRevision.from_wire(
                 (_stamp_of(source) or {}).get("knowledge"))
             if revision is None:
-                return current_export(tenant.tenant)
+                return _materialised(tenant, None, container)  # SPIKE: was `current`; now main (commit=None)
             if revision.commit is None:
                 why = (f"unavailable knowledge ({revision.unavailable})"
                        if revision.unavailable is not None else "unversioned knowledge")
@@ -432,7 +440,7 @@ def _pinned_export(tenant: RunTenant, source: Run, container: JobContainer | Non
                 "is no knowledge commit to pin its siblings to, so the family cannot be "
                 "launched (not waived by --allow-dirty)", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
         return _materialised(tenant, commit, container)
-    except (DeliveryRefused, LockBusy) as refused:
+    except DeliveryRefused as refused:
         at = "" if commit is None else f" ran at knowledge commit {commit}, which"
         raise ending(
             f"[branch] source run {source.run_dir}{at} cannot be pinned to a knowledge "

@@ -16,10 +16,6 @@ from .auth import ForgejoAuthError
 from .forgejo import ForgeError, PullRequest
 
 
-class LockBusy(DeliveryRefused):
-    """Another process holds the tenant's knowledge lock: raised at once, naming its pid."""
-
-
 @contextlib.contextmanager
 def _refusals() -> Iterator[None]:
     """Every fault below a public call, as the one refusal type callers handle. A `TypeError`

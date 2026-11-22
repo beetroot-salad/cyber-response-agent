@@ -123,17 +123,10 @@ class KnowledgeBodies:
             self._why = (f"unreadable: no tenant is known to read knowledge commit "
                          f"{revision.commit} from")
         else:
-            from defender.learning.author.version_control import (
-                DeliveryRefused,
-                LockBusy,
-                materialise_export,
-            )
-
-            try:
-                self._export = materialise_export(self.tenant, revision.commit)
-            except (DeliveryRefused, LockBusy) as refused:
-                self._why = (f"unreadable: knowledge commit {revision.commit} has no export "
-                             f"and none could be materialised ({refused})")
+            # SPIKE #1618: NOT DONE. The judge runs in the job container: it has no fetch, no credential and no channel
+            # to the host helper (`export.materialise`); `KnowledgeBodies` is built from (tenant, wire) only.
+            self._why = (f"unreadable: knowledge commit {revision.commit}: the judge has no way to fetch it "
+                         "(spike: the helper channel is not threaded here)")
 
 
 #: The agent root's folder inside an export (`<T>/exports/<commit>/agent/`).

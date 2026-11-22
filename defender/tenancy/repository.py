@@ -185,8 +185,10 @@ def publish_outcome(line: str) -> tuple[str | None, str | None, str | None]:
     from defender.tenancy._publish_status import FRESH, OPERATOR, STALE_TRANSIENT, TRANSIENT
 
     head, _sep, rest = line.strip().partition(" ")
-    if head == FRESH:
+    if head in (FRESH, "ok"):
         return rest, None, None
+    if head == "refused":  # SPIKE (#1618): the retired stale classes are no longer written; kind "refused"
+        return None, one_line(rest), "refused"
     return None, one_line(rest), TRANSIENT if head == STALE_TRANSIENT else OPERATOR
 
 

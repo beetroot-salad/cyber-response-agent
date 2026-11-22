@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 import secrets
+import shutil
+import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,12 +13,12 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import httpx
-from defender import _git, _io
+from defender import _git
 
 from .auth import CLOCK_SKEW, TOKEN_TTL, ForgeCredential
 from .forgejo import ForgejoForge, OpenedPullRequest, PullRequest
 from .model import _REGULAR_MODES, ChangeSet, DeliveryRefused
-from .transport import _NO_BACKGROUND_GIT, GitTransport
+from .transport import _NO_BACKGROUND_GIT, GitTransport, clone_main, fetch_private, init_for_commit, init_private
 
 
 def _local_env() -> dict[str, str]:
@@ -80,7 +82,6 @@ def _tree_entries(
 
 
 NETWORK_TIMEOUT = 120.0
-_FILTERS_OFF = "* -filter"
 
 
 def _require_own_repository(path: Path, env: dict[str, str]) -> None:
@@ -152,58 +153,6 @@ class LocalRepository:
 
     def commits_since(self, base: str, tip: str) -> list[str]:
         return self._git(["rev-list", f"{base}..{tip}"]).split()
-
-    def prepare_publish(self) -> str:
-        """Validate the clone under its tenant lock, without performing a checkout yet."""
-        self._filters_off()
-        if self._git(["symbolic-ref", "--quiet", "HEAD"]) != "refs/heads/main":
-            raise DeliveryRefused("the tenant clone must be on main to fast-forward")
-        if self._git(["status", "--porcelain", "--untracked-files=all"]):
-            raise DeliveryRefused("the tenant clone is dirty or has untracked files")
-        head, upstream = (
-            self.revision("HEAD"),
-            self.revision("refs/remotes/origin/main"),
-        )
-        if head != upstream and not _git.git_ok(
-            ["merge-base", "--is-ancestor", head, upstream],
-            cwd=self.path,
-            env=_local_env(),
-        ):
-            raise DeliveryRefused("the tenant clone has diverged from origin/main")
-        return upstream
-
-    def fast_forward(self, commit: str) -> None:
-        if self.revision("HEAD") != commit:
-            self._git(["merge", "--ff-only", "--quiet", commit])
-
-    def _filters_off(self) -> None:
-        """Keep `* -filter` the last line of the clone's `$GIT_DIR/info/attributes`, which
-        outranks every `.gitattributes`, so no filter driver the tenant's attributes name runs
-        on the host (a later line in one file wins: an operator's line appended after it would
-        turn a filter back on, so it is re-appended whenever it is not last). Git's own `eol`
-        and `ident` keep applying. The caller holds the tenant's lock."""
-        attributes = Path(
-            self._git(
-                ["rev-parse", "--path-format=absolute", "--git-path", "info/attributes"]
-            )
-        )
-        info = attributes.parent
-        _io.rooted_mkdir(info.parent, info.name)
-        with _io.bind(info) as folder:
-            read = folder.read(attributes.name)
-        if read.text is None and not read.absent:
-            raise DeliveryRefused(f"{attributes} could not be read: {read.refusal}")
-        lines = (read.text or "").splitlines()
-        while lines and not lines[-1].strip():
-            lines.pop()
-        if lines and lines[-1].strip() == _FILTERS_OFF:
-            return
-        _io.rooted_write(
-            info,
-            attributes.name,
-            "\n".join([*lines, _FILTERS_OFF]) + "\n",
-            mode="replace",
-        )
 
     def regular_blobs(self, rev: str, paths: Sequence[str]) -> dict[str, str]:
         """The blob id `rev` holds at each of `paths` that is a regular file there."""
@@ -314,14 +263,17 @@ class GitRepository(LocalRepository):
     @classmethod
     def open(
         cls,
-        path: Path,
         *,
         tenant_id: str,
         origin: str,
         identity: ForgeCredential,
         client: httpx.Client,
         network_timeout: float = NETWORK_TIMEOUT,
+        path: Path | None = None,
     ) -> GitRepository:
+        """SPIKE (#1618): a drain tick's, revert's, adoption's or feedback's one private bare repository, in its own temporary
+        folder (never under `<T>`; `close()` removes it) holding history and every branch of `origin` as local heads
+        (`+refs/heads/*:refs/heads/*`): its local tip of a branch IS the remote's."""
         if (
             isinstance(network_timeout, bool)
             or not isinstance(network_timeout, (int, float))
@@ -334,25 +286,75 @@ class GitRepository(LocalRepository):
             )
         if identity.tenant_id != tenant_id:
             raise DeliveryRefused("The Forgejo identity belongs to a different tenant")
-        env = _local_env()
-        _require_own_repository(path, env)
-        for ref in ("refs/heads/main", "refs/remotes/origin/main"):
-            if not _git.git_ok(
-                ["show-ref", "--verify", "--quiet", ref], cwd=path, env=env
-            ):
-                raise DeliveryRefused(
-                    f"tenant repository is missing its main ref {ref}"
-                )
         forge = ForgejoForge(origin=origin, identity=identity, client=client)
         forge.repository_id()
         forge.verify_main_protection()
-        return cls(path, origin, forge, identity, float(network_timeout))
+        path = path or Path(tempfile.mkdtemp(prefix="defender-repo-"))
+        try:
+            init_private(path, origin=origin, identity=identity, timeout=float(network_timeout))
+            repository = cls(path, origin, forge, identity, float(network_timeout))
+            repository.fetch()
+        except BaseException:
+            shutil.rmtree(path, ignore_errors=True)
+            raise
+        return repository
+
+    def close(self) -> None:
+        shutil.rmtree(self.path, ignore_errors=True)
+
+    @classmethod
+    def open_private(
+        cls,
+        path: Path,
+        *,
+        tenant_id: str,
+        origin: str,
+        identity: ForgeCredential,
+        client: httpx.Client,
+        network_timeout: float = NETWORK_TIMEOUT,
+        commit: str | None = None,
+    ) -> tuple[GitRepository, str]:
+        """SPIKE (#1618): the fetch child's repository: a fresh bare repository at `path` holding one depth-1 fetch of
+        `main`, or of `commit` by id; answers it and the commit the fetch brought."""
+        if identity.tenant_id != tenant_id:
+            raise DeliveryRefused("The Forgejo identity belongs to a different tenant")
+        forge = ForgejoForge(origin=origin, identity=identity, client=client)
+        pass  # D9: the fetch reads no forge API (protection only when asked)
+        try:
+            if commit is None:
+                got = clone_main(path, origin=origin, identity=identity, timeout=float(network_timeout))
+            else:
+                init_for_commit(path, commit, timeout=float(network_timeout))
+                got = fetch_private(path, origin=origin, identity=identity, timeout=float(network_timeout),
+                                    commit=commit)
+        except _git.GitError as refused:
+            what = f"commit {commit}" if commit else "main"
+            raise DeliveryRefused(f"Forgejo did not serve {what}: {refused}") from None
+        return cls(path, origin, forge, identity, float(network_timeout)), got
 
     def _transport(self) -> GitTransport:
         return GitTransport(self.path, self.origin, self.identity, self.network_timeout)
 
-    def fetch(self) -> None:
-        self._transport().fetch()
+    def fetch(self, *refs: str) -> None:
+        self._transport().fetch(*refs)
+
+    def pull_head(self, number: int) -> str | None:
+        """The tip of PR `number` (`refs/pull/<n>/head`, which Forgejo keeps after the branch is deleted: C-F5),
+        fetched now; `None` when Forgejo does not serve it."""
+        ref = f"refs/pull/{number}/head"
+        try:
+            self._transport().fetch(ref)
+        except _git.GitError:
+            return None
+        return self.revision(ref)
+
+    def require_commit(self, commit: str) -> None:
+        """`commit` held: fetched by id (protocol v2) when this repository lacks it; refused when Forgejo does not serve it."""
+        if not self.holds_commit(commit):
+            try:
+                self._transport().fetch_commit(commit)
+            except _git.GitError as refused:
+                raise DeliveryRefused(f"Forgejo did not serve commit {commit}: {refused}") from None
 
     def push(self, commit: str, branch: str) -> None:
         self._transport().push(commit, branch)

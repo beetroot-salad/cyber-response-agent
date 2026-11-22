@@ -43,8 +43,8 @@ from typing import TYPE_CHECKING, Any
 from defender.execution import end_group, kill_group
 from defender.box import provider_scrubbed_environ
 from defender.tenancy import run_knowledge
-from defender.tenancy import knowledge_lock_holder
-from defender.tenancy import STALE_TRANSIENT, record_report
+from defender.tenancy import record_report
+from defender.tenancy._publish_status import REFUSED
 from defender.tenancy import Tenant, data_root_from_path, database_address_variable, requested_tenant
 from defender.records.formats import TenantId, TenantRefused
 
@@ -105,6 +105,8 @@ def launch_publish(
     tenant_id: TenantId,
     *,
     data_root: Path,
+    dest: Path,
+    commit: str | None = None,
     budget: float = 60.0,
     command: Sequence[str] | None = None,
     spawn: Spawn | None = None,
@@ -125,7 +127,8 @@ def launch_publish(
     with _sigterm_noted() as asked:
         try:
             return _launch_child(tenant_id, data_root=data_root, budget=budget, command=command,
-                                 spawn=spawn, directory=directory, asked=asked, trigger=trigger)
+                                 spawn=spawn, directory=directory, asked=asked, trigger=trigger,
+                                 dest=dest, commit=commit)
         except Exception as failed:  # noqa: BLE001 — U11: whatever fails here is a failed publish child, recorded
             return _recorded(directory, tenant_id, run_knowledge.failed_line(
                 f"the launcher failed: {type(failed).__name__}: {failed}"), trigger=trigger)
@@ -153,12 +156,14 @@ def _sigterm_noted() -> Iterator[list[int]]:
 def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
     tenant_id: TenantId, *, data_root: Path, budget: float, command: Sequence[str] | None,
     spawn: Spawn | None, directory: TenantDirectory | None, asked: list[int], trigger: str,
+    dest: Path, commit: str | None,
 ) -> str:
     if not budget > 0:
         raise ValueError(f"the launch-time publish budget must be positive, not {budget!r}")
     prefix = list(command) if command is not None else [sys.executable, "-m", CHILD_MODULE]
     argv = [*prefix, str(tenant_id), "--data-root", str(data_root),
-            "--budget", f"{child_budget(budget):g}", "--trigger", trigger]
+            "--budget", f"{child_budget(budget):g}", "--trigger", trigger,
+            "--dest", str(dest), *(["--commit", commit] if commit else [])]
     start = spawn if spawn is not None else subprocess.Popen
     try:
         proc = start(
@@ -169,8 +174,7 @@ def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
             f"it could not be started: {type(unstarted).__name__}: "
             f"{getattr(unstarted, 'strerror', None) or unstarted}"), trigger=trigger)
     try:
-        out, err, stopped = _wait(proc, budget=budget, asked=asked,
-                                  holds_lock=lambda: _holds_lock(proc, tenant_id, data_root))
+        out, err, stopped = _wait(proc, budget=budget, asked=asked)
     finally:
         # One publish is one process group (the child's session; its network git joins it):
         # whatever the child left running is gone (not only signalled) once it ends, however it
@@ -181,12 +185,12 @@ def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
         return line
     if stopped is not None:
         # Stopped in its network phase with nothing to say (a stopped child prints nothing).
-        line = f"{STALE_TRANSIENT} the launch-time publish {stopped}"
+        line = f"{REFUSED} transient the fetch child {stopped}"
     return _recorded(directory, tenant_id, line, trigger=trigger)
 
 
 def _wait(
-    proc: Any, *, budget: float, asked: list[int], holds_lock: Callable[[], bool],
+    proc: Any, *, budget: float, asked: list[int],
 ) -> tuple[Any, Any, str | None]:
     """Until the child itself has exited, reading its pipes meanwhile so it never blocks writing them
     (not until they close: a grandchild in its group can hold them open, and is killed with the
@@ -208,17 +212,13 @@ def _wait(
         if told_at is None:
             if not (asked or now >= deadline):
                 continue
-            if holds_lock():
-                settled = True
-                continue
             stopped = ("was stopped with its run" if asked
                        else f"did not finish its network phase within the {budget:g}s budget")
             proc.send_signal(signal.SIGTERM)
             told_at = now
         elif now >= told_at + _STOP_GRACE:
             settled = True
-            if not holds_lock():
-                _kill(proc)
+            _kill(proc)
     return ended[0], ended[1], stopped
 
 
@@ -239,16 +239,6 @@ def _kill(proc: Any) -> None:
         os.killpg(proc.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         proc.kill()
-
-
-def _holds_lock(proc: Any, tenant_id: str, data_root: Path) -> bool:
-    """Has the child taken the tenant's knowledge lock (its holder writes its pid there)? Then
-    it is past its network phase, doing local work that must not be cut off."""
-    tenant = _tenant(tenant_id, data_root)
-    try:
-        return tenant is not None and knowledge_lock_holder(tenant) == proc.pid
-    except OSError:
-        return False
 
 
 def _read_report(

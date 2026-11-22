@@ -32,8 +32,8 @@ from .exports import (
     draft_path,
     TenantExport,
     build_draft,
-    publish_locked,
-    tenant_lock,
+    knowledge_at,
+    sweep_dead_owners,
 )
 from .credential import forge_credential
 from .model import (
@@ -48,7 +48,7 @@ from .model import (
 )
 from .record import _BatchKey
 from .repository import NETWORK_TIMEOUT, GitRepository
-from .status import record_published, recording
+from .status import recording
 
 #: The lessons lane's branch prefix on the tenant repository (a lane passes its own).
 LESSONS_BRANCH_PREFIX = "lessons/"
@@ -89,8 +89,10 @@ def opened_delivery(  # noqa: PLR0913 — the tenant, its records, and the in-pr
             import httpx
 
             client = owned.enter_context(httpx.Client())
-        yield TenantDelivery.open(tenant, defender_dir=defender_dir, client=client,
-                                  identity=identity, origin=wiring.origin, directory=directory, relay=relay)
+        delivery = TenantDelivery.open(tenant, defender_dir=defender_dir, client=client,
+                                       identity=identity, origin=wiring.origin, directory=directory, relay=relay)
+        owned.callback(delivery.close)
+        yield delivery
 
 
 @dataclass(frozen=True, eq=False)
@@ -127,8 +129,8 @@ class TenantDelivery:
         relay: Callable[..., dict[str, Any]] | None = None,
     ) -> TenantDelivery:
         with recording(directory, accepted_tenant.id, by="delivery"), _refusals():
+            # One private repository for this delivery's life: history and every branch fetched once, here (D4/K12).
             repository = GitRepository.open(
-                accepted_tenant.knowledge,
                 tenant_id=str(accepted_tenant.id),
                 identity=identity,
                 origin=origin,
@@ -141,16 +143,28 @@ class TenantDelivery:
             )
 
     def publish(self) -> TenantExport:
-        """Flow 1: fetch (no lock), then under the lock fast-forward the clone to `origin/main`
-        and publish its export. Refuses, publishing nothing, a dirty, untracked or diverged
-        clone, a tree entry under `agent/` or `settings/` that is not a regular blob, and an
-        `agent/.tenant-id` not naming this tenant."""
-        with recording(self.directory, self.tenant.id, by="delivery"), _refusals():
-            self.repository.fetch()
-            with tenant_lock(self.tenant):
-                export = publish_locked(self.tenant, self.repository)
-        record_published(self.directory, self.tenant.id, export.commit, by="delivery")
-        return export
+        """SPIKE SHIM (#1618): NOT the design. The retired `exports/` snapshot of the clone's HEAD, kept only so the
+        sketch's fixture (`published_tenant`) can lay down its decoy `exports/<seed>/` + `current`."""
+        import shutil
+
+        from defender.records.formats import unwrap_exports_root
+        from .repository import LocalRepository
+
+        clone = LocalRepository.open_local(self.tenant.knowledge)
+        commit = clone.revision("HEAD")
+        files = knowledge_at(self.tenant, clone, commit)
+        exports = unwrap_exports_root(self.tenant.exports)
+        final = exports / commit
+        shutil.rmtree(final, ignore_errors=True)
+        for rel, data in files.items():
+            (final / rel).parent.mkdir(parents=True, exist_ok=True)
+            (final / rel).write_bytes(data)
+        (exports / "current").write_text(f"{commit}\n", encoding="utf-8")
+        return TenantExport(commit=commit, path=final)
+
+    def close(self) -> None:
+        """The delivery's private repository is its tick's: removed when the tick ends."""
+        self.repository.close()
 
     def start_batch(self, batch_id: str, *, lanes: Sequence[str], branch: str | None = None,
                     recorder: Recorder | None = None) -> Batch:
@@ -172,18 +186,11 @@ class TenantDelivery:
             declared = _lanes(lanes)
             branch = branch if branch is not None else f"{self.branch_prefix}{batch_id}"
             self._refuse_taken(batch_id, branch)
-            with recording(self.directory, self.tenant.id, by="delivery"), _refusals():
-                self.repository.fetch()
-            with tenant_lock(self.tenant):
-                with recording(self.directory, self.tenant.id, by="delivery"), _refusals():
-                    export = publish_locked(
-                        self.tenant, self.repository, temporaries_only=True
-                    )
-                record_published(self.directory, self.tenant.id, export.commit, by="delivery")
-                self._refuse_taken(batch_id, branch)
-                build_draft(
-                    self.tenant, self.repository, batch_id, export.commit, declared
-                )
+            sweep_dead_owners(self.tenant)  # flow 8: a batch start sweeps; no lock
+            # The draft is the tick's own fetch of `main` (D4): nothing is fetched or published here.
+            commit = self.repository.revision("refs/heads/main")
+            build_draft(self.tenant, self.repository, batch_id, commit, declared)
+            export = TenantExport(commit=commit, path=draft_path(self.tenant, batch_id))
             line = _Line(
                 batch=_BatchKey(
                     branch=branch, base=export.commit, start=secrets.token_hex(8)
@@ -221,6 +228,8 @@ class TenantDelivery:
         if folder != draft_path(self.tenant, batch_id):
             raise DeliveryRefused(f"the helper's draft {folder} is not batch {batch_id}'s")
         branch = branch if branch is not None else f"{self.branch_prefix}{batch_id}"
+        with _refusals():
+            self.repository.require_commit(commit)  # the helper's base, fetched by id when this tick's fetch lacks it
         line = _Line(batch=_BatchKey(branch=branch, base=commit, start=secrets.token_hex(8)), lanes=declared)
         return Batch(id=batch_id, branch=branch, export=TenantExport(commit=commit, path=Path(answer["export"])),
                      draft_root=folder / DRAFT_STAGE, lanes=declared, tenant=self.tenant,

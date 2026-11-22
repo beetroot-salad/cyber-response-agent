@@ -228,7 +228,7 @@ def mirror_run_page(run: Run, tenant: Any) -> None:
         mirror_page(page, run.run_dir.name, tenant)
 
 
-def settle_knowledge(session: Session, accepted: Any, records: Any, *, trigger: str) -> Any:
+def settle_knowledge(session: Session, accepted: Any, records: Any, *, trigger: str, run_id: str) -> Any:
     """The export the job reads (O5): the launch-time publish run under this helper's hold (C19), told who asked for it
     (`trigger`, #1471), then the export it settled on, by run setup's shared step (`run_common.resolve_knowledge`, the
     operator command's too, A6). Told to stop while the publish ran, the helper starts no container (A1); any other
@@ -237,7 +237,7 @@ def settle_knowledge(session: Session, accepted: Any, records: Any, *, trigger: 
 
     try:
         return run_common.resolve_knowledge(accepted, pin=None, publish=session.publish, data_root=session.root,
-                                            records=records, trigger=trigger)
+                                            records=records, trigger=trigger, run_id=run_id)
     except SystemExit as refused:
         if refused.code == 128 + signal.SIGTERM:
             session.signalled.set()
@@ -356,7 +356,7 @@ def tenant_launch_steps(session: Session, hold: contextlib.ExitStack, *, copy_id
     # refused before its alert mapping is read. The container reads no database; it is handed these in the launch facts.
     facts.current = _launch_step("records", run_common.read_records, facts.records, facts.accepted.id)
     facts.mapping = _launch_step("alert_mapping", run_common.read_alert_mapping, facts.records, facts.accepted.id)
-    facts.source = settle_knowledge(session, facts.accepted, facts.records, trigger=trigger)
+    facts.source = settle_knowledge(session, facts.accepted, facts.records, trigger=trigger, run_id=copy_id)
     repository = facts.accepted.runs_repository()
     try:
         if facts.launched is not None:

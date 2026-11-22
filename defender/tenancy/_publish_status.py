@@ -32,6 +32,9 @@ STALE_PREFIX = "stale:"
 STALE_TRANSIENT = f"{STALE_PREFIX}{TRANSIENT}"
 STALE_OPERATOR = f"{STALE_PREFIX}{OPERATOR}"
 MISCONFIGURED = "misconfigured"
+#: SPIKE (#1618): the fetch child's whole vocabulary: `ok <commit>` or `refused <reason>` (FORCED by the sketch).
+OK = "ok"
+REFUSED = "refused"
 
 
 def record_report(directory: TenantDirectory | None, tenant_id: TenantId, line: str, *, by: str) -> None:

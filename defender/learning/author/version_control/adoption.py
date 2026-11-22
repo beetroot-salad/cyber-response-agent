@@ -50,14 +50,11 @@ class _Matches:
 def adopt(repository: GitRepository, *, system: str, rendering: dict[str, bytes], digest: str) -> AdoptionRecord:
     """Offer `rendering` (`{agent/<path>: bytes}`, digest `digest`) to the repository's `main` for `system` (module doc)."""
     branch = base_files.branch_of(system, digest)
-    refused = _fetch(repository)
-    if refused is not None:
-        return refused
     try:
         decided = _decide(repository, system, branch, rendering)
         if decided is not None:
             return decided
-        main = repository.revision("refs/remotes/origin/main")
+        main = repository.revision("refs/heads/main")
         commit, _after = repository.make_commit(main, _change_set(rendering), _commit_message(system, digest))
         return _push_and_open(repository, system, branch, rendering, commit, digest)
     except Exception:  # noqa: BLE001 — A3: whatever a step raised, a fixed reason; the cause goes to the log
@@ -66,22 +63,13 @@ def adopt(repository: GitRepository, *, system: str, rendering: dict[str, bytes]
 
 
 def _fetch(repository: GitRepository) -> AdoptionRecord | None:
-    """The one fetch of `origin` both of `adopt`'s fetches use: None when it succeeded, else the failed record, a ref-lock
-    collision on the shared clone being `repository_busy` and any other fault `delivery_failed`."""
+    """The refetch after a refused push (the racer's branch): None when it succeeded, else the failed record."""
     try:
         repository.fetch()
-    except _git.GitError as fault:
-        return AdoptionRecord.failed(REPOSITORY_BUSY if _ref_lock_collision(fault) else DELIVERY_FAILED)
-    except Exception:  # noqa: BLE001 — A3: any other fetch fault, the forge token's refusal included, is a fixed reason
+    except Exception:  # noqa: BLE001 — A3: any fetch fault, the forge token's refusal included, is a fixed reason
         _logger.exception("adoption: the fetch of origin failed")
         return AdoptionRecord.failed(DELIVERY_FAILED)
     return None
-
-
-def _ref_lock_collision(fault: _git.GitError) -> bool:
-    """Whether a failed fetch collided on a ref the shared clone holds locked: its one local ref transaction
-    (`update-ref --stdin`, `GitTransport.fetch`) names `cannot lock ref` (git 2.47, probed)."""
-    return "update-ref" in str(fault) and "cannot lock ref" in fault.stderr
 
 
 def _adoption_matches(prs: list[PullRequest], system: str, branch: str) -> _Matches:
@@ -101,7 +89,7 @@ def _decide(repository: GitRepository, system: str, branch: str, rendering: dict
         return AdoptionRecord("already_open", pr_number=found.open[0].number)
     if found.merged_on_d:
         return AdoptionRecord("nothing_to_adopt")
-    if _tree_holds(repository, "refs/remotes/origin/main", rendering):
+    if _tree_holds(repository, "refs/heads/main", rendering):
         return AdoptionRecord("nothing_to_adopt")
     if found.closed_on_d:
         return AdoptionRecord("rejected", pr_number=found.closed_on_d[0].number)
@@ -143,7 +131,7 @@ def _after_refused_push(repository: GitRepository, system: str, branch: str, ren
     decided = _decide(repository, system, branch, rendering)
     if decided is not None:
         return decided
-    tip = f"refs/remotes/origin/{branch}"
+    tip = f"refs/heads/{branch}"
     if not repository.holds_ref(tip) or not _tree_holds(repository, tip, rendering):
         return AdoptionRecord.failed(DELIVERY_FAILED)
     return _open_pull_request(repository, system, branch, rendering, digest)

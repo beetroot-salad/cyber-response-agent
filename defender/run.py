@@ -1078,7 +1078,7 @@ def _set_up(  # noqa: C901, PLR0913 — run setup's whole call: the request, its
         # before anything reads it. The copy is the run's alone and is removed when it ends.
         early = _early_run(ns, accepted, world, episode_runs)
         knowledge = _knowledge_source(accepted, pin=pin, publish=publish, data_root=data_root,
-                                      records=records)
+                                      records=records, run_id=early.run_dir.name)
         copy = _copy_knowledge(accepted, knowledge, early.run_dir.name)
         try:
             # The tenant's settings (and with them the one tenant check), over the run's copy:

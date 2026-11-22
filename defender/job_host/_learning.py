@@ -93,6 +93,7 @@ class _Learning:
     records: Any = None
     siblings: dict[str, _Sibling] = field(default_factory=dict)  # by run id
     by_world: dict[str, str] = field(default_factory=dict)  # world id -> run id
+    exports: dict[str, Any] = field(default_factory=dict)  # commit -> the copy `export.materialise` fetched
 
 
 @dataclass
@@ -189,15 +190,16 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     # The tenant's current records, read once for the whole job (#1366 O6; a tenant not active refused, #1470 O8): the
     # container, which reads no database, is handed them in the launch facts, and so is each sibling's run.
     current = setup_step(run_common.read_records, records, accepted.id)
-    source = settle_knowledge(session, accepted, records, trigger=LAUNCH_TRIGGER)
+    # SPIKE #1618: the grant read needs a copy too; minted id (the design names none), removed after the read.
+    grant_copy_id = f"{job}-grant"
+    source = settle_knowledge(session, accepted, records, trigger=LAUNCH_TRIGGER, run_id=grant_copy_id)
+    grant_copy = run_knowledge.adopt_copy(accepted, grant_copy_id)
     # The catalog's roster, read cold (no adapter code, N7) once: the records' reads are judged against it (#1504 O3)
     # and the tenant's systems are narrowed to it (#1366 R12).
     roster = setup_step(run_common.run_roster, session.defender_dir)
     try:
-        export = session.inside_tenant(accepted.export_folder(source.commit))
         ready = run_tenant_for(accepted, dispatches_lead_zero=False, records=current, catalog=Catalog(roster),
-                               agent_root=export / run_knowledge.AGENT_HALF,
-                               settings_root=export / run_knowledge.SETTINGS_HALF)
+                               agent_root=grant_copy.agent, settings_root=grant_copy.settings)
     except (TenantRefused, Refused) as refused:
         raise SetupRefused(f"this job's tenant cannot be used: {refused}") from None
     # Narrowed to the systems the tenant has enabled records of (#1366 R12), over the same roster.
@@ -207,6 +209,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     # lock for the whole job, so no publish moves `current` under it. A grant from an older pin could only add systems
     # the proxy refuses, and would miss none it serves.
     reads = grant(ready)
+    grant_copy.remove()  # SPIKE #1618: scratch; a refusal above leaves it to the owner sweep
     passes = first_pass(session, accepted, records, reads)
     cleanup = contextlib.ExitStack()
     try:
@@ -413,6 +416,7 @@ def _copy_make(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     """A sibling's run id (the roster's), its run copy and its run folder `<episode>/runs/<run>/`, made and owned here:
     the run materialized (its input, the episode's copy of the source alert, and its stamp) as an investigation's is,
     and its host-held knowledge record beside it (A6, C20). The sibling's run half opens it."""
+    from defender import run_common
     from defender.tenancy import run_knowledge
 
     state = _state(session, _Learning)
@@ -431,7 +435,12 @@ def _copy_make(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     source = run_knowledge.KnowledgeSource(kind=run_knowledge.PINNED,
                                            commit=_pinned_commit(state, session, state.commit))
     try:
-        copy = run_knowledge.copy_for_run(state.tenant, source, run)
+        # SPIKE #1618: the fetch child (this helper's launcher, `session.publish`) fetches the pin by id and writes the
+        # sibling's copy; the helper holds no credential of its own (the child mints one).
+        report = run_common.publish_report(session.publish, state.tenant, session.root, state.records,
+                                           run_id=run, commit=source.commit, into=state.scratch / "copies")
+        run_knowledge.resolve_source(state.tenant, report=report, pinned=source.commit)
+        copy = run_knowledge.adopt_copy(state.tenant, run, into=state.scratch / "copies")
     except (run_knowledge.KnowledgeRefused, OSError) as refused:
         raise Refused(f"the sibling's run copy could not be made: {refused}", "internal") from None
     try:
@@ -451,22 +460,30 @@ def _copy_make(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
 
 
 def _export_materialise(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
-    """`export.materialise(commit=)`: `<T>/exports/<commit>/` for a commit the tenant's clone holds, written from its
-    objects under the knowledge lock if absent (`materialise_export`), by this helper (P-A, C20: no export is written
-    and no knowledge lock is taken inside the container). The learning launch pins its family to its source's
-    commit; the job reads the export it is answered."""
-    from defender.learning.author.version_control import DeliveryRefused, LockBusy, materialise_export
+    """`export.materialise(commit=)` (SPIKE #1618): a copy of the named commit fetched from Forgejo by the fetch child
+    (this helper's launcher) into the claim's folder (`<T>/run-knowledge/<job>-x-<commit>`, FORCED: no path is
+    designed), kept for the job and removed with its copies. Answers the copy's `stage/` (holding `agent/`)."""
+    from defender import run_common
+    from defender.tenancy import run_knowledge
 
     commit = fields["commit"]
     if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
         raise Refused("export.materialise takes a full commit id", "bad-fields")
     state = _state(session, _Learning)
-    try:
-        export = materialise_export(state.tenant, commit)
-    except (DeliveryRefused, LockBusy) as refused:
-        raise Refused(f"the export of {commit} could not be materialised: {refused}", "delivery") from None
-    session.inside_tenant(Path(export.path))
-    return {"commit": export.commit, "path": str(export.path)}
+    with session.lock:
+        held = state.exports.get(commit)
+    if held is None:
+        run_id = f"{session.job_id}-x-{commit[:12]}"
+        try:
+            report = run_common.publish_report(session.publish, state.tenant, session.root, state.records,
+                                               run_id=run_id, commit=commit, into=_shared(state.scratch) / "copies")
+            run_knowledge.resolve_source(state.tenant, report=report, pinned=commit)
+            held = run_knowledge.adopt_copy(state.tenant, run_id, into=_shared(state.scratch) / "copies")
+        except (run_knowledge.KnowledgeRefused, OSError) as refused:
+            raise Refused(f"the knowledge of {commit} could not be fetched: {refused}", "delivery") from None
+        with session.lock:
+            state.exports[commit] = held
+    return {"commit": commit, "path": str(held.stage)}  # under the claim's `shared/`, outside `<T>` (C21)
 
 
 def _source_alert(episode: Episode) -> Path:

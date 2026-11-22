@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender import _io
-from defender.records.formats import unwrap_exports_root, unwrap_knowledge_lock
+from defender.records.formats import unwrap_exports_root
 from defender.records.formats import OID
 from defender.tenancy._tenant import Tenant
 
@@ -82,22 +82,6 @@ def _current_at(exports: Path, tenant_id: object) -> TenantExport:
             "not a published export folder"
         )
     return TenantExport(commit=commit, path=exports / commit)
-
-
-def knowledge_lock_holder(tenant: Tenant) -> int | None:
-    """The pid the tenant's knowledge lock file names (its holder writes it on taking the lock),
-    or `None` when it names none. Reads the file only: it says who took the lock last, not that
-    the lock is held now, so a caller pairs it with whether that process is still running."""
-    path = unwrap_knowledge_lock(tenant.knowledge_lock)
-    with _io.bind(path.parent) as folder:
-        read = folder.read(path.name, errors="replace")
-    return lock_pid(read.text or "")
-
-
-def lock_pid(written: str) -> int | None:
-    """The pid a knowledge lock file's text names (its holder writes it bare), or `None`."""
-    written = written.strip()
-    return int(written) if written.isdigit() else None
 
 
 def regular_files(root: Path) -> dict[str, bytes]:

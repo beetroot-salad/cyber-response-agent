@@ -10,6 +10,7 @@ paths. Host lock (RC-5): install and remove_old_file hold it shared, prepare and
 from __future__ import annotations
 
 import asyncio
+import uuid
 import base64
 import contextlib
 import datetime as _dt
@@ -29,7 +30,7 @@ from defender import _io
 from defender.configuration import publish_root
 from defender.configuration.issuer import TRANSIT_MOUNT
 from defender.credential_proxy import transit_key_for
-from defender.lifecycle._bot import Minted, log_in, mint
+from defender.lifecycle._bot import log_in, mint
 from defender.lifecycle._job import (
     HOST,
     SERVICE,
@@ -212,16 +213,14 @@ class HostActor(Actor):
         tenant = held.tenant_id
         async with self._host_lock(tenant, exclusive=True):
             await asyncio.to_thread(self._drop_unrecorded_secrets, tenant, gens)
-            clone = await asyncio.to_thread(self._existing_clone, tenant, wiring.origin)
-            if clone is None:
-                secret_id = self.secret(await asyncio.to_thread(_read_secret, Path(gen.host_secret_file)))
-                credential = Minted(tenant, await self._bot_jwt(gen, secret_id))
-                await asyncio.to_thread(self._clone, tenant, wiring.origin, credential)
             await asyncio.to_thread(self._make_runs, tenant)
-            line = (await asyncio.to_thread(self._publish, tenant, data_root=self._root)).strip()
+            run_id = f"prepare-{uuid.uuid4().hex[:12]}"
+            line = (await asyncio.to_thread(self._publish, tenant, data_root=self._root, run_id=run_id,
+                                            trigger="onboarding")).strip()
+            await asyncio.to_thread(self._discard_copy, tenant, run_id)
             head, _sep, commit = line.partition(" ")
-            if head != "fresh" or not commit or " " in commit:
-                raise StepFailed(f"the first publish answered {line!r}, not 'fresh <commit>'")
+            if head != "ok" or not commit or " " in commit:
+                raise StepFailed(f"the first fetch answered {line!r}, not 'ok <commit>'")
             step, actor = next_step(held)
             await held.commit(step=step, actor=actor)
 
@@ -236,36 +235,11 @@ class HostActor(Actor):
         level refuses the step as one at `knowledge/` does."""
         _io.guarded_mkdir(self._folder(tenant) / _RUNS, base=self._root)
 
-    def _existing_clone(self, tenant: str, origin: str) -> Path | None:
-        """The tenant's clone if one is there (`<T>/knowledge`, where every entry point accepts it),
-        after checking its origin is the recorded one; None when there is none to keep."""
-        clone = self._folder(tenant) / _KNOWLEDGE
-        if clone.is_symlink():
-            raise StepFailed(f"{clone} is a link; the tenant's clone must be a real directory")
-        if not (clone / ".git").exists() or (clone / ".git").is_symlink():
-            return None
-        found = self._git_out(["remote", "get-url", "origin"], clone)
-        if found != origin and found != self._git_out(["ls-remote", "--get-url", origin], clone):
-            raise StepFailed(f"{clone} is a clone of {found}, not of the recorded {origin}")
-        return clone
+    def _discard_copy(self, tenant: str, run_id: str) -> None:
+        """Onboarding's fetch validates; its copy is thrown away."""
+        from defender.tenancy import remove_entry
 
-    def _git_out(self, args: list[str], clone: Path) -> str:
-        """What a local git call in `clone` prints (`ls-remote --get-url` names a URL as git resolves
-        it, without a network call)."""
-        done = self._git(["-C", str(clone), *args], cwd=clone)
-        if done.returncode != 0:
-            raise StepFailed(f"git {args[0]} in {clone} failed: {done.stderr.strip()}")
-        return done.stdout.strip()
-
-    def _clone(self, tenant: str, origin: str, credential: Minted) -> None:
-        folder = self._folder(tenant)
-        _io.guarded_mkdir(folder, base=self._root)
-        target = folder / _KNOWLEDGE
-        if target.exists() or target.is_symlink():
-            raise StepFailed(f"{target} is there but is not a clone; remove it to prepare the tenant")
-        done = self._git(["clone", "-q", origin, str(target)], cwd=folder, origin=origin, identity=credential)
-        if done.returncode != 0:
-            raise StepFailed(f"git clone failed: {done.stderr.strip()}")
+        remove_entry(self._folder(tenant) / "run-knowledge", run_id)
 
     # --- rotate's end, offboard -------------------------------------------------------------------
 
