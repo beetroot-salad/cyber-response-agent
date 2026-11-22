@@ -1,5 +1,5 @@
 """`resync-people` (#1592 F6(c)): after a restore, and at the upgrade, record a people request for every tenant with a
-forge wiring, (none, T), and for every `p-<id>` account on the Keycloak login source, (U, none), known to the product or
+forge wiring, (none, T), and for every `p-<id>` account on the sign-in provider's login source, (U, none), known to the product or
 not; the request worker does the rest. Accounts it cannot vouch for are listed and left unchanged: a login on the
 source that is not `p-` followed by a canonical user id (no request), and a `p-` account whose `login_name` is not its
 user's sub (still recorded). It writes nothing to Forgejo."""

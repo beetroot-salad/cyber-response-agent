@@ -26,7 +26,7 @@ INTEGRATION_ENV = "DEFENDER_LIFECYCLE_INTEGRATION_CONTAINER"
 SECRETS_DIR_ENV = "DEFENDER_LIFECYCLE_SECRETS_DIR"
 POLL_ENV = "DEFENDER_LIFECYCLE_POLL_INTERVAL"
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
-#: The people worker's two required settings (#1592): the id of Forgejo's Keycloak login source, and the DSN of a
+#: The people worker's two required settings (#1592): the id of Forgejo's sign-in login source, and the DSN of a
 #: login that is a member of `fs_lifecycle` on the Forgejo sessions database (it holds a password).
 KEYCLOAK_SOURCE_ID_ENV = "DEFENDER_LIFECYCLE_KEYCLOAK_SOURCE_ID"
 FORGE_SESSIONS_DSN_ENV = "DEFENDER_LIFECYCLE_FORGE_SESSIONS_DSN"
@@ -62,7 +62,7 @@ class LifecycleConfig:
     repository page, `repo_url`, is `<forge_public_url>/<repo>`, which the app's Knowledge repo link opens (home
     redesign). Unset, it is `forge_url`.
 
-    The people worker (#1592): `keycloak_source_id` is Forgejo's Keycloak login source, `forge_sessions_dsn` a login of
+    The people worker (#1592): `keycloak_source_id` is Forgejo's sign-in login source, `forge_sessions_dsn` a login of
     `fs_lifecycle` on the Forgejo sessions database; `people_poll` the wait between its polls, `people_concurrency` the
     users it works at once, `people_call_timeout` each Forgejo call's and session statement's bound, `forge_session_cap`
     the longest a Forgejo session lives after sign-in and `forge_cap_every` how often the cap job runs (seconds each)."""
@@ -128,7 +128,7 @@ class LifecycleConfig:
             raise ConfigRefused("people_concurrency is a positive whole number of users")
         if isinstance(self.keycloak_source_id, bool) or not isinstance(self.keycloak_source_id, int) \
                 or self.keycloak_source_id < 1:
-            raise ConfigRefused("keycloak_source_id is the positive id of Forgejo's Keycloak login source")
+            raise ConfigRefused("keycloak_source_id is the positive id of Forgejo's sign-in login source")
 
     @classmethod
     def from_env(cls, *, template_dir: Path) -> LifecycleConfig:

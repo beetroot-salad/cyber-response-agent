@@ -46,7 +46,7 @@ lifecycle service; run migrations; start the new code. The notes below say only 
 After restoring the product database or Forgejo from a backup, run `python -m defender.lifecycle resync-people` once,
 with `DEFENDER_DATABASE_DSN`, `DEFENDER_LIFECYCLE_FORGE_URL`, `DEFENDER_LIFECYCLE_FORGE_ADMIN_TOKEN_FILE` and
 `DEFENDER_LIFECYCLE_KEYCLOAK_SOURCE_ID` set (#1592). It records a people request for every tenant with a forge wiring
-and for every `p-<id>` account on the Keycloak login source, known to the product or not; the lifecycle's request worker
+and for every `p-<id>` account on the sign-in provider's login source, known to the product or not; the lifecycle's request worker
 then brings Forgejo's teams, suspensions and sessions in line with the restored memberships within a few polls. It
 lists, and leaves unchanged, every account on that source whose login is not `p-<user id>` and every `p-` account whose
 `login_name` is not its user's sub: fix or delete those by hand. It writes nothing to Forgejo itself.

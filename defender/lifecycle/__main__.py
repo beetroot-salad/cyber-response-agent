@@ -9,7 +9,7 @@ settings (`defender.lifecycle.config`: the files holding the forge admin token a
 management login, the integration container, the secrets directory, `DEFENDER_DATA_ROOT`). The
 issuer and OpenBao addresses are fixed service names (`defender.configuration.issuer`); the
 infrastructure routes them. `resync-people` reads only `DEFENDER_DATABASE_DSN`, the forge's address, the file holding its
-admin token and the Keycloak login source's id."""
+admin token and the sign-in provider's login source's id."""
 from __future__ import annotations
 
 import argparse
@@ -87,7 +87,7 @@ async def _make_runs_folders() -> int:
 
 async def _resync_people() -> int:
     """`resync-people` (#1592 F6(c)): a (none, T) request for every wired tenant and a (U, none) one for every `p-<id>`
-    account on the Keycloak source; the accounts it cannot vouch for are listed on stdout, unchanged."""
+    account on the sign-in provider's source; the accounts it cannot vouch for are listed on stdout, unchanged."""
     from defender._io import read_text_utf8
     from defender.identity.postgres import PostgresIdentityRepository
     from defender.kit.internal_http import internal_async_client, tls_trust
