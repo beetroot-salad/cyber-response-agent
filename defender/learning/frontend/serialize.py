@@ -147,14 +147,6 @@ def _group_lessons(agent_root: Path, name: str, spec: GroupSpec) -> list[dict]:
     return lessons
 
 
-def published_agent_root(tenant) -> Path:
-    """The `agent/` of the export the tenant's `current` names: the knowledge the page shows.
-    `DeliveryRefused` when nothing is published for the tenant."""
-    from defender.tenancy import current_export
-
-    return current_export(tenant).path / "agent"
-
-
 def stamped_view(agent_root: Path | None) -> dict:
     view = build_view(agent_root=agent_root)
     view["generated_at"] = z_seconds(_dt.datetime.now(_dt.UTC))
@@ -165,11 +157,11 @@ def dump_contract(view: dict) -> str:
     return json.dumps(view, indent=2, ensure_ascii=False) + "\n"
 
 
-def main(argv: list[str], *, directory: Any = None) -> int:
+def main(argv: list[str], *, directory: Any = None, fetch: Any = None) -> int:
     """The posture page's contract on stdout, for `--agent-root` (no tenant) or `--tenant T`: T
-    through the one host acceptance (r10 A1), held while its published knowledge is read.
-    `directory` is the tenant records a test hands in; a production process reads
-    `DEFENDER_DATABASE_DSN`'s. A refusal is a usage error (exit 2)."""
+    through the one host acceptance (r10 A1), held while a copy of its `main` is read (made by the fetch child, `fetch`
+    when a test hands one in, and removed after, #1618 F4). `directory` is the tenant records a test hands in; a
+    production process reads `DEFENDER_DATABASE_DSN`'s. A refusal, a knowledge fetch's too, is a usage error (exit 2)."""
     import argparse
 
     use_utf8_stdio()
@@ -178,15 +170,15 @@ def main(argv: list[str], *, directory: Any = None) -> int:
     parser.add_argument("--stdout", action="store_true", help="kept for existing callers; "
                         "the contract always goes to stdout")
     where = parser.add_mutually_exclusive_group(required=True)
-    where.add_argument("--tenant", help="show the tenant's published knowledge")
+    where.add_argument("--tenant", help="show the tenant's knowledge as `main` holds it")
     where.add_argument("--agent-root", type=Path, help="show the knowledge at this agent root")
     args = parser.parse_args(argv[1:])
     if args.agent_root is not None:
         sys.stdout.write(dump_contract(stamped_view(args.agent_root)))
         return 0
-    from defender import tenancy
+    from defender import run_common, tenancy
     from defender.systems.run_tenant import host_tenant
-    from defender.tenancy import DeliveryRefused
+    from defender.tenancy import run_knowledge
 
     try:
         admitted = host_tenant(tenancy.resolve_data_root(), args.tenant, directory=directory)
@@ -194,10 +186,10 @@ def main(argv: list[str], *, directory: Any = None) -> int:
         parser.error(str(refused))
     with admitted:
         try:
-            agent_root = published_agent_root(admitted.tenant)
-        except DeliveryRefused as refused:
+            with run_common.temporary_copy(admitted.tenant.id, data_root=tenancy.resolve_data_root(), fetch=fetch) as copy:
+                sys.stdout.write(dump_contract(stamped_view(copy / "agent")))
+        except run_knowledge.KnowledgeRefused as refused:
             parser.error(str(refused))
-        sys.stdout.write(dump_contract(stamped_view(agent_root)))
     return 0
 
 

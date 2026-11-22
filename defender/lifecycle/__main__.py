@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import datetime as _dt
-import functools
 import logging
 import os
 import signal
@@ -89,7 +88,6 @@ async def _serve() -> int:
     from defender.investigation.publish_launch import launch_publish
     from defender.lifecycle import HostActor, ManagementService, git_runner, integration_runner, serve
     from defender.lifecycle import _process as clients
-    from defender.tenancy import TenantDirectory
     from defender.tenancy.postgres import PostgresTenantRepository
 
     dsn, config = _dsn(), _lifecycle_settings()
@@ -104,11 +102,8 @@ async def _serve() -> int:
                                 openbao=clients.openbao_management(config),
                                 integration=integration_runner(config.integration_command), git=git_runner,
                                 config=config, clock=_now)
-    directory = TenantDirectory(lambda: PostgresTenantRepository(dsn))
     host = HostActor(tenants, forge=clients.forge_anonymous(config), openbao_login=clients.openbao_login(config),
-                     git=git_runner, config=config, clock=_now,
-                     # as run start's: the outcomes only the launcher sees are recorded for the readiness check
-                     publish=functools.partial(launch_publish, directory=directory))
+                     git=git_runner, config=config, clock=_now, fetch=launch_publish)
     _logger.info("lifecycle: serving both actors every %ss", config.poll_interval)
     try:
         await serve(service, host, config=config, stop=stopping.is_set)

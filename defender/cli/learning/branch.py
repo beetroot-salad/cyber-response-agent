@@ -54,6 +54,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     signer: Any = None,
     proxy_url: str | None = None,
     issuer_transport: Any = None,
+    fetch: Any = None,
     clock: Callable[[], float] = time.time,
 ) -> int:
     """Launch one episode with the real role preflight unless one is injected. `directory` is the
@@ -66,7 +67,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
         render_page=_render_episode_page, judge=judge, lessons_dir=lessons_dir,
         live_tree=live_tree, oracle=oracle, verifier=verifier, roster=roster, directory=directory,
         signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
-        clock=clock)
+        fetch=fetch, clock=clock)
 
 
 if __name__ == "__main__":

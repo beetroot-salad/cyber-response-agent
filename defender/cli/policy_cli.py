@@ -89,10 +89,11 @@ def _policy(
     )
 
 
-def _definition(role: AgentRole, admitted: Admitted | None) -> AgentDefinition:
+def _definition(role: AgentRole, admitted: Admitted | None, copy: Path | None) -> AgentDefinition:
     """The role's definition as a run would bind it. Gather's grant is the tenant `main`'s host
-    acceptance admitted, resolved the way a run resolves it (and refused, like a run, when gather
-    could query nothing); other roles carry their own grant and name no tenant."""
+    acceptance admitted, resolved the way a run resolves it over `copy`, a copy of the tenant's
+    `main` (and refused, like a run, when gather could query nothing); other roles carry their own
+    grant and name no tenant."""
     defn = AGENTS[role]
     if role is not AgentRole.GATHER:
         return defn
@@ -100,6 +101,7 @@ def _definition(role: AgentRole, admitted: Admitted | None) -> AgentDefinition:
     from defender.investigation.driver import gather_def_for
 
     assert admitted is not None  # `main` admits gather's tenant before it asks
+    assert copy is not None  # and copies its `main`
     from defender.systems.catalog import Catalog
     from defender.systems.verbs import RegistryError
 
@@ -109,7 +111,7 @@ def _definition(role: AgentRole, admitted: Admitted | None) -> AgentDefinition:
         records = admitted.directory.current_records(admitted.tenant.id)
         catalog = Catalog.of_checkout(PATHS.defender_dir)
         run = run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False, records=records,
-                                            catalog=catalog)
+                                            catalog=catalog, agent_root=copy / "agent", settings_root=copy / "settings")
         verdict = run_tenant_mod.tenant_systems(run, catalog)
     except (run_tenant_mod.TenantRefused, RegistryError) as refusal:
         sys.exit(f"defender-policy: {refusal}")
@@ -147,7 +149,7 @@ def _containment(g: Grant) -> str:
     return "scope: " + _shapes(g)
 
 
-def _show(policy: AgentPolicy, name: str, run_dir: Path, defender_dir: Path) -> int:
+def _show(policy: AgentPolicy, name: str, run_dir: Path, defender_dir: Path, grant: Any = None) -> int:
     print(f"agent: {name}")
     print(f"run-dir: {run_dir}")
     print(f"defender-dir: {defender_dir}\n")
@@ -167,6 +169,13 @@ def _show(policy: AgentPolicy, name: str, run_dir: Path, defender_dir: Path) -> 
     print("  roots:")
     for root in _read_roots(policy, run_dir, defender_dir):
         print(f"    {root}")
+    if grant is not None:  # the tenant's table as `main` grants it (#1618 K8): each system with the verbs it is granted
+        print("\ngrant:")
+        for system in sorted({system for system, _verb, _kind in grant.entries}):
+            verbs = sorted(verb for sys_, verb, _kind in grant.entries if sys_ == system)
+            print(f"  {system}: {', '.join(verbs)}")
+        if not grant.entries:
+            print("  (nothing)")
     print("\nwrite:")
     for s in policy.write_allow or ():
         print(f"  {s.pattern}")
@@ -215,7 +224,7 @@ def _explain(  # noqa: PLR0913 — the gate's own call shape, plus the output-fo
     return 0
 
 
-def main(argv: list[str] | None = None, *, directory: Any = None) -> int:
+def main(argv: list[str] | None = None, *, directory: Any = None, fetch: Any = None) -> int:
     ap = argparse.ArgumentParser(prog="defender-policy", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("show", "explain"):
@@ -246,11 +255,23 @@ def main(argv: list[str] | None = None, *, directory: Any = None) -> int:
                                    defender_dir=args.defender_dir)
         except TenantRefused as refusal:
             sys.exit(f"defender-policy: {refusal}")
-    with admitted if admitted is not None else contextlib.nullcontext():
-        defn = _definition(role, admitted)
+    with contextlib.ExitStack() as held:
+        copy = None
+        if admitted is not None:
+            from defender import run_common, tenancy
+            from defender.tenancy import run_knowledge
+
+            held.enter_context(admitted)
+            try:  # gather's grant table is `main`'s, copied by the fetch child for this command alone (K8)
+                copy = held.enter_context(run_common.temporary_copy(
+                    admitted.tenant.id, data_root=tenancy.resolve_data_root(), fetch=fetch))
+            except run_knowledge.KnowledgeRefused as refusal:
+                sys.exit(f"defender-policy: {refusal}")
+        defn = _definition(role, admitted, copy)
         policy = _policy(defn, args.run_dir, args.defender_dir, args.corpus_name, agent=args.agent)
         if args.cmd == "show":
-            return _show(policy, args.agent, args.run_dir, args.defender_dir)
+            return _show(policy, args.agent, args.run_dir, args.defender_dir,
+                         grant=defn.verb_grant if role is AgentRole.GATHER else None)
         anchor = args.defender_dir.parent if defn.anchors_on_tree else args.run_dir
         return _explain(
             policy, args.command, args.run_dir, args.defender_dir, args.as_json, cwd_anchor=anchor,

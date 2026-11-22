@@ -12,3 +12,8 @@ class JudgeRefused(Exception):
     A bare `Exception`, not a `ValueError`: pydantic wraps a `ValueError` raised in a `@model`
     validator into `ValidationError`, which every `except JudgeRefused` would then miss.
     """
+
+
+class KnowledgeRefused(JudgeRefused):
+    """The pass's knowledge could not be copied (the copy seam refused, #1618 K4/K5): the whole pass is refused, not the one world
+    that asked, so no world is graded on bodies another's could not read."""

@@ -218,12 +218,12 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None, fetch: An
               file=sys.stderr)
         return 1
     with admitted:
-        return _trace(ns, admitted.tenant, records=admitted.directory, fetch=fetch)
+        return _trace(ns, admitted.tenant, fetch=fetch)
 
 
-def _trace(ns: argparse.Namespace, tenant: Tenant, *, records: Any, fetch: Any) -> int:
-    """`main`'s work for the accepted `tenant`. SPIKE #1618: without `--lessons-dir` the lessons are a temporary copy
-    of `main` the fetch child makes, removed on exit."""
+def _trace(ns: argparse.Namespace, tenant: Tenant, *, fetch: Any) -> int:
+    """`main`'s work for the accepted `tenant`: without `--lessons-dir` the lessons are those of a temporary copy of
+    the tenant's `main`, which the fetch child makes and this removes on exit (#1618 F4)."""
     import contextlib
 
     from defender import run_common, tenancy
@@ -234,12 +234,12 @@ def _trace(ns: argparse.Namespace, tenant: Tenant, *, records: Any, fetch: Any) 
         if lessons_dir is None:
             try:
                 copy = stack.enter_context(run_common.temporary_copy(
-                    tenant, data_root=tenancy.resolve_data_root(), records=records, fetch=fetch))
+                    tenant.id, data_root=tenancy.resolve_data_root(), fetch=fetch))
             except (TenantRefused, run_knowledge.KnowledgeRefused) as refused:
                 print(f"error: the lessons of tenant {one_line(str(tenant.id))} cannot be found: "
                       f"{one_line(str(refused))}", file=sys.stderr)
                 return 1
-            lessons_dir = KnowledgePaths(copy.agent).lessons_dir
+            lessons_dir = KnowledgePaths(copy / "agent").lessons_dir
 
         if not lessons_dir.is_dir():
             print(f"no lessons dir: {lessons_dir}", file=sys.stderr)

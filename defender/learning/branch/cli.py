@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
 import dataclasses
 import functools
 import os
@@ -49,7 +50,7 @@ import sqlite3
 import sys
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +77,7 @@ from defender.records import (
 from defender.systems.catalog import Catalog
 from defender.systems.run_tenant import RunTenant
 from defender.tenancy import Tenant
+from defender.tenancy.run_knowledge import KnowledgeRefused
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import seams
 from defender.learning.branch import timing as timing_mod
@@ -369,82 +371,71 @@ def sibling_argv(
 _UNPINNABLE = "the source run's knowledge cannot be pinned for the family"
 
 
-def _materialised(tenant: RunTenant, commit: str, container: JobContainer | None) -> Any:
-    """SPIKE #1618: a copy of `commit` fetched from Forgejo by id: by the fetch child for an operator's launch (the
-    copy is this process's scratch, reclaimed by the owner sweep once it exits; no records directory is threaded
-    here, so the child's outcome goes unrecorded), inside a job container by its per-job host helper
-    (`export.materialise`). The answer is held to a folder inside this tenant's `run-knowledge/`. A refusal, or a
-    helper that cannot be reached, is `DeliveryRefused`."""
-    import uuid
+@dataclasses.dataclass(frozen=True)
+class _Pinned:
+    """The knowledge every sibling is pinned to: its commit and the copy of it the questioner's corpus is read from."""
 
+    commit: str
+    path: Path
+
+
+@contextlib.contextmanager
+def _copy_of(tenant_id: TenantId, commit: str | None, *, container: JobContainer | None, fetch: Any,
+             data_root: Any) -> Iterator[Path]:
+    """The tenant's knowledge at `commit` (`main`'s tip when None) as a folder holding `agent/` and `settings/`, fetched from
+    Forgejo by id (#1618 F4, K5): by the fetch child (`fetch`, the launcher's one seam) into this process's temporary folder,
+    removed on exit, for an operator's launch; inside a job container by its host helper (`copy.make`), which owns the copy.
+    `KnowledgeRefused` when the fetch is refused, naming why (no fallback to another commit, D3)."""
     from defender import job_socket, run_common
-    from defender.learning.author.version_control import DeliveryRefused, TenantExport
-    from defender.tenancy import run_knowledge
+    from defender.tenancy.run_knowledge import KnowledgeRefused
 
     if container is None:
-        run_id = str(uuid.uuid4())
-        try:
-            report = run_common.publish_report(None, tenant.tenant, tenancy.resolve_data_root(), None,
-                                               run_id=run_id, commit=commit)
-            source = run_knowledge.resolve_source(tenant.tenant, report=report, pinned=commit)
-            copy = run_knowledge.adopt_copy(tenant.tenant, run_id)
-        except run_knowledge.KnowledgeRefused as refused:
-            raise DeliveryRefused(str(refused)) from None
-        return TenantExport(commit=source.commit, path=copy.stage)
+        with run_common.temporary_copy(tenant_id, data_root=data_root, fetch=fetch, commit=commit) as folder:
+            yield folder
+        return
     try:
-        answer = container.materialised_export(commit)
+        answer = container.ask("copy.make", **({} if commit is None else {"commit": commit}))
     except job_socket.Refused as refused:
-        raise DeliveryRefused(f"the job's host helper did not fetch it ({refused.code}): {refused}") from None
-    except (OSError, ValueError, TenantRefused) as lost:
-        raise DeliveryRefused(f"no copy from the job's host helper: {type(lost).__name__}: {lost}") from None
-    folder = Path(str(answer.get("path")))
-    if answer.get("commit") != commit or not folder.is_relative_to(tenant.tenant.run_knowledge):
-        raise DeliveryRefused(f"the job's host helper answered another copy ({answer.get('path')!r})")
-    return TenantExport(commit=commit, path=folder)
+        raise KnowledgeRefused(f"the job's host helper did not copy it ({refused.code}): {refused}") from None
+    except (OSError, ValueError) as lost:
+        raise KnowledgeRefused(f"no copy from the job's host helper: {type(lost).__name__}: {lost}") from None
+    if commit is not None and answer.get("commit") != commit:
+        raise KnowledgeRefused(f"the job's host helper answered another copy ({answer.get('commit')!r})")
+    yield Path(str(answer.get("path")))
 
 
-def _pinned_export(tenant: RunTenant, source: Run, container: JobContainer | None = None) -> Any:
-    """The export every sibling is pinned to and the questioner's corpus is read from (flow 7,
-    O-PIN): the knowledge commit the source run's HOST-HELD knowledge record names (U12, beside
-    the run folder, where no box writes), materialised from the tenant clone when absent —
-    never its provenance stamp, which sits in the box's rw bind (the stamp is compared against
-    this pin at pre-flight, never read for it). A record that cannot be read has no commit to
-    pin to, so it refuses — `--allow-dirty` does not waive it (OD9) — as does a commit the
-    clone cannot materialise; both before anything is spent. Only a source from before records
-    were written (no record, and a stamp naming no knowledge source) is judged by its stamp, as
-    before: a commit it names, a refusal for `unversioned`/`unavailable`, or with none recorded
-    the tenant's published `current` (pre-flight still refuses that unless `--allow-dirty`). Inside a job
-    container the export is materialised by the job's host helper (`_materialised`)."""
-    from defender.learning.author.version_control import DeliveryRefused
-
+def _source_pin(source: Run) -> str:
+    """The knowledge commit every sibling is pinned to and the questioner's corpus is read from (flow 7, O-PIN): the one the
+    source run's HOST-HELD knowledge record names (U12, beside the run folder, where no box writes) — never its provenance
+    stamp, which sits in the box's rw bind (the stamp is compared against this pin at pre-flight, never read for it). A record
+    that cannot be read has no commit to pin to, so it refuses — `--allow-dirty` does not waive it (OD9) — before anything is
+    fetched or spent. Only a source from before records were written (no record, and a stamp naming a knowledge source) is
+    judged by its stamp, as before: a commit it names, or a refusal for `unversioned`/`unavailable`/none (no fallback to
+    `main`, #1618 r5.1-b)."""
     status = source.knowledge_status()
     commit = None if status is None else status.commit
-    try:
-        if status is None:
-            # A source from before host records: its stamp is all there is (#1204's rules).
-            revision = formats.KnowledgeRevision.from_wire(
-                (_stamp_of(source) or {}).get("knowledge"))
-            if revision is None:
-                return _materialised(tenant, None, container)  # SPIKE: was `current`; now main (commit=None)
-            if revision.commit is None:
-                why = (f"unavailable knowledge ({revision.unavailable})"
-                       if revision.unavailable is not None else "unversioned knowledge")
-                raise ending(
-                    f"[branch] source run {source.run_dir}'s stamp names {why}: there is no "
-                    "knowledge commit to pin its siblings to, so the family cannot be launched "
-                    "(not waived by --allow-dirty)", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
-            commit = revision.commit
-        elif commit is None:
+    if status is None:
+        # A source from before host records: its stamp is all there is (#1204's rules).
+        revision = formats.KnowledgeRevision.from_wire((_stamp_of(source) or {}).get("knowledge"))
+        if revision is None:
             raise ending(
-                f"[branch] source run {source.run_dir}'s knowledge record is unreadable: there "
-                "is no knowledge commit to pin its siblings to, so the family cannot be "
-                "launched (not waived by --allow-dirty)", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
-        return _materialised(tenant, commit, container)
-    except DeliveryRefused as refused:
-        at = "" if commit is None else f" ran at knowledge commit {commit}, which"
+                f"[branch] source run {source.run_dir} has no knowledge record and its stamp names no knowledge: "
+                "there is no knowledge commit to pin its siblings to, so the family cannot be launched "
+                "(not waived by --allow-dirty)", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
+        if revision.commit is None:
+            why = (f"unavailable knowledge ({revision.unavailable})"
+                   if revision.unavailable is not None else "unversioned knowledge")
+            raise ending(
+                f"[branch] source run {source.run_dir}'s stamp names {why}: there is no "
+                "knowledge commit to pin its siblings to, so the family cannot be launched "
+                "(not waived by --allow-dirty)", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
+        commit = revision.commit
+    elif commit is None:
         raise ending(
-            f"[branch] source run {source.run_dir}{at} cannot be pinned to a knowledge "
-            f"export: {refused}", reason=LAUNCH_REFUSED, brief=_UNPINNABLE, cause=refused) from refused
+            f"[branch] source run {source.run_dir}'s knowledge record is unreadable: there "
+            "is no knowledge commit to pin its siblings to, so the family cannot be "
+            "launched (not waived by --allow-dirty)", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
+    return commit
 
 
 #: The job's fixed brief when the launcher's check before a sibling finds the token can no
@@ -691,6 +682,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     signer: Any = None,
     proxy_url: str | None = None,
     issuer_transport: Any = None,
+    fetch: Any = None,
     clock: Callable[[], float] = time.time,
 ) -> int:
     """Launch one episode, reporting a refusal as an operator exit rather than a traceback.
@@ -703,7 +695,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
                        render_page=render_page, judge=judge, lessons_dir=lessons_dir, live_tree=live_tree,
                        oracle=oracle, verifier=verifier, roster=roster, directory=directory,
                        signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
-                       clock=clock)
+                       fetch=fetch, clock=clock)
     except (branch.BranchError, LedgerError, EstateError, FamilyError, GrantError,
             session_store.StoreError, sqlite3.Error) as refusal:
         raise LauncherRefused(f"[branch] {refusal}") from refusal
@@ -767,7 +759,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     live_tree: Callable[[], formats.RunProvenance] | None = None,
     oracle: Any = None, verifier: Any = None, roster: Any = None, directory: Any = None,
     signer: Any = None, proxy_url: str | None = None, issuer_transport: Any = None,
-    container: JobContainer | None = None,
+    container: JobContainer | None = None, fetch: Any = None,
     clock: Callable[[], float] = time.time,
 ) -> int:
     # Injected seams are resolved once and threaded inward non-`None`, so no two frames can
@@ -801,8 +793,8 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
                      brief=f"the job's tenant was refused ({type(refusal).__name__})",
                      cause=refusal) from refusal
-    with admitted:
-        # The tenant's readiness over its own folder; siblings dispatch no turn-0 lead. Its
+    with admitted, contextlib.ExitStack() as copies:
+        # The tenant's readiness over a copy of `main`'s knowledge (the family's copies live as long as the launch); siblings dispatch no turn-0 lead. Its
         # systems are its CURRENT records (#1366 H9, O6): the episode's served systems and every
         # replay read the present, whatever the source run read; a tenant that is not active is
         # refused (#1470 O8). Narrowed over the catalog the launch reads (R12): a grant on a system
@@ -818,18 +810,30 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
             records = (admitted.directory.current_records(admitted.tenant.id) if container is None
                        else _handed_records(container))
             catalog = Catalog(roster)
+        except TenantRefused as refusal:
+            raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
+                         brief=f"the job's tenant was refused ({type(refusal).__name__})",
+                         cause=refusal) from refusal
+        runs = admitted.tenant.runs_repository()
+        source = _open_launch_source(runs, ns.source_run_id)
+        _source_stamp_agrees(source, admitted.tenant.id)
+        # What the family is pinned to is decided from the source alone, before anything is fetched or spent.
+        commit = _source_pin(source)
+        try:
+            # The tenant's grants and settings are `main`'s at this moment (K8: the tenant has no knowledge folder), read from
+            # a copy fetched for the check.
+            main_root = copies.enter_context(_copy_of(admitted.tenant.id, None, container=container, fetch=fetch,
+                                                      data_root=data_root))
             verdict = run_tenant_mod.tenant_systems(
                 run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False, records=records,
-                                              catalog=catalog), catalog)
-        except TenantRefused as refusal:
+                                              catalog=catalog, agent_root=main_root / "agent",
+                                              settings_root=main_root / "settings"), catalog)
+        except (TenantRefused, KnowledgeRefused) as refusal:
             raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
                          brief=f"the job's tenant was refused ({type(refusal).__name__})",
                          cause=refusal) from refusal
         run_tenant_mod.warn_ignored(verdict)
         tenant, roster = verdict.tenant, verdict.systems.roster
-        runs = tenant.tenant.runs_repository()
-        source = _open_launch_source(runs, ns.source_run_id)
-        _source_stamp_agrees(source, tenant.tenant_id)
         # World A's declared disposition is the source's closing record (#1534), refused here on
         # any fault with the kind's wording, and looked up before any writer opens the source's
         # store (the fork pick, the branch clock): that open creates a database where a missing
@@ -862,7 +866,15 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         # `tmp_path` corpus and this frame is the only one that ever sees the production path.
         # #1108 P4 flow 7: the family's knowledge is the source's commit, its export materialised
         # here (git-capable) before anything is spent; the questioner's corpus is that export's.
-        pinned = _pinned_export(tenant, source, container)
+        try:
+            pinned = _Pinned(commit, copies.enter_context(_copy_of(
+                admitted.tenant.id, commit, container=container, fetch=fetch,
+                data_root=data_root)))
+        except KnowledgeRefused as refused:
+            raise ending(
+                f"[branch] source run {source.run_dir} ran at knowledge commit {commit}, which cannot be "
+                f"pinned to a knowledge copy: {refused}", reason=LAUNCH_REFUSED, brief=_UNPINNABLE,
+                cause=refused) from refused
         questioner_lessons_dir = (
             KnowledgePaths(Path(pinned.path) / "agent").lessons_questioner_dir
             if lessons_dir is None else lessons_dir)
@@ -903,7 +915,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
                     verifier=verifier, roster=roster, started=started,
                     knowledge_commit=pinned.commit, render_page=render_page,
                     signer=signer, proxy_url=proxy_url, issuer_transport=issuer_transport,
-                    directory=admitted.directory, lane=lane, container=container,
+                    directory=admitted.directory, lane=lane, container=container, fetch=fetch,
                     token_clock=clock, data_root=tenancy.data_root_for_child(data_root))
             except SystemExit:
                 raise
@@ -926,7 +938,7 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
     verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer | None,
     knowledge_commit: str | None = None, signer: Any = None, proxy_url: str | None = None,
     issuer_transport: Any = None, directory: Any = None, lane: JobLaneHooks | None = None,
-    container: JobContainer | None = None,
+    container: JobContainer | None = None, fetch: Any = None,
     token_clock: Callable[[], float] = time.time, data_root: Path,
 ) -> int:
     """Every `Step`, `QUESTIONER` through `JUDGE`.
@@ -1062,7 +1074,8 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
     stage(Step.JUDGE)
     with clock.step(Step.JUDGE):
         if lane is None:
-            _grade(runs, episode_id=episode_id, judge=judge)
+            _grade(runs, episode_id=episode_id, judge=judge, copy=_judge_copy(
+                tenant.tenant_id, fetch=fetch, data_root=tenancy.resolve_data_root()))
         else:
             _grade_job(runs, episode_id=episode_id, judge=judge, lane=lane)
     # Rendered after the JUDGE frame closes so the page sees the judge's timing row;
@@ -1106,7 +1119,24 @@ def _render_page(runs: RunsRepository[Tenant], render_page: PageRenderer, *, epi
                         f"({render_failed!r})")
 
 
-def _grade(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any) -> None:
+def _judge_copy(tenant_id: TenantId, *, fetch: Any, data_root: Any) -> Callable[[str], Any]:
+    """The host judge's copy path (#1618 K5): its launcher's own fetch seam, the knowledge at one commit as a temporary folder;
+    a refusal is the judge's `KnowledgeRefused`, which refuses the pass (logged, the launch goes on)."""
+    from defender.learning.judge import KnowledgeRefused
+    from defender.tenancy.run_knowledge import KnowledgeRefused as Refused
+
+    @contextlib.contextmanager
+    def copy(commit: str) -> Iterator[Path]:
+        try:
+            with _copy_of(tenant_id, commit, container=None, fetch=fetch, data_root=data_root) as folder:
+                yield folder
+        except Refused as refused:
+            raise KnowledgeRefused(f"knowledge commit {commit} could not be copied: {refused}") from None
+
+    return copy
+
+
+def _grade(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any, copy: Any = None) -> None:
     """The grade, the body of the `JUDGE` frame; any failure is logged, never raised. The
     judge opens the episode by id through `runs`, the request's tenant's repository, and inserts
     its findings into the learning store at the host's database address (#1278)."""
@@ -1125,7 +1155,7 @@ def _grade(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any) -> None
                                          "findings into the learning store, and has no database to "
                                          "reach it at")
         with blocking(dsn) as store:
-            judge_mod.grade_episode(runs, episode_id, judge=judge, store=store)
+            judge_mod.grade_episode(runs, episode_id, judge=judge, store=store, copy=copy)
     # Imports are inside the `try` too, so an import or config fault is a judge failure
     # rather than reaching `_launch`'s abort arm with a false "no sibling started" message.
     except Exception as judge_failed:  # noqa: BLE001 — a judge failure is non-fatal, see below
