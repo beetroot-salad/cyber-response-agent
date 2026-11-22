@@ -129,9 +129,12 @@ def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, s
     assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
     assert git(repo[1], "rev-parse", "main") == expected
     merged = merge_on_remote(repo, tmp_path, batch.branch)
+    d.close()
     with monkeypatch.context() as env:
         redirect(env)
-        reverted = revert_with(d, store, "agent/lessons/ambient.md", "ambient")
+        # #1618 (flow 7): the revert is its own operation, over its own private repository fetched after the merge.
+        with delivery(repo, http) as later:
+            reverted = revert_with(later, store, "agent/lessons/ambient.md", "ambient")
     assert opened(reverted, None) == forge_pulls(repo[1])[-1]["html_url"]
     revert_head = http.creates[-1]["head"]
     tip = git(repo[1], "rev-parse", f"refs/heads/{revert_head}")

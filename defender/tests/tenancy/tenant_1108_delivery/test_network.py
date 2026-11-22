@@ -41,6 +41,16 @@ class _Stall:
         self._go.set()
 
 
+def _refusals(route):
+    """How the route's caller is refused: a delivery's open and a revert answer `DeliveryRefused`; the end push is the
+    tick's bare `GitRepository.push` (#1618: `finish`, which wrapped it, is deleted), whose git failure or timeout the
+    tick reads as a forge fault (`store_tick._forge_faults`)."""
+    from defender import _git
+
+    refused = target().DeliveryRefused
+    return (refused, _git.GitError, _git.GitTimeout) if route == "end-push" else (refused,)
+
+
 def _left(tenant, server):
     """Processes still at work in the tenant's folders, or talking to the server, a moment
     after the call ended (a killed process may take that long to go)."""
@@ -55,7 +65,7 @@ def _left(tenant, server):
 _ROUTES = {
     "open-fetch": ("git-upload-pack", True),
     "end-push": ("git-receive-pack", True),
-    "revert-fetch": ("git-upload-pack", True),
+    "revert-fetch": ("git-upload-pack", True),  # the revert's own repository's opening fetch (flow 7)
     "revert-push": ("git-receive-pack", True),
 }
 
@@ -100,9 +110,11 @@ def _stalled_route(http_repo, tmp_path, route, then=None, trickle=False, store=N
         opened(finished)
         reviewed(store, held, finished)
         merge_on_remote(http_repo, tmp_path, batch.branch)
+        d.close()
 
-        def call():
-            return revert_with(d, store, "agent/lessons/stalled.md", "stalled")
+        def call():  # flow 7: the revert opens its own private repository (its fetch), then commits and pushes
+            with delivery(http_repo, http, network_timeout=_TIMEOUT) as own:
+                return revert_with(own, store, "agent/lessons/stalled.md", "stalled")
     stall = _Stall(service, then, trickle)
     server.rearm()
     server.on_service = stall
@@ -119,7 +131,7 @@ def test_a_stalled_forge_fails_within_the_timeout_and_leaves_no_process(http_rep
         result, error = None, None
         try:
             result = call()
-        except target().DeliveryRefused as refused:
+        except _refusals(route) as refused:
             error = refused
         elapsed = time.monotonic() - started
         reached = stall.reached.is_set()
