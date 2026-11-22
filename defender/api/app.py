@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import logging
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode
 from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Generic, Literal, NamedTuple, TypeVar, cast
@@ -18,6 +18,7 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from defender import identity as _identity
+from defender._url import browser_origin, split_http_url
 from defender._vocab import Disposition, NoOutcome
 from defender import system_records as _records
 from defender import tenancy as _tenancy
@@ -549,23 +550,16 @@ repository = _router(prefix="/repository", tags=["repository"], responses=_EVERY
 
 
 def _browser_page(recorded: str | None, app_origin: str) -> str | None:
-    """`recorded` when a browser may be sent there: http or https, a host, no user part (a credential could ride in
-    it), no query or fragment, and another origin than the app's (so never one of the app's own addresses, `/api`
-    among them). Otherwise None."""
+    """`recorded` when a browser may be sent there: the one rule for an absolute http(s) URL (a host, no credentials,
+    query, fragment or whitespace), on another origin than the app's (so never one of the app's own addresses, `/api`
+    among them). Otherwise None. `app_origin` is canonical (`check_origin`), so origins compare as strings."""
     if recorded is None:
         return None
     try:
-        parts, app = urlsplit(recorded), urlsplit(app_origin)
-        host, port, app_port = parts.hostname, parts.port, app.port
+        parts = split_http_url(recorded)
     except ValueError:
         return None
-    if parts.scheme not in ("http", "https") or not host or "@" in parts.netloc or parts.query or parts.fragment:
-        return None
-    default = {"http": 80, "https": 443}
-    if (parts.scheme, host, port or default[parts.scheme]) == (
-            app.scheme, app.hostname, app_port or default.get(app.scheme)):
-        return None
-    return recorded
+    return None if browser_origin(parts) == app_origin else recorded
 
 
 @repository.get("")

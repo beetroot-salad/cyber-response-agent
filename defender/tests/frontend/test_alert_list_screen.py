@@ -877,18 +877,19 @@ def test_alert_list_o4_signed_out_the_alerts_address_returns_to_its_path_without
 # --- O8, O9: Home ----------------------------------------------------------------------------------------------------
 
 def test_alert_list_o8_home_links_a_persons_one_tenant_as_alerts_and_it_opens_the_screen(world, context):
-    """Ann (tenant A only): Home's one tenant link is the Alerts card's "Open alerts" to A's alerts address, which opens
-    the alerts screen; no tenant heading, no invite-only text, no invitation line, no Defender. (O8, O9; home redesign:
+    """Ann (tenant A only): Home's tenant links are the cards' "Open alerts" to A's alerts address, which opens the
+    alerts screen, and "Open repo" to A's repository address; no tenant heading, no invite-only text, no invitation line, no Defender. (O8, O9; home redesign:
     the link is a card's, and the top bar holds its own)"""
     sign_in(world, context)
     page = _home(world, context)
     links = page.locator('main a[href^="/t/"]')
-    assert [(link.get_attribute("href"), _plain(link.inner_text())) for link in links.all()] == [(ALERTS, "Open alerts")]
-    assert page.locator("main h2").count() == 0
+    assert [(link.get_attribute("href"), _plain(link.inner_text())) for link in links.all()] == [
+        (ALERTS, "Open alerts"), (f"/t/{A}/repo", "Open repo")]
+    assert page.locator("main h2").all_inner_texts() == ["Alerts", "Knowledge repo"]  # no tenant heading
     text = _plain(page.locator("body").inner_text())
     assert "invite-only" not in text and "invited to a team" not in text
     _no_defender(page)
-    links.click()
+    page.locator('main [data-action="open-alerts"]').click()
     screen(page, "alerts")
 
 
@@ -899,7 +900,7 @@ def test_alert_list_o8_home_labels_each_of_several_tenants_alerts_with_the_tenan
     page = _home(world, _signed_in(browser, world))
     found = {}
     for tenant in page.locator("main li[data-tenant]").all():
-        [link] = tenant.locator('a[href^="/t/"]').all()
+        link = tenant.locator('[data-action="open-alerts"]')
         found[_plain(tenant.locator("h2").inner_text())] = (link.get_attribute("href"), _plain(link.inner_text()))
     assert found == {A: (ALERTS, "Open alerts"), B: (ALERTS_OF_B, "Open alerts")}
 
@@ -947,7 +948,7 @@ FORGE_PAGE = "http://forge.test/tenants/a"
 def _nav(page: Any) -> list[tuple[str, str | None, str | None]]:
     """The top bar's links, in order: (text, href, aria-current)."""
     links = page.locator('header[data-bar="top"] nav a').all()
-    return [(_plain(link.inner_text().replace("↗", "")), link.get_attribute("href"), link.get_attribute("aria-current"))
+    return [(_plain(link.inner_text()), link.get_attribute("href"), link.get_attribute("aria-current"))
             for link in links]
 
 

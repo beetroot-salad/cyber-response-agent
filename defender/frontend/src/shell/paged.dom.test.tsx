@@ -69,8 +69,7 @@ function server() {
       retry: () => undefined,
       signOut: () => undefined,
       acceptInvitation: () => Promise.reject(new Error()),
-      mayOpenRepository: () => false,
-      openRepository: () => undefined,
+      outbound: () => null,
     },
   };
   return { sent, shell };

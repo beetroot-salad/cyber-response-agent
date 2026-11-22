@@ -38,25 +38,27 @@ export function Home() {
 
 /** One tenant's cards: its alerts, and its knowledge repository. Under the tenant's id when the person has several. */
 function Tenant({ tenant, lone }: { readonly tenant: string; readonly lone: boolean }) {
+  // Under the page's h1, or under the tenant's h2 when there are several: no heading level skipped.
+  const Title = lone ? "h2" : "h3";
   return (
     <li data-tenant={tenant}>
       {lone ? null : <h2 data-field="tenant">{tenant}</h2>}
       <div data-cards="tenant">
         <section data-card="alerts">
-          <h3>Alerts</h3>
+          <Title data-field="card-title">Alerts</Title>
           <p>Every alert pulled from your ticket system, with what Sluice concluded.</p>
           <a href={addressOf("alerts", [tenant])} data-action="open-alerts">
             Open alerts
           </a>
         </section>
         <section data-card="repo">
-          <h3>Knowledge repo</h3>
+          <Title data-field="card-title">Knowledge repo</Title>
           <p>
             What Sluice has learned about your environment, kept as files. A change takes effect once someone on your
             team merges it, and Sluice asks for feedback there as issues you answer in a comment.
           </p>
           <a href={addressOf("repo", [tenant])} data-action="open-repo">
-            Open repo <span aria-hidden="true">↗</span>
+            Open repo
           </a>
         </section>
       </div>

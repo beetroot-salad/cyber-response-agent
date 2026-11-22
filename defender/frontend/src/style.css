@@ -63,14 +63,12 @@ button[data-action="sign-out"]:hover {
 /* The signed-in screens' top bar: the product's name on the left, who is signed in and their actions on the right. */
 header[data-bar="top"] {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
   padding: 0.6rem 1.5rem;
   border-bottom: 1px solid var(--app-line);
   background: var(--app-raised);
-}
-header[data-bar="top"] {
-  flex-wrap: wrap;
 }
 header[data-bar="top"] a[data-action="home"] {
   font-weight: 700;
@@ -299,7 +297,7 @@ section[data-card] {
   border-radius: 8px;
   background: var(--app-raised);
 }
-section[data-card] h3 {
+section[data-card] [data-field="card-title"] {
   margin: 0;
   font-size: 1.05rem;
   font-weight: 600;

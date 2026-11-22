@@ -10,13 +10,13 @@ import { addressOf, literalAddress } from "../addresses";
 import { useActions, useMe } from "../shell/provider";
 
 /** The screen the bar is drawn on, for the link that says so (`aria-current`). */
-type Current = "home" | "alerts" | null;
+type Current = "home" | "alerts" | "repo" | null;
 
 export function TopBar({ tenant, current = null }: { readonly tenant?: string; readonly current?: Current }) {
   const me = useMe();
   const actions = useActions();
   const named = tenant ?? (me.tenants.length === 1 ? me.tenants[0]?.tenant_id : undefined);
-  const inView = me.tenants.find(({ tenant_id }) => tenant_id === named)?.tenant_id ?? null;
+  const inView = named !== undefined && me.tenants.some(({ tenant_id }) => tenant_id === named) ? named : null;
   const here = (screen: Current) => (current === screen ? "page" : undefined);
   return (
     <header data-bar="top">
@@ -32,8 +32,8 @@ export function TopBar({ tenant, current = null }: { readonly tenant?: string; r
             <a href={addressOf("alerts", [inView])} data-nav="alerts" aria-current={here("alerts")}>
               Alerts
             </a>
-            <a href={addressOf("repo", [inView])} data-nav="repo">
-              Knowledge repo <span aria-hidden="true">↗</span>
+            <a href={addressOf("repo", [inView])} data-nav="repo" aria-current={here("repo")}>
+              Knowledge repo
             </a>
           </>
         )}

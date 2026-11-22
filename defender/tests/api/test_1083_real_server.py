@@ -1307,7 +1307,7 @@ async def test_home_the_repository_read_serves_the_page_the_lifecycle_recorded_o
     None, "ssh://git@forge.example/tenants/a", "git@forge.example:tenants/a", "file:///srv/tenants/a",
     "https://bot:secret@forge.example/tenants/a", "https://bot@forge.example/tenants/a", "https:///tenants/a",
     "https://forge.example/tenants/a?x=1", "https://forge.example/tenants/a#x", "tenants/a", "https://[forge.example/a",
-    f"{ORIGIN}/api/me", f"{ORIGIN.upper()}:80/x",
+    f"{ORIGIN}/api/me", ORIGIN.upper() + "/x",
 ], ids=["none-recorded", "ssh", "scp", "file", "user-and-password", "user", "no-host", "query", "fragment", "relative",
         "malformed-host", "the-apps-own-origin", "the-apps-own-origin-spelled-otherwise"])
 async def test_home_the_repository_read_serves_null_for_none_or_a_page_a_browser_should_not_be_sent_to(served, page):

@@ -74,12 +74,11 @@ export interface Load {
   readonly client: Client;
   /** Sign in again from the failed screen: records an attempt when storage allows, then leaves for the sign-in. */
   readonly signIn: (returns: readonly string[]) => void;
-  /** `address`, a tenant repository's page as the API served it, as the browser spells it, when the page may leave
-   * for it: an http or https address with no user part on another origin than the page's (so never one of the app's
-   * own addresses). Otherwise null. */
-  readonly repositoryPage: (address: string) => string | null;
-  /** Leave for `repositoryPage(address)` by replace; nothing when that is null, or the load is already leaving. */
-  readonly toRepository: (address: string) => void;
+  /** A way out of the app to `address`: a function that leaves for it by replace (nothing once the load is already
+   * leaving), when it is an http or https address with no user part on another origin than the page's, so never one
+   * of the app's own addresses; otherwise null. Pure: it only leaves when the function is called. The API serves an
+   * outside address only after its own, fuller check; this is the shell's guard on what a screen hands it. */
+  readonly outbound: (address: string) => (() => void) | null;
   readonly supersede: Exit["supersede"];
   readonly mayShow: Exit["mayShow"];
 }
@@ -292,7 +291,8 @@ export function makeLoad(options: LoadOptions): Load {
     }
   }
 
-  function repositoryPage(address: string): string | null {
+  const appOrigin = new URL(origin).origin;
+  function outbound(address: string): (() => void) | null {
     let url: URL;
     try {
       url = new URL(address);
@@ -300,8 +300,13 @@ export function makeLoad(options: LoadOptions): Load {
       return null;
     }
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    if (url.username !== "" || url.password !== "" || url.origin === new URL(origin).origin) return null;
-    return url.href;
+    if (url.username !== "" || url.password !== "" || url.origin === appOrigin) return null;
+    const page = url.href;
+    return () => {
+      exit.leave(() => {
+        effects.replace(page);
+      });
+    };
   }
 
   const wiring: Wiring = { origin, effects, exit, unauthorized };
@@ -313,14 +318,7 @@ export function makeLoad(options: LoadOptions): Load {
       exit,
       effects,
     ),
-    repositoryPage,
-    toRepository: (address) => {
-      const page = repositoryPage(address);
-      if (page === null) return;
-      exit.leave(() => {
-        effects.replace(page);
-      });
-    },
+    outbound,
     signIn: (returns) => {
       // The values are handed to the sign-in route unjudged: the API judges them.
       exit.leave(() => {

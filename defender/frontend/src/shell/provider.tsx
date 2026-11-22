@@ -22,12 +22,11 @@ export interface Actions {
    * here), on a 401 it signs in again. What it came to is the screen's to show, the server's error included: it is
    * not the error state. */
   readonly acceptInvitation: (id: string) => Promise<AcceptResult>;
-  /** Whether the browser may be sent to `address`, the tenant repository's page the repository read served: an http
-   * or https address with no user part on another origin than the app's. */
-  readonly mayOpenRepository: (address: string) => boolean;
-  /** Send the browser to `address`, replacing this page (Back returns to where the person came from); nothing when
-   * `mayOpenRepository` says no. */
-  readonly openRepository: (address: string) => void;
+  /** A way out of the app to `address` (the knowledge repository's page the API served): a function that sends the
+   * browser there, replacing this page so Back returns to where the person came from; null when the shell will not
+   * send a browser there (not http or https, a user part, or the app's own origin). Calling `outbound` does nothing
+   * by itself. */
+  readonly outbound: (address: string) => (() => void) | null;
 }
 
 /** A read-only copy of the address's query. */

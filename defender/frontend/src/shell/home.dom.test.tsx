@@ -44,10 +44,12 @@ function drawn(
       retry: () => undefined,
       signOut: () => undefined,
       acceptInvitation: () => Promise.reject(new Error()),
-      mayOpenRepository: () => allows,
-      openRepository: (address) => {
-        opened.push(address);
-      },
+      outbound: (address) =>
+        allows
+          ? () => {
+              opened.push(address);
+            }
+          : null,
     },
   };
   render(<ShellProvider shell={shell}>{node}</ShellProvider>);
@@ -76,7 +78,11 @@ describe("Home", () => {
     const main = within(screen.getByRole("main"));
     expect(main.getByRole("link", { name: "Open alerts" }).getAttribute("href")).toBe(`/t/${A}/alerts`);
     expect(main.getByRole("link", { name: /Open repo/ }).getAttribute("href")).toBe(`/t/${A}/repo`);
-    expect(main.queryByRole("heading", { level: 2 })).toBeNull();
+    // No tenant heading: the card titles sit directly under the page's h1.
+    expect(main.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
+      "Alerts",
+      "Knowledge repo",
+    ]);
   });
 
   it("with several tenants, puts each tenant's cards under its id, and the bar has only Home", () => {
@@ -101,6 +107,7 @@ describe("the repository address", () => {
       expect(opened).toEqual(["https://forge.example/tenants/a"]);
     });
     expect(screen.getByText("Opening the repository…")).toBeTruthy();
+    expect(nav().at(-1)).toEqual(["Knowledge repo", `/t/${A}/repo`, "page"]);
   });
 
   it.each([
