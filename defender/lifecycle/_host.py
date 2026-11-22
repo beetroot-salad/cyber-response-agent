@@ -241,7 +241,7 @@ class HostActor(Actor):
         fetch validates, its copy is thrown away."""
         dest = Path(tempfile.mkdtemp(prefix="defender-onboarding-"))
         try:
-            return self._fetch(tenant, dest, data_root=self._root)
+            return self._fetch(tenant, dest=dest, data_root=self._root)
         finally:
             shutil.rmtree(dest, ignore_errors=True)
 

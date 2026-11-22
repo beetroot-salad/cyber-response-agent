@@ -68,9 +68,12 @@ def remove_entry(folder: Path, name: str) -> None:
             st = os.stat(name, dir_fd=fd, follow_symlinks=False)
         except FileNotFoundError:
             return
-        if stat.S_ISDIR(st.st_mode):
-            shutil.rmtree(name, dir_fd=fd)
-        else:
-            os.unlink(name, dir_fd=fd)
+        try:  # another sweeper may remove entries under it (or it) meanwhile: gone is what was wanted
+            if stat.S_ISDIR(st.st_mode):
+                shutil.rmtree(name, dir_fd=fd)
+            else:
+                os.unlink(name, dir_fd=fd)
+        except FileNotFoundError:
+            return
     finally:
         os.close(fd)
