@@ -8,7 +8,6 @@ PICKS (r8 wins where it speaks; otherwise the spelling most slices already used)
 - `page` is `{"page": rendered|render_failed|none}`, sent and staged (an arm's is the `page` field of its `arm/<run id>`).
 - `arms` is `{"roster": [{"run_id", "world_id"}]}`; `arm/<run id>` is `{"scrub", "page"}` with no roster inside (PR8).
 - `knowledge` is staged as the served shape `{status, commit, stale_kind}`; the record shape `{kind, ...}` is only a source.
-- a drain's `result` is `{"status": <tick exit status>}`.
 - the closing field is `review_outcome`; a readiness `result` carries no knowledge (its own staged `knowledge` fact does).
 - a learning outcome is sent with `findings {state: ok, text}` and staged with `screened{rows by channel}` or `refused{reason}`.
 - an `End` reads the same for both kinds: `stage`/`failure_reason` (a learning row's `status`/`reason` columns take them).
@@ -168,9 +167,10 @@ def learning_progress(sibling_cost_usd: float = 0.1) -> dict[str, Any]:
 
 READINESS_RESULT = {"outcome": "ready", "warnings": []}
 ADOPTION_RESULT = {"outcome": "nothing_to_adopt", "pr_number": None}
-#: a drain's `result` is its tick's exit status (`lead_author_drain` returns an int; a fatal refusal is raised, never returned).
-DRAIN_RESULT = {"status": 0}
-RESULTS = {"readiness": READINESS_RESULT, "adoption": ADOPTION_RESULT, "drain": DRAIN_RESULT}
+#: a drain's `result` is its tick's exit status, an int (`lead_author_drain` returns it; a fatal refusal is raised, never returned);
+#: staged as that int and stored in the row's `result` as the same int.
+DRAIN_EXIT_STATUS = 0
+RESULTS = {"readiness": READINESS_RESULT, "adoption": ADOPTION_RESULT, "drain": DRAIN_EXIT_STATUS}
 
 
 def refused(name: str, reason: str = "malformed") -> dict[str, Any]:
@@ -185,8 +185,6 @@ def up(status: str = UP, scrub: str | None = None) -> dict[str, Any]:
 
 #: A learning job's arm in the generated record cases: its run id and world id (the roster names it before its `arm` is sent).
 ARM_RUN, ARM_WORLD = "7d1f3a52-9b6e-4c08-a1d4-5e2b8c3f6a90", "c4e8b2d1-3a57-4f90-8e16-b7a2d5c9f301"
-#: A drain's `result` is its tick's exit status (an int, `learning/core/drains.py:640`).
-DRAIN_EXIT_STATUS = 0
 
 #: Each verb a job stages a fact through, one case per (kind, record name): (kind, verb, sent record, fact name, staged body).
 #: The control of every malformed-record case; the staged body is what the helper leaves (equal to the sent record unless it

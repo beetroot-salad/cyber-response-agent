@@ -20,6 +20,7 @@ from defender.tests.support.shared._postgres1339 import database, empty_database
 from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import as_bot, jwts  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noqa: E402
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 TICK = dt.timedelta(seconds=30)
 NOW = dt.datetime(2026, 11, 9, 12, 0, tzinfo=dt.UTC)
@@ -349,7 +350,7 @@ async def repo(request) -> AsyncIterator[Any]:
 @pytest.mark.anyio
 async def test_a_tenant_with_nothing_recorded_reads_none(repo):
     """D13: absent record is None, not an empty list."""
-    tenant = (await repo.request_create(now=NOW)).id
+    tenant = (await repo.request_create(now=NOW, **CREATE_RETENTION)).id
     assert await repo.merge_eligibility(tenant) is None
 
 
@@ -357,7 +358,7 @@ async def test_a_tenant_with_nothing_recorded_reads_none(repo):
 async def test_the_record_reads_back_as_written_and_a_later_record_replaces_it_whole(repo):
     """D13: logins (case and punctuation kept) and read_at round-trip as a frozenset and an aware time; the empty set is
     a record; recording again replaces both; another tenant's record is its own."""
-    one, two = (await repo.request_create(now=NOW)).id, (await repo.request_create(now=NOW)).id
+    one, two = (await repo.request_create(now=NOW, **CREATE_RETENTION)).id, (await repo.request_create(now=NOW, **CREATE_RETENTION)).id
     first = frozenset({"Carol", "dave.x-1", "o_lga"})
     await repo.record_merge_eligibility(one, logins=first, read_at=NOW)
     got = await repo.merge_eligibility(one)
@@ -376,7 +377,7 @@ async def test_the_record_reads_back_as_written_and_a_later_record_replaces_it_w
 @pytest.mark.anyio
 async def test_a_read_at_in_another_zone_is_the_same_instant(repo):
     """D13: the time is an instant: a +05:00 read_at reads back equal to itself."""
-    tenant = (await repo.request_create(now=NOW)).id
+    tenant = (await repo.request_create(now=NOW, **CREATE_RETENTION)).id
     zoned = NOW.astimezone(dt.timezone(dt.timedelta(hours=5)))
     await repo.record_merge_eligibility(tenant, logins=frozenset({"dave"}), read_at=zoned)
     assert (await repo.merge_eligibility(tenant)).read_at == NOW
@@ -411,7 +412,7 @@ def test_the_directory_reads_what_the_repository_recorded(backend):
                         await opened.close()
                 return asyncio.run(once())
 
-        tenant = run(lambda r: r.request_create(now=NOW)).id
+        tenant = run(lambda r: r.request_create(now=NOW, **CREATE_RETENTION)).id
         assert directory.merge_eligibility(tenant) is None
         run(lambda r: r.record_merge_eligibility(tenant, logins=frozenset({"dave", "olga"}), read_at=NOW))
         got = directory.merge_eligibility(tenant)

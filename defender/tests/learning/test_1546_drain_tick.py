@@ -13,7 +13,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.tests.support.jobs._ending1546 import plant_claim, plant_complete_source, plant_uploads  # noqa: E402
-from defender.tests.support.evidence._facts1546 import BUNDLE, DRAIN_RESULT, UP, up  # noqa: E402
+from defender.tests.support.evidence._facts1546 import BUNDLE, DRAIN_EXIT_STATUS, UP, up  # noqa: E402
 from defender.tests.support.jobs._jobs1342 import job_store  # noqa: E402
 from defender.tests.support.learning.core._store1278 import call, migrated_database, world  # noqa: E402, F401 — fixtures
 from defender.tests.support.sandbox._spec791 import make_run_dir  # noqa: E402
@@ -98,7 +98,7 @@ def test_a_drain_tick_serves_the_run_in_its_set_kills_the_expired_and_tainted_an
 
     rc = lead_author_drain(world.t, paths, box=BoxSpy(), run_lead_author=lead, run_pitfalls=lambda *_a, **_k: 0)
 
-    assert rc == DRAIN_RESULT["status"]
+    assert rc == DRAIN_EXIT_STATUS
     assert seen == [in_set], "only the run in the set is served"
     items = _items(world)
     for gone in (expired, tainted):

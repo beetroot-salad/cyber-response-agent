@@ -39,6 +39,7 @@ from defender.tests.support.shared._pglocks1339 import TIMEOUT, connections, unt
 from defender.tests.support.shared._postgres1339 import database, execute
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.support.tenancy._twin1496 import seed_tenant
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 
 pytestmark = pytest.mark.anyio
@@ -216,12 +217,31 @@ def test_the_pinned_record_types_carry_the_pinned_fields():
 
 async def test_a_create_request_inserts_a_creating_tenant_at_the_names_step(store):
     """request_create stores a `creating` tenant, `create` pending, step `names`, actor `service`, no failure, at `now` (RC-3)."""
-    record = await store.repo.request_create(now=NOW)
+    record = await store.repo.request_create(now=NOW, **CREATE_RETENTION)
     assert uuid.UUID(record.id).version == 4
     assert _job(record) == ("creating", "create", "names", "service", None)
     assert (record.created_at, record.repo_url, record.offboarded_at, record.repo_delete_after) == (NOW, None, None, None)
     assert _values(await store.repo.tenant(record.id)) == _values(record)  # stored, not just returned
     assert await store.repo.generations(record.id) == []  # the pending generation is the names step's, not the request's
+
+
+@pytest.mark.postgres
+async def test_request_create_writes_the_retention_row_in_the_same_transaction_as_the_tenants_row(pg_store):
+    """`request_create(now=, investigation_days=, learning_days=)` leaves the tenant `creating` with its retention row holding
+    both values; a value the database refuses (29 days) leaves no tenant row either; the row exists while `creating`.
+    (A-O7, D16)"""
+    import psycopg
+
+    from defender.tests.support.shared._postgres1339 import execute
+
+    made = await pg_store.repo.request_create(now=NOW, investigation_days=45, learning_days=500)
+    assert made.state == "creating"
+    assert execute(pg_store.dsn, "SELECT investigation_days, learning_days FROM tenancy.evidence_retention WHERE tenant_id = %s",
+                   (made.id,)) == [(45, 500)]
+    before = execute(pg_store.dsn, "SELECT count(*) FROM tenancy.tenants")
+    with pytest.raises(psycopg.errors.CheckViolation):
+        await pg_store.repo.request_create(now=NOW, investigation_days=29, learning_days=500)
+    assert execute(pg_store.dsn, "SELECT count(*) FROM tenancy.tenants") == before
 
 
 @pytest.mark.postgres
@@ -234,7 +254,7 @@ async def test_1345_d2_a_tenant_made_by_the_create_request_has_no_alert_mapping_
     from defender.tests.support.jobs._jobs1342 import an_alert
     from defender.tests.support.tenancy._mapping1345 import mapping_value
 
-    tenant = (await pg_store.repo.request_create(now=NOW)).id
+    tenant = (await pg_store.repo.request_create(now=NOW, **CREATE_RETENTION)).id
     store = JobStore(pg_store.dsn, clock=lambda: NOW)
     try:
         assert await pg_store.repo.alert_mapping(tenant) is None
@@ -268,7 +288,7 @@ async def test_1345_m1_the_mapping_read_is_the_asked_tenants_own_when_another_te
 
 async def test_two_create_requests_are_two_tenants(store):
     """Each create mints its own id and adds a row; `tenants()` lists both (RC-3)."""
-    first, second = await store.repo.request_create(now=NOW), await store.repo.request_create(now=NOW)
+    first, second = await store.repo.request_create(now=NOW, **CREATE_RETENTION), await store.repo.request_create(now=NOW, **CREATE_RETENTION)
     assert first.id != second.id
     assert {t.id for t in await store.repo.tenants()} == {first.id, second.id}
 
@@ -532,7 +552,7 @@ def _mutate(model: object) -> int:
 READS = {
     "tenant": lambda r: r.tenant(T1),
     "tenants": lambda r: r.tenants(),
-    "request_create": lambda r: r.request_create(now=NOW),
+    "request_create": lambda r: r.request_create(now=NOW, **CREATE_RETENTION),
     "request_rotate": lambda r: r.request_rotate(T1),
     "forge_wiring": lambda r: r.forge_wiring(T1),
 }
@@ -620,7 +640,7 @@ async def test_created_at_is_the_callers_now_and_returned_in_utc_whatever_the_zo
     """Python-side values: request_create stores exactly the `now` passed; the database's own zone never shows (P4, D)."""
     name = execute(pg_store.dsn, "SELECT current_database()")[0][0]
     execute(pg_store.dsn, f"ALTER DATABASE \"{name}\" SET timezone TO 'Pacific/Chatham'")
-    record = await pg_store.repo.request_create(now=NOW)
+    record = await pg_store.repo.request_create(now=NOW, **CREATE_RETENTION)
     await pg_store.seed(T1, ACTIVE)
     stamps = [getattr(r, f) for r in (record, await pg_store.repo.tenant(record.id), await pg_store.repo.tenant(T1))
               for f in ("created_at",)]
@@ -1068,7 +1088,7 @@ async def test_1470_o8_a_tenant_made_by_the_create_request_is_refused_until_it_i
     it is `active`. (#1470 O8: `creating` newly refused; replaces #1366 R11)"""
     from defender.records.formats import TenantRefused
 
-    made = (await store.repo.request_create(now=NOW)).id
+    made = (await store.repo.request_create(now=NOW, **CREATE_RETENTION)).id
     with pytest.raises(TenantRefused):
         await store.repo.current_records(made)
 

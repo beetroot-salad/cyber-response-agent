@@ -43,6 +43,7 @@ from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, ISSUER_URL, 
 # Production names #1214 must supply. Kept in this one block so a missing package is one ImportError.
 from defender.lifecycle import HostActor, LifecycleConfig, ManagementService  # noqa: E402
 from defender.tenancy import InMemoryTenantRepository, TenantDirectory, template_dir  # noqa: E402,F401
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 #: Offboarding keeps the archived repo this long (Q5).
 REPO_WINDOW = _dt.timedelta(days=30)
@@ -128,7 +129,7 @@ class LifecycleWorld(World):
 
     def create(self) -> str:
         """`POST /admin/tenants` as `ops`; the minted id (asserted 202)."""
-        made = self.ops.post(API + "/admin/tenants", json={})
+        made = self.ops.post(API + "/admin/tenants", json=CREATE_RETENTION)
         assert made.status_code == 202, made.text
         return made.json()["tenant_id"]
 

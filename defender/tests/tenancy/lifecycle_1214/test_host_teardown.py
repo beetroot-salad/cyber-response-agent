@@ -132,7 +132,7 @@ def test_install_that_waits_for_the_exclusive_lock_goes_ahead_once_it_is_free(wo
     assert not ran.is_alive()
     item = world.item(tenant)
     assert (item["step"], item["failure"]) == ("sweep", None)
-    assert len(world.openbao.made("POST", UNWRAP)) == 2, "install unwraps the delivery and the sign secret (A24')"
+    assert len(world.openbao.made("POST", UNWRAP)) == 3, "install unwraps the delivery, sign and evidence secrets (A24', #1546 r9)"
 
 
 def test_removing_the_old_secret_file_waits_for_the_exclusive_lock_too(world):
@@ -494,7 +494,7 @@ def test_an_install_that_fails_after_writing_its_secret_file_removes_it(world):
     host_openbao_failing(world, lambda r: r.url.path.endswith("/approle/login"))
     world.host_pass()
     assert "install" in (world.item(tenant)["failure"] or ""), world.item(tenant)
-    assert len(world.openbao.made("POST", UNWRAP)) == 2, "control: both secrets were unwrapped (and written) before any check"
+    assert len(world.openbao.made("POST", UNWRAP)) == 3, "control: all three secrets were unwrapped (and written) before any check"
     assert not [p for p in world.config.secrets_dir.rglob("*") if p.is_file()], "a failed install left its secret file"
 
 class _AnswerLost:

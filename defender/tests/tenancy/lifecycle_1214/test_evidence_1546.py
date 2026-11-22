@@ -1,12 +1,19 @@
 # ruff: noqa: F811, PLR0913, PT018
-"""#1546 A-O5: the tenant's evidence key and AppRole (made with the tenant, backfilled, destroyed at offboarding) and the
-offboarding pass over the real store (Garage) and the jobs database, through the lifecycle's own actors and fakes.
+"""#1546 A-O5 (r9): the tenant's evidence key `evidence-<T>` (per tenant, made once, kept across rotations like the signing
+key, destroyed at offboarding) and each generation's evidence login (an AppRole beside the sign chain, made by the management
+service, its secret unwrapped by the host at install and proven by a datakey/decrypt probe); the offboarding pass over the real
+store (Garage) and the jobs database, through the lifecycle's own actors and fakes. There is no backfill: no tenant survives
+the upgrade (D16, B).
 
-Pinned (missing): the host step `evidence` between `teardown` and `finish`; `HostActor(blob=<defender.evidence.BlobStore>)`
-(the store the step reaches; the jobs database is `DEFENDER_DATABASE_DSN`, as the learning purge's); transit key
-`evidence-<T>` (aes256-gcm96) and one AppRole whose name starts `evidence-` and holds `<T>`. FakeOpenBao only records (no policy)."""
+Pinned (missing): the host step `evidence` between `teardown` and `finish`; `HostActor(blob=<defender.evidence.BlobStore>)`;
+transit key `evidence-<T>` (aes256-gcm96); on `Generation`, mirroring `sign_*`: `evidence_approle` (name starts `evidence-`),
+`evidence_entity`, `evidence_role_id`, `evidence_wrapped_secret`, `evidence_secret_accessor`, `evidence_secret_file`;
+`LifecycleConfig.evidence_policy` (the fake's `EVIDENCE_POLICY`, datakey/decrypt on the login's own tenant's key); the store
+settings `DEFENDER_EVIDENCE_{ENDPOINT,BUCKET,ACCESS_KEY,SECRET_KEY}` (required, `LifecycleConfig.from_env` refuses naming a
+missing one). FakeOpenBao enforces the policy by the entity's tenant on datakey/decrypt, as it does for sign."""
 from __future__ import annotations
 
+import os
 import uuid
 
 import pytest
@@ -26,6 +33,7 @@ from defender.tests.support.evidence._retention1546 import (  # noqa: E402
     stage_fact,
     uploads,
 )
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noqa: E402
 
 
@@ -34,7 +42,20 @@ def _key(tenant: str) -> str:
 
 
 def _roles(bao, tenant: str) -> list[str]:
+    """The evidence AppRoles of the tenant's generations (names start `evidence-`, hold the tenant)."""
     return sorted(n for n in bao.approles if n.startswith("evidence-") and tenant in n)
+
+
+def _login(world, role_id: str, secret: str) -> str:
+    done = world.call(world.openbao.client(None).post, "/v1/auth/approle/login", json={"role_id": role_id, "secret_id": secret})
+    assert done.status_code == 200, done.text
+    return done.json()["auth"]["client_token"]
+
+
+def _transit(world, token: str, op: str, key: str) -> int:
+    path = f"/v1/transit/datakey/plaintext/{key}" if op == "datakey" else f"/v1/transit/sign/{key}"
+    body = {} if op == "datakey" else {"input": "cHJvYmU="}
+    return world.call(world.openbao.client(None).post, path, json=body, headers={"X-Vault-Token": token}).status_code
 
 
 @pytest.fixture
@@ -44,47 +65,93 @@ def world(tmp_path, data_root):
     w.close()
 
 
-# --- the key and AppRole: made with the tenant, backfilled, destroyed ----------------------------------------------
+# --- the key (per tenant) and the login (per generation) ------------------------------------------------------------
 
-def test_a_created_tenant_has_its_evidence_key_and_one_approle_with_a_secret_it_can_log_in_with(world):
-    """Once the tenant is active, `evidence-<T>` is an aes256-gcm96 transit key and one evidence AppRole of the tenant holds a
-    secret id that logs in; the other tenant has its own pair and the signing key is still ed25519. (A-O5)"""
+def test_a_created_tenant_has_its_evidence_key_and_a_generation_login_on_its_own_policy(world):
+    """Once the tenant is active, `evidence-<T>` is an aes256-gcm96 transit key (the signing key still ed25519), and the live
+    generation has an evidence AppRole on the evidence policy beside the delivery and sign ones, an entity carrying the
+    tenant and an alias named by its role id; the other tenant has its own. (A-O5, r9)"""
     tenant, other = world.active_tenant(), world.active_tenant()
     bao = world.openbao
     assert bao.transit_keys[_key(tenant)]["type"] == "aes256-gcm96"
     assert bao.transit_keys[f"request-token-{tenant}"]["type"] == "ed25519", "control: the signing key is as before"
-    [role] = _roles(bao, tenant)
-    assert _roles(bao, other) and _roles(bao, other) != [role] and _key(other) in bao.transit_keys
-    secrets = list(bao.approles[role].values())
-    assert secrets, "no secret id was issued for the evidence AppRole"
-    login = world.call(bao.client(None).post, "/v1/auth/approle/login",
-                       json={"role_id": f"role-id-{role}", "secret_id": secrets[0]})
-    assert login.status_code == 200, login.text
+    gen, theirs = world.live(tenant), world.live(other)
+    assert gen.evidence_approle.startswith("evidence-") and gen.evidence_approle in _roles(bao, tenant)
+    assert bao.approle_policies[gen.evidence_approle] == [bao.evidence_policy]
+    assert bao.approle_policies[gen.sign_approle] != bao.approle_policies[gen.evidence_approle]
+    assert bao.entities[gen.evidence_entity]["metadata"]["tenant_id"] == tenant
+    assert gen.evidence_role_id not in (gen.role_id, gen.sign_role_id)
+    assert {a["name"]: a["canonical_id"] for a in bao.aliases}[gen.evidence_role_id] == bao.entities[gen.evidence_entity]["id"]
+    assert theirs.evidence_approle != gen.evidence_approle and _key(other) in bao.transit_keys
 
 
-def test_a_tenant_made_before_the_key_existed_gets_key_and_approle_from_a_lifecycle_step(world):
-    """An active tenant with no evidence key or AppRole (made by an earlier release) has both after fresh actors have run
-    their passes, and a tenant that has them is sent no second key create (backfill; A-O5).
-    FORCED CHOICE: the trigger (the design says "a lifecycle step backfills existing tenants")."""
-    tenant, other = world.active_tenant(), world.active_tenant()
+def test_the_evidence_secret_is_wrapped_unwrapped_at_install_written_and_proved_by_a_datakey_and_decrypt(world):
+    """A secret id is wrapped for the evidence AppRole and unwrapped by the host at install, which writes its file beside the
+    others, records the accessor, clears the wrapping token, and proves the login with one datakey and one decrypt of the
+    tenant's key (not at prepare). (A-O5, r9)"""
+    tenant = world.active_tenant()
+    gen = world.live(tenant)
     bao = world.openbao
-    bao.transit_keys.pop(_key(tenant))
-    for role in _roles(bao, tenant):
-        bao.approles.pop(role)
-        bao.approle_policies.pop(role, None)
-    mark = len(bao.calls)
-    world.service_actor = world.new_service(world.tenants, identity=world.service)
-    world.host_actor = world.new_host(world.tenants)
+    wrapped_for = {c.path.split("/")[5] for c in bao.calls if c.path.endswith("/secret-id") and "x-vault-wrap-ttl" in c.headers}
+    assert gen.evidence_approle in wrapped_for
+    assert gen.evidence_secret_file.parent == gen.sign_secret_file.parent == world.config.secrets_dir / tenant
+    assert gen.evidence_secret_file != gen.sign_secret_file
+    assert gen.evidence_secret_file.read_text(encoding="utf-8") == bao.approles[gen.evidence_approle][gen.evidence_secret_accessor] + "\n"
+    assert gen.evidence_wrapped_secret is None
+    assert bao.datakeys == [(_key(tenant), gen.evidence_approle)] and bao.decrypts == [(_key(tenant), gen.evidence_approle)]
+
+
+def test_each_login_may_use_only_its_own_key_and_only_for_its_own_purpose(world):
+    """The evidence login takes a datakey on its own tenant's key (200, control), not on another tenant's, and cannot sign;
+    the sign login cannot take a datakey. (A-O5, r9)"""
+    tenant, other = world.active_tenant(), world.active_tenant()
+    gen = world.live(tenant)
+    bao = world.openbao
+    evidence = _login(world, gen.evidence_role_id, next(iter(bao.approles[gen.evidence_approle].values())))
+    sign = _login(world, gen.sign_role_id, next(iter(bao.approles[gen.sign_approle].values())))
+    assert _transit(world, evidence, "datakey", _key(tenant)) == 200
+    assert _transit(world, evidence, "datakey", _key(other)) == 403
+    assert _transit(world, evidence, "sign", f"request-token-{tenant}") == 403
+    assert _transit(world, sign, "datakey", _key(tenant)) == 403
+
+
+def test_the_key_is_the_tenants_and_survives_rotations_while_each_generation_proves_its_own_login(world):
+    """Two rotations leave the one key `evidence-<T>` (created once, never deleted), and every generation's install proved a
+    datakey with its own evidence login. (A-O5, A25, r9)"""
+    tenant = world.active_tenant()
+    for _ in range(2):
+        assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
+        world.drive()
+        assert world.item(tenant)["state"] == "active"
+    bao = world.openbao
+    path = f"/v1/transit/keys/{_key(tenant)}"
+    assert bao.made("DELETE", path) == [] and len([c for c in bao.calls if c.method in ("POST", "PUT") and c.path == path]) == 1
+    gens = world.generations(tenant)
+    assert len(gens) == 3 and len({g.evidence_approle for g in gens}) == 3
+    assert {role for key, role in bao.datakeys if key == _key(tenant)} == {g.evidence_approle for g in gens}
+
+
+def test_an_evidence_proof_that_fails_fails_install_and_restarts_at_wrap_with_no_file_left(world):
+    """The tenant's `evidence-<T>` is gone when install proves the login: install fails, restarts at `wrap`, leaves no secret
+    file; with the key back, resume finishes and the proof is made. (A-O5, r9)"""
+    tenant = world.create()
+    world.drive(stop=lambda: world.item(tenant)["step"] == "install")
+    lost = world.openbao.transit_keys.pop(_key(tenant))
     world.drive()
-    assert bao.transit_keys[_key(tenant)]["type"] == "aes256-gcm96" and len(_roles(bao, tenant)) == 1
-    assert world.item(tenant)["state"] == "active" and world.item(tenant)["failure"] is None
-    touched_other = [c for c in bao.calls[mark:] if _key(other) in c.path or any(r in c.path for r in _roles(bao, other))]
-    assert [c for c in touched_other if c.method in ("POST", "PUT", "DELETE")] == [], "the tenant that had them was written to"
+    item = world.item(tenant)
+    assert (item["step"], item["step_actor"]) == ("wrap", "service") and "install" in item["failure"], item
+    assert not [p for p in world.config.secrets_dir.rglob("*") if p.is_file()], "a failed install left a secret file"
+    assert world.openbao.datakeys == []
+    world.openbao.transit_keys[_key(tenant)] = lost
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
+    world.drive()
+    assert world.item(tenant)["state"] == "active"
+    assert [role for _key_, role in world.openbao.datakeys] == [world.live(tenant).evidence_approle]
 
 
-def test_offboarding_destroys_the_evidence_key_and_approle_and_only_that_tenants(world):
-    """After offboarding, the tenant's `evidence-<T>` key (made deletable, then deleted once) and its evidence AppRole are
-    gone; the other tenant's pair stays. (A-O5, "a read after offboarding is refused" at the key layer)"""
+def test_offboarding_destroys_the_evidence_key_and_logins_and_only_that_tenants(world):
+    """After offboarding, the tenant's `evidence-<T>` key (made deletable, then deleted once) and its evidence AppRoles are
+    gone; the other tenant's key and login stay. (A-O5, "a read after offboarding is refused" at the key layer)"""
     tenant, other = world.active_tenant(), world.active_tenant()
     bao = world.openbao
     assert _key(tenant) in bao.transit_keys and _roles(bao, tenant), "premise"
@@ -97,11 +164,11 @@ def test_offboarding_destroys_the_evidence_key_and_approle_and_only_that_tenants
     config = next(i for i, (m, p, b) in enumerate(calls) if p.endswith("/config") and m in ("POST", "PUT") and b["deletion_allowed"] is True)
     deletes = [i for i, (m, p, _b) in enumerate(calls) if m == "DELETE" and p == path]
     assert len(deletes) == 1 and config < deletes[0]
-    assert _key(other) in bao.transit_keys and _roles(bao, other), "control: the other tenant's pair stays"
+    assert _key(other) in bao.transit_keys and _roles(bao, other), "control: the other tenant's key and login stay"
 
 
-def test_offboarding_a_tenant_whose_evidence_key_and_approle_are_already_gone_finishes_sending_no_delete(world):
-    """With the key and AppRole already absent, offboarding finishes and sends no delete for either. (A-O5, idempotent)"""
+def test_offboarding_a_tenant_whose_evidence_key_and_logins_are_already_gone_finishes_sending_no_delete(world):
+    """With the key and AppRoles already absent, offboarding finishes and sends no delete for either. (A-O5, idempotent)"""
     tenant = world.active_tenant()
     bao = world.openbao
     roles = _roles(bao, tenant)
@@ -115,6 +182,40 @@ def test_offboarding_a_tenant_whose_evidence_key_and_approle_are_already_gone_fi
     sent = [(c.method, c.path) for c in bao.calls[mark:] if c.method == "DELETE" and (
         _key(tenant) in c.path or any(r in c.path for r in roles))]
     assert sent == []
+
+
+# --- no store configured: fail closed ------------------------------------------------------------------------------------
+
+STORE_ENV = ("ENDPOINT", "BUCKET", "ACCESS_KEY", "SECRET_KEY")
+
+
+@pytest.mark.parametrize("missing", [None, *STORE_ENV])
+def test_a_lifecycle_with_no_evidence_store_configured_is_refused_at_its_settings(tmp_path, data_root, monkeypatch, missing):
+    """The lifecycle's settings with the evidence store's four variables set are built (control); with any one unset,
+    `from_env` refuses naming it, so the service never runs an offboarding that would skip the store. (A-O5, fail closed)"""
+    from defender.lifecycle import ConfigRefused
+    from defender.lifecycle import config as settings
+    from defender.tests.support.evidence._facts1546 import EVIDENCE_ENV_PREFIX
+    from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config
+
+    expected = lifecycle_config(tmp_path, data_root)
+    for name, value in (("forge-token", expected.forge_admin_token), ("bao-login", expected.openbao_login)):
+        (tmp_path / name).write_text(value + "\n", encoding="utf-8")
+    for name in [k for k in os.environ if k.startswith(("DEFENDER_LIFECYCLE_", "DEFENDER_EVIDENCE_"))]:
+        monkeypatch.delenv(name)
+    for name, value in ((settings.FORGE_URL_ENV, expected.forge_url), (settings.FORGE_TOKEN_FILE_ENV, str(tmp_path / "forge-token")),
+                        (settings.OPENBAO_LOGIN_FILE_ENV, str(tmp_path / "bao-login")),
+                        (settings.INTEGRATION_ENV, expected.integration_command),
+                        (settings.SECRETS_DIR_ENV, str(expected.secrets_dir)), (settings.DATA_ROOT_ENV, str(data_root))):
+        monkeypatch.setenv(name, value)
+    for name in STORE_ENV:
+        if name != missing:
+            monkeypatch.setenv(f"{EVIDENCE_ENV_PREFIX}{name}", "x")
+    if missing is None:
+        assert settings.LifecycleConfig.from_env(template_dir=expected.template_dir)
+        return
+    with pytest.raises(ConfigRefused, match=f"{EVIDENCE_ENV_PREFIX}{missing}"):
+        settings.LifecycleConfig.from_env(template_dir=expected.template_dir)
 
 
 # --- the offboarding pass over the real store ------------------------------------------------------------------------
@@ -208,3 +309,22 @@ def test_an_offboarding_whose_store_cannot_be_reached_does_not_finish_and_resume
         assert world.record(tenant).state == "offboarded" and gone(garage, mine["key"])
     finally:
         world.close()
+
+
+@pytest.mark.garage
+@pytest.mark.postgres
+def test_offboarding_keeps_the_tenants_retention_row_and_its_investigations_foreign_key_holds(evidence_world, garage):
+    """After offboarding, the tenant's retention row is still there with its created values (the investigations that name it
+    would refuse its delete), and the other tenant's is untouched. (A-O7, D16)"""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    world, dsn = evidence_world, evidence_world.dsn
+    tenant, other = world.active_tenant(), world.active_tenant()
+    make_owner(dsn, garage, tenant, "mine", accepted_days_ago=1)
+    sql = "SELECT investigation_days, learning_days FROM tenancy.evidence_retention WHERE tenant_id = %s"
+    want = [(CREATE_RETENTION["investigation_days"], CREATE_RETENTION["learning_days"])]
+    assert execute(dsn, sql, (tenant,)) == want, "premise: the create request wrote the row"
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
+    world.drive()
+    assert world.record(tenant).state == "offboarded" and world.record(tenant).failure is None, world.item(tenant)
+    assert execute(dsn, sql, (tenant,)) == want and execute(dsn, sql, (other,)) == want

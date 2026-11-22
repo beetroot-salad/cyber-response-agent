@@ -39,6 +39,7 @@ import httpx
 import pytest
 from defender.tests.support.tenancy._twin1496 import offboard_twin
 from defender.tests.support.tenancy._twin1496 import seed_tenant
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 pytestmark = pytest.mark.live
 
@@ -134,7 +135,7 @@ def _stack(tmp_path: Path, live: Live, data_root: Path) -> Stack:
 
 
 async def _create(stack: Stack) -> str:
-    return (await stack.tenants.request_create(now=NOW)).id
+    return (await stack.tenants.request_create(now=NOW, **CREATE_RETENTION)).id
 
 
 async def _credential_token(stack: Stack, tenant: str) -> str:

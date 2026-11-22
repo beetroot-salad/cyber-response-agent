@@ -37,6 +37,7 @@ from defender.tests.support.api._server1083 import (
     seed_identity,
 )
 from defender.tests.support.jobs._jobs1342 import register_tenant
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 from defender.tests.support.shared._openbao1163 import (  # noqa: F401 — the fixture
     Bao,
     openbao,
@@ -188,8 +189,9 @@ async def served_config(dsn: str, tmp_path: Path, *, scripted: ScriptedOpenBao |
     from defender.credential_proxy._openbao import store_policies
 
     if register:
-        register_tenant(dsn, A, records=None)
-        register_tenant(dsn, B, records=None)
+        created = (CREATE_RETENTION["investigation_days"], CREATE_RETENTION["learning_days"])  # r9: set at creation
+        register_tenant(dsn, A, records=None, retention=created)
+        register_tenant(dsn, B, records=None, retention=created)
     seeded = await seed_identity(dsn)
     if real is not None:
         writer = real.token_for(real.apply_policy("api-writer", store_policies(kv_mount=real.kv_mount)["writer"]))

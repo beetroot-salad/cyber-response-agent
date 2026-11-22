@@ -40,6 +40,7 @@ from defender.tenancy import template_dir  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._atk1 import Echo, EchoGit  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import ADMIN_TOKEN, FORGE_URL, OPENBAO_URL  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noqa: E402
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 
 CREATE_STEPS = [
@@ -57,7 +58,7 @@ def world(tmp_path, data_root):
 
 def test_create_answers_202_with_a_minted_id_and_a_creating_row(world):
     """POST /admin/tenants mints a UUID, records it `creating` with `create` pending at `names`, answers 202 (O1, DC-3)."""
-    made = world.ops.post(API + "/admin/tenants", json={})
+    made = world.ops.post(API + "/admin/tenants", json=CREATE_RETENTION)
     assert made.status_code == 202, made.text
     tenant = made.json()["tenant_id"]
     assert is_uuid4(tenant)

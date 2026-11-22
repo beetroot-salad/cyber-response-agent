@@ -9,8 +9,10 @@ region=)`, the object key `t/<tenant>/<owner kind>/<owner id>/<claim token>/<obj
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 from defender.tests.support.evidence._evidence1546 import Garage
@@ -33,7 +35,10 @@ def object_key(tenant: str, kind: str, owner: str, claim: str, obj: str = "bundl
 
 
 def set_retention(dsn: str, tenant: str, investigation_days: int, learning_days: int | None = None) -> None:
-    execute(dsn, "INSERT INTO tenancy.evidence_retention (tenant_id, investigation_days, learning_days) VALUES (%s, %s, %s)",
+    """The tenant's retention row with these values: replaces the seeded one (`insert_active_tenant`, r9/D16)."""
+    execute(dsn, "INSERT INTO tenancy.evidence_retention (tenant_id, investigation_days, learning_days) VALUES (%s, %s, %s) "
+                 "ON CONFLICT (tenant_id) DO UPDATE SET investigation_days = EXCLUDED.investigation_days, "
+                 "learning_days = EXCLUDED.learning_days",
             (tenant, investigation_days, investigation_days if learning_days is None else learning_days))
 
 
@@ -120,6 +125,25 @@ def make_owner(dsn: str, garage: Garage, tenant: str, ticket: str, *, kind: str 
     stage_upload(dsn, claim, "bundle", status="uploaded", accepted_days_ago=accepted_days_ago,
                  age_hours=(24 * (accepted_days_ago or 0) if hours_old is None else hours_old))
     return {"owner": owner_id, "claim": claim, "key": key, "investigation": inv_id}
+
+
+@contextlib.contextmanager
+def planted_before_the_foreign_key(dsn: str) -> Iterator[None]:
+    """Rows planted while `jobs.investigations`'s foreign keys are off, as a database from before the retention release holds
+    them (an investigation of an offboarded tenant with no retention row); on again at exit. The constraint itself is not
+    touched (it stays `NOT VALID`)."""
+    execute(dsn, "ALTER TABLE jobs.investigations DISABLE TRIGGER ALL")
+    try:
+        yield
+    finally:
+        execute(dsn, "ALTER TABLE jobs.investigations ENABLE TRIGGER ALL")
+
+
+def retention_fk_validated(dsn: str) -> list[bool]:
+    """`convalidated` of each foreign key from `jobs.investigations` to the retention table (r9: stays `NOT VALID`)."""
+    return [v for (v,) in execute(dsn, "SELECT con.convalidated FROM pg_constraint con WHERE con.contype = 'f' "
+                                       "AND con.conrelid = 'jobs.investigations'::regclass "
+                                       "AND con.confrelid = 'tenancy.evidence_retention'::regclass")]
 
 
 def gone(garage: Garage, key: str) -> bool:

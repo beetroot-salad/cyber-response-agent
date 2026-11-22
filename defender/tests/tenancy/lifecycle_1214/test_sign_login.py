@@ -116,7 +116,8 @@ def test_the_provider_makes_the_sign_approle_entity_alias_and_key_each_on_its_ow
     assert bao.entities[gen.sign_entity]["metadata"]["tenant_id"] == tenant
     assert gen.sign_role_id and gen.sign_role_id != gen.role_id
     by_name = {a["name"]: a["canonical_id"] for a in bao.aliases}
-    assert by_name == {gen.role_id: bao.entities[gen.entity]["id"], gen.sign_role_id: bao.entities[gen.sign_entity]["id"]}
+    assert by_name == {gen.role_id: bao.entities[gen.entity]["id"], gen.sign_role_id: bao.entities[gen.sign_entity]["id"],
+                       gen.evidence_role_id: bao.entities[gen.evidence_entity]["id"]}  # #1546 r9: the evidence login is beside them
     assert bao.transit_keys[_key(tenant)]["type"] == "ed25519"
 
 
@@ -191,22 +192,22 @@ def test_a_provider_that_died_before_committing_is_run_again_reusing_its_entitie
     world.drive()
     assert world.item(tenant)["state"] == "active", world.item(tenant)
     gen = world.live(tenant)
-    assert {a["name"] for a in bao.aliases} == {gen.role_id, gen.sign_role_id} and len(bao.aliases) == 2
-    assert ({a for a in bao.approles if not a.startswith("evidence-")}, set(bao.entities)) == (  # #1546: the evidence AppRole is beside them
-        {gen.approle, gen.sign_approle}, {gen.entity, gen.sign_entity})
+    assert {a["name"] for a in bao.aliases} == {gen.role_id, gen.sign_role_id, gen.evidence_role_id} and len(bao.aliases) == 3
+    assert (set(bao.approles), set(bao.entities)) == (  # #1546 r9: the evidence login is the generation's third
+        {gen.approle, gen.sign_approle, gen.evidence_approle}, {gen.entity, gen.sign_entity, gen.evidence_entity})
 
 
 # --- wrap, install, sweep ----------------------------------------------------------------------------------
 
 def test_wrap_and_install_handle_both_secrets_and_prove_the_sign_pair_by_signing(world):
-    """A secret id is wrapped for each AppRole and unwrapped by install, which writes both files, records both accessors,
-    clears both wrapping tokens and signs one probe as the tenant's sign login (A24' wrap/install)."""
+    """A secret id is wrapped for each AppRole and unwrapped by install, which writes the files, records the accessors,
+    clears the wrapping tokens and signs one probe as the tenant's sign login (A24' wrap/install)."""
     tenant = world.active_tenant()
     gen = world.live(tenant)
     bao = world.openbao
     wrapped_for = {c.path.split("/")[5] for c in bao.calls if c.path.endswith("/secret-id") and "x-vault-wrap-ttl" in c.headers}
-    assert wrapped_for == {gen.approle, gen.sign_approle}
-    assert len(bao.made("POST", "/v1/sys/wrapping/unwrap")) == 2
+    assert wrapped_for == {gen.approle, gen.sign_approle, gen.evidence_approle}  # #1546 r9: and the evidence login's
+    assert len(bao.made("POST", "/v1/sys/wrapping/unwrap")) == 3
     assert gen.host_secret_file != gen.sign_secret_file and gen.host_secret_file.parent == gen.sign_secret_file.parent
     assert world.config.secrets_dir / tenant == gen.sign_secret_file.parent
     assert gen.sign_secret_file.read_text(encoding="utf-8") == bao.approles[gen.sign_approle][gen.sign_secret_accessor] + "\n"

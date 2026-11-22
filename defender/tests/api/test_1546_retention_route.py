@@ -2,6 +2,9 @@
 """#1546 A-O7: a tenant's evidence retention is written through the API (`config.write`, audited) as both values together,
 30-730 days each; the table is `tenancy.evidence_retention`. Postgres-gated, over the real server (#1470's `scripted`).
 
+The tenants start with the values their create request carried (r9/D16: `CREATE_RETENTION`; `served_config` registers A and B
+so): a write replaces them, a refused one leaves them, and there is no "no row" state to start from.
+
 Pinned (the design names no route): `PUT /api/tenants/{T}/evidence-retention` with `{investigation_days, learning_days}`
 answering 200 with the stored pair, `GET` of the same path answering it, audit action `evidence_retention.write` (actor the
 member, tenant `T`, the two values in the event's words)."""
@@ -14,9 +17,11 @@ import pytest
 from defender.tests.support.api._config1470 import audit_events, told
 from defender.tests.support.api._server1083 import ANN, ORIGIN, A, B
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
+BASELINE = [(CREATE_RETENTION["investigation_days"], CREATE_RETENTION["learning_days"])]
 PATH = f"/api/tenants/{A}/evidence-retention"
 ACTION = "evidence_retention.write"
 
@@ -26,17 +31,21 @@ def _stored(dsn: str, tenant: str = A) -> list[tuple[int, int]]:
                    (tenant,))  # type: ignore[return-value]
 
 
-async def test_a_write_stores_both_values_replaces_them_and_reads_back(scripted):
-    """Ann writes 90 and 365: 200 with the pair, stored, and a GET serves it; a second write replaces both; the other
-    tenant has no row. (A-O7)"""
-    first = await scripted.client.put(PATH, headers=scripted.ann(), json={"investigation_days": 90, "learning_days": 365})
+async def test_a_write_replaces_the_created_values_and_reads_back(scripted):
+    """Ann's tenant starts at its created pair and a GET serves it; she writes 90 and 365: 200 with the pair, stored, GET
+    serves it; a second write replaces both; the other tenant keeps its created pair. (A-O7)"""
+    base = {"investigation_days": BASELINE[0][0], "learning_days": BASELINE[0][1]}
+    assert _stored(scripted.dsn) == BASELINE, "premise: the created pair"
+    assert (await scripted.client.get(PATH, headers=scripted.ann(write=False))).json() == base
+    body = {"investigation_days": 91, "learning_days": 366}
+    first = await scripted.client.put(PATH, headers=scripted.ann(), json=body)
     assert first.status_code == 200, first.text
-    assert first.json() == {"investigation_days": 90, "learning_days": 365}
-    assert _stored(scripted.dsn) == [(90, 365)]
+    assert first.json() == body
+    assert _stored(scripted.dsn) == [(91, 366)]
     assert (await scripted.client.get(PATH, headers=scripted.ann(write=False))).json() == first.json()
     second = await scripted.client.put(PATH, headers=scripted.ann(), json={"investigation_days": 30, "learning_days": 730})
     assert second.status_code == 200 and _stored(scripted.dsn) == [(30, 730)]
-    assert _stored(scripted.dsn, B) == []
+    assert _stored(scripted.dsn, B) == BASELINE
 
 
 @pytest.mark.parametrize("field", ["investigation_days", "learning_days"])
@@ -46,7 +55,7 @@ async def test_each_value_is_accepted_at_30_and_730_and_refused_at_29_and_731(sc
     body = {"investigation_days": 100, "learning_days": 100, field: days}
     answered = await scripted.client.put(PATH, headers=scripted.ann(), json=body)
     assert answered.status_code == (200 if ok else 422), answered.text
-    assert _stored(scripted.dsn) == ([(body["investigation_days"], body["learning_days"])] if ok else [])
+    assert _stored(scripted.dsn) == ([(body["investigation_days"], body["learning_days"])] if ok else BASELINE)
 
 
 @pytest.mark.parametrize("body", [
@@ -54,21 +63,21 @@ async def test_each_value_is_accepted_at_30_and_730_and_refused_at_29_and_731(sc
     {"investigation_days": 90.5, "learning_days": 90}, {"investigation_days": True, "learning_days": 90},
     {"investigation_days": None, "learning_days": 90}, {"investigation_days": 90, "learning_days": 90, "extra": 1}])
 async def test_a_write_missing_a_value_or_with_a_value_that_is_no_whole_number_is_refused_and_stores_nothing(scripted, body):
-    """No default and no partial write: a missing, null, string, fractional or boolean value, or an extra field, is a 422
-    and no row exists. (A-O7)"""
+    """No partial write: a missing, null, string, fractional or boolean value, or an extra field, is a 422 and the created
+    pair stays. (A-O7)"""
     answered = await scripted.client.put(PATH, headers=scripted.ann(), json=body)
     assert answered.status_code == 422, answered.text
-    assert _stored(scripted.dsn) == []
+    assert _stored(scripted.dsn) == BASELINE
 
 
 async def test_only_a_member_with_config_write_may_write_membership_first(scripted, caplog):
-    """A program of A (no `config.write`) is 403, another tenant's admin 404, an anonymous caller 401, each storing nothing;
+    """A program of A (no `config.write`) is 403, another tenant's admin 404, an anonymous caller 401, each changing nothing;
     Ann is served (control). (A-O7, `config.write`)"""
     body = {"investigation_days": 90, "learning_days": 90}
     assert (await scripted.client.put(PATH, headers=scripted.program(), json=body)).status_code == 403
     assert (await scripted.client.put(PATH, headers=scripted.bob(), json=body)).status_code == 404
     assert (await scripted.client.put(PATH, headers={"Origin": ORIGIN}, json=body)).status_code == 401
-    assert _stored(scripted.dsn) == []
+    assert _stored(scripted.dsn) == BASELINE and _stored(scripted.dsn, B) == BASELINE
     assert (await scripted.client.put(PATH, headers=scripted.ann(), json=body)).status_code == 200
 
 

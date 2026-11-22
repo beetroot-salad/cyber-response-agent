@@ -20,6 +20,7 @@ from typing import Any
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._active1214 import SEED_RETENTION
 from defender.tests.support.tenancy._systems1366 import DERIVED, drop_records
 from defender.tests.support.tenancy._mapping1345 import (
     ALERT_BYTES_DESCRIPTION,
@@ -72,7 +73,8 @@ DESCRIPTION = ALERT_BYTES_DESCRIPTION
 def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: bool = True,  # noqa: PLR0913 — the row, its mapping, origin and records
                     data_root: Path | None = None, generations: Any = None,
                     alert_mapping: Mapping[str, str | None] | None = FIXTURE_ALERT_MAPPING,
-                    origin: str | None = None, records: Any = DERIVED) -> None:
+                    origin: str | None = None, records: Any = DERIVED,
+                    retention: tuple[int, int] | None = SEED_RETENTION) -> None:
     """A `tenancy.tenants` row (default: active, forge wiring recorded, at `origin` when given) by main's #1214 helper
     (r6), and #1345's default alert mapping saved through the store (`alert_mapping=None`: a tenant with none, for a test
     of absence).
@@ -80,6 +82,9 @@ def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: 
     of the tenant's planted or published `settings/` under `data_root` (else the fixture's); `records=None` registers an
     active tenant with no records at all (#1470 O8: no "not imported" state; its first write is version 1); a
     `RecordsSpec` seeds exactly that.
+
+    #1546 r9 (D16): a tenant not offboarded has its retention row, `retention` days (investigation, learning; default
+    `SEED_RETENTION`, `None` plants none), as the create request writes it.
 
     An active tenant gets one live generation with a sign login (the fixture tenant's elastic is proxied,
     #1391 P1/D12: run start signs request tokens), unless `generations` says otherwise (`()` for none)."""
@@ -89,13 +94,15 @@ def register_tenant(dsn: str, tenant_id: str, *, state: str = "active", wiring: 
     if generations is None:
         generations = [sign_generation(tenant_id)] if state == "active" else ()
     insert_active_tenant(dsn, tenant_id, state=state, wiring=wiring, data_root=data_root, generations=generations,
-                         alert_mapping=alert_mapping, origin=origin, records=records)
+                         alert_mapping=alert_mapping, origin=origin, records=records, retention=retention)
 
 
 def drop_tenant(dsn: str, tenant_id: str) -> None:
     """Delete `tenant_id`'s record and the tenancy rows that reference it (alert mapping, generations, publish status,
     forge wiring) and, since #1366, its records (system and case versions, the imported mark)."""
     drop_records(dsn, tenant_id)
+    if execute(dsn, "SELECT to_regclass('tenancy.evidence_retention')::text")[0][0] is not None:  # #1546: the row the tenant's
+        execute(dsn, "DELETE FROM tenancy.evidence_retention WHERE tenant_id = %s", (tenant_id,))  # investigations name
     for table in ("alert_mappings", "generations", "publish_status", "forge_wiring"):
         execute(dsn, f'DELETE FROM tenancy."{table}" WHERE tenant_id = %s', (tenant_id,))  # noqa: S608
     execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant_id,))

@@ -57,6 +57,7 @@ from defender.tests.support.jobs._jobs1342 import (
 )
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 pytestmark = pytest.mark.anyio
 
@@ -537,7 +538,7 @@ async def test_1485_o4_held_dead_items_and_parked_batches_are_served_from_the_le
 @pytest.mark.postgres
 async def test_o7_an_administrator_creates_a_tenant_row_the_lifecycle_will_work(served):
     """`POST /admin/tenants` writes a `creating` tenant row with `create` pending, which reads back through the admin routes. (O7)"""
-    created = await served.client.post("/api/admin/tenants", headers=served.ops())
+    created = await served.client.post("/api/admin/tenants", headers=served.ops(), json=CREATE_RETENTION)
     assert created.status_code == 202
     tenant_id = created.json()["tenant_id"]
     assert execute(served.dsn, "SELECT state, pending_action FROM tenancy.tenants WHERE id = %s",
@@ -1209,13 +1210,32 @@ async def test_1161_s1_the_sign_in_routes_answer_code_to_any_method_but_get(serv
 
 
 @pytest.mark.postgres
+async def test_o7_the_create_request_writes_the_retention_row_with_the_tenant_and_a_refused_one_writes_neither(served):
+    """`POST /admin/tenants` with both values leaves a `creating` tenant and its retention row (the values sent); without
+    them, or with one out of range, it is a 422 and neither row exists. (A-O7, D16)"""
+    sent = {"investigation_days": 45, "learning_days": 500}
+    created = await served.client.post("/api/admin/tenants", headers=served.ops(), json=sent)
+    assert created.status_code == 202, created.text
+    tenant_id = created.json()["tenant_id"]
+    assert execute(served.dsn, "SELECT t.state, r.investigation_days, r.learning_days FROM tenancy.tenants t "
+                               "JOIN tenancy.evidence_retention r ON r.tenant_id = t.id WHERE t.id = %s",
+                   (tenant_id,)) == [("creating", 45, 500)]
+    before = execute(served.dsn, "SELECT count(*) FROM tenancy.tenants")
+    for body in (None, {"investigation_days": 45}, {**sent, "learning_days": 731}):
+        refused = await served.client.post("/api/admin/tenants", headers=served.ops(), **({} if body is None else {"json": body}))
+        assert refused.status_code == 422, (body, refused.text)
+    assert execute(served.dsn, "SELECT count(*) FROM tenancy.tenants") == before
+    assert execute(served.dsn, "SELECT count(*) FROM tenancy.evidence_retention") == [(3,)]  # A, B and the one created
+
+
+@pytest.mark.postgres
 async def test_1161_b3_every_create_answers_a_location_path_under_api_that_reads_back(served):
     """Investigation, learning job and tenant creates answer a `Location` that is a path under `/api` and reads the new record. (B3, C36)"""
     [alert_id] = await _alerts(served.dsn, A, NOON)
     started = await _start(served, alert_id, "loc-1")
     assert started.status_code == 201, started.text
     inv = started.json()["investigation_id"]
-    admin = await served.client.post("/api/admin/tenants", headers=served.ops())
+    admin = await served.client.post("/api/admin/tenants", headers=served.ops(), json=CREATE_RETENTION)
     assert admin.status_code == 202, admin.text
     for response, path in ((started, f"/api/tenants/{A}/investigations/{inv}"),
                            (admin, f"/api/admin/tenants/{admin.json()['tenant_id']}")):

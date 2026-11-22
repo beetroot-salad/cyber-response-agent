@@ -28,6 +28,7 @@ from defender.tests.support.shared._postgres1339 import execute, migrated_databa
 from defender.tests.tenancy.lifecycle_1214._fakes import Fakes  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import ADMIN_TOKEN, FORGE_URL  # noqa: E402
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 
 pytestmark = pytest.mark.postgres
@@ -141,7 +142,7 @@ def _offboard(dsn: str, tenant: str) -> Any:
 
 
 def _request_create(dsn: str) -> str:
-    return _api(dsn, "request_create", now=NOW).id
+    return _api(dsn, "request_create", now=NOW, **CREATE_RETENTION).id
 
 
 def _row(dsn: str, tenant: str) -> tuple[Any, ...]:
@@ -606,7 +607,7 @@ def test_a_failure_text_the_database_cannot_store_is_still_recorded_and_the_pass
     async def go() -> tuple[list[int], list[tuple[Any, ...]]]:
         repo = PostgresTenantRepository(migrated_database)
         try:
-            tenants = [(await repo.request_create(now=NOW)).id for _ in range(2)]
+            tenants = [(await repo.request_create(now=NOW, **CREATE_RETENTION)).id for _ in range(2)]
             service = ManagementService(repo, identity=_Identity(), forge=forge, openbao=fakes.openbao.client(),
                                         integration=integration, git=fakes.git, config=config, clock=lambda: NOW)
             ran = [await service.work(), await service.work()]
@@ -637,7 +638,7 @@ def test_after_a_fence_miss_another_copy_can_take_the_tenants_lock_while_the_fir
     async def go() -> tuple[bool, bool]:
         a, b = PostgresTenantRepository(migrated_database), PostgresTenantRepository(migrated_database)
         try:
-            t = (await a.request_create(now=NOW)).id
+            t = (await a.request_create(now=NOW, **CREATE_RETENTION)).id
             async with a.lock(t) as held:
                 await offboard_on_database(migrated_database, t)  # the job moves under the worker
                 with pytest.raises(FenceMissed):
@@ -666,7 +667,7 @@ def test_a_write_from_a_session_that_no_longer_holds_the_lock_changes_nothing(mi
     async def go() -> tuple[str, list[tuple[Any, ...]], list[tuple[Any, ...]]]:
         repo = PostgresTenantRepository(migrated_database)
         try:
-            t = (await repo.request_create(now=NOW)).id
+            t = (await repo.request_create(now=NOW, **CREATE_RETENTION)).id
             before = execute(migrated_database, ROW, (t,))
             outcome = "landed"
             async with repo.lock(t) as held:
@@ -711,7 +712,7 @@ def test_the_lock_connections_keepalive_options_stay_within_the_configured_bound
     async def go() -> None:
         repo = PostgresTenantRepository(dsn, lock_keepalive=keepalive)
         try:
-            t = (await repo.request_create(now=NOW)).id
+            t = (await repo.request_create(now=NOW, **CREATE_RETENTION)).id
             async with repo.lock(t) as held:
                 assert held is not None
         finally:

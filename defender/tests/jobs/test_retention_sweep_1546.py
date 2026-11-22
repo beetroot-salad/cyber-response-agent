@@ -21,12 +21,14 @@ from defender.tests.support.evidence._retention1546 import (
     facts,
     gone,
     make_owner,
+    planted_before_the_foreign_key,
     present,
+    retention_fk_validated,
     set_retention,
     stage_fact,
     uploads,
 )
-from defender.tests.support.jobs._jobs1342 import T1, T2, job_store, register_tenant
+from defender.tests.support.jobs._jobs1342 import job_store, register_tenant
 from defender.tests.support.shared import _pglocks1339 as pglocks
 from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — fixture
 
@@ -106,24 +108,46 @@ async def test_expired_replaces_every_state_that_had_accepted_objects(migrated_d
     assert evidence_state(dsn, "investigation", nothing["owner"]) == "none"
 
 
-async def test_the_sweep_keeps_what_another_tenants_value_or_no_row_at_all_keeps(migrated_database, garage):
-    """T1 keeps 30 days and T2 keeps 90, a third tenant has no retention row (release 1: nothing expires for it); each has
-    a bundle accepted 40 days ago: only T1's expires. (A-O7)"""
+async def test_the_sweep_applies_each_tenants_own_value(migrated_database, garage):
+    """One tenant keeps 30 days and another 90, each with a bundle accepted 40 days ago: only the first's expires. (A-O7)"""
     dsn = migrated_database
-    third = str(uuid.uuid4())
-    for tenant in (T1, T2, third):
-        register_tenant(dsn, tenant)
-    set_retention(dsn, T1, 30)
-    set_retention(dsn, T2, 90)
+    first, second = _fresh_tenant(dsn), _fresh_tenant(dsn)  # fresh ids: the Garage bucket is shared (R13)
+    set_retention(dsn, first, 30)
+    set_retention(dsn, second, 90)
     async with job_store(dsn) as store:
-        mine = make_owner(dsn, garage, T1, "T-1", accepted_days_ago=40)
-        theirs = make_owner(dsn, garage, T2, "T-2", accepted_days_ago=40)
-        unset = make_owner(dsn, garage, third, "T-3", accepted_days_ago=400)
+        mine = make_owner(dsn, garage, first, "T-1", accepted_days_ago=40)
+        theirs = make_owner(dsn, garage, second, "T-2", accepted_days_ago=40)
         await _run(store, garage)
     assert evidence_state(dsn, "investigation", mine["owner"]) == "expired" and gone(garage, mine["key"])
-    for other in (theirs, unset):
-        assert evidence_state(dsn, "investigation", other["owner"]) == "complete"
-        assert present(garage, other["key"]) and list(uploads(dsn, other["claim"])) == ["bundle"]
+    assert evidence_state(dsn, "investigation", theirs["owner"]) == "complete"
+    assert present(garage, theirs["key"]) and list(uploads(dsn, theirs["claim"])) == ["bundle"]
+
+
+async def test_an_offboarded_tenant_with_investigations_and_no_row_expires_nothing_and_the_foreign_key_stays_not_valid(
+        migrated_database, garage):
+    """An offboarded tenant (investigations planted before the foreign key, no retention row) keeps a bundle accepted 400 days
+    ago and a claim ended 400 days ago; a tenant with a 30-day row expires its own (control); the key is still `NOT VALID`.
+    (A-O7, D16)"""
+    dsn = migrated_database
+    gone_tenant, live = str(uuid.uuid4()), _fresh_tenant(dsn)
+    register_tenant(dsn, gone_tenant, state="offboarded")
+    set_retention(dsn, live, 30)
+    async with job_store(dsn) as store:
+        with planted_before_the_foreign_key(dsn):
+            old = make_owner(dsn, garage, gone_tenant, "T-off", accepted_days_ago=400)
+            ended = make_owner(dsn, garage, gone_tenant, "T-off-claim", state="none", accepted_days_ago=None,
+                               put_object=False, ended_days_ago=400)
+            execute(dsn, "DELETE FROM jobs.uploads WHERE token = %s", (ended["claim"],))
+        stage_fact(dsn, ended["claim"], "started", {"container": "started"})
+        control = make_owner(dsn, garage, live, "T-live", accepted_days_ago=40)
+        assert execute(dsn, "SELECT count(*) FROM tenancy.evidence_retention WHERE tenant_id = %s", (gone_tenant,)) == [(0,)]
+        await _run(store, garage)
+    assert evidence_state(dsn, "investigation", old["owner"]) == "complete"
+    assert present(garage, old["key"]) and list(uploads(dsn, old["claim"])) == ["bundle"]
+    assert execute(dsn, "SELECT count(*) FROM jobs.claims WHERE token = %s", (ended["claim"],)) == [(1,)]
+    assert "started" in facts(dsn, ended["claim"])
+    assert evidence_state(dsn, "investigation", control["owner"]) == "expired" and gone(garage, control["key"])
+    assert retention_fk_validated(dsn) == [False]
 
 
 # --- the learning source exception -----------------------------------------------------------------------------------
@@ -241,14 +265,15 @@ async def test_a_learning_job_is_queued_only_on_a_source_whose_evidence_is_compl
 async def test_an_unpromoted_upload_of_a_claim_no_longer_live_goes_after_an_hours_grace_by_the_database_clock(
         migrated_database, garage, status):
     """Unpromoted upload rows (`pending`, `uploaded`, `refused`) of an ended claim are removed with their objects once more
-    than an hour old; at 30 minutes they stay, and a live claim's, however old, stays. (A-O7, PR7)"""
+    than an hour old; at 30 minutes they stay, and a live claim's, however old, stays. The claim's own end and the upload's
+    creation are the same age in each case, so either reading of "an hour's grace" gives one answer. (A-O7, PR7)"""
     dsn = migrated_database
     tenant = _fresh_tenant(dsn)
     async with job_store(dsn) as store:
         made = {}
         for name, hours, live in (("old", 2.0, False), ("recent", 0.5, False), ("live", 2.0, True)):
             made[name] = make_owner(dsn, garage, tenant, f"T-{name}", accepted_days_ago=None, live=live,
-                                          hours_old=hours, state="none")
+                                    hours_old=hours, state="none", ended_days_ago=hours / 24)
             execute(dsn, "UPDATE jobs.uploads SET status = %s WHERE token = %s", (status, made[name]["claim"]))
         await _run(store, garage)
     assert gone(garage, made["old"]["key"]) and uploads(dsn, made["old"]["claim"]) == {}
@@ -281,22 +306,20 @@ async def test_the_grace_sweep_removes_store_objects_no_upload_row_names(migrate
 
 async def test_claims_of_ended_references_older_than_the_longest_retention_go_with_their_facts(migrated_database, garage):
     """With 30 and 90 days, a claim whose investigation ended 100 days ago is removed with its staged facts, one whose row
-    ended 60 days ago stays (older than one value, not the longest), and a live claim stays; for a tenant with no
-    retention row none is swept. (A-O7, "Claims lifecycle")"""
+    ended 60 days ago stays (older than one value, not the longest), and a live claim stays. (A-O7, "Claims lifecycle")"""
     dsn = migrated_database
-    tenant, unset = _fresh_tenant(dsn), _fresh_tenant(dsn)
+    tenant = _fresh_tenant(dsn)
     set_retention(dsn, tenant, 30, 90)
     async with job_store(dsn) as store:
         made = {}
-        for name, days, live, owner_tenant in (("old", 100, False, tenant), ("mid", 60, False, tenant),
-                                               ("live", 0, True, tenant), ("unset", 400, False, unset)):
-            made[name] = make_owner(dsn, garage, owner_tenant, f"T-{name}", state="none", accepted_days_ago=None,
+        for name, days, live in (("old", 100, False), ("mid", 60, False), ("live", 0, True)):
+            made[name] = make_owner(dsn, garage, tenant, f"T-{name}", state="none", accepted_days_ago=None,
                                           put_object=False, live=live, ended_days_ago=days)
             execute(dsn, "DELETE FROM jobs.uploads WHERE token = %s", (made[name]["claim"],))
             stage_fact(dsn, made[name]["claim"], "started", {"container": "started"})
         await _run(store, garage)
     assert execute(dsn, "SELECT count(*) FROM jobs.claims WHERE token = %s", (made["old"]["claim"],)) == [(0,)]
     assert facts(dsn, made["old"]["claim"]) == {}
-    for name in ("mid", "live", "unset"):
+    for name in ("mid", "live"):
         assert execute(dsn, "SELECT count(*) FROM jobs.claims WHERE token = %s", (made[name]["claim"],)) == [(1,)], name
         assert "started" in facts(dsn, made[name]["claim"]), name

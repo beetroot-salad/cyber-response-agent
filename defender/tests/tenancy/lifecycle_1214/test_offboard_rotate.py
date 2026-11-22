@@ -33,6 +33,7 @@ from defender.tests.tenancy.lifecycle_1214._support import (  # noqa: E402
     ROTATE,
     LifecycleWorld,
 )
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 
 #: #1546 A-O5: the evidence pass is the host step between `teardown` and `finish` (its name `evidence` is a pinned pick).
@@ -367,7 +368,7 @@ def test_both_bots_have_write_and_the_old_jwt_works_once_install_is_done_and_rot
 
 def test_rotation_is_refused_unless_the_tenant_is_active_with_nothing_pending(world):
     """Rotate: `creating` and a second rotate answer 409 with the row unchanged; an unknown tenant 404 (O5, RC-3)."""
-    creating = world.ops.post(API + "/admin/tenants", json={}).json()["tenant_id"]
+    creating = world.ops.post(API + "/admin/tenants", json=CREATE_RETENTION).json()["tenant_id"]
     before = world.item(creating)
     refused = world.ops.post(f"{API}/admin/tenants/{creating}/rotate-forge-credential")
     assert refused.status_code == 409, refused.text
