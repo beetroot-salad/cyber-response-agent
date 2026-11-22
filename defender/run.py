@@ -507,7 +507,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
-    scrub: Callable[..., None] = box_mod.scrub,
+    scrub: Callable[..., object] = box_mod.scrub,
     #: A job-lane run (#1342): its box start never degrades to host execution (R2). On either lane a
     #: start fault leaves as `BoxStartFault` (M3, #1484), told from a teardown fault by its type.
     job_lane: bool = False,
@@ -893,7 +893,7 @@ def _sibling_box_mounted(ns: argparse.Namespace, data_root: DataRoot) -> Iterato
     yield mounted
 
 
-def _open_episode_runs(ns: argparse.Namespace, accepted: tenancy.Tenant) -> Any:
+def _open_episode_runs(ns: argparse.Namespace, accepted: tenancy.Tenant | tenancy.JobTenant) -> Any:
     """The sibling's episode view, in its sibling form (`require_roster=True`, O4b): the episode is
     walked from the accepted tenant's own folder, no link followed at any level, and its arm
     roster must have been published — an episode that never reached RUNS, a roster that does not
@@ -963,7 +963,7 @@ class _Started:
     the world-only seams, and the run's request-token signer. Held by `_set_up` for the length
     of its block."""
 
-    accepted: tenancy.Tenant
+    accepted: tenancy.Tenant | tenancy.JobTenant
     tenant: RunTenant
     run: Run
     model: str
@@ -1473,20 +1473,18 @@ def _launch_tenant_active(launch: Mapping[str, Any], *, label: str) -> None:
         sys.exit(f"[run.py] {label}: this run's tenant cannot be used: it is {launch.get('tenant_state')!r}")
 
 
-def _container_tenant(ns: argparse.Namespace, data_root: DataRoot, *,
-                      defender_dir: Path | None = None) -> tenancy.Tenant:
-    """The job's tenant inside its container: the folder rules only, over its own tenant folder (the
-    one the container mounts), as run start judges them (`clone_tree=False`). No host lock and no
-    admission: the job's host helper holds the one and ran the other, and their verdict is in the
-    launch facts (#1170 A6, C19). `defender_dir`: the code tree the entry reads (`DEFENDER_DIR`)."""
+def _container_tenant(ns: argparse.Namespace, data_root: DataRoot, launch: Mapping[str, Any]) -> tenancy.JobTenant:
+    """The job's tenant inside its container (#1546): a `JobTenant` over the job's own root (`data_root`, the container's
+    `DEFENDER_DATA_ROOT`) and the read-only inputs folder the launch facts name. There is no clone in the root to accept, no
+    host lock and no admission: the job's host helper holds the one and ran the other, and their verdict is in the launch
+    facts (#1170 A6, C19); what a container can judge for itself is the id grammar and where its two folders are."""
     try:
-        return tenancy.accept_tenant(data_root, ns.tenant, clone_tree=False,
-                                     defender_dir=defender_dir if defender_dir is not None else DEFENDER_DIR)
+        return tenancy.job_tenant_from_launch(data_root, ns.tenant, launch)
     except TenantRefused as refused:
         sys.exit(f"[run.py] job {ns.job}: this run's tenant cannot be used: {refused}")
 
 
-def _helper_run(ns: argparse.Namespace, accepted: tenancy.Tenant, launch: Mapping[str, Any]) -> Run:
+def _helper_run(ns: argparse.Namespace, accepted: tenancy.Tenant | tenancy.JobTenant, launch: Mapping[str, Any]) -> Run:
     """The run folder the job's host helper made at the job's id (#1170 A6): opened, never made. The
     launch facts must name the same place."""
     run = _open_run(accepted.runs_repository(), ns.job, what=f"job {ns.job}: its run folder")
@@ -1494,7 +1492,7 @@ def _helper_run(ns: argparse.Namespace, accepted: tenancy.Tenant, launch: Mappin
     return run
 
 
-def _helper_copy(ns: argparse.Namespace, accepted: tenancy.Tenant,
+def _helper_copy(ns: argparse.Namespace, accepted: tenancy.Tenant | tenancy.JobTenant,
                  launch: Mapping[str, Any]) -> run_knowledge.RunCopy:
     """The knowledge copy the job's host helper made at the job's id (#1170 A6): the launch facts
     must name it (its path only; #1471 R13-1.4)."""
@@ -1531,7 +1529,7 @@ def _staged(stage: str, call: Callable[..., Any], *args: Any, **kwargs: Any) -> 
 class _ContainerTenant:
     """What a job container's tenant-level steps settled (`_container_tenant_steps`)."""
 
-    accepted: tenancy.Tenant
+    accepted: tenancy.JobTenant
     run: Run | None
     copy: run_knowledge.RunCopy
     records: TenantRecords
@@ -1554,7 +1552,7 @@ def _container_tenant_steps(  # noqa: PLR0913 — the request, its facts and the
     over the copy and its one judgement of its systems (`systems`). Each refusal is a `_StageExit`
     naming its stage. `defender_dir` is the one code tree read (`DEFENDER_DIR`); `warn` logs the ignored
     grants (a readiness check reports them instead)."""
-    accepted = _staged("container_tenant", _container_tenant, ns, data_root, defender_dir=defender_dir)
+    accepted = _staged("container_tenant", _container_tenant, ns, data_root, launch)
     run = _staged("handover", made, ns, accepted, launch) if made is not None else None
     copy = _staged("handover", _helper_copy, ns, accepted, launch)
     current = _staged("handover", _run.handed_records, launch, label=f"job {ns.job}")
@@ -1564,7 +1562,7 @@ def _container_tenant_steps(  # noqa: PLR0913 — the request, its facts and the
 
 
 def _container_systems(  # noqa: PLR0913 — the tenant, its copy and records, the roster, the lead flag, the ids
-    accepted: tenancy.Tenant, *, copy: run_knowledge.RunCopy, records: TenantRecords, roster: Any,
+    accepted: tenancy.Tenant | tenancy.JobTenant, *, copy: run_knowledge.RunCopy, records: TenantRecords, roster: Any,
     dispatches_lead_zero: bool, known_ids: Any = (),
 ) -> tuple[RunTenant, RunSystems]:
     """A job container's tenant and its one judgement of its systems (#1170 A6, #1366): the tenant
@@ -1578,7 +1576,7 @@ def _container_systems(  # noqa: PLR0913 — the tenant, its copy and records, t
 
 
 def _container_verdict(  # noqa: PLR0913 — `_container_systems`' inputs, the code tree and the warning
-    accepted: tenancy.Tenant, *, copy: run_knowledge.RunCopy, records: TenantRecords, roster: Any,
+    accepted: tenancy.Tenant | tenancy.JobTenant, *, copy: run_knowledge.RunCopy, records: TenantRecords, roster: Any,
     dispatches_lead_zero: bool, known_ids: Any = (), defender_dir: Path | None = None, warn: bool = True,
 ) -> tuple[Any, RunSystems]:
     """`_container_systems` with the whole grants x records verdict (its ignored grants too, #1471 R4),
@@ -1865,7 +1863,7 @@ def serve_job(  # noqa: PLR0913 — the entries' inputs plus their injection sea
 
 # -- a learning sibling in its job container (#1170 A6, #1449) ---------------------------------------
 
-def _sibling_made(request: Callable[..., dict[str, Any]], ns: argparse.Namespace, accepted: tenancy.Tenant,
+def _sibling_made(request: Callable[..., dict[str, Any]], ns: argparse.Namespace, accepted: tenancy.Tenant | tenancy.JobTenant,
                   episode_runs: Any, world: Any) -> tuple[Run, run_knowledge.RunCopy]:
     """The sibling's run and knowledge copy, made by the job's host helper (`copy.make`, #1170 A6, C20):
     its id the episode roster's for this world, its folder materialized there (input and stamp), its
@@ -1915,8 +1913,7 @@ def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the siblin
                             label=f"--episode {ns.episode}")
     data_root = _request_data_root(ns)
     try:
-        accepted = tenancy.accept_tenant(data_root, ns.tenant, defender_dir=DEFENDER_DIR,
-                                         box_mounted=_sibling_box_mounted(ns, data_root), clone_tree=False)
+        accepted = tenancy.job_tenant_from_launch(data_root, ns.tenant, launch)
     except TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
     episode_runs = _open_episode_runs(ns, accepted)

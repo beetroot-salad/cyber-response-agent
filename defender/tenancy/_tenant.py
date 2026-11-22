@@ -6,9 +6,9 @@ import dataclasses
 import os
 import re
 import stat
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from defender.records.formats import (
     DataRoot,
@@ -292,9 +292,7 @@ class Tenant(RecordTenant):
         """`<T>/exports/<commit>/`, the published export of one commit, for a reader that judges
         it itself (a run's copy, a map of what a run read). `commit` must be one path segment:
         anything else is `TenantRefused`, never joined (callers hold it to a commit id first)."""
-        if not commit or "/" in commit or commit in (".", ".."):
-            raise TenantRefused(f"{commit!r} does not name an export (one commit id, no path)")
-        return self._layout.exports / commit
+        return self._layout.exports / _export_segment(commit)
 
     @property
     def knowledge_lock(self) -> KnowledgeLock:
@@ -333,6 +331,141 @@ class Tenant(RecordTenant):
     def learning_paths(self, paths_type: Callable[..., _P], *, repo_root: Path) -> _P:
         """Build learning configuration where the tenant's record root is owned."""
         return paths_type(repo_root=repo_root, tenant=self)
+
+
+def _export_segment(commit: str) -> str:
+    """`commit` as the one path segment an export folder is named by: anything else is `TenantRefused`, never joined."""
+    if not commit or "/" in commit or commit in (".", "..") or "\x00" in commit:
+        raise TenantRefused(f"{commit!r} does not name an export (one commit id, no path)")
+    return commit
+
+
+# ==========================================================================================
+# The tenant a job container sees (#1546).
+# ==========================================================================================
+
+# A job's four locations print as the path they hold (`str`), unlike the host's opaque ones: a job's folders are named
+# inside its container, and a root of its own is nothing a model's text could locate on the host.
+class _JobDataRoot(DataRoot):
+    __slots__ = ()
+
+    def __str__(self) -> str:
+        return str(unwrap_data_root(self))
+
+
+class _JobTenantRoot(TenantRoot):
+    __slots__ = ()
+
+    def __str__(self) -> str:
+        return str(unwrap_tenant_root(self))
+
+
+class _JobRunsBase(RunsBase):
+    __slots__ = ()
+
+    def __str__(self) -> str:
+        return str(unwrap_runs_base(self))
+
+
+class _JobEpisodesRoot(EpisodesRoot):
+    __slots__ = ()
+
+    def __str__(self) -> str:
+        return str(unwrap_episodes_root(self))
+
+
+@dataclasses.dataclass(frozen=True)
+class JobTenant(RecordTenant):
+    """The tenant a job container sees: its own root (`data_root`, laid out as `<root>/<T>/{runs,episodes,...}`) and its
+    read-only `inputs` folder (the run's knowledge copy, for a learning job the pinned export), and no clone of the tenant's
+    knowledge, no lock and no scratch. `accept_tenant` opens `<T>/knowledge` and so refuses such a root: the container
+    entries build a `JobTenant` from the launch facts instead (`job_tenant_from_launch`). The helper that made the folders
+    already admitted the tenant for the claim; what a container can check for itself is the id grammar and where the two
+    folders are, and that is what the constructor judges.
+
+    A `RecordTenant`, so the record stores and `RunsRepository` work over it unchanged. Its members are `id`, `data_root`
+    (the job root), `tenant_root`, `runs`, `episodes`, `runs_repository()`, `run_knowledge`, `export_folder(pin)` and
+    `root_names()`; `runs_legacy` and `episodes_legacy` raise; it has no `knowledge`, `settings`, `agent`, lock, scratch,
+    drafts or worktrees.
+
+    Built from an id and two absolute paths (a `str` id is parsed, a `DataRoot` taken as it is); `TenantRefused` for an id
+    that is no tenant id, a relative or unresolvable path, a folder inside the running checkout's `defender/` tree, or a
+    root and inputs where one holds the other."""
+
+    id: TenantId
+    data_root: DataRoot
+    inputs: Path
+
+    def __post_init__(self) -> None:
+        tenant_id = TenantId(self.id)
+        root = unwrap_data_root(self.data_root) if isinstance(self.data_root, DataRoot) else Path(self.data_root)
+        inputs = Path(self.inputs)
+        _TenantPaths(DataRoot(root), tenant_id)  # the id, an absolute root outside the code tree: the host's one rule
+        if not inputs.is_absolute():
+            raise TenantRefused(f"job inputs {str(inputs)!r} must be an absolute path")
+        resolved_root, resolved_inputs = _resolve_or_refuse(root), _resolve_or_refuse(inputs)
+        _refuse_inside_defender_tree(resolved_inputs, inputs)
+        if resolved_root.is_relative_to(resolved_inputs) or resolved_inputs.is_relative_to(resolved_root):
+            raise TenantRefused("a job's root and its inputs must be two separate folders")
+        object.__setattr__(self, "id", tenant_id)
+        object.__setattr__(self, "data_root", _JobDataRoot(root))
+        object.__setattr__(self, "inputs", inputs)
+
+    @property
+    def _layout(self) -> _TenantLayout:
+        return _TenantLayout(unwrap_data_root(self.data_root) / self.id)
+
+    @property
+    def tenant_root(self) -> TenantRoot:
+        return _JobTenantRoot(self._layout.tenant_root)
+
+    @property
+    def runs(self) -> RunsBase:
+        return _JobRunsBase(self._layout.runs)
+
+    @property
+    def episodes(self) -> EpisodesRoot:
+        return _JobEpisodesRoot(self._layout.episodes)
+
+    @property
+    def runs_legacy(self) -> LegacyRunsRoot:
+        raise TenantRefused("a job tenant has no legacy runs folder")
+
+    @property
+    def episodes_legacy(self) -> LegacyEpisodesRoot:
+        raise TenantRefused("a job tenant has no legacy episodes folder")
+
+    @property
+    def run_knowledge(self) -> Path:
+        """The folder of the run knowledge copies the helper made, one `<run id>/` each, in the read-only inputs."""
+        return _TenantLayout(self.inputs).run_knowledge
+
+    def export_folder(self, commit: str) -> Path:
+        """The pinned export's folder in the inputs (`exports/<commit>/`): `commit` is one path segment, else
+        `TenantRefused`, never joined."""
+        return _TenantLayout(self.inputs).exports / _export_segment(commit)
+
+    def root_names(self) -> dict[str, str]:
+        """How text shown to a model or an operator names this job's folders instead of locating them (as `Tenant`'s): its
+        own folder `<tenant folder>`, its root `<data root>` and its inputs `<job inputs>`."""
+        return {**_paths.root_spellings(self.inputs, "<job inputs>"),
+                **_paths.root_spellings(unwrap_data_root(self.data_root), "<data root>"),
+                **_paths.root_spellings(unwrap_tenant_root(self.tenant_root), "<tenant folder>")}
+
+    def runs_repository(self) -> RunsRepository[JobTenant]:
+        """This job's runs repository, over its root; the package is imported here, lazily (it imports tenancy)."""
+        from defender.records import RunsRepository
+
+        return RunsRepository(self)
+
+
+def job_tenant_from_launch(data_root: DataRoot, raw_id: object, launch: Mapping[str, Any]) -> JobTenant:
+    """The `JobTenant` of `raw_id` over `data_root` (the job's root) and the inputs folder the launch facts the job's host
+    helper handed over name (`inputs_dir`, an absolute path): `TenantRefused` when they name none, or the constructor's."""
+    inputs = launch.get("inputs_dir")
+    if not isinstance(inputs, str) or not inputs:
+        raise TenantRefused("the launch facts name no inputs folder (`inputs_dir`)")
+    return JobTenant(id=requested_tenant_id(raw_id), data_root=data_root, inputs=Path(inputs))
 
 
 def clone_halves(tenant: Tenant) -> tuple[Path, Path]:

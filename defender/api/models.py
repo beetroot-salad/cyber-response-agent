@@ -133,7 +133,7 @@ ReadinessStep = Literal["tenant", "records", "alert_mapping", "publish", "knowle
                         "tenant_verdict", "signing", "first_pass", "container_tenant", "systems"]
 #: What a readiness warning is about (#1471 R4).
 WarningKind = Literal["case_system", "system_down", "grant_ignored", "verb_undecided", "verb_undeclared",
-                      "tacit_registry", "tacit_grant", "feedback_setting", "retired_file"]
+                      "tacit_registry", "tacit_grant", "feedback_setting", "retired_file", "evidence_key_missing"]
 AdoptionOutcome = Literal["opened", "already_open", "rejected", "nothing_to_adopt"]
 
 
@@ -573,6 +573,17 @@ class TenantItem(BaseModel):
     step_actor: Literal["service", "host"] | None
     failure: str | None
     created_at: Instant
+
+
+class EvidenceRetention(BaseModel):
+    """How long a tenant keeps the evidence of its ended work, in days from the acceptance of each object: one value for
+    investigations, one for learning jobs, each a whole number from 30 to 730 (#1546). Both are always given together,
+    when a tenant is created and whenever they change; there is no default (#1082)."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    investigation_days: int = Field(ge=30, le=730, description="Days an investigation's accepted evidence is kept.")
+    learning_days: int = Field(ge=30, le=730, description="Days a learning job's accepted evidence is kept.")
 
 
 class InvitationRef(BaseModel):

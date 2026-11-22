@@ -34,8 +34,8 @@ from sqlalchemy.pool import NullPool
 
 from defender.database import async_engine, url
 from defender.records.formats import AlertMapping, TenantId
-from defender.tenancy.models import (SCHEMA, AlertMappingRow, CaseRecord, CaseVersionRow, ForgeWiring, Generation,
-                                     MergeEligibility, MergeEligibilityRow, PublishStatus, SystemVersionRow,
+from defender.tenancy.models import (SCHEMA, AlertMappingRow, CaseRecord, CaseVersionRow, EvidenceRetention,
+                                     EvidenceRetentionRow, ForgeWiring, Generation, MergeEligibility, MergeEligibilityRow, PublishStatus, SystemVersionRow,
                                      TenantRecord, TenantRecords)
 from defender.tenancy.record_refusals import refuse_unless_active
 from defender.tenancy.repository import (
@@ -58,6 +58,7 @@ _P: Table = PublishStatus.__table__  # type: ignore[assignment]
 _M: Table = AlertMappingRow.__table__  # type: ignore[assignment]
 _SV: Table = SystemVersionRow.__table__  # type: ignore[assignment]
 _CV: Table = CaseVersionRow.__table__  # type: ignore[assignment]
+_R: Table = EvidenceRetentionRow.__table__  # type: ignore[assignment]
 _E: Table = MergeEligibilityRow.__table__  # type: ignore[assignment]
 
 #: The lock connection's keepalive bound, in seconds, when the caller states none.
@@ -161,11 +162,37 @@ class PostgresTenantRepository:
         return MergeEligibilityRow(**rows[0]._mapping).as_record() if rows else None
 
     # --- requests (the API) ----------------------------------------------------------------------
-    async def request_create(self, *, now: _dt.datetime) -> TenantRecord:
+    async def request_create(self, *, now: _dt.datetime, investigation_days: int, learning_days: int) -> TenantRecord:
+        """The tenant row and its retention row in one transaction. A value the table's check refuses is raised as the
+        driver's `CheckViolation`, with neither row written."""
         values = dict(id=TenantId.mint(), created_at=now, state="creating", pending_action="create",
                       step="names", step_actor=SERVICE)
-        async with self._engine.begin() as conn:
-            return _record((await conn.execute(insert(_T).values(**values).returning(*_T.c))).one())
+        try:
+            async with self._engine.begin() as conn:
+                made = _record((await conn.execute(insert(_T).values(**values).returning(*_T.c))).one())
+                await conn.execute(insert(_R).values(tenant_id=made.id, investigation_days=investigation_days,
+                                                     learning_days=learning_days))
+                return made
+        except IntegrityError as refused:
+            if refused.orig is None:
+                raise
+            raise refused.orig from None
+
+    async def evidence_retention(self, tenant_id: TenantId) -> EvidenceRetention | None:
+        rows = await self._rows(select(_R).where(_R.c.tenant_id == tenant_id))
+        return EvidenceRetentionRow(**rows[0]._mapping).as_record() if rows else None
+
+    async def set_evidence_retention(self, tenant_id: TenantId, retention: EvidenceRetention) -> EvidenceRetention:
+        values = dict(investigation_days=retention.investigation_days, learning_days=retention.learning_days)
+        try:
+            async with self._engine.begin() as conn:
+                await conn.execute(insert(_R).values(tenant_id=tenant_id, **values)
+                                   .on_conflict_do_update(index_elements=[_R.c.tenant_id], set_=values))
+        except IntegrityError as refused:
+            if getattr(refused.orig, "sqlstate", None) == "23503":  # foreign_key_violation: no such tenant
+                raise NotFound(f"no tenant {tenant_id}") from refused
+            raise
+        return retention
 
     async def _request(self, tenant_id: TenantId, precondition: ColumnElement[bool], refusal: str,
                        **values: Any) -> TenantRecord:

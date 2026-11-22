@@ -393,7 +393,7 @@ def is_readiness_step(step: object) -> bool:
     return isinstance(step, str) and step in READINESS_STEPS
 #: A `ready` record's warning kinds (surface §5, R13-3): one warning per census finding line.
 READINESS_WARNING_KINDS = ("case_system", "system_down", "grant_ignored", "verb_undecided", "verb_undeclared",
-                           "tacit_registry", "tacit_grant", "feedback_setting", "retired_file")
+                           "tacit_registry", "tacit_grant", "feedback_setting", "retired_file", "evidence_key_missing")
 #: A readiness `failed` record's reasons, by writer (R13-1.2, .3, R13-3). The worker judges the union: it cannot tell
 #: the writers apart and need not.
 READINESS_HELPER_REASONS = frozenset({"start_failed", WORKER_ERROR})

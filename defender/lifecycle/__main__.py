@@ -87,6 +87,7 @@ async def _serve() -> int:
     from defender.identity import Bootstrap, IdentityService
     from defender.identity.postgres import PostgresIdentityRepository
     from defender.investigation.publish_launch import launch_publish
+    from defender.jobs import JobStore
     from defender.lifecycle import HostActor, ManagementService, git_runner, integration_runner, serve
     from defender.lifecycle import _process as clients
     from defender.tenancy import TenantDirectory
@@ -110,12 +111,35 @@ async def _serve() -> int:
                      # as run start's: the outcomes only the launcher sees are recorded for the readiness check
                      publish=functools.partial(launch_publish, directory=directory))
     _logger.info("lifecycle: serving both actors every %ss", config.poll_interval)
+    jobs = JobStore(dsn, clock=_now)
     try:
-        await serve(service, host, config=config, stop=stopping.is_set)
+        await serve(service, host, config=config, stop=stopping.is_set, sweep=_paced_sweep(jobs, host.blob))
     finally:
+        await jobs.close()
         await identity.close()
         await tenants.close()
     return 0
+
+
+#: Seconds between the evidence retention sweep's passes: expiry is in days, so it need not run each poll.
+EVIDENCE_SWEEP_INTERVAL = 300.0
+
+
+def _paced_sweep(jobs: Any, blob: Any) -> Any:
+    """The retention sweep as `serve` calls it each round: one pass at most every `EVIDENCE_SWEEP_INTERVAL` seconds, the
+    first at once. With no store (a config that names none) there is nothing to sweep."""
+    import time
+
+    from defender.lifecycle import sweep_evidence
+
+    last: list[float] = []
+
+    async def sweep() -> None:
+        if blob is None or (last and time.monotonic() - last[0] < EVIDENCE_SWEEP_INTERVAL):
+            return
+        last[:] = [time.monotonic()]
+        await sweep_evidence(jobs=jobs, blob=blob)
+    return sweep
 
 
 def main(argv: list[str] | None = None) -> int:

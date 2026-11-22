@@ -17,8 +17,8 @@ from collections.abc import AsyncIterator, Collection, Mapping
 from typing import Any, Literal, TypeVar, cast, overload
 
 from defender.records.formats import AlertMapping, TenantId
-from defender.tenancy.models import (ALLOWED_ACTIONS, AlertMappingRow, ForgeWiring, Generation, MergeEligibility, PublishStatus,
-                                     TenantRecord, TenantRecords)
+from defender.tenancy.models import (ALLOWED_ACTIONS, RETENTION_LEAST, RETENTION_MOST, AlertMappingRow, EvidenceRetention,
+                                     ForgeWiring, Generation, MergeEligibility, PublishStatus, TenantRecord, TenantRecords)
 from defender.tenancy.record_refusals import refuse_unless_active
 from defender.tenancy.repository import (
     KEEP,
@@ -60,6 +60,7 @@ class InMemoryTenantRepository:
         self._mappings: dict[str, AlertMappingRow] = {}
         self._records: dict[str, TenantRecords] = {}
         self._eligibility: dict[str, MergeEligibility] = {}
+        self._retention: dict[str, EvidenceRetention] = {}
         self._locked: set[str] = set()
 
     async def close(self) -> None:
@@ -143,12 +144,25 @@ class InMemoryTenantRepository:
             return self._eligibility.get(tenant_id)
 
     # --- requests (the API) ----------------------------------------------------------------------
-    async def request_create(self, *, now: _dt.datetime) -> TenantRecord:
+    async def request_create(self, *, now: _dt.datetime, investigation_days: int, learning_days: int) -> TenantRecord:
+        retention = _checked_retention(EvidenceRetention(investigation_days, learning_days))
         row = TenantRecord(id=TenantId.mint(), created_at=now, state="creating", pending_action="create",
                            step="names", step_actor=SERVICE)
         with self._mutex:
             self._tenants[row.id] = row
+            self._retention[row.id] = retention
             return _detached(row)
+
+    async def evidence_retention(self, tenant_id: TenantId) -> EvidenceRetention | None:
+        with self._mutex:
+            return self._retention.get(tenant_id)
+
+    async def set_evidence_retention(self, tenant_id: TenantId, retention: EvidenceRetention) -> EvidenceRetention:
+        checked = _checked_retention(retention)
+        with self._mutex:
+            self._row(tenant_id)
+            self._retention[tenant_id] = checked
+            return checked
 
     def _request(self, tenant_id: TenantId, allowed: bool, refusal: str, **changes: Any) -> TenantRecord:
         """Apply `changes` when `allowed` (read under the mutex with the row) else `Conflict`."""
@@ -217,6 +231,14 @@ class InMemoryTenantRepository:
             held.spent = True
             with self._mutex:
                 self._locked.discard(tenant_id)
+
+
+def _checked_retention(retention: EvidenceRetention) -> EvidenceRetention:
+    """`retention`, or `ValueError` when either value is outside the days the table allows (the database's check)."""
+    for days in (retention.investigation_days, retention.learning_days):
+        if not RETENTION_LEAST <= days <= RETENTION_MOST:
+            raise ValueError(f"retention is {RETENTION_LEAST} to {RETENTION_MOST} days, not {days}")
+    return retention
 
 
 def _move_statuses(generations: dict[tuple[str, str], Generation], tenant_id: str, go_live: str | None,

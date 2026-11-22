@@ -2,7 +2,8 @@
 defaults). The alerts and investigations tables carry exactly the lean constraints of #1081's
 design; the migration `0004_jobs` creates them and `0005_uuid_ids` makes their ids `uuid` (#1382).
 The learning jobs and learning checks tables (#1344) are `0008_learning_jobs`'s; the host requests table (#1471) is
-`0026_host_requests`'s."""
+`0026_host_requests`'s. The claims, staged facts and uploads (#1546), and the owners' evidence columns, are
+`0027_run_evidence`'s; the investigations' foreign key to their tenant's retention row is `0029_retention_required`'s."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import dataclasses
 import datetime as _dt
 from typing import Any, Protocol
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKeyConstraint, Index, Integer, LargeBinary, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKeyConstraint, Index, Integer, LargeBinary, Text, UniqueConstraint, false, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Mapped, mapped_column
@@ -29,6 +30,14 @@ LIVE = ("queued", "running")
 TERMINAL = tuple(stage for stage in STAGES if stage not in LIVE)
 
 _TIME = DateTime(timezone=True)
+
+#: An owner's evidence state (#1546 A-O4): written by the applier when the row ends, afterwards only to `expired` by the
+#: retention sweep. Null exactly while the row is queued or running (a check).
+EVIDENCE_STATES = ("complete", "partial", "none", "lost", "expired")
+#: A run's scrub verdict (#1546 A-O10, D2): only `clean` is usable.
+SCRUB_VERDICTS = ("clean", "tainted", "not_run")
+#: An upload row's status (#1546 A-O3): inserted `pending` before its PUT, then `uploaded` or `refused`, once.
+UPLOAD_STATUSES = ("pending", "uploaded", "refused")
 
 
 def _quoted(values: tuple[str, ...]) -> str:
@@ -88,6 +97,15 @@ class InvestigationRow(Base, kw_only=True):
         # #1581 O10: a completed investigation always has a disposition, one of the vocabulary's.
         CheckConstraint("stage <> 'completed' OR disposition IS NOT NULL", name="completed_has_a_disposition"),
         CheckConstraint(f"disposition IN ({_quoted(DISPOSITION_VALUES)})", name="disposition"),
+        # #1546 A-O4, A-O10: an ended row has an evidence state and a scrub verdict, a live one neither.
+        CheckConstraint(f"evidence_state IN ({_quoted(EVIDENCE_STATES)})", name="evidence_state"),
+        CheckConstraint(f"scrub IN ({_quoted(SCRUB_VERDICTS)})", name="scrub"),
+        CheckConstraint(f"(stage IN ({_quoted(LIVE)})) = (evidence_state IS NULL) "
+                        f"AND (stage IN ({_quoted(LIVE)})) = (scrub IS NULL)", name="ended_has_evidence"),
+        # #1546 r9 (D16): every new investigation names its tenant's retention row, `NOT VALID` (an offboarded tenant may
+        # keep investigations and have no row): `0029_retention_required`'s.
+        ForeignKeyConstraint(["tenant_id"], [f"{TENANCY_SCHEMA}.evidence_retention.tenant_id"], use_alter=True,
+                             postgresql_not_valid=True),
         Index("investigations_one_live_per_alert", "tenant_id", "alert_id", unique=True,
               postgresql_where=text(f"stage IN ({_quoted(LIVE)})")),
         Index("investigations_newest_first", "tenant_id", text("created_at DESC"), text("id DESC")),
@@ -117,10 +135,15 @@ class InvestigationRow(Base, kw_only=True):
     failure_message: Mapped[str | None] = mapped_column(Text, default=None)
     #: When the holder's claim lapses (by the database's clock); a running row always has one (#1343 B1).
     lease_expires_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
-    #: When the holder wrote its final cost and knowledge: internal, written once (#1343 B-P2).
+    #: When the holder gave the running row back (`apply` of a hand-back), so no renewal covers it and its take-over says
+    #: so; set on an ended row too, by the applier. Internal (#1343 B-P2).
     accounting_written_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     #: Whether the investigation posts to its ticket (#1471 W1): set at create, copied by a retry.
     update_ticket: Mapped[bool] = mapped_column(Boolean)
+    #: `EVIDENCE_STATES` once ended (#1546 A-O4), null while live.
+    evidence_state: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The run's scrub verdict once ended (#1546 A-O10), null while live; `not_run` when no outcome said otherwise.
+    scrub: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 LEARNING_STATUSES = ("queued", "running", "completed", "failed", "skipped")
@@ -129,6 +152,7 @@ LEARNING_TRIGGERS = ("auto", "explicit")
 #: `completed` end write itself, `done` with its findings stored, or `refused` with none of them stored.
 PUBLISH_STATES = ("none", "done", "refused")
 LEARNING_TERMINAL = ("completed", "failed", "skipped")
+_LEARNING_LIVE = ("queued", "running")
 
 
 class LearningJobRow(Base, kw_only=True):
@@ -146,6 +170,8 @@ class LearningJobRow(Base, kw_only=True):
         CheckConstraint(f"trigger IN ({_quoted(LEARNING_TRIGGERS)})", name="trigger"),
         CheckConstraint(f"publish_state IN ({_quoted(PUBLISH_STATES)})", name="publish_state"),
         CheckConstraint("status <> 'running' OR lease_expires_at IS NOT NULL", name="running_has_a_lease"),
+        CheckConstraint(f"evidence_state IN ({_quoted(EVIDENCE_STATES)})", name="evidence_state"),
+        CheckConstraint(f"(status IN ({_quoted(_LEARNING_LIVE)})) = (evidence_state IS NULL)", name="ended_has_evidence"),
         Index("learning_jobs_queued_by_age", "created_at", "id", postgresql_where=text("status = 'queued'")),
         Index("learning_jobs_running_by_lease", "lease_expires_at", "id", postgresql_where=text("status = 'running'")),
         Index("learning_jobs_by_investigation", "investigation_id"),
@@ -174,6 +200,11 @@ class LearningJobRow(Base, kw_only=True):
     reason: Mapped[str | None] = mapped_column(Text, default=None)
     message: Mapped[str | None] = mapped_column(Text, default=None)
     lease_expires_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    #: `EVIDENCE_STATES` once ended (#1546 A-O4), null while live.
+    evidence_state: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The sibling cost is only a lower limit (#1546 D15): after an offboard or a take-over it is the last staged progress.
+    #: The one column with a server default (false), which `0027_run_evidence` gave every existing row.
+    sibling_cost_is_lower_limit: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class LearningCheckRow(Base, kw_only=True):
@@ -204,9 +235,10 @@ class LearningCheckRow(Base, kw_only=True):
 #: A host request's stages (#1471 R2): it ends `completed` with its kind's result, or `failed` with a fixed reason.
 HOST_REQUEST_STAGES = ("queued", "running", "completed", "failed")
 HOST_REQUEST_LIVE = ("queued", "running")
-#: The host-request kinds (#1471): the table's `kind`, the helper's `--kind` and the launch facts' `kind`.
-READINESS, ADOPTION = "readiness", "adoption"
-HOST_REQUEST_KINDS = (READINESS, ADOPTION)
+#: The host-request kinds (#1471): the table's `kind`, the helper's `--kind` and the launch facts' `kind`. A drain (#1546
+#: D7) is the lead-author lane's tick, queued by the operator command.
+READINESS, ADOPTION, DRAIN = "readiness", "adoption", "drain"
+HOST_REQUEST_KINDS = (READINESS, ADOPTION, DRAIN)
 
 
 class HostRequestRow(Base, kw_only=True):
@@ -227,6 +259,9 @@ class HostRequestRow(Base, kw_only=True):
         Index("host_requests_queued_by_age", "created_at", "id", postgresql_where=text("stage = 'queued'")),
         Index("host_requests_running_by_lease", "lease_expires_at", "id", postgresql_where=text("stage = 'running'")),
         Index("host_requests_live_by_tenant", "tenant_id", postgresql_where=text(f"stage IN ({_quoted(HOST_REQUEST_LIVE)})")),
+        # #1546 D7: at most one drain queued or running per tenant, whatever its dedupe key.
+        Index("host_requests_one_live_drain_per_tenant", "tenant_id", unique=True,
+              postgresql_where=text(f"kind = '{DRAIN}' AND stage IN ({_quoted(HOST_REQUEST_LIVE)})")),
         {"schema": SCHEMA},
     )
 
@@ -248,6 +283,130 @@ class HostRequestRow(Base, kw_only=True):
     failure_message: Mapped[str | None] = mapped_column(Text, default=None)
 
 
+#: A claim's kinds (#1546 PR7): every launched child's; the host-request kinds take their request row as reference.
+INVESTIGATION_CLAIM, LEARNING_CLAIM, POST_STEP_CLAIM = "investigation", "learning", "post-step"
+CLAIM_KINDS = (INVESTIGATION_CLAIM, LEARNING_CLAIM, *HOST_REQUEST_KINDS, POST_STEP_CLAIM)
+#: Each claim kind's lease-reference column.
+CLAIM_REFERENCE = {INVESTIGATION_CLAIM: "investigation_id", LEARNING_CLAIM: "learning_job_id",
+                   **{kind: "host_request_id" for kind in HOST_REQUEST_KINDS}, POST_STEP_CLAIM: "hold_tenant_id"}
+_REFERENCES = ("investigation_id", "learning_job_id", "host_request_id", "hold_tenant_id")
+
+
+def _names_only(column: str) -> str:
+    return " AND ".join(f"{c} IS {'NOT ' if c == column else ''}NULL" for c in _REFERENCES)
+
+
+_KIND_REFERENCE = " OR ".join(
+    f"(kind IN ({_quoted(tuple(k for k, c in CLAIM_REFERENCE.items() if c == column))}) AND {_names_only(column)})"
+    for column in _REFERENCES)
+
+
+class ClaimRow(Base, kw_only=True):
+    """One launched child's claim (#1546 PR7): its token, minted by the store in the claim's own transaction (the folders,
+    labels and every staged fact and upload name it), its tenant, its kind and exactly that kind's lease reference, the
+    launch facts and the `(owner, object)` input set it may pull (never null; empty for every kind but a learning job and a
+    drain). Only the claim names its reference: a row is claimed at most once (one claim per owner or request row, an
+    index); a post-step hold is one reused row, its claims told apart by the hold's `holder`. `0027_run_evidence`."""
+
+    __tablename__ = "claims"
+    __table_args__ = (
+        # No ON DELETE action, as every jobs table (M10): the investigation delete removes its claims itself.
+        ForeignKeyConstraint(["tenant_id"], [f"{TENANCY_SCHEMA}.tenants.id"]),
+        ForeignKeyConstraint(["investigation_id"], [f"{SCHEMA}.investigations.id"]),
+        ForeignKeyConstraint(["learning_job_id"], [f"{SCHEMA}.learning_jobs.id"]),
+        ForeignKeyConstraint(["host_request_id"], [f"{SCHEMA}.host_requests.id"]),
+        ForeignKeyConstraint(["hold_tenant_id"], [f"{SCHEMA}.learning_checks.tenant_id"]),
+        CheckConstraint(f"kind IN ({_quoted(CLAIM_KINDS)})", name="kind"),
+        CheckConstraint(_KIND_REFERENCE, name="kind_names_its_reference"),
+        *(Index(f"claims_one_per_{column}", column, unique=True, postgresql_where=text(f"{column} IS NOT NULL"))
+          for column in ("investigation_id", "learning_job_id", "host_request_id")),
+        Index("claims_by_tenant", "tenant_id"),
+        {"schema": SCHEMA},
+    )
+
+    token: Mapped[str] = mapped_column(Text, primary_key=True)
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId))
+    kind: Mapped[str] = mapped_column(Text)
+    inputs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    investigation_id: Mapped[InvestigationId | None] = mapped_column(IdColumn(InvestigationId), default=None)
+    learning_job_id: Mapped[LearningJobId | None] = mapped_column(IdColumn(LearningJobId), default=None)
+    host_request_id: Mapped[HostRequestId | None] = mapped_column(IdColumn(HostRequestId), default=None)
+    hold_tenant_id: Mapped[TenantId | None] = mapped_column(IdColumn(TenantId), default=None)
+    #: The claim's launch facts (the alert reference, the knowledge pin); nulled by the offboarding pass.
+    launch: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True), default=None)
+    #: Set by the store at the claim; null only on a row planted without it.
+    created_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+
+
+class StagedFactRow(Base, kw_only=True):
+    """One fact the claim's helper staged (#1546), a closed typed value it parsed and screened on receipt (PR2): create-once
+    by `(token, name)` except `progress`, the one replaced fact. Written only while the claim is live (PR7)."""
+
+    __tablename__ = "staged_facts"
+    __table_args__ = (
+        ForeignKeyConstraint(["token"], [f"{SCHEMA}.claims.token"]),
+        {"schema": SCHEMA},
+    )
+
+    token: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, primary_key=True)
+    body: Mapped[Any] = mapped_column(JSONB)
+    staged_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+
+
+class UploadRow(Base, kw_only=True):
+    """One object the claim's helper put in the evidence store (#1546 A-O3): create-once by `(token, object)`, inserted
+    `pending` before its PUT and moved once to `uploaded` or `refused`, each only while the claim is live; `accepted_at` is
+    set by the applier alone, when the owner's ending promotes it, and an accepted row never changes. An arm page's row
+    copies its arm's `scrub`."""
+
+    __tablename__ = "uploads"
+    __table_args__ = (
+        ForeignKeyConstraint(["token"], [f"{SCHEMA}.claims.token"]),
+        CheckConstraint(f"status IN ({_quoted(UPLOAD_STATUSES)})", name="status"),
+        CheckConstraint(f"scrub IN ({_quoted(SCRUB_VERDICTS)})", name="scrub"),
+        CheckConstraint("size >= 0", name="size"),
+        CheckConstraint("accepted_at IS NULL OR status = 'uploaded'", name="only_uploaded_is_accepted"),
+        Index("uploads_unaccepted_by_age", "created_at", postgresql_where=text("accepted_at IS NULL")),
+        Index("uploads_accepted_by_age", "accepted_at", postgresql_where=text("accepted_at IS NOT NULL")),
+        {"schema": SCHEMA},
+    )
+
+    token: Mapped[str] = mapped_column(Text, primary_key=True)
+    object: Mapped[str] = mapped_column(Text, primary_key=True)
+    size: Mapped[int] = mapped_column(BigInteger)
+    sha256: Mapped[str] = mapped_column(Text)
+    wrapped_key: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
+    scrub: Mapped[str | None] = mapped_column(Text, default=None)
+    accepted_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+
+
+class _Token:
+    """A claim's token (#1546 PR7), minted by the store in the claim's own transaction: kept beside the claim's fields,
+    not among them, so the claim's dataclass fields stay its record and state."""
+
+    @property
+    def token(self) -> str:
+        return self.__dict__["_token"]
+
+
+def with_token(claim: Any, token: str) -> Any:
+    """`claim` carrying `token` (the store's one way to set it on a frozen claim)."""
+    object.__setattr__(claim, "_token", token)
+    return claim
+
+
+@dataclasses.dataclass(frozen=True)
+class LearningCheckClaim:
+    """A tenant's family-less check clock, held for its post-step (#1344 amendment 3): the tenant and the hold's token,
+    which is the post-step's claim token (#1546 PR7)."""
+
+    tenant_id: TenantId
+    token: str
+
+
 @model(frozen=True)
 class HostRequestRecord:
     """A host request as read (#1471): the row's fields, in the store's words; `request_id` is the row's id."""
@@ -267,7 +426,7 @@ class HostRequestRecord:
 
 
 @dataclasses.dataclass(frozen=True)
-class HostRequestClaim:
+class HostRequestClaim(_Token):
     """A claimed host request. No tenant state is read with it: the worker starts the request's helper whatever the
     state, and the helper's own tenant admission refuses a tenant that is not active."""
 
@@ -339,7 +498,7 @@ class InvestigationRecord:
 
 
 @dataclasses.dataclass(frozen=True)
-class Claim:
+class Claim(_Token):
     """A claimed investigation and its tenant's state, read in the claim's own transaction
     (#1342 r7 R7-1): the worker starts a job only for an `active` tenant."""
 
@@ -368,6 +527,8 @@ class LearningJobRecord:
     finished_at: _dt.datetime | None
     reason: str | None
     message: str | None
+    #: The sibling cost is only a lower limit (#1546 D15).
+    sibling_cost_is_lower_limit: bool = False
 
 
 class LearningProgress(Protocol):
@@ -386,7 +547,7 @@ class LearningProgress(Protocol):
 
 
 @dataclasses.dataclass(frozen=True)
-class LearningClaim:
+class LearningClaim(_Token):
     """A claimed learning job and its tenant's state, read in the claim's own transaction."""
 
     record: LearningJobRecord
@@ -399,7 +560,8 @@ def learning_job_record(row: LearningJobRow) -> LearningJobRecord:
         request_key=row.request_key, attempt=row.attempt, trigger=row.trigger, status=row.status, stage=row.stage,
         fork_message_id=row.fork_message_id, sibling_cost_usd=row.sibling_cost_usd,
         publish_state=row.publish_state, created_at=row.created_at,
-        started_at=row.started_at, finished_at=row.finished_at, reason=row.reason, message=row.message)
+        started_at=row.started_at, finished_at=row.finished_at, reason=row.reason, message=row.message,
+        sibling_cost_is_lower_limit=row.sibling_cost_is_lower_limit)
 
 
 #: The columns an alert list selects: every column but `raw` (#1507).
@@ -430,21 +592,11 @@ def is_terminal(stage: str) -> bool:
     return stage in TERMINAL
 
 
-def reads_at_least(row: InvestigationRow) -> bool:
-    """Whether a record's cost reads "at least": the holder's stored mark, or a row that ended after it started with a cost
-    and no final figure from its holder (cancelled or taken over mid-run, a copy that may be short). Derived on read, so
-    ending a row never writes the mark and rows from before the column read the same way (#1377 B1, B2, B3)."""
-    if row.cost_is_lower_limit:
-        return True
-    return (is_terminal(row.stage) and row.started_at is not None and row.accounting_written_at is None
-            and row.cost_usd is not None)
-
-
 def investigation_record(row: InvestigationRow) -> InvestigationRecord:
     return InvestigationRecord(
         investigation_id=row.id, tenant_id=row.tenant_id, alert_id=row.alert_id, request_key=row.request_key,
         attempt=row.attempt, stage=row.stage, created_at=row.created_at, started_at=row.started_at,
         finished_at=row.finished_at, disposition=row.disposition, cost_usd=row.cost_usd,
-        cost_is_lower_limit=reads_at_least(row),
+        cost_is_lower_limit=row.cost_is_lower_limit,  # stored by the applier, never derived on read (#1546 D15)
         knowledge=row.knowledge, failure_reason=row.failure_reason, failure_message=row.failure_message,
         update_ticket=row.update_ticket)

@@ -75,7 +75,7 @@ from defender.records import (
 )
 from defender.systems.catalog import Catalog
 from defender.systems.run_tenant import RunTenant
-from defender.tenancy import Tenant
+from defender.tenancy import JobTenant, Tenant
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import seams
 from defender.learning.branch import timing as timing_mod
@@ -225,7 +225,7 @@ def _copy_source_input(episode: Episode, raw: bytes, record_text: str,
 
 
 def prepare_episode(
-    runs: RunsRepository[Tenant], source: Run, *,
+    runs: RunsRepository[Any], source: Run, *,
     prime: Callable[[Path, Episode], PrimeReport] = _PRIME_ALLOWING_EMPTY,
     knowledge_commit: str | None = None, episode_id: str | None = None,
 ) -> EpisodeRuns:
@@ -311,7 +311,7 @@ def _declared_or_refused(found: Any) -> str | None:
         raise ending(f"[branch] {unreadable}", reason=reason, brief=brief) from None
 
 
-def _open_launch_source(runs: RunsRepository[Tenant], source_run_id: str) -> Run:
+def _open_launch_source(runs: RunsRepository[Any], source_run_id: str) -> Run:
     """The source run, by id, in the request's tenant's natural container — or the refusal,
     before anything is spent. `runs.open` walks `<T>/runs` from the tenant's folder no-follow
     (a link at any level is refused) and takes only a real directory at the id; a path, or an
@@ -369,6 +369,14 @@ def sibling_argv(
 _UNPINNABLE = "the source run's knowledge cannot be pinned for the family"
 
 
+def _host_tenant(tenant: RunTenant) -> Tenant:
+    """The accepted tenant of an operator's launch, which holds the knowledge clone a job container's `JobTenant` does not."""
+    held = tenant.tenant
+    if not isinstance(held, Tenant):
+        raise TenantRefused("this launch holds no knowledge clone: a job container reads its pinned export only")
+    return held
+
+
 def _materialised(tenant: RunTenant, commit: str, container: JobContainer | None) -> Any:
     """`<T>/exports/<commit>/`, materialised from the tenant clone when absent: by this process for an operator's
     launch; inside a job container by its per-job host helper (#1170 P-A, C20: the container writes no export and
@@ -378,7 +386,7 @@ def _materialised(tenant: RunTenant, commit: str, container: JobContainer | None
     from defender.learning.author.version_control import DeliveryRefused, TenantExport, materialise_export
 
     if container is None:
-        return materialise_export(tenant.tenant, commit)
+        return materialise_export(_host_tenant(tenant), commit)
     try:
         answer = container.materialised_export(commit)
         folder = tenant.tenant.export_folder(commit)
@@ -417,7 +425,11 @@ def _pinned_export(tenant: RunTenant, source: Run, container: JobContainer | Non
             revision = formats.KnowledgeRevision.from_wire(
                 (_stamp_of(source) or {}).get("knowledge"))
             if revision is None:
-                return current_export(tenant.tenant)
+                if container is not None:
+                    raise ending(
+                        f"[branch] source run {source.run_dir} predates knowledge records: a job container reads the "
+                        "export it was pinned to only", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
+                return current_export(_host_tenant(tenant))
             if revision.commit is None:
                 why = (f"unavailable knowledge ({revision.unavailable})"
                        if revision.unavailable is not None else "unversioned knowledge")
@@ -723,7 +735,7 @@ class _ContainerAdmitted:
 
     directory: Any = None
 
-    def __init__(self, tenant: Tenant) -> None:
+    def __init__(self, tenant: Tenant | JobTenant) -> None:
         self.tenant = tenant
 
     def __enter__(self) -> _ContainerAdmitted:
@@ -733,11 +745,22 @@ class _ContainerAdmitted:
         return None
 
 
-def _admitted(data_root: Any, tenant_id: TenantId, *, box_mounted: tuple[Any, ...]) -> _ContainerAdmitted:
-    """The tenant of a launch inside a job container: the folder rules alone (`_ContainerAdmitted`). An operator's
-    launch opens the one host acceptance in `_launch` itself, the command that holds it."""
-    return _ContainerAdmitted(tenancy.accept_tenant(data_root, tenant_id, defender_dir=_DEFENDER_DIR,
-                                                    box_mounted=box_mounted))
+def _admitted(data_root: Any, tenant_id: TenantId, container: JobContainer) -> _ContainerAdmitted:
+    """The tenant of a launch inside a job container: a `JobTenant` over its own root and the inputs its launch facts name
+    (`_ContainerAdmitted`). An operator's launch opens the one host acceptance in `_launch` itself, the command that holds it."""
+    return _ContainerAdmitted(tenancy.job_tenant_from_launch(data_root, tenant_id, container.launch))
+
+
+def _export_roots(tenant: Tenant | JobTenant, container: JobContainer | None) -> dict[str, Path]:
+    """The two halves of the knowledge export the job is pinned to, in its inputs, for the tenant's settings to be read from
+    (a job holds no clone to read them from); none for an operator's launch, which reads its tenant's own folder."""
+    if container is None:
+        return {}
+    commit = container.launch.get("knowledge_commit")
+    if not isinstance(commit, str) or not commit:
+        raise TenantRefused("the job's launch facts name no knowledge commit")
+    folder = tenant.export_folder(commit)
+    return {"agent_root": folder / "agent", "settings_root": folder / "settings"}
 
 
 def _handed_records(container: JobContainer) -> Any:
@@ -788,7 +811,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         box_mounted = (tenancy.box_mounted_episodes(data_root, tenant_id),)
         admitted = (run_tenant_mod.host_tenant(data_root, tenant_id, directory=directory, defender_dir=_DEFENDER_DIR,
                                                box_mounted=box_mounted)
-                    if container is None else _admitted(data_root, tenant_id, box_mounted=box_mounted))
+                    if container is None else _admitted(data_root, tenant_id, container))
     except TenantRefused as refusal:
         raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
                      brief=f"the job's tenant was refused ({type(refusal).__name__})",
@@ -812,7 +835,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
             catalog = Catalog(roster)
             verdict = run_tenant_mod.tenant_systems(
                 run_tenant_mod.run_tenant_for(admitted.tenant, dispatches_lead_zero=False, records=records,
-                                              catalog=catalog), catalog)
+                                              catalog=catalog, **_export_roots(admitted.tenant, container)), catalog)
         except TenantRefused as refusal:
             raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
                          brief=f"the job's tenant was refused ({type(refusal).__name__})",
@@ -914,7 +937,7 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
     launch_waived: Sequence[str] = (), episode: Episode,
     view: EpisodeRuns, questioner: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
     premise_check: Any = None,
-    tenant: RunTenant, runs: RunsRepository[Tenant], served: Sequence[str], oracle: Any,
+    tenant: RunTenant, runs: RunsRepository[Any], served: Sequence[str], oracle: Any,
     verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer | None,
     knowledge_commit: str | None = None, signer: Any = None, proxy_url: str | None = None,
     issuer_transport: Any = None, directory: Any = None, lane: JobLaneHooks | None = None,

@@ -41,6 +41,32 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade from before #1546
+
+Evidence leaves the host: a job's bundle is kept in an S3-compatible store (Garage in development), each object
+encrypted under a data key wrapped by the tenant's OpenBao transit key `evidence-<T>`. After the shared steps in
+"Upgrading", once:
+
+1. Run migrations (revisions `0027` to `0030`). The upgrade to `0029_retention_required` stops, changing nothing,
+   while any tenant that is not offboarded (`creating` included) has no row in `tenancy.evidence_retention`, naming
+   each; the table is new, so recreate the development database, or offboard those tenants first. There is no backfill:
+   no tenant survives the upgrade without being created again.
+2. A tenant is now created with its retention, both values together, 30 to 730 days (`POST /api/admin/tenants` with
+   `{"investigation_days": n, "learning_days": n}`; a request without them is a 422) and a tenant admin changes them with
+   `PUT /api/tenants/<T>/evidence-retention` (the same body; `GET` reads them). Objects expire that many days after
+   their acceptance; an offboarded tenant from before the setting keeps its investigations and has no row.
+3. Create the OpenBao policy `defender-tenant-evidence` (`LifecycleConfig.evidence_policy`): `update` on
+   `transit/datakey/plaintext/evidence-{{identity.entity.metadata.tenant_id}}` and on
+   `transit/decrypt/evidence-{{identity.entity.metadata.tenant_id}}` (`defender.evidence.TEMPLATED_POLICY` holds its text).
+   Extend the lifecycle's management policy with create, read, update and delete on `transit/keys/evidence-*`, and, if it
+   names AppRoles by prefix, give `auth/approle/role/evidence-*` the delivery roles' capabilities (the evidence entities,
+   `tenant-<T>-<salt>-evidence`, already match `tenant-*`).
+4. The lifecycle service refuses to start without the store: set `DEFENDER_EVIDENCE_ENDPOINT`,
+   `DEFENDER_EVIDENCE_BUCKET`, `DEFENDER_EVIDENCE_ACCESS_KEY` and `DEFENDER_EVIDENCE_SECRET_KEY` (and
+   `DEFENDER_EVIDENCE_REGION`, default `garage`). It makes each generation's evidence login and the tenant's key, empties a
+   tenant's objects and rows when it is offboarded (the host step `evidence`, between `teardown` and `finish`, repeated each
+   pass for an offboarded tenant), and sweeps expired evidence every five minutes.
+
 ## Upgrade: the sign-in screens' name and wording
 
 The sign-in screens name the product and say it is invite-only. On an existing sign-in provider (the dev realm file is

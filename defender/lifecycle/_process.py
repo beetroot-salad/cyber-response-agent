@@ -8,7 +8,7 @@ import logging
 import os
 import subprocess
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -26,16 +26,23 @@ CALL_TIMEOUT = 60.0
 INTEGRATION = ("forgejo", "admin", "user", "create-authorized-integration")
 
 
-async def serve(service: Any, host: Any, *, config: LifecycleConfig, stop: Callable[[], bool]) -> None:
+async def serve(service: Any, host: Any, *, config: LifecycleConfig, stop: Callable[[], bool],
+                sweep: Callable[[], Awaitable[Any]] | None = None) -> None:
     """One pass of each actor, then `config.poll_interval`, until `stop()` (asked once per round) is
     true. `python -m defender.lifecycle serve` runs both actors this way (dev); hosted runs one each.
-    A pass that raises (the database unreachable) is logged and the next round runs as usual."""
+    A pass that raises (the database unreachable) is logged and the next round runs as usual. `sweep`, when given, is
+    the evidence retention sweep (#1546), called each round after the actors (it paces itself)."""
     while True:
         for actor in (service, host):
             try:
                 await actor.work()
             except Exception:  # noqa: BLE001 — a failed pass never ends the process: the next round retries
                 _logger.exception("lifecycle: a %s pass failed", type(actor).__name__)
+        if sweep is not None:
+            try:
+                await sweep()
+            except Exception:  # noqa: BLE001 — a failed sweep never ends the process: the next round retries
+                _logger.exception("lifecycle: the evidence sweep failed")
         if stop():
             return
         await asyncio.sleep(config.poll_interval)

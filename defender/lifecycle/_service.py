@@ -23,6 +23,7 @@ import httpx
 from defender import _git, _io
 from defender.configuration.issuer import TRANSIT_MOUNT
 from defender.credential_proxy import transit_key_for
+from defender.evidence import key_name as evidence_key_name
 from defender.identity import audit
 from defender.lifecycle._bot import Minted, log_in, mint
 from defender.lifecycle._eligibility import eligible_to_merge, listed_logins
@@ -126,10 +127,12 @@ class ManagementService(Actor):
         salt = secrets.token_hex(4)
         bot = f"bot-{tenant[:8]}-{salt}"
         sign = _sign_names(tenant, salt)
+        evidence = _evidence_names(tenant, salt)
         generation = Generation(
             tenant_id=tenant, salt=salt, status="pending", bot_login=bot,
             oidc_role=f"tenant-{tenant}-{salt}", approle=f"delivery-{tenant}-{salt}", entity=f"tenant-{tenant}-{salt}",
             sign_approle=sign["sign_approle"], sign_entity=sign["sign_entity"],
+            evidence_approle=evidence["evidence_approle"], evidence_entity=evidence["evidence_entity"],
             integration_args=["--username", bot, "--name", f"defender-{salt}", "--issuer", self._config.issuer_url,
                               "--claim-eq", f"tenant_id={tenant}", "--scope", INTEGRATION_SCOPES,
                               "--repo", wiring.repo])
@@ -149,25 +152,32 @@ class ManagementService(Actor):
         """The OIDC role, the AppRole on the templated policy, the entity naming its role and tenant,
         and the entity's alias by the AppRole's role id (Flow 1.3), before the integration; then the
         sign-only chain the same way on the sign policy, its entity carrying the tenant (A24'), and the
-        tenant's signing key, made if absent (A25). A re-run after a crash reuses what exists.
+        tenant's signing key, made if absent (A25), and the evidence chain on the evidence policy with the tenant's
+        evidence key (#1546 r9). A re-run after a crash reuses what exists.
 
-        A pending generation recorded before the sign login existed gets its sign names recorded
+        A pending generation recorded before the sign or the evidence login existed gets its names recorded
         first, before anything is made (r8.5, P1)."""
-        gen = await self._with_sign_names(held, await self._building(held))
+        gen = await self._with_names(held, await self._building(held))
         await self._write_role(gen, client_id=None)
         accessor = await self._approle_accessor()
         role_id = await self._approle(gen.approle, self._config.token_policy)
         await self._entity(gen.entity, {"oidc_role": gen.oidc_role, "tenant_id": held.tenant_id}, role_id, accessor)
         sign_role_id = await self._sign_chain(held, gen, accessor)
-        await self._commit_next(held, update_generations={gen.salt: {"role_id": role_id, "sign_role_id": sign_role_id}})
+        evidence_role_id = await self._evidence_chain(held, gen, accessor)
+        await self._commit_next(held, update_generations={gen.salt: {
+            "role_id": role_id, "sign_role_id": sign_role_id, "evidence_role_id": evidence_role_id}})
 
-    async def _with_sign_names(self, held: HeldTenant, gen: Generation) -> Generation:
-        """`gen`, its sign names recorded first if it was recorded before the sign login existed
+    async def _with_names(self, held: HeldTenant, gen: Generation) -> Generation:
+        """`gen`, its sign and evidence names recorded first if it was recorded before either login existed
         (r8.5, P1): committed before anything is made."""
-        if gen.sign_approle is not None and gen.sign_entity is not None:
+        missing: dict[str, str] = {}
+        if gen.sign_approle is None or gen.sign_entity is None:
+            missing.update(_sign_names(held.tenant_id, gen.salt))
+        if gen.evidence_approle is None or gen.evidence_entity is None:
+            missing.update(_evidence_names(held.tenant_id, gen.salt))
+        if not missing:
             return gen
-        await held.commit(step=held.record.step, actor=SERVICE,
-                          update_generations={gen.salt: _sign_names(held.tenant_id, gen.salt)})
+        await held.commit(step=held.record.step, actor=SERVICE, update_generations={gen.salt: missing})
         return await self._building(held)
 
     async def _sign_chain(self, held: HeldTenant, gen: Generation, accessor: str) -> str:
@@ -175,8 +185,17 @@ class ManagementService(Actor):
         tenant's signing key (A24', A25); the sign role id. Reuses what exists."""
         sign_role_id = await self._approle(str(gen.sign_approle), self._config.sign_policy)
         await self._entity(str(gen.sign_entity), {"tenant_id": held.tenant_id}, sign_role_id, accessor)
-        await self._ensure_key(held.tenant_id)
+        await self._ensure_key(transit_key_for(held.tenant_id), "ed25519")
         return sign_role_id
+
+    async def _evidence_chain(self, held: HeldTenant, gen: Generation, accessor: str) -> str:
+        """The evidence AppRole on the evidence policy, its own entity carrying the tenant, and the tenant's evidence key
+        (aes256-gcm96), made if absent: one key per tenant, kept across rotations like the signing key (#1546 r9); the
+        evidence role id. Reuses what exists."""
+        role_id = await self._approle(str(gen.evidence_approle), self._config.evidence_policy)
+        await self._entity(str(gen.evidence_entity), {"tenant_id": held.tenant_id}, role_id, accessor)
+        await self._ensure_key(evidence_key_name(held.tenant_id), "aes256-gcm96")
+        return role_id
 
     async def _approle_accessor(self) -> str:
         mounts = field_of(answered(await self._bao.get("/v1/sys/auth")), "data")
@@ -208,21 +227,22 @@ class ManagementService(Actor):
         answered(await self._bao.post("/v1/identity/entity-alias", json={
             "name": role_id, "canonical_id": entity_id, "mount_accessor": accessor}))
 
-    async def _ensure_key(self, tenant: str) -> None:
-        """The tenant's request-token signing key, made (ed25519) only when absent: one key per tenant,
-        kept across rotations (A25)."""
-        path = f"/v1/{TRANSIT_MOUNT}/keys/{transit_key_for(tenant)}"
+    async def _ensure_key(self, name: str, kind: str) -> None:
+        """The transit key `name` of type `kind`, made only when absent: the tenant's request-token signing key
+        (ed25519, A25) and its evidence key (aes256-gcm96, #1546), one of each per tenant, kept across rotations."""
+        path = f"/v1/{TRANSIT_MOUNT}/keys/{name}"
         if answered(await self._bao.get(path), 404).status_code == 404:
-            answered(await self._bao.post(path, json={"type": "ed25519"}))
+            answered(await self._bao.post(path, json={"type": kind}))
 
-    async def _destroy_key(self, tenant: str) -> None:
-        """The tenant's signing key, at offboarding only: read (absent is done), made deletable, deleted
-        (A25, RC-4)."""
-        path = f"/v1/{TRANSIT_MOUNT}/keys/{transit_key_for(tenant)}"
-        if answered(await self._bao.get(path), 404).status_code == 404:
-            return
-        answered(await self._bao.post(f"{path}/config", json={"deletion_allowed": True}))
-        answered(await self._bao.delete(path), 404)
+    async def _destroy_keys(self, tenant: str) -> None:
+        """The tenant's signing key and its evidence key, at offboarding only: each read (absent is done), made
+        deletable, deleted (A25, RC-4)."""
+        for name in (transit_key_for(tenant), evidence_key_name(tenant)):
+            path = f"/v1/{TRANSIT_MOUNT}/keys/{name}"
+            if answered(await self._bao.get(path), 404).status_code == 404:
+                continue
+            answered(await self._bao.post(f"{path}/config", json={"deletion_allowed": True}))
+            answered(await self._bao.delete(path), 404)
 
     async def _write_role(self, gen: Generation, *, client_id: str | None) -> None:
         """The generation's OIDC role; its claim comes from the minting entity's metadata, and its
@@ -364,40 +384,48 @@ class ManagementService(Actor):
             raise StepFailed(f"git {verb} failed: {(done.stderr + done.stdout).strip()}")
 
     async def _wrap(self, held: HeldTenant) -> None:
-        """A fresh single-use wrapped secret id for the host of each AppRole, delivery and sign (Flow
-        1.7, DC-12, A24'). First `main`'s rule is enforced again (r8.6): install, the host's step, checks
+        """A fresh single-use wrapped secret id for the host of each AppRole, delivery, sign and evidence (Flow
+        1.7, DC-12, A24', #1546 r9). First `main`'s rule is enforced again (r8.6): install, the host's step, checks
         it as the bot but cannot change it, and a job in flight across the upgrade, or a rule changed by
         hand, reaches it here, as does every install that failed and restarts at `wrap`."""
         await self._protect_main(held, await self._wiring(held))
         gen = await self._building(held)
-        if gen.sign_role_id is None:
-            # A generation recorded before the sign login existed whose job was already past
-            # `provider` at the upgrade: its sign chain is made here, as `provider` would have
-            # (r8.5: an in-flight job finishes normally).
-            gen = await self._with_sign_names(held, gen)
-            sign_role_id = await self._sign_chain(held, gen, await self._approle_accessor())
-            await held.commit(step=held.record.step, actor=SERVICE,
-                              update_generations={gen.salt: {"sign_role_id": sign_role_id}})
-            gen = await self._building(held)
+        if gen.sign_role_id is None or gen.evidence_role_id is None:
+            gen = await self._make_missing_chains(held, gen)
         wrapped = [self.secret(str(field_of(answered(await self._bao.post(
             f"/v1/auth/approle/role/{approle}/secret-id", headers={"X-Vault-Wrap-TTL": WRAP_TTL})), "wrap_info", "token")))
-            for approle in (gen.approle, gen.sign_approle)]
-        await self._commit_next(held, update_generations={
-            gen.salt: {"wrapped_secret": wrapped[0], "sign_wrapped_secret": wrapped[1]}})
+            for approle in (gen.approle, gen.sign_approle, gen.evidence_approle)]
+        await self._commit_next(held, update_generations={gen.salt: {
+            "wrapped_secret": wrapped[0], "sign_wrapped_secret": wrapped[1], "evidence_wrapped_secret": wrapped[2]}})
+
+    async def _make_missing_chains(self, held: HeldTenant, gen: Generation) -> Generation:
+        """A generation recorded before the sign or the evidence login existed whose job was already past `provider` at
+        the upgrade: the chain it lacks is made here, as `provider` would have (r8.5: an in-flight job finishes
+        normally)."""
+        gen = await self._with_names(held, gen)
+        accessor = await self._approle_accessor()
+        made: dict[str, str] = {}
+        if gen.sign_role_id is None:
+            made["sign_role_id"] = await self._sign_chain(held, gen, accessor)
+        if gen.evidence_role_id is None:
+            made["evidence_role_id"] = await self._evidence_chain(held, gen, accessor)
+        await held.commit(step=held.record.step, actor=SERVICE, update_generations={gen.salt: made})
+        return await self._building(held)
 
     async def _sweep(self, held: HeldTenant) -> None:
-        """Every secret id of both AppRoles but the ones the host installed is destroyed (P1, RC-9,
-        A24'); the new generation goes live, the one before it `retiring` (DC-5)."""
+        """Every secret id of the three AppRoles but the ones the host installed is destroyed (P1, RC-9,
+        A24', #1546); the new generation goes live, the one before it `retiring` (DC-5)."""
         gen = await self._building(held)
         if not gen.secret_accessor:
             raise StepFailed("the host recorded no installed secret")
-        if not gen.sign_approle or not gen.sign_secret_accessor:
-            # Installed before the sign login existed (a job in flight across the upgrade, r8.5): back
-            # to `wrap`, which makes the sign chain and wraps both secrets for a fresh install.
+        if not (gen.sign_approle and gen.sign_secret_accessor and gen.evidence_approle and gen.evidence_secret_accessor):
+            # Installed before the sign or the evidence login existed (a job in flight across the upgrade, r8.5): back
+            # to `wrap`, which makes the chain it lacks and wraps every secret for a fresh install.
             await held.commit(step="wrap", actor=SERVICE)
             return
         await self._sweep_secret_ids(gen.approle, keep=gen.secret_accessor)
         await self._sweep_secret_ids(gen.sign_approle, keep=gen.sign_secret_accessor)
+        await self._sweep_secret_ids(gen.evidence_approle, keep=gen.evidence_secret_accessor)
         await self._commit_next(held, go_live=gen.salt)
 
     async def _sweep_secret_ids(self, approle: str, *, keep: str) -> None:
@@ -446,9 +474,20 @@ class ManagementService(Actor):
                 paths.append(f"auth/approle/role/{gen.sign_approle}")
             if gen.sign_entity is not None:
                 paths.append(f"identity/entity/name/{gen.sign_entity}")
+            if gen.evidence_entity is not None:
+                paths.append(f"identity/entity/name/{gen.evidence_entity}")
             for path in paths:
                 answered(await self._bao.delete(f"/v1/{path}"), 404)
+            await self._revoke_evidence_role(gen)
         return bots
+
+    async def _revoke_evidence_role(self, gen: Generation) -> None:
+        """The generation's evidence AppRole, read first (a role already gone is done with no delete sent, RC-4)."""
+        if gen.evidence_approle is None:
+            return
+        path = f"/v1/auth/approle/role/{gen.evidence_approle}"
+        if answered(await self._bao.get(f"{path}/role-id"), 404).status_code != 404:
+            answered(await self._bao.delete(path), 404)
 
     async def _delete_bots(self, bots: list[str]) -> None:
         """Each bot account deleted WITHOUT purge (its integrations go with it, G8), the step's last
@@ -467,7 +506,7 @@ class ManagementService(Actor):
         await self._identity.end_tenant(held.tenant_id, now=self._clock())
         repo = await self._repo_of(held)
         bots = await self._revoke([g for g in await held.generations() if g.status != "destroyed"], repo=repo)
-        await self._destroy_key(held.tenant_id)
+        await self._destroy_keys(held.tenant_id)
         if repo is not None:
             answered(await self._forge.patch(f"/api/v1/repos/{repo}", json={"archived": True}), 404)
         await self._delete_bots(bots)
@@ -479,7 +518,7 @@ class ManagementService(Actor):
         (Flow 2.4, A25), and the tenant's system and case records, every version, with its imported
         mark (#1366 O10), in the same fenced commit."""
         bots = await self._revoke(await held.generations(), repo=await self._repo_of(held))
-        await self._destroy_key(held.tenant_id)
+        await self._destroy_keys(held.tenant_id)
         await self._delete_bots(bots)
         now = self._clock()
         await held.commit(step="delete_repo", actor=SERVICE, state="offboarded", pending_action="delete_repo",
@@ -501,6 +540,12 @@ def _sign_names(tenant: str, salt: str) -> dict[str, str]:
     """The names of a generation's sign-only AppRole and its own entity (A24'; OpenBao allows one
     alias per entity and auth mount, so the sign login cannot share the delivery entity)."""
     return {"sign_approle": f"sign-{tenant}-{salt}", "sign_entity": f"tenant-{tenant}-{salt}-sign"}
+
+
+def _evidence_names(tenant: str, salt: str) -> dict[str, str]:
+    """The names of a generation's evidence AppRole and its own entity (#1546 r9; one alias per entity and auth mount,
+    so it cannot share another login's entity). The AppRole's name starts `evidence-`."""
+    return {"evidence_approle": f"evidence-{tenant}-{salt}", "evidence_entity": f"tenant-{tenant}-{salt}-evidence"}
 
 
 def _rule(response: httpx.Response, repo: str) -> dict[str, Any]:

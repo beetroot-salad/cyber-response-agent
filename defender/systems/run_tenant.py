@@ -22,7 +22,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from defender.tenancy import Tenant, accept_tenant, clone_halves
+from defender.tenancy import JobTenant, Tenant, accept_tenant, clone_halves
 from defender.records.formats import TenantId, TenantRefused
 from defender.tenancy import RecordsUnreachable
 from defender.systems.verb_dispositions import DispositionError, RunGrants, require_gather_query, run_grants
@@ -68,14 +68,14 @@ class RunReadiness:
 
 @dataclasses.dataclass(frozen=True)
 class RunTenant:
-    """One run's tenant: the accepted `Tenant`, its grants, item 3's dispatch identity, and what
+    """One run's tenant: the accepted `Tenant` (or, in a job container, its `JobTenant`), its grants, item 3's dispatch identity, and what
     its settings say (#1107).
 
     `correlation` is `None` for a run that dispatches no lead zero (a resumed sibling),
     otherwise the checked `CorrelationDispatch`, whose `system` is `None` when the table
     withholds the lead."""
 
-    tenant: Tenant
+    tenant: Tenant | JobTenant
     grants: RunGrants
     correlation: CorrelationDispatch | None
     #: One entry per enabled system record (#1366 O6), its stored settings held verbatim (keys
@@ -114,16 +114,23 @@ class RunTenant:
 
     @property
     def settings(self) -> Path:
-        return self.settings_root if self.settings_root is not None else clone_halves(self.tenant)[1]
+        return self.settings_root if self.settings_root is not None else _clone_halves(self.tenant)[1]
 
     @property
     def agent(self) -> Path:
-        return self.agent_root if self.agent_root is not None else clone_halves(self.tenant)[0]
+        return self.agent_root if self.agent_root is not None else _clone_halves(self.tenant)[0]
 
     @property
     def table_pointer(self) -> str:
         """This tenant's table as the model is told of it (`table_pointer`)."""
         return table_pointer(self.tenant_id)
+
+
+def _clone_halves(tenant: Tenant | JobTenant) -> tuple[Path, Path]:
+    """The accepted tenant's own `(agent/, settings/)`; a job tenant holds no clone, so a caller over one names its roots."""
+    if isinstance(tenant, JobTenant):
+        raise TenantRefused("a job tenant holds no knowledge clone: its run copy's or its export's roots are named")
+    return clone_halves(tenant)
 
 
 def correlation_dispatch(settings: Path, grant: VerbGrant) -> CorrelationDispatch:
@@ -165,7 +172,7 @@ def resolve_tenant(  # noqa: PLR0913 — the request, the folder rules' inputs a
 
 
 def run_tenant_for(  # noqa: PLR0913 — the tenant, its records, its two roots, the staged token, the flag
-    tenant: Tenant, *, dispatches_lead_zero: bool, records: TenantRecords, catalog: Catalog,
+    tenant: Tenant | JobTenant, *, dispatches_lead_zero: bool, records: TenantRecords, catalog: Catalog,
     agent_root: Path | None = None, settings_root: Path | None = None,
     stage_token: Path | None = None, defender_dir: Path | None = None,
 ) -> RunTenant:
@@ -175,13 +182,16 @@ def run_tenant_for(  # noqa: PLR0913 — the tenant, its records, its two roots,
     records (#1366 R10, O6; DC7: no folder read for them); its grants and lead-zero dispatch from
     `settings_root`'s table. `agent_root`/`settings_root` are the two halves of the one export
     the run reads (#1108 P4, O-B: run start hands its run copy's); each defaults to the tenant's
-    own folder (`clone_halves`). `catalog` is the one the caller holds over the run's single roster read: the adapter's
+    own folder (`clone_halves`; a `JobTenant` holds no clone, so a caller over one names both). `catalog` is the one the caller holds over the run's single roster read: the adapter's
     list of non-GET reads a record's access is judged against (#1504 O3), never a read of its own. `defender_dir` is accepted for callers that still pass it and is
     not read. Which of its records are its systems is the catalog's (`tenant_systems`)."""
     del defender_dir
-    clone_agent, clone_settings = clone_halves(tenant)
-    settings = Path(settings_root) if settings_root is not None else clone_settings
-    agent = Path(agent_root) if agent_root is not None else clone_agent
+    if agent_root is not None and settings_root is not None:
+        agent, settings = Path(agent_root), Path(settings_root)
+    else:
+        clone_agent, clone_settings = _clone_halves(tenant)
+        settings = Path(settings_root) if settings_root is not None else clone_settings
+        agent = Path(agent_root) if agent_root is not None else clone_agent
     ready = resolve_run_tenant_or_refuse(
         settings, tenant_id=tenant.id, dispatches_lead_zero=dispatches_lead_zero)
     return RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation,

@@ -48,7 +48,7 @@ LABEL = "lint_import_order"
 #: first needs the other direction.
 ORDER = (
     "lazy_door", "kit", "configuration", "execution", "_filesystem", "_flat", "job_socket", "providers", "records",
-    "database", "tenancy", "identity", "jobs", "migrations", "knowledge", "credential_proxy", "box", "integrations",
+    "database", "tenancy", "identity", "jobs", "migrations", "knowledge", "credential_proxy", "box", "evidence", "integrations",
     "system_rules", "systems", "system_records", "hooks", "skills", "investigation", "learning_store", "learning", "adoption", "presentation",
     "run_common", "agents",
     "job_host", "worker", "run", "lifecycle", "cli", "api", "api_server",

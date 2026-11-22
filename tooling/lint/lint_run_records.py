@@ -93,7 +93,7 @@ OWNER_MODULES: frozenset[str] = frozenset({
 SWEEP_DIRS: tuple[str, ...] = ("investigation", "learning", "learning_store", "integrations", "presentation", "cli", "hooks", "box", "execution", "_filesystem",
                                "api", "api_server", "tenancy", "identity", "jobs", "knowledge", "configuration", "records", "kit", "providers",
                                "systems", "system_rules", "system_records", "database", "migrations", "credential_proxy", "worker", "lifecycle",
-                               "job_host", "job_socket", "adoption")
+                               "job_host", "job_socket", "adoption", "evidence")
 SWEEP_TOP_LEVEL = True
 EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 

@@ -36,7 +36,8 @@ NEXT: Mapping[str, Mapping[str, tuple[str | None, str | None]]] = {
         "names": ("provider", SERVICE), "provider": ("bot", SERVICE), "bot": ("protect", SERVICE),
         "protect": ("integration", SERVICE), "integration": ("wrap", SERVICE), "wrap": ("install", HOST), "install": ("sweep", SERVICE),
         "sweep": ("retire", SERVICE), "retire": ("remove_old_file", HOST), "remove_old_file": (None, None)},
-    "offboard": {"offboard": ("teardown", HOST), "teardown": ("finish", SERVICE), "finish": ("delete_repo", SERVICE)},
+    "offboard": {"offboard": ("teardown", HOST), "teardown": ("evidence", HOST), "evidence": ("finish", SERVICE),
+                 "finish": ("delete_repo", SERVICE)},
     "delete_repo": {"delete_repo": (None, None)},
 }
 #: The longest failure text recorded.
@@ -115,6 +116,9 @@ class Actor:
     """One pass of the job for one actor (`SERVICE` or `HOST`); subclasses name their steps."""
 
     actor: str = ""
+    #: Steps after which a pass leaves the tenant to the next pass even when its next step is the same actor's: the next
+    #: step starts on a fresh lock hold and a fresh look at the row (host: `teardown`, then the repeatable `evidence`).
+    ends_pass: frozenset[str] = frozenset()
 
     def __init__(self, tenants: TenantRepository, *, clock: Callable[[], _dt.datetime],
                  secrets: tuple[str, ...] = ()) -> None:
@@ -157,6 +161,8 @@ class Actor:
                 if body is None:
                     raise StepFailed(f"the {self.actor} has no step {step!r}")
                 await body(held)
+                if step in self.ends_pass:
+                    return ran + 1
             except FenceMissed as missed:
                 _logger.warning("tenant %s: %s stopped at %s: %s", held.tenant_id, self.actor, step, missed)
                 return ran + 1

@@ -7,6 +7,7 @@ The service alone holds the forge and OpenBao admin powers; the API never loads 
 
 from __future__ import annotations
 
+from defender.lifecycle._evidence import sweep_evidence
 from defender.lifecycle._host import HostActor
 from defender.lifecycle._job import StepFailed
 from defender.lifecycle._process import git_runner, integration_runner, serve
@@ -16,5 +17,5 @@ from defender.lifecycle.config import ConfigRefused, LifecycleConfig
 
 __all__ = [
     "ConfigRefused", "HostActor", "LifecycleConfig", "ManagementService", "RunsFoldersRefused", "StepFailed",
-    "git_runner", "integration_runner", "make_runs_folders", "serve",
+    "git_runner", "integration_runner", "make_runs_folders", "serve", "sweep_evidence",
 ]

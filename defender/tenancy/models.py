@@ -151,7 +151,11 @@ class Generation(Base, kw_only=True):
 
     The `sign_*` fields mirror the delivery chain's for the generation's sign-only AppRole (#1163
     A24'): its own entity, role id, wrapped and installed secret, and the host file beside the
-    delivery one. A generation recorded before them reads back with them None."""
+    delivery one. A generation recorded before them reads back with them None.
+
+    The `evidence_*` fields are the same chain for the generation's evidence login (#1546 r9): an AppRole on the
+    evidence policy that takes a datakey of, and decrypts with, the tenant's own `evidence-<T>` key and nothing
+    else, its own entity carrying the tenant, its role id, wrapped and installed secret and the host file."""
 
     __tablename__ = "generations"
     __table_args__ = (
@@ -179,6 +183,44 @@ class Generation(Base, kw_only=True):
     sign_secret_file: Mapped[Path | None] = mapped_column(_PathText, default=None)
     sign_wrapped_secret: Mapped[str | None] = mapped_column(Text, default=None)
     sign_secret_accessor: Mapped[str | None] = mapped_column(Text, default=None)
+    evidence_approle: Mapped[str | None] = mapped_column(Text, default=None)
+    evidence_entity: Mapped[str | None] = mapped_column(Text, default=None)
+    evidence_role_id: Mapped[str | None] = mapped_column(Text, default=None)
+    evidence_secret_file: Mapped[Path | None] = mapped_column(_PathText, default=None)
+    evidence_wrapped_secret: Mapped[str | None] = mapped_column(Text, default=None)
+    evidence_secret_accessor: Mapped[str | None] = mapped_column(Text, default=None)
+
+
+#: The least and the most days an evidence retention value may be (#1546 A-O7, `0028_evidence_retention`).
+RETENTION_LEAST, RETENTION_MOST = 30, 730
+
+
+@dataclasses.dataclass(frozen=True)
+class EvidenceRetention:
+    """How long a tenant keeps the evidence of an ended investigation and of an ended learning job, in days from the
+    acceptance of each object (#1546 A-O7)."""
+
+    investigation_days: int
+    learning_days: int
+
+
+class EvidenceRetentionRow(Base, kw_only=True):
+    """The tenant's retention (#1546 A-O7, D16): one row per tenant, written with the tenant at its creation and replaced
+    whole by the API; no default exists, and an offboarded tenant keeps its row (investigations name it)."""
+
+    __tablename__ = "evidence_retention"
+    __table_args__ = (
+        CheckConstraint(f"investigation_days BETWEEN {RETENTION_LEAST} AND {RETENTION_MOST}", name="investigation_days"),
+        CheckConstraint(f"learning_days BETWEEN {RETENTION_LEAST} AND {RETENTION_MOST}", name="learning_days"),
+        {"schema": SCHEMA},
+    )
+
+    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
+    investigation_days: Mapped[int] = mapped_column(Integer)
+    learning_days: Mapped[int] = mapped_column(Integer)
+
+    def as_record(self) -> EvidenceRetention:
+        return EvidenceRetention(investigation_days=self.investigation_days, learning_days=self.learning_days)
 
 
 class PublishStatus(Base, kw_only=True):

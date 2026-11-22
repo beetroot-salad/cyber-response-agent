@@ -299,7 +299,12 @@ credential generation has two AppRoles, each with its own entity carrying the te
 which mints the bot's forge token, and a sign-only AppRole on `defender-tenant-sign`
 (`LifecycleConfig.sign_policy`), whose one rule is `update` on
 `transit/sign/request-token-{{identity.entity.metadata.tenant_id}}`, so a tenant's sign login signs
-only with its own key. The credential proxy's policy is KV read plus `update` on
+only with its own key. A third, the evidence AppRole, is on `defender-tenant-evidence`
+(`LifecycleConfig.evidence_policy`, #1546): `update` on
+`transit/datakey/plaintext/evidence-{{identity.entity.metadata.tenant_id}}` and
+`transit/decrypt/evidence-{{identity.entity.metadata.tenant_id}}`, so a tenant's evidence login takes and opens data keys
+of its own `evidence-<T>` key only (an aes256-gcm96 key the lifecycle makes once per tenant and deletes at offboarding;
+the management login's policy needs create, read, update and delete on `transit/keys/evidence-*`). The credential proxy's policy is KV read plus `update` on
 `transit/verify/request-token-*`. Login tokens are never revoked: every AppRole login, the lifecycle's
 one-shot ones (minting the bot's token, proving the sign pair at install) and the held ones (a
 run's request signer, the forge credential), lives out its 10-minute TTL. Revoking would not

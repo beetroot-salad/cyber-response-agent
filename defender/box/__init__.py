@@ -48,12 +48,18 @@ from defender.execution.box_codec import (
     encode_response,
 )
 from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.py/tests import `box.scrub`, `box.RunTainted`
+    CLEAN,
     Finding,
+    Lister,
     RunTainted,
+    classify_entry,
     scrub,
+    state_of_verdict,
     tree_unsandboxed,
     tree_verified,
     verdict_path,
+    unreadable_finding,
+    verdict_state,
     write_did_not_run,
 )
 from ._ending import BoxEnding, BoxLost
@@ -193,7 +199,9 @@ __all__ = [
     "ClassVar",
     "DEFAULT_SPEC",
     "DockerFn",
+    "CLEAN",
     "Finding",
+    "Lister",
     "ImageInputError",
     "Mapping",
     "Mount",
@@ -207,6 +215,9 @@ __all__ = [
     "RELAY_LOST",
     "RelayTransport",
     "RunTainted",
+    "classify_entry",
+    "state_of_verdict",
+    "unreadable_finding",
     "START_TOKEN_LABEL",
     "TENANT_LABEL",
     "CLAIM_ENV",
@@ -316,6 +327,7 @@ __all__ = [
     "unboxed_executor",
     "uuid",
     "verdict_path",
+    "verdict_state",
     "write_did_not_run",
     "write_guarded",
 ]

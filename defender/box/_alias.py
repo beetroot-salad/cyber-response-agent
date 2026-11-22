@@ -62,8 +62,8 @@ def _alias_probe_inconclusive_message(cwd: Path, detail: str) -> str:
     message = (
         f"the alias ban could not be OBSERVED inside the box: the probe's own control "
         f"operations failed under {cwd}, so nothing it saw about the six banned shapes is "
-        f"evidence either way. This is the box's writable mount — full, read-only, or not "
-        f"there — and not the seccomp registration; check {cwd} inside the container."
+        f"evidence either way. This is the directory the probe works in — full, read-only, or "
+        f"not there — and not the seccomp registration; check {cwd} inside the container."
     )
     if detail:
         message += f" probe reported: {detail}"
