@@ -99,10 +99,10 @@ def _plant_decoy(t: Any) -> None:
     root = tenant_root(t)
     export = root / "exports" / t.commit
     for half in ("agent", "settings"):
-        shutil.copytree(Path(t.clone) / half, export / half, symlinks=True)
+        shutil.copytree(Path(t.checkout) / half, export / half, symlinks=True)
     (root / "exports" / "current").write_text(f"{t.commit}\n", encoding="utf-8")
-    (Path(t.clone) / LESSON).write_text(lesson_text(CLONE_ONLY_MARK), encoding="utf-8")
-    (Path(t.clone) / MARK_FILE).write_text(mark_text(CLONE_ONLY_MARK), encoding="utf-8")
+    (Path(t.checkout) / LESSON).write_text(lesson_text(CLONE_ONLY_MARK), encoding="utf-8")
+    (Path(t.checkout) / MARK_FILE).write_text(mark_text(CLONE_ONLY_MARK), encoding="utf-8")
 
 
 def _retire_local_state(t: Any) -> None:
@@ -136,7 +136,7 @@ def scene(tmp_path: Path, data_root: Path, *, decoy: bool = False) -> Iterator[P
         vault = VaultHTTP(tenant_id)
         stand_in = SimpleNamespace(id=tenant_id, tenant_root=Path(location_path(data_root)) / tenant_id, knowledge=clone)
         t = PublishedTenant(
-            tenant=stand_in, data_root=data_root, clone=clone, remote=remote, origin=origin,
+            tenant=stand_in, data_root=data_root, checkout=clone, remote=remote, origin=origin,
             forge=ForgeHTTP(remote=remote, origin=origin), vault=vault, identity=vault.identity(), server=server,
             scratch=scratch, export=SimpleNamespace(commit=seed), p3=(stand_in, remote, None))
         bind_forge(t)

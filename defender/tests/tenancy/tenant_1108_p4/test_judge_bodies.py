@@ -17,7 +17,6 @@ path)` seam (body read and pre-move test alike), which `ProductRepo` serves.
 from __future__ import annotations
 
 import json
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,7 +25,7 @@ import pytest
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
 
-from ._support import current_commit, export_dir, git, published_tenant
+from ._support import committed_blobs, current_commit, export_dir, git, plant_old_clone, published_tenant
 
 #: The fixture tenant's own lesson (committed under `defender/tests/fixtures/tenant-fixture/agent/lessons/`).
 NAME = "fixture-owner-before-close"
@@ -112,8 +111,9 @@ def scene(tmp_path, data_root):
                                  SETTINGS_BAIT[0]: SETTINGS_BAIT[1]}) as t:
         k1 = t.commit
         k2 = t.merge({TENANT_PATH: _lesson(CURRENT)}, message="a later merged lesson edit")
-        assert t.publish().commit == k2
-        (t.clone / TENANT_PATH).write_text(_lesson(WORKTREE), encoding="utf-8")
+        assert t.origin_main() == k2, "premise: main is the later commit"
+        # #1618: (c) is `main`'s tip now (no `current`), (d) a decoy where the old clone's working tree was.
+        plant_old_clone(t, {TENANT_PATH: _lesson(WORKTREE)})
         product = _product_repo(tmp_path / "product")
         ep = J.accepted_episode(tmp_path / "ep", ledgers={"b": [J.oracle_row("b")], "c": []})
         assert Path(ep).parent.parent.name == t.tenant_id, "fixture bug: episode not the tenant's"
@@ -172,12 +172,13 @@ def test_o6_a_pre_move_run_is_judged_on_the_product_tree_at_its_code_commit(scen
         "the product body was not read from the product repository at the code commit")
 
 
-def test_o6_a_post_move_run_is_judged_on_the_export_at_its_knowledge_commit(scene):
-    """The code commit's tree lacks the lesson, so the body is the export's at the knowledge
-    commit: not the product tree at an older commit, `current`, or the clone."""
+def test_o6_a_post_move_run_is_judged_on_the_body_at_its_knowledge_commit(scene, helper):
+    """The code commit's tree lacks the lesson, so the body is the knowledge commit's (#1618: a copy the helper makes):
+    not the product tree at an older commit, `main`'s tip, or the old clone's place; and no `exports/` or `current` is
+    made."""
     _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1})
-    _only(_shown(scene), EXPORT)
-    assert current_commit(scene.t.tenant) == scene.k2, "the judge moved `current`"
+    _only(_shown_with(scene), EXPORT)
+    assert current_commit(scene.t.tenant) is None, "the judge made a `current`"
 
 
 @pytest.fixture
@@ -201,7 +202,7 @@ def test_1618_k5_a_post_move_run_is_judged_on_the_body_at_its_commit_copied_from
     """The judge shows the lesson body at the sibling's knowledge commit as the helper's copy holds it (fetched by id);
     no export is made and nothing else is read. (F3, K5)"""
     _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1})
-    shutil.rmtree(export_dir(scene.t.tenant, scene.k1))
+    assert not export_dir(scene.t.tenant, scene.k1).exists(), "premise: no export stands for the commit"
 
     _only(_shown_with(scene), EXPORT)
 
@@ -272,16 +273,16 @@ def test_o6_a_post_move_run_with_no_readable_knowledge_commit_is_unreadable_nami
         "an export folder was made for a commit the clone does not hold")
 
 
-def test_o6_a_traversing_lesson_name_is_never_read_out_of_the_export(scene):
+def test_o6_a_traversing_lesson_name_is_never_read_out_of_the_export(scene, helper):
     """`lessons_loaded.jsonl` is box-writable, so a row's `lesson_name` may walk out of
     `agent/lessons/`; the export holds a file exactly there and the judge never shows it. The
     row's slot is still shown, named, and the ordinary lesson beside it renders (control)."""
     _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1},
            names=(TRAVERSAL_NAME, NAME))
-    assert (export_dir(scene.t.tenant, scene.k1) / SETTINGS_BAIT[0]).is_file(), (
-        "fixture bug: the bait the traversal would reach is not in the export")
+    assert SETTINGS_BAIT[0] in committed_blobs(scene.t.remote, scene.k1, "settings"), (
+        "fixture bug: the bait the traversal would reach is not in the commit (so not in its copy)")
 
-    shown = _shown(scene)
+    shown = _shown_with(scene)
 
     assert SETTINGS_MARKER not in shown, (
         "a traversing lesson name was read outside the export's agent/lessons/")
@@ -314,8 +315,8 @@ def test_o6_a_hostile_knowledge_commit_is_unreadable_and_reads_nothing_outside_e
     (bait / "agent" / "lessons" / f"{NAME}.md").write_text(
         _lesson("O6-BODY-FROM-AN-ABSOLUTE-PATH"), encoding="utf-8")
     commit = HOSTILE_COMMITS[shape].format(out=out, abs=bait)
-    exports = export_dir(scene.t.tenant, scene.k1).parent
-    before = sorted(p.name for p in exports.iterdir())
+    tenant_dir = export_dir(scene.t.tenant, scene.k1).parent.parent
+    before = sorted(p.name for p in tenant_dir.iterdir())
     _stamp(scene, code=scene.product.post, knowledge={"commit": commit})
 
     shown = _shown(scene)
@@ -324,5 +325,5 @@ def test_o6_a_hostile_knowledge_commit_is_unreadable_and_reads_nothing_outside_e
     assert not leaked, f"a hostile knowledge commit read a body from somewhere: {leaked}"
     assert f"### {NAME}" in shown, "the lesson vanished from the judge's view entirely"
     assert not out.exists(), "an option-shaped commit made git write a host file"
-    assert sorted(p.name for p in exports.iterdir()) == before, (
-        "an export folder was made for a hostile commit")
+    assert sorted(p.name for p in tenant_dir.iterdir()) == before, (
+        "a folder (an export, a copy) was made in the tenant's folder for a hostile commit")

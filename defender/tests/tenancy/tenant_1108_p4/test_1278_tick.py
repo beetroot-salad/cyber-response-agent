@@ -14,6 +14,7 @@ import importlib
 import signal
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -31,7 +32,6 @@ from defender.tests.support.learning.core._store1278 import (
     files_under,
     finding,
     foreign_commit_on,
-    forget_local_branch,
     kill_if_alive,
     lapse_lease,
     lease_seconds_left,
@@ -175,7 +175,7 @@ def test_d5_the_branch_is_set_at_claim_base_and_start_with_the_first_commit_and_
     assert not row.reverts
     assert [c[0] for c in row.changes] == [f"agent/lessons/{LESSON_NAME}"]
     assert dict(remote_branches(w.t.remote))[branch] == writer.commits[0]
-    assert git(w.t.clone, "show", "--name-only", "--format=", writer.commits[0]).split() == [f"agent/lessons/{LESSON_NAME}"], \
+    assert git(w.t.remote, "show", "--name-only", "--format=", writer.commits[0]).split() == [f"agent/lessons/{LESSON_NAME}"], \
         "raw findings (or anything but the lesson) went into Git (H1)"
 
 
@@ -190,7 +190,8 @@ def test_o3_a_holder_whose_lease_lapsed_makes_no_commit_and_changes_no_item(worl
     assert writer.served, critical_text(caplog)
     assert writer.commits == []
     assert remote_branches(w.t.remote) == {}
-    assert git(w.t.clone, "for-each-ref", "refs/heads/lessons/") == ""
+    # #1618: the tick's private repository (where an unpushed commit could live) is gone with the tick.
+    assert K.repo_scratch(w.t) == []
     assert _record(w) == []
     [batch] = _batches(w).values()
     assert batch.phase == "working", "a holder past its lease cannot end its own batch"
@@ -404,12 +405,23 @@ def test_o1_every_recovery_path_judges_a_lapse_by_the_databases_clock_alone(worl
         assert after is None, "offboarding a batch lapsed past grace left its rows"
 
 
+def _replacement_host(w: Any) -> None:
+    """The host as a replacement one finds it (was `forget_local_branch` on the clone): no draft, and no private
+    repository of an earlier tick left under `.repo-scratch/` (premise: the stranded tick closed its own)."""
+    import shutil
+
+    for draft in (drafts_dir(w.t).iterdir() if drafts_dir(w.t).is_dir() else ()):
+        shutil.rmtree(draft, ignore_errors=True)
+    assert K.repo_scratch(w.t) == [], "premise: the earlier tick left its private repository"
+
+
 def test_o1_a_branch_only_on_the_forge_is_verified_against_the_record_and_gets_its_pr_from_a_fresh_clone(world, caplog):  # noqa: F811 — the imported fixture
-    """The replacement host's clone has no local branch: the takeover fetches the tip, finds it is the recorded commit, opens the PR. (O1, D11b)"""
+    """A replacement host has no draft and no repository of the stranded tick's (#1618: every tick's repository is its own,
+    so this is every takeover): the takeover fetches the tip, finds it is the recorded commit, opens the PR. (O1, D11b)"""
     w = world
     writer, batch_id, branch = _stranded(w, caplog)
-    forget_local_branch(w.t.clone, branch, drafts=drafts_dir(w.t))
-    assert git(w.t.clone, "for-each-ref", f"refs/heads/{branch}") == ""
+    _replacement_host(w)
+    assert dict(remote_branches(w.t.remote))[branch] == writer.commits[0], "premise: the branch is only on the forge"
 
     lapse_lease(w.dsn, batch_id)
     _tick(w, writer)
@@ -426,7 +438,7 @@ def test_o5_a_forge_tip_beyond_the_record_is_not_opened_and_goes_to_a_person(wor
     w = world
     writer, batch_id, branch = _stranded(w, caplog)
     foreign_commit_on(w.t.remote, branch, w.scratch)
-    forget_local_branch(w.t.clone, branch, drafts=drafts_dir(w.t))
+    _replacement_host(w)
 
     lapse_lease(w.dsn, batch_id)
     _tick(w, writer)

@@ -76,8 +76,10 @@ def _write_files(checkout: Path, files: Files | None) -> None:
 @dataclass(frozen=True, eq=False)
 class PublishedTenant:
     """An accepted tenant whose Forgejo repository (the bare `remote`, served at `origin`) holds the fixture (plus any
-    `files`) on `main`, with a forge fake and an issuer fake. `clone` is the test's own seed checkout, outside the data
+    `files`) on `main`, with a forge fake and an issuer fake. `checkout` is the test's own seed checkout, outside the data
     root (`seed_checkout`): a human's copy, never read by the code under test. `export.commit` (= `commit`) is the seed.
+    There is no `clone` (#1618 K8): reading `.clone` raises, so a case written against the host clone is ruled on, never
+    silently re-pointed at the checkout.
 
     Fault seams are P3's fakes: `server` (`GitHTTP`: `.refuse`, `.on_service` returning a
     `Trickle`), `forge` (`ForgeHTTP`: `.fault`, `.protection`), `vault` (`VaultHTTP`: `.status`,
@@ -88,7 +90,7 @@ class PublishedTenant:
 
     tenant: Any
     data_root: Path
-    clone: Path
+    checkout: Path
     remote: Path
     origin: str
     forge: ForgeHTTP
@@ -104,6 +106,12 @@ class PublishedTenant:
     @property
     def tenant_id(self) -> str:
         return str(self.tenant.id)
+
+    @property
+    def clone(self) -> Path:
+        raise AttributeError(
+            "#1618 K8: a tenant has no clone on the host; `checkout` is the test's own seed checkout (outside the data root, "
+            "no reader looks there), a decoy for a reader that might still read the old clone goes under `<T>/knowledge`")
 
     @property
     def directory(self) -> Any:
@@ -154,7 +162,7 @@ class PublishedTenant:
             # #1366 R8 DERIVED read `<T>/knowledge/settings`, which #1618 removes: derive from the seed checkout's instead.
             from defender.tests.support.tenancy._systems1366 import derive
 
-            merged["records"] = derive(Path(self.clone) / "settings")
+            merged["records"] = derive(Path(self.checkout) / "settings")
         if merged.get("wiring", True) and "generations" not in merged:
             # The fixture tenant's elastic is proxied (#1391 P1/D12): run start needs a live generation with a
             # sign login. A test whose premise is "none" passes `generations=()`.
@@ -186,11 +194,6 @@ class PublishedTenant:
         options.setdefault("origin", self.origin)
         return target().TenantDelivery.open(self.tenant, **options)
 
-    def publish(self, **_options: Any) -> Any:
-        """#1618 r5 has no publish (readers fetch `main` themselves): what an existing case's "publish again" step stood for
-        is now only the remote's `main`, answered as `.commit` (read from the bare remote, no code under test runs)."""
-        return SimpleNamespace(commit=self.origin_main())
-
     def merge(self, files: Files, message: str = "human merge") -> str:
         """A human-merged PR: one commit on the fake origin's `main` writing `files` (`None`
         deletes); the clone and exports are untouched until something publishes. Returns the new
@@ -201,6 +204,15 @@ class PublishedTenant:
     def origin_main(self) -> str:
         """The fake origin's `main` tip, read from the bare remote."""
         return git(self.remote, "rev-parse", "refs/heads/main")
+
+
+def plant_old_clone(t: PublishedTenant, files: Files) -> Path:
+    """A decoy for a reader that might still read the host clone r5 deletes (#1618 K8): `files` written under
+    `<T>/knowledge/` (the old clone's place), never committed anywhere. Returns that folder."""
+    folder = Path(location_path(t.tenant.tenant_root)) / "knowledge"
+    folder.mkdir(exist_ok=True)
+    _write_files(folder, files)
+    return folder
 
 
 def place_fixture(root: Path, tenant_id: str = FIXTURE_TENANT_ID, *,
@@ -293,7 +305,7 @@ def publish_placed(scratch: Path, *, root: Path, tenant_id: str,
         vault = VaultHTTP(tenant_id)
         identity = vault.identity()
         yield PublishedTenant(
-            tenant=tenant, data_root=root, clone=work, remote=remote, origin=origin,
+            tenant=tenant, data_root=root, checkout=work, remote=remote, origin=origin,
             forge=forge, vault=vault, identity=identity, server=server, scratch=scratch,
             export=SimpleNamespace(commit=head), p3=(tenant, remote, None))
     finally:
@@ -489,6 +501,7 @@ __all__ = [
     "files_under",
     "fixture_agent_files",
     "place_fixture",
+    "plant_old_clone",
     "publish_once",
     "publish_placed",
     "git",
