@@ -60,7 +60,9 @@ class FetchWorld(LifecycleWorld):
 
             self.fetch.once(arm, lambda: setattr(server, "on_service", None))
         elif how == "down":
-            self.fetch.once(lambda: self._aim(lambda _t: f"http://127.0.0.1:{_closed_port()}/dead.git"),
+            # A well-formed recorded origin (`http://host:port/<owner>/<repo>.git`, as every forge wiring is) whose port is closed:
+            # the fetch reaches git and finds Forgejo unreachable, rather than refusing the URL's shape.
+            self.fetch.once(lambda: self._aim(lambda t: f"http://127.0.0.1:{_closed_port()}/tenants/{t}.git"),
                             lambda: self._aim(self._origin))
         else:
             self.fetch.once(lambda: server.refuse.add("git-upload-pack"), lambda: server.refuse.discard("git-upload-pack"))

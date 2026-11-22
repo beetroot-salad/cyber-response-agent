@@ -294,8 +294,7 @@ def listed_runs(scene: HelperScene) -> list[str]:
     from defender import tenancy
     from defender._paths import process_defender_dir
 
-    accepted = tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=process_defender_dir(),
-                                     clone_tree=False)
+    accepted = tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=process_defender_dir())
     return [str(r) for r in accepted.runs_repository().list()]
 
 
