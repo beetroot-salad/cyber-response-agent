@@ -41,6 +41,18 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Upgrade from before #1618
+
+A tenant's knowledge lives only in its Forgejo repository; the host keeps no clone, no `exports/` and no `current`, and
+no lock. Stop everything (the API, the workers, the learning drains, the lifecycle service) first. Deliver or abandon the
+in-flight learning batches with the old code, since their unpushed commits live on the clone and are not recovered
+afterwards (work not pushed is redone). Then, once per tenant, delete `<data root>/<T>/knowledge`, `<data root>/<T>/exports/`
+and `<data root>/<T>/knowledge.lock`, and run migrations (revision `0027_drop_publish_status`: it drops
+`tenancy.publish_status`). Everything that reads knowledge now needs Forgejo: a run, a learning job, a readiness check and
+the operator tools refuse, naming why, while it is unreachable; there is no stale fallback. A stored `stale` knowledge
+status is still read back as it was stored; new records say `fresh`, `pinned` or `unreadable`. The readiness check's
+`knowledge_copy` step is merged into `publish`.
+
 ## Upgrade from before #1565
 
 No migration. The learning store now refuses an item that arrives at a key it already holds with other content
