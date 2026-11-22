@@ -102,7 +102,7 @@ class ManagementService(Actor):
             integration_args=["--username", bot, "--name", f"defender-{salt}", "--issuer", self._config.issuer_url,
                               "--claim-eq", f"tenant_id={tenant}", "--scope", INTEGRATION_SCOPES,
                               "--repo", wiring.repo])
-        repo_url = held.record.repo_url or f"{self._config.forge_url.rstrip('/')}/{wiring.repo}"
+        repo_url = held.record.repo_url or f"{self._config.forge_page_base}/{wiring.repo}"
         await self._commit_next(held, add_generation=generation, wiring=wiring, repo_url=repo_url)
 
     async def _building(self, held: HeldTenant) -> Generation:

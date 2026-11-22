@@ -161,6 +161,14 @@ def active_tenant_directory(data_root: Path) -> Callable[..., TenantDirectory]:
 _JOB = {"creating": ("create", "names", "service"), "offboarding": ("offboard", "offboard", "service")}
 
 
+def record_repo_page(dsn: str, tenant: str, page: str | None) -> None:
+    """Set the page the lifecycle records on the tenant row when it creates the repository (`<forge url>/<repo>`), as
+    the home redesign's repository read serves it; `None` for none recorded."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    execute(dsn, "UPDATE tenancy.tenants SET repo_url = %s WHERE id = %s", (page, tenant))
+
+
 def insert_active_tenant(dsn: str, tenant: str, *, state: str = "active", repo: str | None = None,  # noqa: PLR0913
                          origin: str | None = None, wiring: bool = True,
                          data_root: Path | None = None, generations: Sequence[Mapping[str, Any]] = (),

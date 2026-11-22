@@ -56,6 +56,7 @@ from defender.tests.support.jobs._jobs1342 import (
     seed_alert_mapping,
 )
 from defender.tests.support.shared._postgres1339 import execute
+from defender.tests.support.tenancy._active1214 import record_repo_page
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
 
 pytestmark = pytest.mark.anyio
@@ -842,6 +843,7 @@ PERMISSION_OF = {
     ("GET", f"{TENANT}/readiness/{{}}"): "config.read",  # #1471 R2
     ("POST", f"{TENANT}/systems/{{}}/adoptions"): "config.write",  # #1471 A1
     ("GET", f"{TENANT}/adoptions/{{}}"): "config.read",  # #1471 A2
+    ("GET", f"{TENANT}/repository"): "work.read",  # home redesign: where the knowledge repo opens
     ("GET", f"{TENANT}/learning/items"): "work.read",  # #1485 O3
     ("GET", f"{TENANT}/learning/parked-batches"): "work.read",  # #1485 O3
     ("POST", f"{TENANT}/learning/items/{{}}/release"): "learning.manage",  # #1537 O7 (r3.1 forced choice)
@@ -1280,3 +1282,46 @@ async def test_1161_b10_no_interactive_docs_page_is_served_whatever_the_environm
         assert (await client.get("/api/openapi.json")).status_code == 200
         assert [p for p in route_paths(running.app.routes) if not p.startswith("/api/")] == []
         assert [(await client.get(p)).status_code for p in ("/docs", "/redoc", "/docs/oauth2-redirect", "/openapi.json")] == [404] * 4
+
+
+# --- Home redesign: where a browser opens a tenant's knowledge repository ---------------------------------------------
+
+async def _repository(served: Served, tenant: str = A) -> httpx.Response:
+    return await served.client.get(f"/api/tenants/{tenant}/repository", headers=served.ann(write=False))
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("page", ["http://forge.test/tenants/a", "https://forge.example:8443/tenants/a",
+                                  "http://localhost:3000/tenants/a"],
+                         ids=["http", "https-with-port", "the-apps-host-on-another-port"])
+async def test_home_the_repository_read_serves_the_page_the_lifecycle_recorded_on_the_tenant(served, page):
+    """A member reads the tenant row's `repo_url`, as recorded. (The app's own origin is `ORIGIN`; its host on
+    another port is another origin.)"""
+    record_repo_page(served.dsn, A, page)
+    r = await _repository(served)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"repo_url": page}
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("page", [
+    None, "ssh://git@forge.example/tenants/a", "git@forge.example:tenants/a", "file:///srv/tenants/a",
+    "https://bot:secret@forge.example/tenants/a", "https://bot@forge.example/tenants/a", "https:///tenants/a",
+    "https://forge.example/tenants/a?x=1", "https://forge.example/tenants/a#x", "tenants/a", "https://[forge.example/a",
+    f"{ORIGIN}/api/me", ORIGIN.upper() + "/x",
+], ids=["none-recorded", "ssh", "scp", "file", "user-and-password", "user", "no-host", "query", "fragment", "relative",
+        "malformed-host", "the-apps-own-origin", "the-apps-own-origin-spelled-otherwise"])
+async def test_home_the_repository_read_serves_null_for_none_or_a_page_a_browser_should_not_be_sent_to(served, page):
+    """Nothing recorded, or a value that is not an http(s) page with a host and no user part, query or fragment on
+    another origin than the app's: null, never the value (a user part may carry a credential)."""
+    record_repo_page(served.dsn, A, page)
+    r = await _repository(served)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"repo_url": None}
+
+
+@pytest.mark.postgres
+async def test_home_the_repository_read_of_a_tenant_the_person_is_not_in_is_not_found(served):
+    """Ann is in A only: B's repository read is 404, as every route under another tenant is."""
+    record_repo_page(served.dsn, B, "http://forge.test/tenants/b")
+    assert (await _repository(served, B)).status_code == 404
