@@ -51,9 +51,9 @@ def _local_origin_repository() -> type:
     class _LocalOriginRepository(GitRepository):
         remote: Path | None = None
 
-        def fetch(self) -> None:
-            _git.git(["fetch", "-q", str(self.remote), "+refs/heads/*:refs/remotes/origin/*"],
-                     cwd=self.path)
+        def fetch(self, *refs: str) -> None:
+            specs = [f"+{ref}:{ref}" for ref in refs] or ["+refs/heads/*:refs/heads/*"]
+            _git.git(["fetch", "-q", str(self.remote), *specs], cwd=self.path)
 
         def push(self, commit: str, branch: str) -> None:
             _git.git(["push", "-q", str(self.remote), f"{commit}:refs/heads/{branch}"],
