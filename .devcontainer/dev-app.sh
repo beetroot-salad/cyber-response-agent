@@ -18,8 +18,8 @@
 # in the host's browser. docker-compose.yml publishes the dev container's 8000 on the host's 127.0.0.1:8000; a container
 # made before that relies on an attached editor forwarding the port.
 #
-# It checks the one thing the API does not: that the live realm accepts that callback (Keycloak imports the realm file
-# on its first start only). It never migrates the database, starts compose services or changes the realm.
+# The API's own start refuses a realm that does not accept that callback (#1620). The script never migrates the
+# database, starts compose services or changes the realm.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -63,13 +63,6 @@ check() {
   CERTS="$(lifecycle_value SSL_CERT_DIR)"
   [ -n "$DSN" ] || die "$ISSUER/lifecycle.env sets no DEFENDER_DATABASE_DSN"
 
-  # Asked the way the browser will ask: an unregistered callback is refused (400), a registered one is sent on (302).
-  local code
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$KC/realms/defender/protocol/openid-connect/auth?\
-response_type=code&scope=openid&client_id=defender-api&redirect_uri=http%3A%2F%2Flocalhost%3A$APP_PORT%2Fapi%2Fauth%2Fcallback")"
-  [ "$code" = 302 ] || die "the live realm 'defender' does not accept http://localhost:$APP_PORT/api/auth/callback \
-(Keycloak answered $code): add it to the defender-api client's Valid redirect URIs (admin console at \
-http://localhost:8080), or recreate Keycloak's data so it imports keycloak/realm-defender.json"
   # The login theme, read as the live Keycloak's bootstrap admin: a warning only.
   local password token theme
   password="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$KEYCLOAK_CONTAINER" 2>/dev/null \

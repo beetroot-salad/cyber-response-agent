@@ -159,9 +159,9 @@ background. The browser on the host opens `http://localhost:8000`; the first adm
 set-password mail is in Mailpit at `http://localhost:8025`. The script's header says what it starts and checks.
 
 Keycloak imports the realm files on its first start only. A dev Keycloak made before #1161 still has the old callback,
-`http://localhost:8000/auth/callback`, and Keycloak answers `Invalid parameter: redirect_uri` until
+`http://localhost:8000/auth/callback`, and the API refuses to start at its redirect step until
 `http://localhost:8000/api/auth/callback` is added to the `defender-api` client's redirect URIs (the admin console, or
-recreating Keycloak's data). The launcher's check catches this.
+recreating Keycloak's data).
 
 Walk-through (needs the dev PostgreSQL, Keycloak with both realms imported, Mailpit, the lifecycle's Forgejo and
 OpenBao from `provision-dev-issuer.sh` with `playground-issuer/lifecycle.env`, the database migrated to head, and
