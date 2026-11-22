@@ -24,8 +24,7 @@ oracle's box, its bind folders in a per-claim folder under the data root, never 
 **The post-step and the family-less check** (`--kind post-step [--job <id>] --tenant T`). Its host half: the tenant's
 lock and admission (waiting as today). Its requests: `batch.start(lanes=)`, the drain's draft of `main`'s `agent/` (read through a delivery
 of the helper's own, no fetch child call), made here (the draft owned by this helper, C23), its id minted here; `forge.token(min_validity=)`, a fresh token of the tenant's
-forge credential, for at most 150 s (C25: fail closed above it); `record.published(commit=)` and
-`record.refusal(kind=, reason=)`, the drain's publish outcomes written to the tenant records (O3, O4); and the tick's
+forge credential, for at most 150 s (C25: fail closed above it); and the tick's
 store, `store.*` (#1487 Flow 2, `_store_relay`). Box: `batch`, over a draft this helper made.
 
 **Endings before the container** (A3, r4.1): a learning job's in the learning entry's own words (setup refused:
@@ -613,28 +612,6 @@ def _forge_token(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     return forge_token_answer(fields, lambda: _drain_credential(session, state))
 
 
-def _record_published(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
-    from defender.tenancy import record_published
-
-    commit = fields["commit"]
-    if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
-        raise Refused("record.published takes a full commit id", "bad-fields")
-    state = _state(session, _PostStep)
-    record_published(state.records, state.tenant.id, commit, by="drain")
-    return {"recorded": True}
-
-
-def _record_refusal(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
-    from defender.tenancy import OPERATOR, TRANSIENT, record_refusal
-
-    kind, reason = fields["kind"], fields["reason"]
-    if kind not in (TRANSIENT, OPERATOR) or not isinstance(reason, str):
-        raise Refused(f"record.refusal takes a kind ({TRANSIENT} or {OPERATOR}) and a reason", "bad-fields")
-    state = _state(session, _PostStep)
-    record_refusal(state.records, state.tenant.id, kind=kind, reason=reason, by="drain")
-    return {"recorded": True}
-
-
 def _drain_delivery(session: Session, state: _PostStep) -> Any:
     """A delivery of this helper's own, opened afresh (a private repository fetched at the moment: `main`'s tip then),
     held open to the helper's end; the batch's box is started through the latest."""
@@ -688,10 +665,6 @@ def register(registry: Registry) -> None:
     registry.add("copy.make", kinds=(LEARNING,), handler=_copy_make, optional=("world", "commit"))
     registry.add("batch.start", kinds=(POST_STEP,), handler=_batch_start, required=("lanes",))
     registry.add("forge.token", kinds=(POST_STEP,), handler=_forge_token, required=("min_validity",),
-                 after_signal=True)
-    registry.add("record.published", kinds=(POST_STEP,), handler=_record_published, required=("commit",),
-                 after_signal=True)
-    registry.add("record.refusal", kinds=(POST_STEP,), handler=_record_refusal, required=("kind", "reason"),
                  after_signal=True)
     registry.box_kind("shell", kinds=(LEARNING,), start=_sibling_box)
     registry.box_kind("oracle", kinds=(LEARNING,), start=_oracle_box)
