@@ -118,7 +118,7 @@ def _logged_instants(message: str) -> list[dt.datetime]:
     found = []
     for text in _TIMESTAMP.findall(message):
         at = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
-        found.append(at if at.tzinfo else at.replace(tzinfo=dt.timezone.utc))
+        found.append(at if at.tzinfo else at.replace(tzinfo=dt.UTC))
     return found
 
 

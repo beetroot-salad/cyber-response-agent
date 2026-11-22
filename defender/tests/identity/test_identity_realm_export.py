@@ -218,12 +218,14 @@ def test_keycloaks_own_email_is_sent_through_mailpit():
 # --- #1592 S3-15: Forgejo's client, and the browser flow it is bound to --------------------------------------
 
 FORGEJO_CLIENT = "forgejo"
+FORGEJO_FLOW = "forgejo browser"
 
 
-def _flow_named(realm: dict, reference: str) -> dict:
-    """The flow a binding override names: by id (as Keycloak exports it) or by alias."""
-    [flow] = [f for f in realm["authenticationFlows"] if reference in (f.get("id"), f["alias"])]
-    return flow
+def _flow_with_id(realm: dict, reference: str) -> dict:
+    """The flow a binding override names. Keycloak 26's import resolves an override only by flow id, never by alias."""
+    flows = [f for f in realm["authenticationFlows"] if f.get("id") == reference]
+    assert len(flows) == 1, f"the binding override {reference!r} is not the id of a flow in authenticationFlows (an alias is refused at import)"
+    return flows[0]
 
 
 def check_forgejo_client_always_asks_for_the_password(realm: dict) -> None:
@@ -240,8 +242,9 @@ def check_forgejo_client_always_asks_for_the_password(realm: dict) -> None:
     assert len(client["redirectUris"]) == 1
     assert client["redirectUris"][0].endswith("/user/oauth2/product/callback"), client["redirectUris"]
     bound = client["authenticationFlowBindingOverrides"]["browser"]
-    flow = _flow_named(realm, bound)
+    flow = _flow_with_id(realm, bound)
     assert flow["alias"] != realm["browserFlow"], "the client is bound to the realm's own browser flow"
+    assert flow["alias"] == FORGEJO_FLOW, flow["alias"]
     authenticators = [e.get("authenticator") for e in _executions(realm, flow["alias"])]
     assert "auth-cookie" not in authenticators, authenticators
     assert "auth-username-password-form" in authenticators, authenticators
@@ -262,6 +265,16 @@ def test_1592_the_forgejo_check_can_fail():
     _clients(own)[FORGEJO_CLIENT]["authenticationFlowBindingOverrides"]["browser"] = own["browserFlow"]
     with pytest.raises(AssertionError):
         check_forgejo_client_always_asks_for_the_password(own)
+    own_by_id = copy.deepcopy(realm)  # the realm's own flow, named by its id: resolvable, but the wrong flow
+    [own_flow] = [f for f in own_by_id["authenticationFlows"] if f["alias"] == own_by_id["browserFlow"]]
+    own_flow["id"] = "11111111-1592-4c3e-9b1a-000000000000"
+    _clients(own_by_id)[FORGEJO_CLIENT]["authenticationFlowBindingOverrides"]["browser"] = own_flow["id"]
+    with pytest.raises(AssertionError):
+        check_forgejo_client_always_asks_for_the_password(own_by_id)
+    by_alias = copy.deepcopy(realm)  # Keycloak 26 refuses to start on this ("Unable to resolve auth flow binding override")
+    _clients(by_alias)[FORGEJO_CLIENT]["authenticationFlowBindingOverrides"]["browser"] = FORGEJO_FLOW
+    with pytest.raises(AssertionError):
+        check_forgejo_client_always_asks_for_the_password(by_alias)
     bare = copy.deepcopy(realm)
     del _clients(bare)[FORGEJO_CLIENT]["authenticationFlowBindingOverrides"]
     with pytest.raises(KeyError):

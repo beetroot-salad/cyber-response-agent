@@ -192,16 +192,22 @@ def _seed_content(live: Live1592, tenant: str, marker: str) -> None:
 
 CALLBACK = "/user/oauth2/product/callback"
 PUBLIC_ASSETS = ("/assets/", "/avatars/", "/favicon.ico")
-SIGN_IN_TARGETS = ("/user/login", "/user/oauth2/", "/realms/")
+SIGN_IN_PREFIXES = ("/user/oauth2/", "/realms/")
 
 
-def no_session_answer_ok(method: str, path: str, status: int, where: str) -> bool:
-    """F10's no-session set for one allowlisted path: a 4xx refusal anywhere; a redirect only to the sign-in page, the
-    sign-in start or Keycloak; a 200 only for the sign-in page or a public asset; a 500 only for the callback."""
+def no_session_answer_ok(method: str, path: str, status: int, where: str, hosts: frozenset[str]) -> bool:
+    """F10's no-session set for one allowlisted path: a 4xx refusal anywhere; a redirect (to no host, or to `hosts`, the
+    edge and Keycloak) only to the sign-in page or start or the realm, or from a public asset to a public asset; a 200
+    only for the sign-in page or a public asset; a 500 only for the callback."""
     if 400 <= status < 500:
         return True
     if 300 <= status < 400:
-        return urllib.parse.urlsplit(where).path.startswith(SIGN_IN_TARGETS)
+        target = urllib.parse.urlsplit(where)
+        if target.netloc and target.netloc not in hosts:
+            return False
+        if target.path == "/user/login" or target.path.startswith(SIGN_IN_PREFIXES):
+            return True
+        return path.startswith(PUBLIC_ASSETS) and target.path.startswith(PUBLIC_ASSETS)
     if status == 200:
         return method == "GET" and (path == "/user/login" or path.startswith(PUBLIC_ASSETS))
     return status == 500 and path == CALLBACK
@@ -209,16 +215,22 @@ def no_session_answer_ok(method: str, path: str, status: int, where: str) -> boo
 
 def test_s4_15_classifier_accepts_the_ruled_answers_and_rejects_the_others():
     """S4-15 / F10: the no-session classifier takes exactly the answers the design names."""
+    hosts = frozenset({"forge.localhost:3000", "kc:8080"})
     ok = [("GET", "/x", 401, ""), ("POST", "/x", 403, ""), ("GET", "/x", 404, ""), ("GET", "/", 303, "/user/login"),
-          ("GET", "/", 302, "http://kc/realms/r/auth"), ("GET", "/x", 307, "/user/oauth2/product?a=1"),
+          ("GET", "/", 303, "/user/login?redirect_to=%2F"), ("GET", "/", 303, "http://forge.localhost:3000/user/login"),
+          ("GET", "/", 302, "http://kc:8080/realms/r/auth"), ("GET", "/x", 307, "/user/oauth2/product?a=1"),
           ("GET", "/user/login", 200, ""), ("GET", "/assets/js/index.js", 200, ""), ("GET", CALLBACK, 500, ""),
-          ("GET", "/avatars/ab", 303, "/user/login")]
+          ("GET", "/avatars/ab", 303, "/user/login"),
+          ("GET", "/favicon.ico", 301, "/assets/img/favicon.png"), ("GET", "/assets/a", 301, "/assets/b"),
+          ("GET", "/assets/a", 301, "http://forge.localhost:3000/assets/b")]
     bad = [("GET", "/x", 200, ""), ("GET", "/user/login/x", 200, ""), ("POST", "/user/logout", 200, ""),
            ("GET", "/", 302, "/elsewhere"), ("GET", "/x", 302, ""), ("POST", "/user/logout", 302, "https://evil/other"),
-           ("GET", "/x", 500, ""), ("POST", CALLBACK, 200, ""), ("GET", "/x", 502, ""), ("GET", "/assets/a", 301, "/assets/b"),
-           ("GET", CALLBACK, 302, "/")]
-    assert [c for c in ok if not no_session_answer_ok(*c)] == []
-    assert [c for c in bad if no_session_answer_ok(*c)] == []
+           ("GET", "/x", 500, ""), ("POST", CALLBACK, 200, ""), ("GET", "/x", 502, ""), ("GET", CALLBACK, 302, "/"),
+           ("GET", "/assets/a", 301, "http://evil/assets/b"), ("GET", "/assets/a", 301, "/repo/private"),
+           ("GET", "/x", 301, "/assets/b"), ("GET", "/", 302, "/user/login_x"), ("GET", "/", 302, "/user/login/x"),
+           ("GET", "/", 302, "http://evil/realms/r/auth"), ("GET", "/", 302, "http://evil/user/login")]
+    assert [c for c in ok if not no_session_answer_ok(*c, hosts)] == []
+    assert [c for c in bad if no_session_answer_ok(*c, hosts)] == []
 
 
 async def test_s4_15_every_allowlisted_path_asked_with_no_session_never_shows_tenant_content(rig: Rig, live: Live1592):
@@ -232,11 +244,12 @@ async def test_s4_15_every_allowlisted_path_asked_with_no_session_never_shows_te
     assert seen.status_code == 200 and marker in seen.text, "control: a member reads the marker through the edge"
     anonymous = httpx.Client(base_url=live.edge, follow_redirects=False, timeout=30)
     wrong = []
+    hosts = frozenset({urllib.parse.urlsplit(live.edge).netloc, urllib.parse.urlsplit(live.keycloak.base).netloc})
     for method, path in allowlist.allowed(repo(tenant)):
         response = anonymous.request(method, path)
         status, where = response.status_code, response.headers.get("location", "")
         assert marker not in response.text, (method, path)
-        ok = no_session_answer_ok(method, path, status, where)
+        ok = no_session_answer_ok(method, path, status, where, hosts)
         if not ok:
             wrong.append((method, path, status, where))
     assert wrong == []
@@ -281,8 +294,10 @@ async def test_s4_2_the_cookie_drop_defeats_the_signed_in_link(rig: Rig, live: L
     assert {k for k, (d, _a) in rows.items() if holds(d, alice_uid)} == holding_alice, (path, attack.trail)
     assert alice_keys <= set(rows)
     assert live.account(alice.login)["login_name"] == login_before and live.accounts() == accounts_before
-    if attack.trail[0][2] == 404:  # a variant the edge (or Forgejo) refuses at the start goes no further
-        assert len(attack.trail) == 1, attack.trail
+    edge_netloc = urllib.parse.urlsplit(live.edge).netloc
+    if all(urllib.parse.urlsplit(u).netloc == edge_netloc and s >= 400 for _m, u, s in attack.trail):
+        # the trail never left the start (the edge or Forgejo refused the variant with some 4xx, not only 404): no new session
+        assert not session_keys(rig, attack) - alice_keys, attack.trail
     elif mallory_uid is not None:  # forwarded: the attack's session is Mallory's, never Alice's
         final = session_keys(rig, attack) - alice_keys
         assert final and all(holds(rows[k][0], mallory_uid) and not holds(rows[k][0], alice_uid) for k in final), attack.trail
