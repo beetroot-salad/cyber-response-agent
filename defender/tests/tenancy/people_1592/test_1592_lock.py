@@ -143,13 +143,14 @@ async def test_a_lock_lost_with_a_run_and_an_expansion_in_flight_cancels_them_an
     with contextlib.ExitStack() as held_elsewhere:
         if loss == "backend-ends":
             (old,) = holders(people.dsn)
-            end_backend(people.dsn, old)
-            held_elsewhere.enter_context(people_lock_held_elsewhere(people.dsn))  # not held at every later poll
+            end_backend(people.dsn, old)  # the lock is free: the losing poll must answer not held all the same
         else:
             assert script is not None
             script.held = False if loss == "answers-false" else LockUnanswered("the database could not be asked")
         try:
             await worker.poll()  # the losing poll
+            if loss == "backend-ends":
+                held_elsewhere.enter_context(people_lock_held_elsewhere(people.dsn))  # not held at every later poll
             arrived, sessions_calls = len(people.forge.arrived), dict(counting.calls)
             try:
                 await asyncio.wait_for(worker.settle(), 2)  # the gates are shut: only cancelled tasks are done

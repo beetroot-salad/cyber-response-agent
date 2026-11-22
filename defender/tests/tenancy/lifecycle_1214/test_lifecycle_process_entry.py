@@ -259,7 +259,7 @@ READERS: dict[str, Callable[[dict[str, Any], str, Any], list[str]]] = {
     "sign_policy": _ACTORS,
     "keycloak_source_id": _in_config("people"),
     "forge_sessions_dsn": _that(lambda s, v: s["sessions"]["dsn"] == v, "the sessions port's DSN"),
-    "people_poll": _that(lambda s, v: all(v * 0.8 <= gap < 2.0 for gap in _gaps(s["polls"][:3])),
+    "people_poll": _that(lambda s, v: len(s["polls"]) >= 3 and all(v * 0.8 <= gap < 2.0 for gap in _gaps(s["polls"][:3])),
                          "the wait between the worker's polls"),
     "people_concurrency": _in_config("people"),
     "people_call_timeout": _that(lambda s, v: s["people"]["forge"].timeout.read == v

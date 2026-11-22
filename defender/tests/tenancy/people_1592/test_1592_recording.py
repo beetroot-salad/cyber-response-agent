@@ -659,23 +659,39 @@ async def _record_warning_delivery(w: World, m: Model, r: random.Random) -> None
         await w.identity.record_warning_delivery(credential.id, r.choice(THRESHOLDS), user.id, sent_at=_when(r))
 
 
+def _invitees(m: Model) -> list[Any]:
+    """Users with an invited row: where a settled set-password's `expires_at` lands (a membership write, not status)."""
+    invited = {str(row.user_id) for row in _invited(m)}
+    return [u for u in _users(m) if str(u.id) in invited]
+
+
 async def _request_set_password(w: World, m: Model, r: random.Random) -> None:
-    if user := _pick(r, _users(m)):
+    if user := _prefer(r, _invitees(m), _users(m)):
         m.seqs[str(user.id)] = await w.identity.request_set_password(user.id, now=_when(r))
 
 
+def _invited(m: Model) -> list[Any]:
+    return [row for row, status in m.members.values() if status == "invited"]
+
+
+def _prefer(r: random.Random, likely: list[Any], every: list[Any]) -> Any:
+    """Mostly one of `likely` (the rows or users a write can apply to), sometimes any of `every`."""
+    return _pick(r, likely) if likely and r.random() < 0.8 else _pick(r, every)
+
+
 async def _request_notification(w: World, m: Model, r: random.Random) -> None:
-    if row := _pick(r, _rows(m)):
+    if row := _prefer(r, _invited(m), _rows(m)):
         m.seqs[str(row.id)] = await w.identity.request_notification(row.id, now=_when(r))
 
 
 async def _claim_set_password(w: World, m: Model, r: random.Random) -> None:
-    now = _when(r)
+    now = _when(r) if r.random() < 0.3 else NOW + dt.timedelta(days=60)
     await w.identity.claim_set_password(now=now, hold_until=now + dt.timedelta(minutes=r.randint(1, 30)))
 
 
 async def _claim_notification(w: World, m: Model, r: random.Random) -> None:
-    now = _when(r)
+    """Mostly at a time after every requested send, so a requested invited row is due and its next try moves."""
+    now = _when(r) if r.random() < 0.3 else NOW + dt.timedelta(days=60)
     await w.identity.claim_notification(now=now, hold_until=now + dt.timedelta(minutes=r.randint(1, 30)))
 
 
@@ -691,15 +707,16 @@ async def _defer_notification(w: World, m: Model, r: random.Random) -> None:
 
 async def _settle_set_password(w: World, m: Model, r: random.Random) -> None:
     """With an `expires_at` it moves the user's invited rows' expiry: a membership write that is not of `status`."""
-    if user := _pick(r, _users(m)):
-        await w.identity.settle_set_password(user.id, m.seqs.get(str(user.id), 0) + r.randint(0, 1),
+    requested = [u for u in _users(m) if str(u.id) in m.seqs]
+    if user := _prefer(r, [u for u in requested if u in _invitees(m)] or requested, _users(m)):
+        await w.identity.settle_set_password(user.id, m.seqs.get(str(user.id), 0) + (r.random() < 0.2),
                                              sent_at=_when(r) if r.random() < 0.7 else None,
                                              expires_at=_when(r) if r.random() < 0.7 else None)
 
 
 async def _settle_notification(w: World, m: Model, r: random.Random) -> None:
-    if row := _pick(r, _rows(m)):
-        await w.identity.settle_notification(row.id, m.seqs.get(str(row.id), 0) + r.randint(0, 1),
+    if row := _prefer(r, [row for row in _rows(m) if str(row.id) in m.seqs], _rows(m)):
+        await w.identity.settle_notification(row.id, m.seqs.get(str(row.id), 0) + (r.random() < 0.2),
                                              sent_at=_when(r) if r.random() < 0.7 else None,
                                              expires_at=_when(r) if r.random() < 0.7 else None)
 
@@ -857,7 +874,8 @@ async def run_sequence(backend: str, seed: int, length: int = 40,
         trace: list[tuple[Any, ...]] = []
         before = await recorded()
         for n in range(length):
-            op = rng.choice(ops)
+            generated = [o for o in ops if o not in OPS]  # half the draws stay on the seeders and status writers
+            op = rng.choice(generated) if generated and rng.random() < 0.5 else rng.choice(OPS)
             sub = random.Random(rng.getrandbits(64))  # noqa: S311 — one stream per op, so a skipped op shifts nothing
             error: BaseException | None = None
             try:
@@ -880,8 +898,8 @@ async def test_generated_write_sequences_leave_the_same_requests_on_the_twin_and
     """S1-11 (cross-slice): seeds included, a generated sequence over every write method of the ports (the census above)
     records the same requests in memory and on PostgreSQL at each op, or raises the same refusal, same-value writes (a
     state set to itself, a membership ended again) and non-status writes (a notification's claim, an expiry) among them."""
-    twin, twin_trace = await run_sequence("memory", seed, length=90, ops=ALL_OPS)
-    database_, database_trace = await run_sequence("postgres", seed, length=90, ops=ALL_OPS)
+    twin, twin_trace = await run_sequence("memory", seed, length=120, ops=ALL_OPS)
+    database_, database_trace = await run_sequence("postgres", seed, length=120, ops=ALL_OPS)
     for mine, theirs in zip(twin_trace, database_trace, strict=True):
         assert mine == theirs, f"seed {seed}: in memory {mine}, on PostgreSQL {theirs}"
     assert twin == database_, f"seed {seed}: only in memory {twin - database_}, only on PostgreSQL {database_ - twin}"
