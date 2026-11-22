@@ -52,13 +52,11 @@ class KnowledgeRefused(Exception):
 
 @dataclass(frozen=True)
 class PublishReport:
-    """What the launch-time publish child reported: `fresh` with the commit it published,
-    `stale` with its kind and reason, or `misconfigured` with its reason. `unreadable`: the
-    line was not one of those, so this is U11's `stale:operator` in its place."""
+    """What the fetch child reported: `ok` with the commit it fetched, or `refused` with its reason (and
+    whether it may pass). `unreadable`: the line was not one of those."""
 
     kind: str
     commit: str | None = None
-    stale_kind: str | None = None
     reason: str | None = None
     unreadable: bool = False
     transient: bool = False

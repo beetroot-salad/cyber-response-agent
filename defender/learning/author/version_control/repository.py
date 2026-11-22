@@ -325,7 +325,7 @@ class GitRepository(LocalRepository):
             return repository, repository.revision(f"refs/fetched/{commit}")
         except _git.GitError as refused:
             what = f"commit {commit}" if commit else "main"
-            raise DeliveryRefused(f"Forgejo did not serve {what}: {refused}") from None
+            raise DeliveryRefused(f"Forgejo did not serve {what}: git said (rc={refused.returncode}): {refused.stderr}") from None
 
     def _transport(self) -> GitTransport:
         return GitTransport(self.path, self.origin, self.identity, self.network_timeout)
