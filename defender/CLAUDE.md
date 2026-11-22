@@ -43,7 +43,8 @@ lifecycle service; run migrations; start the new code. The notes below say only 
 
 ## Upgrade from before #1620
 
-No migration. The API now refuses to start when the sign-in realm does not accept its sign-in request: before
+No migration. The API now refuses to start when the sign-in realm does not accept its sign-in client and redirect
+URI (the rest of the sign-in request, such as its PKCE method, is still met only at first sign-in): before
 upgrading, check that the realm's sign-in client lists `<frontend origin>/api/auth/callback` among its valid redirect
 URIs (a realm imported from an older realm file may still list only the old callback). A refused start names the
 client and the redirect URI. Each start leaves one unfinished login session in the realm until its login timeout.

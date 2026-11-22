@@ -1,7 +1,7 @@
 """The browser sign-in's one-use values: state, nonce and PKCE verifier, and the S256 challenge of a verifier.
 
 One owner, so the API's start check (#1620) sends the sign-in request with values of exactly the shape a browser's
-carries: the sign-in provider answers a malformed challenge with an error, which the check would read as a broken realm."""
+carries, and so is answered as a browser's would be."""
 from __future__ import annotations
 
 import base64

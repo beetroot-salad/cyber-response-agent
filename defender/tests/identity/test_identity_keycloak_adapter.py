@@ -1004,10 +1004,10 @@ async def test_1083_o3_every_member_of_each_steps_failure_space_refuses_naming_t
     assert all(not both for both in shared.values()), shared
 
 
-# --- the sign-in realm's redirect step (#1620 r2) --------------------------------------------------------------------
-# The probe's last sign-in step sends the browser's sign-in request on the back channel: the sign-in page (200) holds;
-# a 400 refuses naming the client and the redirect URI; a redirect to the callback with `error` refuses with Keycloak's
-# error; anything else refuses as the other steps do. The programs realm has no such step (its paths are pinned above).
+# --- the sign-in realm's redirect step (#1620 r3) --------------------------------------------------------------------
+# The probe's last sign-in step sends the browser's sign-in request on the back channel: the sign-in page (200) or any
+# redirect holds; a 400 refuses naming the client and the redirect URI; anything else refuses as the other steps do.
+# The programs realm has no such step (its paths are pinned above).
 
 _AUTH_PATH = f"realms/{SIGNIN_REALM}/protocol/openid-connect/auth"
 

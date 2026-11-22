@@ -330,7 +330,8 @@ class KeycloakSignIn(_RealmAdmin):
         return f"{self._signin_url}?{self._signin_query(state=state, nonce=nonce, code_challenge=code_challenge)}"
 
     async def probe(self) -> None:
-        """The shared steps, then one of the sign-in realm's own: it accepts the browser's sign-in request."""
+        """The shared steps, then one of the sign-in realm's own: it accepts the browser's sign-in request. That step is
+        not read-only: Keycloak keeps the unfinished login session it opens until the realm's login timeout."""
         await super().probe()
         await self._probe_step("redirect", self._probe_redirect())
 
@@ -339,7 +340,12 @@ class KeycloakSignIn(_RealmAdmin):
         fresh values, sent on the back channel and not followed. Keycloak checks the client and the redirect URI before
         it runs any sign-in flow and refuses either with a 400, so a 400 refuses start, and the sign-in page or any
         redirect (to the callback, or on to another sign-in provider) means it accepted both; where a redirect points
-        is not read. Anything else is an answer this check cannot read."""
+        is not read. Anything else is an answer this check cannot read.
+
+        Sent on the back channel, yet answered as the browser's would be: a relative valid redirect URI resolves
+        against the host the request names, and so does the issuer, which the discovery step already requires to be
+        the configured one. A realm that would judge this request by another host than the browser's has refused start
+        there, before this step runs (#1620 C10)."""
         query = self._signin_query(state=pkce.new_secret(), nonce=pkce.new_secret(),
                                    code_challenge=pkce.challenge(pkce.new_secret()))
         try:
