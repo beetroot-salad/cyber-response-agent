@@ -158,6 +158,12 @@ jobs:
             -p 127.0.0.1:8200:8200 openbao/openbao:2.4.1 server -dev
           timeout 60 sh -c 'until docker exec -e BAO_ADDR=http://127.0.0.1:8200 defender-openbao bao status >/dev/null 2>&1; do sleep 1; done'
 
+      # #1546 evidence store (`garage`-marked tests): a single-node Garage (S3-compatible) with one key and one
+      # bucket; the script exports DEFENDER_TEST_GARAGE_* to the steps after it. Started here for the same
+      # reason as PostgreSQL above.
+      - name: Start Garage for the evidence-store contract
+        run: tooling/testing/start_garage.sh
+
       - name: Run unit tests
         working-directory: defender
         # ONE collection root. This used to read `tests/ learning/`, because test
