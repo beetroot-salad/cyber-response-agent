@@ -22,9 +22,14 @@ from defender.tests.support.jobs._container_entry1170 import (
     ThreadCalls,
     enter,
 )
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — fixtures
 from defender.tests.support.jobs import _box_relay as R
+from defender.tests.support.jobs import _helper_evidence1546 as H
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
 from defender.tests.support.jobs._job_helper import OTHER_TENANT, claims_of, helper_scene, listing, until
 from defender.tests.support.jobs._jobs1342 import DEFENDER, WORKTREE
+
+evidence_store = H.evidence_store
 
 pytestmark = [pytest.mark.postgres, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
 
@@ -204,24 +209,50 @@ def test_a6_the_host_half_and_the_run_half_each_run_once_in_a_job_and_in_the_ope
         (lane, calls.by_thread, publishes, ran)
 
 
-def test_a10_the_job_renders_its_page_as_bytes_and_the_helper_copies_nothing_to_the_publish_folder(
-        scene, monkeypatch, tmp_path):
-    """#1546 A-O8 (conflict updated: was the helper's page mirror): the job's page never lands in the shared publish folder by
-    the helper, during or after the entry; the run folder keeps whatever the job wrote, which nothing reads back. (A10, A8)"""
+@pytest.mark.openbao
+@pytest.mark.garage
+def test_a10_the_run_page_stored_is_the_renderers_bytes_for_the_run_the_job_pushed_not_a_file_in_its_folder(
+        scene, evidence_store, tmp_path):
+    """#1546 A-O8 (conflict updated: was the helper's page mirror): the job renders its run's page with the real renderer and
+    pushes the bytes over its socket; the stored page equals the renderer's bytes for that run (an oracle render of the same
+    golden run in a folder of its own) though the job left another `runtime.html` in its run folder, which nothing reads
+    back and nothing copies to the publish folder. (A10, A-O8)"""
+    import shutil
+
+    from defender.presentation import visualize_run
+    from defender.tests.support.evidence._facts1546 import sent_page
+    from defender.tests.support.jobs import _helper_evidence1546 as H
+    from defender.tests.support.jobs._job_helper import host_path
+    from defender.tests.support.shared.contracts._spec1077 import fixture_run
+
+    golden = Path(__file__).resolve().parents[1] / "fixtures" / "e2e" / "golden-v2sshd"
+    oracle = tmp_path / "oracle" / str(uuid.uuid4())
+    shutil.copytree(golden, oracle)
+    expected = visualize_run.render_page(fixture_run(oracle)).encode("utf-8")
     publish_dir = tmp_path / "published"
     publish_dir.mkdir()
-    monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")
-    monkeypatch.setenv("DEFENDER_RUN_VISUALIZATIONS_DIR", str(publish_dir))
-    inv, page = str(uuid.uuid4()), "<html>run page 1170</html>"
-    scene.plant(inv)
+    planted = H.plant(scene, "investigation")
 
-    def visualize(run: Any, **_kw: Any) -> None:
-        run.observability.runtime_html.write(page)  # the job's own record of its page, in its run folder
+    def job(c: Any) -> int:
+        folder = host_path(c.mounts, str(H.job_root(scene) / scene.tenant)) / "runs" / planted.owner
+        shutil.copytree(golden, folder)
+        page = visualize_run.render_page(fixture_run(folder)).encode("utf-8")
+        (folder / "runtime.html").write_bytes(b"<html>written in the job's run folder</html>")  # never read back
+        H.send(c, "outcome", record=H.inv_outcome())
+        H.send(c, "page", record=sent_page())
+        H.put_object(c, H.RUN_PAGE, page)
+        H.put_object(c, "bundle", b"bundle")
+        return 0
 
-    got = enter(scene, inv, lifecycle=_investigation(), preflight=lambda *a, **k: 0, visualize=visualize)
-
-    _clean(got)
-    assert [p for p in publish_dir.rglob("*") if p.is_file()] == [], "the helper mirrored a page it read from the job's folder"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("DEFENDER_DEPLOYMENT", "dev")
+        patch.setenv("DEFENDER_RUN_VISUALIZATIONS_DIR", str(publish_dir))
+        H.drive(scene, planted, job, **evidence_store.seams)
+    row = H.uploads(scene.dsn, scene.claim)[H.RUN_PAGE]
+    assert row["status"] == "uploaded"
+    assert evidence_store.read(scene.tenant, "investigation", planted.owner, scene.claim, H.RUN_PAGE,
+                               row["wrapped_key"]) == expected
+    assert [p for p in publish_dir.rglob("*") if p.is_file()] == [], "the helper copied a page to the publish folder"
 
 
 # --- A5 and the signal: real processes -----------------------------------------------------------------------------

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender.tests.support.evidence._facts1546 import inv_progress, roster, staged_page
+from defender.tests.support.evidence._facts1546 import inv_progress, learning_progress, roster, staged_page
 from defender.tests.support.jobs import _findings1487 as F
 from defender.tests.support.jobs._ending1546 import (
     BUNDLE,
@@ -42,8 +42,8 @@ DONE = {"started": STARTED, "knowledge": KNOWLEDGE, "page": staged_page(), "outc
 BOTH = {BUNDLE: up(), RUN_PAGE: up()}
 
 
-async def _running(store, dsn):
-    inv = await _queued(store)
+async def _running(store, dsn, ticket="T-1"):
+    inv = await _queued(store, ticket, f"k-{ticket}")
     claim = await store.claim()
     assert claim is not None
     assert claim.record.investigation_id == inv
@@ -117,8 +117,8 @@ async def test_a_tainted_run_ends_failed_partial_with_its_bundle_accepted_and_no
 
 @pytest.mark.parametrize("by", ["cancel", "offboard"])
 async def test_a_staged_outcome_does_not_survive_a_cancel_or_offboard_and_nothing_is_promoted(migrated_database, by):
-    """Cancel and offboard end the row `aborted`, evidence `none`, `scrub = not_run`, uploads unpromoted, and the cost is
-    the last staged progress as a lower limit. (rule 2, D15)"""
+    """Cancel and offboard end the row `aborted`, evidence `none`, the staged outcome's `scrub`, uploads unpromoted, and the
+    cost the last staged progress as a lower limit. (rule 2, D15, A-O10)"""
     dsn = migrated_database
     register_tenant(dsn, T1)
     async with job_store(dsn) as store:
@@ -130,13 +130,13 @@ async def test_a_staged_outcome_does_not_survive_a_cancel_or_offboard_and_nothin
         else:
             await store.offboard_tenant(T1, actor="u-1")
     got = inv_row(dsn, inv, "stage", "evidence_state", "scrub", "cost_usd", "cost_is_lower_limit", "disposition")
-    assert got == {"stage": "aborted", "evidence_state": "none", "scrub": "not_run", "cost_usd": 0.17,
+    assert got == {"stage": "aborted", "evidence_state": "none", "scrub": "clean", "cost_usd": 0.17,
                    "cost_is_lower_limit": True, "disposition": None}
     assert accepted(dsn, token) == []
 
 
 async def test_a_cancelled_queued_row_has_no_evidence_and_nothing_staged(migrated_database):
-    """A row cancelled before any claim ends `none`/`not_run` as well (no started fact). (rule 1, A-O4)"""
+    """A row cancelled before any claim ends `none`, and `not_run` since it has no outcome. (rule 1, A-O4, A-O10)"""
     dsn = migrated_database
     register_tenant(dsn, T1)
     async with job_store(dsn) as store:
@@ -181,8 +181,8 @@ async def test_take_over_keeps_a_decided_verdict_by_the_ordinary_rules_and_retri
 
 
 async def test_a_taken_over_run_ends_with_the_last_progress_as_its_cost_and_a_row_with_no_started_fact_reads_none(migrated_database):
-    """A lapsed run's cost is its last staged progress, a lower limit; no `started` fact reads `none`/`not_run` whatever
-    else was staged. (D15, rule 1)"""
+    """A lapsed run's cost is its last staged progress, a lower limit; no `started` fact reads `none` whatever else was
+    staged, its scrub the staged outcome's. (D15, rule 1, A-O10)"""
     dsn = migrated_database
     register_tenant(dsn, T1)
     async with job_store(dsn) as store:
@@ -192,8 +192,62 @@ async def test_a_taken_over_run_ends_with_the_last_progress_as_its_cost_and_a_ro
         lapse_lease(dsn, inv)
         await store.take_over()
     assert inv_row(dsn, inv, "evidence_state", "scrub", "cost_usd", "cost_is_lower_limit") == {
-        "evidence_state": "none", "scrub": "not_run", "cost_usd": 0.31, "cost_is_lower_limit": True}
+        "evidence_state": "none", "scrub": "clean", "cost_usd": 0.31, "cost_is_lower_limit": True}
     assert accepted(dsn, token) == []
+
+
+async def test_a_cut_investigation_with_no_staged_progress_has_no_cost_and_is_not_marked(migrated_database):
+    """Cancelled with nothing staged under `progress`: cost NULL, not marked (the mark needs a cost). (D15)"""
+    dsn = migrated_database
+    register_tenant(dsn, T1)
+    async with job_store(dsn) as store:
+        inv, token = await _running(store, dsn)
+        plant_facts(dsn, token, {"started": STARTED, "outcome": inv_outcome()})
+        await store.cancel_investigation(T1, inv, actor="u-1")
+    assert inv_row(dsn, inv, "cost_usd", "cost_is_lower_limit") == {"cost_usd": None, "cost_is_lower_limit": False}
+
+
+@pytest.mark.parametrize(("progress", "cost"), [(learning_progress(2.5), 2.5), (None, 0)], ids=["progress", "none"])
+async def test_a_taken_over_learning_job_stores_its_last_progress_cost_marked_a_lower_limit(migrated_database, progress, cost):
+    """A lapsed learning job: its last staged `progress` sibling cost (0 with none), marked in
+    `learning_jobs.sibling_cost_is_lower_limit`, the outcome's figure never used; the record reads the mark. (D15)"""
+    dsn = migrated_database
+    register_tenant(dsn, T1)
+    async with job_store(dsn) as store:
+        job, token, _ = await _running_job(store, dsn)
+        plant_facts(dsn, token, {"started": STARTED, "outcome": learning_outcome("stopped", cost=9.0),
+                                 **({"progress": progress} if progress else {})})
+        execute(dsn, "UPDATE jobs.learning_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = %s", (job,))
+        assert await store.take_over() == [job]
+        record = await store.get_learning_job(T1, job)
+    assert learn_row(dsn, job, "sibling_cost_usd", "sibling_cost_is_lower_limit") == {
+        "sibling_cost_usd": cost, "sibling_cost_is_lower_limit": True}
+    assert (record.sibling_cost_usd, record.sibling_cost_is_lower_limit) == (cost, True)
+
+
+async def test_a_record_reads_exact_only_after_an_exit_with_a_final_cost(migrated_database):
+    """After an exit whose outcome gave the cost, both kinds' records read exact; after a cancel they read a lower
+    limit. Nothing is derived on read from a stage or an accounting time. (D15)"""
+    dsn = migrated_database
+    register_tenant(dsn, T1)
+    async with job_store(dsn) as store:
+        inv, token = await _running(store, dsn)
+        plant_facts(dsn, token, {**DONE, "progress": inv_progress(0.1)})
+        plant_uploads(dsn, token, BOTH)
+        await end_row(store, dsn, kind="investigation", tenant=T1, owner=inv, token=token, by="exited")
+        exact = await store.get_investigation(T1, inv)
+        job, jtoken, _ = await _running_job(store, dsn)
+        plant_facts(dsn, jtoken, {"started": STARTED, "arms": roster(), "outcome": learning_outcome(cost=4.0)})
+        plant_uploads(dsn, jtoken, {BUNDLE: up(), EPISODE_PAGE: up()})
+        await end_row(store, dsn, kind="learning", tenant=T1, owner=job, token=jtoken, by="exited")
+        learned = await store.get_learning_job(T1, job)
+        cut, ctoken = await _running(store, dsn, "T-2")
+        plant_facts(dsn, ctoken, {"started": STARTED, "progress": inv_progress(0.2)})
+        await store.cancel_investigation(T1, cut, actor="u-1")
+        cancelled = await store.get_investigation(T1, cut)
+    assert (exact.cost_usd, exact.cost_is_lower_limit) == (0.42, False)
+    assert (learned.sibling_cost_usd, learned.sibling_cost_is_lower_limit) == (4.0, False)
+    assert (cancelled.cost_usd, cancelled.cost_is_lower_limit) == (0.2, True)
 
 
 async def test_a_decided_learning_take_over_stores_the_screened_findings_and_is_not_rerun(migrated_database):
@@ -259,6 +313,45 @@ async def test_a_handed_back_investigation_is_not_terminal_and_is_then_taken_ove
         assert await store.take_over() == [inv]
     assert inv_row(dsn, inv, "stage", "evidence_state", "cost_usd") == {"stage": "failed", "evidence_state": "none",
                                                                         "cost_usd": 0.5}
+    words = inv_row(dsn, inv, "failure_reason", "failure_message")
+    assert words["failure_reason"] == "lease_lapsed"
+    assert "handed it back" in words["failure_message"]
+    assert "stopped renewing" not in words["failure_message"]
+
+
+async def test_a_lapsed_row_whose_worker_was_lost_says_so_in_its_take_over_words(migrated_database):
+    """The control of the hand-back words (today's `store.py:810`): a lapsed row nobody handed back reads `its worker
+    stopped renewing its lease`. (B11 kept)"""
+    dsn = migrated_database
+    register_tenant(dsn, T1)
+    async with job_store(dsn) as store:
+        inv, token = await _running(store, dsn)
+        plant_facts(dsn, token, {"started": STARTED})
+        lapse_lease(dsn, inv)
+        assert await store.take_over() == [inv]
+    words = inv_row(dsn, inv, "failure_reason", "failure_message")
+    assert words["failure_reason"] == "lease_lapsed"
+    assert "stopped renewing its lease" in words["failure_message"]
+    assert "handed it back" not in words["failure_message"]
+
+
+async def test_apply_for_another_tenant_is_refused_and_leaves_the_row(migrated_database):
+    """`apply(other tenant, row, decision)` answers `None` and changes nothing; the row's own tenant ends it (control).
+    (PR9; the refusal the retired `write_accounting` tests held)"""
+    dsn = migrated_database
+    register_tenant(dsn, T1)
+    register_tenant(dsn, T2)
+    async with job_store(dsn) as store:
+        inv, token = await _running(store, dsn)
+        plant_facts(dsn, token, DONE)
+        plant_uploads(dsn, token, BOTH)
+        wrong, wrong_record = await end_row(store, dsn, kind="investigation", tenant=T2, owner=inv, token=token, by="exited")
+        assert wrong_record is None
+        assert inv_row(dsn, inv, "stage", "evidence_state") == {"stage": "running", "evidence_state": None}
+        assert accepted(dsn, token) == []
+        _, record = await end_row(store, dsn, kind="investigation", tenant=T1, owner=inv, token=token, by="exited")
+        assert record is not None
+    assert inv_row(dsn, inv, "stage")["stage"] == "completed"
 
 
 async def test_a_learning_job_expired_in_the_queue_and_one_offboarded_end_with_no_evidence(migrated_database):
@@ -369,6 +462,10 @@ async def test_a_terminal_row_without_an_evidence_state_is_refused_by_the_schema
         with pytest.raises(Exception, match="check"):
             execute(dsn, end.format(state=bad), (row_id,))
     execute(dsn, end.format(state="'complete'"), (row_id,))
+    assert execute(dsn, f"SELECT evidence_state FROM jobs.{table} WHERE id = %s", (row_id,)) == [("complete",)]  # noqa: S608
     for good in ("partial", "none", "lost", "expired"):
-        execute(dsn, f"UPDATE jobs.{table} SET evidence_state = %s WHERE id = %s", (good, row_id))  # noqa: S608
-        assert execute(dsn, f"SELECT evidence_state FROM jobs.{table} WHERE id = %s", (row_id,)) == [(good,)]  # noqa: S608
+        async with job_store(dsn) as store:  # a fresh row per state: no chain through a terminal row
+            fresh = ((await _running(store, dsn, f"T-{good}"))[0] if table == "investigations"
+                     else (await _running_job(store, dsn))[0])
+        execute(dsn, end.format(state=f"'{good}'"), (fresh,))
+        assert execute(dsn, f"SELECT evidence_state FROM jobs.{table} WHERE id = %s", (fresh,)) == [(good,)]  # noqa: S608

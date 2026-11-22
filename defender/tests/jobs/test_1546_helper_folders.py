@@ -238,19 +238,26 @@ def test_export_materialise_answers_the_pin_and_refuses_every_other_commit_the_c
 
 
 def test_an_arms_run_copy_goes_through_the_same_settings_check_as_the_parents(scene, evidence_store):
-    """With the pinned export's settings damaged (a link planted in them) after one arm's copy was made, the next arm's
-    `copy.make` is refused and no copy or arm folder is made for it; the first arm's copy (control) was answered. (design:
-    arm run copies get the settings check, today skipped)"""
-    from defender.tests.support.jobs._learning_container1170 import plant_episode
-
-    planted = plant(scene, "learning")
-    ep, _ = plant_episode(scene, planted.owner, planted.source)
+    """The job stages its `arms` roster (the staged fact names each arm's run, no roster file exists); with the pinned export's
+    settings damaged (a link planted in them) after one arm's copy was made, the next arm's `copy.make` is refused and no copy
+    or arm folder is made for it; the first arm's copy (control) was answered under the staged roster's run id. (design: arm
+    run copies get the settings check, today skipped; `arms` fact, PR2)"""
+    from defender.tests.support.evidence._facts1546 import sent_arms
+    from defender.tests.support.jobs._helper_evidence1546 import send
     from defender.tests.support.learning.branch import _triplet_947 as T
 
-    worlds = {w: T.world_id(ep, w) for w in T.WORLDS}
+    planted = plant(scene, "learning")
+    runs = {w: str(uuid.uuid4()) for w in T.WORLDS}
     seen: dict = {}
 
     def job(c) -> int:
+        folder = J.host_path(c.mounts, str(job_root(scene) / scene.tenant))  # the job's own root, where its episode is made
+        (folder / "runs" / planted.source).mkdir(parents=True, exist_ok=True)
+        doc = T.family_doc(episode_id=planted.owner, source_run_dir=str(folder / "runs" / planted.source),
+                           source_run_id=planted.source)
+        ep = T.episode(scene.root, doc=doc, root=folder / "episodes", episode_id=planted.owner)
+        worlds = {w: T.world_id(ep, w) for w in T.WORLDS}
+        send(c, "arms", record=sent_arms(*[(runs[w], worlds[w]) for w in T.WORLDS]))
         export = c.request("export.materialise", commit=scene.t.commit)
         seen["first"] = c.request("copy.make", world=worlds["b"])
         stray = next(p for p in (Path(export["path"]) / "settings").rglob("*") if p.is_file())
@@ -261,6 +268,6 @@ def test_an_arms_run_copy_goes_through_the_same_settings_check_as_the_parents(sc
         return 0
 
     drive(scene, planted, job, **evidence_store.seams)
-    assert seen["first"]["run"]
+    assert seen["first"]["run"] == runs["b"], "the arm's run is the staged roster's"
     assert seen["second"].code
-    assert seen["folders"] == [seen["first"]["run"]]
+    assert seen["folders"] == [runs["b"]]

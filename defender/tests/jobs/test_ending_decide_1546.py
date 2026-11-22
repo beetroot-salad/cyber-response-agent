@@ -52,25 +52,41 @@ LEARN_CLASSES: dict[str, tuple[dict[str, Any], bool, bool]] = {
     "completed": ({"outcome": learning_outcome()}, True, True),
     "completed_findings_refused": ({"outcome": learning_outcome(findings={"state": "refused", "reason": "x"})}, True, True),
     "failed": ({"outcome": learning_outcome("failed", reason="entry_error")}, True, False),
+    "skipped": ({"outcome": learning_outcome("skipped", reason="no_fork_point")}, True, False),
     "stopped": ({"outcome": learning_outcome("stopped")}, False, False),
 }
 #: Whether the run's own outcome decides the stage on this ending (the others end it themselves, or fall back).
 OUTCOME_COUNTS = ("exited", "exited_failed", "stopped", "lapsed", "not_launched")
 
 
-def expected_state(by: str, started: bool, decided: bool, completed: bool, bundle_up: bool, all_up: bool) -> str:
-    """r8 "Evidence state", first match wins, over class labels (not over facts)."""
-    if not started:
+#: The endings a row is only ever put to before a helper ran (no facts, no uploads); the rest reach a started job.
+BEFORE_THE_RUN = ("not_launched", "expired_in_queue")
+#: The endings in which the helper ran to its end by itself: a learning job's own `stopped` record then hands it back
+#: (today's rule: `stopped` ends nothing).
+EXITS = ("exited", "exited_failed")
+
+
+def oracle_state(by: str, started: bool, decided: bool, stage: str, bundle_up: bool, owed_up: bool) -> str:
+    """r8 "Evidence state" rules 1-7, first match wins, one `return` per rule, in r8's words."""
+    if not started:                                   # 1. no `started` -> none
         return "none"
-    if by in ("cancelled", "offboarded", "expired_in_queue"):
+    if by in ("cancelled", "offboarded"):             # 2. cancelled or offboarded -> none
         return "none"
-    if by == "lapsed" and not decided:
+    if by == "lapsed" and not decided:                # 3. lapsed and not decided -> none
         return "none"
-    if completed and all_up:
+    if stage == "completed" and owed_up:              # 4. completed and every must-push object uploaded -> complete
         return "complete"
-    if completed:
+    if stage == "completed":                          # 5. completed and a must-push object not uploaded -> lost
         return "lost"
-    return "partial" if bundle_up else "none"
+    if bundle_up:                                     # 6. stage is not completed and the bundle uploaded -> partial
+        return "partial"
+    return "none"                                     # 7. otherwise none
+
+
+def reachable(by: str, started: bool, oc: str, uploads: dict[str, Any], page: str | None = None) -> bool:
+    """Combinations the system cannot produce are left out: a row put to `not_launched` or `expired_in_queue` never ran
+    (no facts, no uploads)."""
+    return by not in BEFORE_THE_RUN or (not started and oc == "none" and not uploads and page is None)
 
 
 def investigation_cases():
@@ -89,17 +105,16 @@ def _inv_input(started, oc, bundle, page_fact, page_up):
     return facts, uploads
 
 
-def _check_end(got, by, started, decided, completed, uploads, owed):
-    if by == "stopped" and not decided:
-        assert type(got).__name__ == "HandBack"
+def _check_end(got, by, started, decided, completed, uploads, owed, *, hands_back=False):
+    if hands_back:
+        assert type(got).__name__ == "HandBack", (by, got)
         return
     assert type(got).__name__ == "End", (by, got)
     bundle_up = uploads.get(BUNDLE, {}).get("status") == UP
-    all_up = all(uploads.get(o, {}).get("status") == UP for o in owed)
-    stage_completed = completed and by in OUTCOME_COUNTS and by != "not_launched"
-    if stage_completed:
+    owed_up = all(uploads.get(o, {}).get("status") == UP for o in owed)
+    if completed and by in OUTCOME_COUNTS and by != "not_launched":
         assert got.stage == "completed", (by, got.stage)
-    want = expected_state(by, started, decided, stage_completed, bundle_up, all_up)
+    want = oracle_state(by, started, decided, got.stage, bundle_up, owed_up)
     assert got.evidence_state == want, (by, started, uploads, got.stage)
     uploaded = {o for o, u in uploads.items() if u["status"] == UP}
     assert set(got.promote) == (uploaded if want in KEEPS else set())
@@ -114,42 +129,51 @@ def test_the_investigation_evidence_state_follows_rules_one_to_seven_over_every_
     exactly the uploaded rows when kept, and `complete` implies a `clean` completed run. (PR9, A-O4, A-O3)"""
     seen = 0
     for by_, started, oc, bundle, page_fact, page_up in investigation_cases():
-        if by_ != by:
-            continue
         facts, uploads = _inv_input(started, oc, bundle, page_fact, page_up)
+        if by_ != by or not reachable(by, started, oc, uploads):
+            continue
         owed = [BUNDLE] + ([RUN_PAGE] if page_fact == "rendered" else [])
         got = decide("investigation", facts, uploads, by)
         _, decided, completed = INV_CLASSES[oc]
-        _check_end(got, by, started, decided, completed, uploads, owed)
+        _check_end(got, by, started, decided, completed, uploads, owed, hands_back=by == "stopped" and not decided)
         if getattr(got, "evidence_state", None) == "complete":
             assert got.scrub == "clean"
         seen += 1
-    assert seen == 2 * len(INV_CLASSES) * 4 * 4 * 4
+    assert seen > 0 if by in BEFORE_THE_RUN else seen == 2 * len(INV_CLASSES) * 4 * 4 * 4
+
+
+LEARNING_ENDED_BY = tuple(b for b in ENDED_BY if b != "cancelled")  # a learning job is never cancelled
 
 
 def learning_cases():
     yield from itertools.product(
-            ENDED_BY, (True, False), LEARN_CLASSES, (UP, PENDING, None), (UP, REFUSED, None),
+            LEARNING_ENDED_BY, (True, False), LEARN_CLASSES, (UP, PENDING, None), (UP, REFUSED, None),
             ("rendered", "render_failed", None), (UP, PENDING, None))
 
 
-@pytest.mark.parametrize("by", ENDED_BY)
+@pytest.mark.parametrize("by", LEARNING_ENDED_BY)
 def test_the_learning_evidence_state_follows_the_rules_with_a_page_owed_per_rendered_arm(by):
     """The learning job's must-push set is its bundle, episode page and the page of each `arm/<id>` fact that
     rendered; the same rules and promotion apply. (PR8, PR9, A-O4)"""
+    seen = 0
     for by_, started, oc, bundle, episode, arm_fact, arm_up in learning_cases():
-        if by_ != by:
-            continue
         facts: dict[str, Any] = {"arms": {"roster": [{"run_id": ARM}]}, **LEARN_CLASSES[oc][0]}
         if started:
             facts["started"] = STARTED
         if arm_fact:
             facts[f"arm/{ARM}"] = {"scrub": "clean", "page": arm_fact}
         uploads = {n: up(s) for n, s in ((BUNDLE, bundle), (EPISODE_PAGE, episode), (arm_page(ARM), arm_up)) if s}
+        if by_ != by or not reachable(by, started, oc, uploads, arm_fact):
+            continue
+        if by in BEFORE_THE_RUN:
+            facts = {}
         owed = [BUNDLE, EPISODE_PAGE] + ([arm_page(ARM)] if arm_fact == "rendered" else [])
         _, decided, completed = LEARN_CLASSES[oc]
         got = decide("learning", facts, uploads, by)
-        _check_end(got, by, started, decided, completed, uploads, owed)
+        _check_end(got, by, started, decided, completed, uploads, owed,
+                   hands_back=not decided and (by == "stopped" or (oc == "stopped" and by in EXITS)))
+        seen += 1
+    assert seen > 0
 
 
 def test_a_complete_run_is_the_only_end_that_queues_the_auto_learning_job_and_a_completed_verdict_sets_the_alert_outcome():
@@ -176,6 +200,8 @@ def test_an_ending_before_or_around_the_run_ends_by_its_own_words_and_reads_none
     assert got.disposition is None
     if by != "not_launched":
         assert (got.evidence_state, set(got.promote)) == ("none", set())
+        assert got.scrub == "clean", "the scrub is the staged outcome's, whatever ended the job"
+        assert decide("investigation", {"started": STARTED}, {}, by).scrub == "not_run", "`not_run` only with no outcome"
 
 
 @pytest.mark.parametrize(("oc", "by", "stage", "reason", "disposition", "scrub"), [
@@ -201,6 +227,83 @@ def test_the_stage_is_todays_rules_reading_scrub_clean_and_a_decided_verdict_sur
     facts, ups = _inv_input(True, oc, UP, "rendered" if oc == "complete_clean" else None, UP)
     got = decide("investigation", facts, ups, by)
     assert (got.stage, got.failure_reason, got.disposition, got.scrub) == (stage, reason, disposition, scrub)
+
+
+BASE_NO_RECORD = "the run left no job-end record; its container's status is in the helper's log"
+CUT = "box-lost"  # a `run_end.TRUNCATED_BY_VALUES` word
+
+
+def _ended(**over):
+    return inv_outcome(**{"report_committed": False, "closing": None, "scrub": "not_run", **over})
+
+
+@pytest.mark.parametrize(("outcome", "by", "reason", "words"), [
+    pytest.param(None, "exited", "no_report", BASE_NO_RECORD, id="no-record"),
+    pytest.param(_ended(setup="refused", box="not_started"), "exited", "setup_refused", "run setup refused the job",
+                 id="setup-refused"),
+    pytest.param(_ended(box="start_failed"), "exited", "worker_error", "the run's box did not start",
+                 id="box-start-failed"),
+    pytest.param(inv_outcome(box="start_failed"), "exited", "worker_error", "the run's box did not start",
+                 id="box-start-failed-beats-a-clean-scrub"),
+    pytest.param(_ended(setup="crashed", box="not_started"), "exited", "no_report", "run setup crashed",
+                 id="setup-crashed"),
+    pytest.param(_ended(), "exited", "no_report", "the host committed no report", id="no-report-committed"),
+    pytest.param(inv_outcome(scrub="not_run"), "exited", "no_report",
+                 "the scrub did not verify the run folder after the box stopped", id="scrub-not-verified"),
+    pytest.param(_ended(setup="crashed", box="not_started", cut_short=CUT), "exited", "no_report",
+                 f"run setup crashed; the run was cut short ({CUT})", id="setup-crashed-cut-short"),
+    pytest.param(_ended(cut_short=CUT), "exited", "no_report", f"the host committed no report; the run was cut short ({CUT})",
+                 id="no-report-cut-short"),
+    pytest.param(inv_outcome(scrub="tainted", cut_short=CUT), "exited", "no_report",
+                 f"the scrub did not verify the run folder after the box stopped; the run was cut short ({CUT})",
+                 id="unverified-cut-short"),
+])
+def test_the_failure_fallbacks_and_their_words_are_todays_ending_rules_moved(outcome, by, reason, words):
+    """Today's `_ending_from` rules, which only retired tests hold: no record, setup refused, box start failed (beats a
+    clean scrub), setup crashed, no report, scrub unverified, each with its words and the cut-short suffix. (Stage)"""
+    facts: dict[str, Any] = {"started": STARTED, "knowledge": KNOWLEDGE}
+    if outcome is not None:
+        facts["outcome"] = outcome
+    got = decide("investigation", facts, {BUNDLE: up()}, by)
+    assert (got.stage, got.failure_reason, got.failure_message) == ("failed", reason, words)
+    assert got.disposition is None
+
+
+def test_a_helper_that_failed_on_its_own_with_no_record_is_the_workers_error_with_its_status_in_the_words():
+    """No job-end record after a helper that failed by itself: `failed/worker_error`, words naming the helper and that it
+    stopped before the job recorded its end (not the run's `no_report`). (Stage)"""
+    got = decide("investigation", {"started": STARTED}, {}, "exited_failed")
+    assert (got.stage, got.failure_reason) == ("failed", "worker_error")
+    assert got.failure_message.startswith("the job's helper ")
+    assert got.failure_message.endswith(" before the job recorded its end")
+
+
+@pytest.mark.parametrize(("outcome", "by", "stage", "reason"), [
+    (learning_outcome("skipped", reason="no_fork_point"), "exited", "skipped", "no_fork_point"),
+    (learning_outcome("skipped", reason="history_unreadable"), "exited", "skipped", "history_unreadable"),
+    (learning_outcome("failed", reason="judge_failed"), "exited", "failed", "judge_failed"),
+    (learning_outcome("failed", reason="entry_error"), "exited_failed", "failed", "entry_error"),
+    (None, "exited", "failed", "exited_without_result"),
+    (None, "exited_failed", "failed", "worker_error"),
+])
+def test_a_learning_jobs_own_end_is_its_status_and_reason_and_none_is_exited_without_result_or_the_workers_error(
+        outcome, by, stage, reason):
+    """Today's learning rules: the job's own `skipped` or `failed` end keeps its reason; no record is
+    `exited_without_result`, or `worker_error` after a helper that failed by itself. (Stage)"""
+    facts: dict[str, Any] = {"started": STARTED}
+    if outcome is not None:
+        facts["outcome"] = outcome
+    got = decide("learning", facts, {BUNDLE: up()}, by)
+    assert (got.stage, got.failure_reason) == (stage, reason)
+    assert got.evidence_state == "partial"
+
+
+@pytest.mark.parametrize("by", ["exited", "exited_failed", "stopped"])
+def test_a_learning_job_that_recorded_stopped_is_handed_back_whatever_ended_it(by):
+    """Today a `stopped` end record ends nothing: the job is handed back, to be retried, never skipped or failed. (Stage,
+    PR9)"""
+    got = decide("learning", {"started": STARTED, "outcome": learning_outcome("stopped")}, {BUNDLE: up()}, by)
+    assert type(got).__name__ == "HandBack"
 
 
 def test_a_found_closing_record_gives_its_disposition_whatever_it_is():
@@ -233,12 +336,41 @@ def test_a_cost_after_a_cancel_offboard_or_take_over_is_the_last_staged_progress
     assert (done.cost_usd, done.cost_is_lower_limit) == (0.42, False)
 
 
+@pytest.mark.parametrize("by", ["cancelled", "lapsed", "offboarded"])
+def test_a_cut_job_with_no_staged_progress_has_no_investigation_cost_and_a_learning_cost_of_zero_marked(by):
+    """D15, with nothing staged: an investigation's cost is NULL and not marked (the mark needs a cost); a learning job's
+    sibling cost is 0 (its column is NOT NULL) and marked a lower limit. Neither takes the outcome's figure. (D15)"""
+    facts, ups = _inv_input(True, "complete_clean", UP, "rendered", UP)
+    cut = decide("investigation", facts, ups, by)
+    assert (cut.cost_usd, cut.cost_is_lower_limit) == (None, False)
+    learn = decide("learning", {"started": STARTED, "outcome": learning_outcome(cost=9.0)}, {},
+                   "lapsed" if by == "lapsed" else "offboarded")
+    assert (learn.sibling_cost_usd, learn.sibling_cost_is_lower_limit) == (0, True)
+
+
+def test_a_cost_reads_exact_only_after_an_exit_whose_outcome_gave_a_final_cost():
+    """A normal exit (or a stop that decided) with the outcome's figure reads exact; an exit with no outcome carries the
+    last `progress` as a lower limit. (D15)"""
+    facts, ups = _inv_input(True, "complete_clean", UP, "rendered", UP)
+    facts["progress"] = inv_progress(0.17)
+    for by in ("exited", "stopped"):
+        got = decide("investigation", facts, ups, by)
+        assert (got.cost_usd, got.cost_is_lower_limit) == (0.42, False), by
+    for by in ("exited", "exited_failed"):
+        got = decide("investigation", {"started": STARTED, "progress": inv_progress(0.17)}, {}, by)
+        assert (got.cost_usd, got.cost_is_lower_limit) == (0.17, True), by
+    learned = decide("learning", {"started": STARTED, "outcome": learning_outcome(cost=9.0),
+                                  "progress": learning_progress(2.5)}, {}, "exited")
+    assert (learned.sibling_cost_usd, learned.sibling_cost_is_lower_limit) == (9.0, False)
+
+
 def test_a_learning_cost_after_take_over_is_its_last_staged_sibling_cost_as_a_lower_limit():
-    """D15 for a learning job: the last `progress` sibling cost. (D15)"""
+    """D15 for a learning job: the last `progress` sibling cost, marked a lower limit (`sibling_cost_is_lower_limit`), not
+    the outcome's figure. (D15)"""
     facts = {"started": STARTED, "outcome": learning_outcome(cost=9.0),
              "progress": learning_progress(2.5)}
     got = decide("learning", facts, {}, "lapsed")
-    assert got.sibling_cost_usd == 2.5
+    assert (got.sibling_cost_usd, got.sibling_cost_is_lower_limit) == (2.5, True)
 
 
 @pytest.mark.parametrize("kind", ["investigation", "learning"])
@@ -272,14 +404,15 @@ def test_a_lapsed_learning_job_that_decided_keeps_its_screened_findings_and_one_
     assert (lapsed.stage, lapsed.failure_reason) == ("failed", "lease_lapsed")
 
 
-@pytest.mark.parametrize(("by", "status", "reason"), [("offboarded", "skipped", "tenant_offboarded"),
-                                                      ("expired_in_queue", "skipped", "expired"),
-                                                      ("lapsed", "failed", "lease_lapsed")])
-def test_a_learning_ending_by_the_system_has_its_own_status_and_reason_and_no_evidence(by, status, reason):
-    """Queue expiry, offboarding and an undecided take-over end by their words (an `End` reads `stage`/`failure_reason` for
-    every kind; the row's `status`/`reason` take them); state `none`. (rule 2, 3)"""
-    got = decide("learning", {"started": STARTED}, {BUNDLE: up()}, by)
-    assert (got.stage, got.failure_reason, got.evidence_state) == (status, reason, "none")
+@pytest.mark.parametrize(("by", "started", "stage", "reason"), [("offboarded", True, "skipped", "tenant_offboarded"),
+                                                                ("expired_in_queue", False, "skipped", "expired"),
+                                                                ("lapsed", True, "failed", "lease_lapsed")])
+def test_a_learning_ending_by_the_system_has_its_own_status_and_reason_and_no_evidence(by, started, stage, reason):
+    """Queue expiry (never started), offboarding and an undecided take-over end by their words (an `End` reads `stage` and
+    `failure_reason` for every kind; the row's `status` and `reason` take them); state `none`. (rule 1, 2, 3)"""
+    facts = {"started": STARTED} if started else {}
+    got = decide("learning", facts, {BUNDLE: up()} if started else {}, by)
+    assert (got.stage, got.failure_reason, got.evidence_state) == (stage, reason, "none")
 
 
 @pytest.mark.parametrize(("facts", "by", "stage", "reason"), [

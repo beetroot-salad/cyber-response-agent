@@ -2,7 +2,8 @@
 omitted entry in `scrub-findings.json`, refuses escaping paths and over-cap sizes, and carries session stores whole.
 
 Pinned (design leaves open): `defender.evidence.bundle` with `pack(root, dest, *, exclude=(), max_packed=MAX_PACKED_BYTES)`,
-`unpack(source, into, *, max_unpacked=MAX_UNPACKED_BYTES)` (both over files), `BundleRefused`, `FINDINGS_FILE`,
+`unpack(source, into, *, max_unpacked=MAX_UNPACKED_BYTES)` (both over files; `pack` also takes the scrub's `lister=` seam, the
+walk the one classifier makes, so an unreadable entry can be made without a permission, as root), `BundleRefused`, `FINDINGS_FILE`,
 `MAX_PACKED_BYTES`, `MAX_UNPACKED_BYTES`; `exclude` is relative POSIX paths, each a whole subtree. The findings file sits at
 the archive root as a list of `{path, kind, mode, link_count, target}`; `target` is the symlink's text, else null.
 """
@@ -122,6 +123,26 @@ def test_every_non_regular_entry_type_is_omitted_and_listed(tmp_path, tree, outs
     # What the symlink pointed at is never followed into the bundle (its target text is all that is kept).
     assert b"OUTSIDE-SECRET" not in b"".join(v or b"" for v in _files(into).values())
     # The control rides with it: the rest of the tree is intact.
+    assert (into / "sub" / "beta.bin").read_bytes() == bytes(range(256))
+
+
+def test_an_unreadable_entry_is_omitted_and_listed_like_the_scrubs_refusal(tmp_path, tree):
+    """The walk meets an entry it cannot read (made through the `lister` seam, so it holds as root): the packer leaves it out and
+    lists it `unreadable` beside the scrub's finding, and packs the rest. (A-O10, D2)"""
+    b = _bundle()
+
+    def lister(top, onerror):
+        for dirpath, dirs, files in os.walk(top):
+            if Path(dirpath) == Path(top):
+                onerror(OSError(13, "Permission denied", str(Path(top) / "locked")))
+                dirs[:] = [d for d in dirs if d != "locked"]
+            yield dirpath, dirs, files
+
+    (tree / "locked").mkdir()
+    (tree / "locked" / "inside.txt").write_text("hidden", encoding="utf-8")
+    into, findings = _round_trip(b, tree, tmp_path, lister=lister)
+    assert [(row["path"], row["kind"]) for row in findings] == [("locked", "unreadable")]
+    assert not (into / "locked").exists()
     assert (into / "sub" / "beta.bin").read_bytes() == bytes(range(256))
 
 
@@ -275,7 +296,9 @@ def _store(path: Path, rows: int) -> sqlite3.Connection:
 
 
 def test_a_session_store_with_its_rows_only_in_the_wal_is_packed_whole(tmp_path):
-    """A store whose latest rows live only in `-wal` unpacks, from the `.db` file alone, with every row. (A-O3)"""
+    """A store whose latest rows live only in `-wal` unpacks, from the `.db` file alone, with every row. (A-O3)
+
+    Recorded pick: the design says session stores are checkpointed before packing but not who does it; here the packer does."""
     b = _bundle()
     live = tmp_path / "live" / "sessions" / "arm1.db"
     conn = _store(live, 50)

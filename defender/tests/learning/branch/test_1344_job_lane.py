@@ -855,15 +855,16 @@ def _1546_source_files(tenant_dir: Path, src: Path) -> dict[str, bytes]:
     return found
 
 
-def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pushes(tmp_path, monkeypatch):  # noqa: PLR0915 — one flow
+def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pushes(tmp_path, monkeypatch):  # noqa: PLR0915, C901 — one flow
     """With its source's host folder and session database gone, the job pulls only `(source, bundle)`, unpacks it to
     `runs/<source>/`, sends one outcome (`completed`, findings inside), then pushes `page/learning.html` and `bundle`, the
     outcome first; no learning-end record is written to a folder; its bundle holds its episode, not the pulled source's run
-    folder or the helper's copies. (Done when: source folder absent; A-O1, A-O2, PR1, PR8, D1)"""
+    folder or the helper's copies. (Done when: source folder absent; A-O1, A-O2, PR1, PR8, D1, D12: roster before the first arm, arm facts, arm pages, arm databases in the bundle)"""
     import contextlib
     import shutil
 
     from defender import job_socket
+    from defender.tests.support.evidence._facts1546 import arm_page
     from defender.tests.support.jobs._evidence_flows1546 import EPISODE_PAGE, members, pack, sha
     from defender.learning.branch import job_entry
     L = sys.modules[__name__]
@@ -903,6 +904,24 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
         return {"size": len(pushed[fields["object"]]), "sha256": sha(pushed[fields["object"]])}
 
     ended: list[dict] = []
+    rosters: list[dict] = []
+    arm_facts_sent: dict[str, dict] = {}
+    sibling = J.FakeSibling()
+
+    def spawned(argv, **kw):
+        if "--world" in argv:
+            order.append("spawn")
+        return sibling(argv, **kw)
+
+    def arms(fields):
+        order.append("arms")
+        rosters.append(fields["record"])
+        return {}
+
+    def arm(fields):
+        order.append(f"arm:{fields['run_id']}")
+        arm_facts_sent[fields["run_id"]] = fields["record"]
+        return {}
 
     def outcome(fields):
         order.append("outcome")
@@ -913,9 +932,9 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
     seams = dict(questioner=asking, preflight=S.no_preflight, live_tree=T.source_capture(), roster=est.roster(),
                  judge=L.WatchJudge(default=J.as_reply_text(J.reply_doc(bucket="none", systems=[]))),
                  oracle=S.oracle(then=S.submit()).model, verifier=S.passing_verifier().model,
-                 directory=est.launch_directory(tenant), spawn=J.FakeSibling(), candidates=L.choose(T.BRANCH_MESSAGE_ID))
+                 directory=est.launch_directory(tenant), spawn=spawned, candidates=L.choose(T.BRANCH_MESSAGE_ID))
     answers = {"export.materialise": materialise_export(tenant), "evidence.pull": pull, "evidence.put": put,
-               "outcome": outcome, "arms": lambda f: order.append("arms") or {}}
+               "outcome": outcome, "arms": arms, "arm": arm}
     launch = {"kind": "learning", "job": L.JOB, "records": handed_records(seams["directory"], tenant)}
     previous = signal.signal(signal.SIGTERM, L._unexpected_sigterm)
     try:
@@ -932,8 +951,8 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
     assert len(ended) == 1, f"no outcome reached the socket: {asked}"
     assert ended[0]["status"] == "completed", ended[0]
     assert set(ended[0]["findings"]) == {"state", "text"}
-    assert set(pushed) == {EPISODE_PAGE, "bundle"}, sorted(pushed)
-    assert order.index("outcome") < min(order.index(f"put:{o}") for o in pushed), order
+    assert {o for o in pushed if not o.startswith("page/runs/")} == {EPISODE_PAGE, "bundle"}, sorted(pushed)
+    assert order.index("outcome") < min(order.index(f"put:{o}") for o in (EPISODE_PAGE, "bundle")), order
     assert pushed[EPISODE_PAGE].lstrip().lower().startswith(b"<!doctype html") or b"<html" in pushed[EPISODE_PAGE]
     runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
     assert not (runs / f"{L.JOB}.learning-end.json").exists(), "the end still went through the folder"
@@ -941,3 +960,24 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
     assert not [n for n in inside if n.startswith(f"runs/{src.name}/")], "the job's bundle holds the pulled source"
     assert any(n.startswith(f"episodes/{L.JOB}/") for n in inside), sorted(inside)
     assert not [n for n in inside if n.startswith((f"runs/{L.JOB}.launch.json", "run-knowledge/", "exports/"))]
+
+    # D12 / G11: the arms fork into the pulled copy; the roster is staged before the first arm runs, each arm stages its
+    # verdict and page after its run, a rendered arm's page rides the socket, and every arm's session database is in the bundle.
+    assert order.count("spawn") >= 1, "premise: the job ran its arms"
+    assert order.index("arms") < order.index("spawn"), f"the roster was staged after the first arm ran: {order}"
+    assert len(rosters) == 1, rosters
+    staged_roster = {(a["run_id"], a["world_id"]) for a in rosters[0]["roster"]}
+    assert set(rosters[0]) == {"roster"}, rosters
+    assert staged_roster, "the roster names no arm"
+    assert set(arm_facts_sent) == {run_id for run_id, _ in staged_roster}, "an arm of the roster staged no verdict, or one outside it did"
+    for run_id, record in arm_facts_sent.items():
+        assert set(record) == {"scrub", "page"}, record  # no roster inside an arm's fact (PR8)
+        assert record["scrub"] == "clean", record  # the arms the stand-in sibling leaves walk clean
+        assert order.index(f"arm:{run_id}") > order.index("spawn")
+        assert (record["page"] == "rendered") == (arm_page(run_id) in pushed), (record, sorted(pushed))
+    tenant_root = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant
+    arm_databases = sorted(str(p.relative_to(tenant_root)) for run_id in arm_facts_sent
+                           for p in tenant_root.rglob("*.db") if run_id in p.name or run_id in p.parts)
+    assert arm_databases, "premise: the arms left session databases in the job's root"
+    assert set(arm_databases) <= set(inside), f"an arm's session database is missing from the bundle: {sorted(set(arm_databases) - set(inside))}"
+    assert not [n for n in inside if n.startswith(f"runs/{src.name}/")], "the bundle holds the pulled source's run folder"

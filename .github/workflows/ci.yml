@@ -83,6 +83,13 @@ jobs:
         timeout-minutes: 6
         run: docker build -f .devcontainer/Dockerfile.job -t defender-job:latest .
 
+      # #1546 done-when 1: the test-only layer over the job image (adds pytest, which the replay harness the real
+      # investigation entry runs imports). tests/e2e/test_1546_evidence_replay.py starts its job container from it and
+      # FAILS, never skips, on CI when it or the `runsc-job` runtime is missing.
+      - name: Build the test-only job replay image
+        timeout-minutes: 3
+        run: docker build -f tooling/testing/Dockerfile.job-replay -t defender-job-replay:latest .
+
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 

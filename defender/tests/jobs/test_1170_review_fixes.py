@@ -3,7 +3,7 @@
 - Two concurrent `box.start` of one run's shell box: only one starts (the id is reserved before the start).
 - A read pass from the helper is the asking call's `AdapterFault` on every in-container path (`credential_proxy.helper_access`),
   so the verb layer records a refusal as the proxy's own fault instead of crashing.
-- A learning job's siblings' run pages are copied to the publish area after the container, as an investigation's is."""
+- A learning job's sibling pages are the renderer's bytes it pushes over the socket (#1546 A-O8), stored as pushed."""
 from __future__ import annotations
 
 import threading
@@ -11,13 +11,21 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — fixtures
+from defender.tests.support.jobs import _helper_evidence1546 as H
+from defender.tests.support.jobs import _job_helper as J
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
 
 from defender import job_socket
 from defender.credential_proxy import helper_access
-from defender.job_host import _common, _learning
-from defender.job_host._session import Prepared, Registry, Session
+from defender.job_host import _common
+from defender.job_host._session import Registry, Session
 from defender.job_socket import Refused
 from defender.kit.faults import AdapterFault
+
+evidence_store = H.evidence_store
+process_state = J.process_state
+scene = J.scene
 
 RUN = "af3ba774-355d-4dbc-b8b6-3becc9d3e7a1"
 
@@ -119,62 +127,48 @@ def test_the_forge_cap_is_one_value_for_the_container_and_the_helper():
 
 # --- the siblings' run pages ---------------------------------------------------------------------------------------------
 
-class _Page:
-    def __init__(self, text: str | None) -> None:
-        self._text = text
+@pytest.mark.postgres
+@pytest.mark.openbao
+@pytest.mark.garage
+def test_a_learning_jobs_sibling_pages_stored_are_the_bytes_it_pushed_per_arm_and_nothing_is_copied_out(
+        scene, evidence_store, tmp_path):
+    """#1546 A-O8 (conflict updated: the page mirror is gone): each rendered arm's page and the episode page are stored as the
+    bytes the learning job pushed over its socket, though every arm's folder holds another `runtime.html` (which nothing
+    reads back), and the publish folder stays empty. (A-O8, D3)"""
+    import uuid
 
-    def read(self) -> str | None:
-        if self._text is None:
-            raise FileNotFoundError("no page")
-        return self._text
+    from defender.tests.support.evidence._facts1546 import sent_arm, sent_arms
+    from defender.tests.support.jobs import _helper_evidence1546 as H
+    from defender.tests.support.jobs._job_helper import host_path
 
+    planted = H.plant(scene, "learning")
+    arms = {str(uuid.uuid4()): str(uuid.uuid4()) for _ in range(2)}
+    pages = {run: f"<html>the renderer's page for {run}</html>".encode() for run in arms}
+    episode_page = b"<html>the episode page</html>"
+    publish_dir = tmp_path / "published"
+    publish_dir.mkdir()
 
-class _Handle:
-    def __init__(self, run_id: str, page: str | None) -> None:
-        self.run_dir = Path("/episodes/e/runs") / run_id
-        self.observability = type("O", (), {"runtime_html": _Page(page)})()
+    def job(c: Any) -> int:
+        root = host_path(c.mounts, str(H.job_root(scene) / scene.tenant))
+        for run in arms:
+            folder = root / "episodes" / planted.owner / "runs" / run
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "runtime.html").write_bytes(b"<html>written in the arm's folder</html>")  # never read back
+        H.send(c, "arms", record=sent_arms(*arms.items()))
+        for run in arms:
+            H.send(c, "arm", run_id=run, record=sent_arm())
+            H.put_object(c, H.arm_page(run), pages[run])
+        H.send(c, "outcome", record=H.learning_outcome())
+        H.put_object(c, H.EPISODE_PAGE, episode_page)
+        return 0
 
-
-class _Episode:
-    def __init__(self, pages: dict[str, str | None]) -> None:
-        self._pages = pages
-
-    def __enter__(self) -> _Episode:
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        return None
-
-    def open(self, run_id: Any) -> _Handle:
-        return _Handle(str(run_id), self._pages[str(run_id)])
-
-
-class _Tenant:
-    def __init__(self, pages: dict[str, str | None]) -> None:
-        self._pages = pages
-
-    def runs_repository(self) -> Any:
-        pages = self._pages
-        return type("R", (), {"episode": lambda _self, _job: _Episode(pages)})()
-
-
-def test_a_learning_jobs_sibling_pages_are_never_copied_from_the_job_writable_folders_after_its_container(monkeypatch):
-    """#1546 A-O8 (conflict updated: the page mirror is gone): `_learning_exited` on a container that ran reads no sibling's
-    page from the episode folder and mirrors none; the pages are the renderer's bytes, pushed over the socket."""
-    from defender.presentation import visualize_run
-
-    other = "b04cb885-466e-4ecd-89c7-4cfdd0e4f8b2"
-    copied: list[tuple[str, str]] = []
-    # `raising=False`: the mirror function is deleted by the design, so absent is the target state.
-    monkeypatch.setattr(visualize_run, "mirror_page",  # lint-monkeypatch: ok — a recorder that the design says is never called
-                        lambda page, run_id, _tenant: copied.append((run_id, page)) or "copied", raising=False)
-    tenant = _Tenant({RUN: "<html>one</html>", other: None})
-    state = _learning._Learning(tenant, "c" * 40, Path("/scratch"))
-    state.siblings = dict.fromkeys((RUN, other))  # only the ids are read
-    session = _session()
-    session.kind = "learning"
-    session.job_id = "00000000-0000-4000-8000-000000000000"
-    session.prepared = Prepared(launch={}, command=[], state=state)
-
-    _learning._learning_exited(session, 0)
-    assert copied == [], "a sibling's page was copied out of a job-writable folder"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("DEFENDER_DEPLOYMENT", "dev")
+        patch.setenv("DEFENDER_RUN_VISUALIZATIONS_DIR", str(publish_dir))
+        H.drive(scene, planted, job, **evidence_store.seams)
+    rows = H.uploads(scene.dsn, scene.claim)
+    for obj, data in [(H.arm_page(run), pages[run]) for run in arms] + [(H.EPISODE_PAGE, episode_page)]:
+        assert rows[obj]["status"] == "uploaded", obj
+        assert evidence_store.read(scene.tenant, "learning", planted.owner, scene.claim, obj,
+                                   rows[obj]["wrapped_key"]) == data, obj
+    assert [p for p in publish_dir.rglob("*") if p.is_file()] == [], "a page was copied to the publish folder"

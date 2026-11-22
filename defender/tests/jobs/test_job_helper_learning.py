@@ -107,10 +107,12 @@ _ABSENT_COMMIT = "fedcba9876543210" * 2 + "fedcba98"
 
 @pytest.mark.parametrize("kind", ["learning", "post-step", "investigation"])
 def test_c32_export_materialise_answers_the_pin_for_a_learning_job_and_refuses_every_other_commit(scene, kind):
-    """#1546 (conflict updated: was "the clone's commit"): for a learning job, `export.materialise(commit=)` of the claim's pin
-    answers that commit and `<T>/exports/<commit>/` (exactly its `agent/` and `settings/` blobs); a later commit the clone
-    holds (merged and fetched, never published) and one it lacks are refused and no export is made. The post-step and the
-    investigation are refused it and nothing is made. (Flow 2 behind the socket, C32; export pin)"""
+    """#1546 (conflict updated: the export lives in the job's inputs, not `<T>/exports/<commit>`): for a learning job,
+    `export.materialise(commit=)` of the claim's pin answers that commit and a folder under `.job-inputs/<claim>/` holding
+    exactly its `agent/` and `settings/` blobs; a later commit the clone holds (merged and fetched, never published) and one
+    it lacks are refused and no export is made anywhere. The post-step and the investigation are refused it and nothing is
+    made. (Flow 2 behind the socket, C32; export pin)"""
+    from defender.tests.support.jobs._helper_evidence1546 import job_inputs
     from defender.tests.tenancy.tenant_1108_p4._support import agent_blobs, export_dir, files_under, git
 
     t = scene.t
@@ -121,6 +123,11 @@ def test_c32_export_materialise_answers_the_pin_for_a_learning_job_and_refuses_e
     def job(c) -> int:
         if kind == "learning":
             got["answer"] = c.request("export.materialise", commit=t.commit)
+            folder = Path(got["answer"]["path"])  # read while the job runs: the inputs go with it
+            got["inputs"] = job_inputs(scene)
+            got["under_inputs"] = folder.is_relative_to(job_inputs(scene))
+            got["agent"] = files_under(folder / "agent")
+            got["settings"] = files_under(folder / "settings")
             got["later"] = c.refused("export.materialise", commit=later).code
             got["absent"] = c.refused("export.materialise", commit=_ABSENT_COMMIT).code
         else:
@@ -129,17 +136,17 @@ def test_c32_export_materialise_answers_the_pin_for_a_learning_job_and_refuses_e
 
     run_kind(scene, kind, job, family_less=kind == "post-step")
 
+    assert not export_dir(t.tenant, later).exists(), f"a {kind} job materialised an export"
     if kind != "learning":
         assert got["refused"] in ("not-for-kind", "unknown-request"), got["refused"]
-        assert not export_dir(t.tenant, later).exists(), f"a {kind} job materialised an export"
         return
     assert got["answer"]["commit"] == t.commit
-    assert Path(got["answer"]["path"]) == export_dir(t.tenant, t.commit)
-    assert files_under(export_dir(t.tenant, t.commit) / "agent") == agent_blobs(t.clone, t.commit)
-    assert files_under(export_dir(t.tenant, t.commit) / "settings") == agent_blobs(t.clone, t.commit, prefix="settings")
+    assert got["under_inputs"], f"the export is not in the job's inputs: {got['answer']['path']}"
+    assert got["agent"] == agent_blobs(t.clone, t.commit)
+    assert got["settings"] == agent_blobs(t.clone, t.commit, prefix="settings")
     assert got["later"], "a commit other than the pin was materialised"
     assert got["absent"]
-    assert not export_dir(t.tenant, later).exists()
+    assert not export_dir(t.tenant, t.commit).exists(), "the export was also written under the tenant folder"
     assert not export_dir(t.tenant, _ABSENT_COMMIT).exists()
 
 

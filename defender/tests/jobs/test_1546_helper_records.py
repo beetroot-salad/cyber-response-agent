@@ -12,7 +12,20 @@ import uuid
 import pytest
 
 from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — fixtures
-from defender.tests.support.evidence._facts1546 import screened, sent_arm, sent_arms, sent_findings, sent_page, staged_arms, staged_knowledge
+from defender.tests.support.evidence._facts1546 import (
+    ARM_RUN,
+    ARM_WORLD,
+    VERB_ARM,
+    VERB_ARMS,
+    screened,
+    sent_arm,
+    sent_arms,
+    sent_findings,
+    sent_page,
+    staged_arms,
+    staged_knowledge,
+)
+from defender.tests.support.jobs._ending1546 import decide
 from defender.tests.support.jobs import _job_helper as J
 from defender.tests.support.jobs._helper_evidence1546 import (
     INV_PROGRESS,
@@ -32,7 +45,6 @@ from defender.tests.support.jobs._helper_evidence1546 import (
     plant,
     put_object,
     send,
-    spool_bytes,
     uploads,
 )
 from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
@@ -62,19 +74,21 @@ def _refused(staged: dict, name: str) -> dict:
 
 # --- PR2: valid records are staged as sent -----------------------------------------------------------------------------
 
+def _send_record(c, verb: str, record):
+    """The job's send of one record on its verb (an `arm` after the roster naming it, as a job does)."""
+    if verb == VERB_ARM:
+        send(c, VERB_ARMS, record=sent_arms((ARM_RUN, ARM_WORLD)))
+        return send(c, verb, run_id=ARM_RUN, record=record)
+    return send(c, verb, record=record)
+
+
 @pytest.mark.parametrize("case", sorted(VALID))
 def test_a_valid_record_of_each_kind_is_staged_as_the_closed_shape_it_was(scene, evidence_store, case):
-    """The control of every malformed-record case: a valid outcome/page/result, sent on its verb, is staged whole under its
-    name, and no `refused/` fact exists. (PR2)"""
+    """The control of every malformed-record case: a valid outcome/page/arms/arm/result/knowledge record of its kind, sent on
+    its verb, is staged whole under its name, and no `refused/` fact exists. (PR2)"""
     kind, verb, record, name, want = VALID[case]
     planted = plant(scene, kind)
-    got: dict = {}
-
-    def job(c) -> int:
-        got["answer"] = send(c, verb, record=record)
-        return 0
-
-    drive(scene, planted, job, **evidence_store.seams)
+    drive(scene, planted, lambda c: _send_record(c, verb, record) and 0, **evidence_store.seams)
     staged = facts(scene.dsn, scene.claim)
     assert staged[name] == want
     assert not [n for n in staged if n.startswith("refused/")], staged
@@ -101,26 +115,60 @@ def test_the_helper_stages_started_and_the_served_knowledge_itself(scene, eviden
 
 # --- PR2: whole-class malformed records ------------------------------------------------------------------------------------
 
+#: Keys of a record that are nullable (their absence is not a malformed record), by case.
+NULLABLE = {"readiness-knowledge": {"reason", "stale_kind"}}
+#: The kinds' `decide` input (a host request's three kinds are one).
+DECIDE_KIND = {"investigation": "investigation", "learning": "learning", "readiness": "host_request",
+               "adoption": "host_request", "drain": "host_request"}
+
+
+def _is_still_valid(case: str, valid: dict, bad) -> bool:
+    """`bad` is the valid record less only nullable keys: the one mutant that is no malformed record."""
+    return (isinstance(bad, dict) and set(bad) <= set(valid) and set(valid) - set(bad) <= NULLABLE.get(case, set())
+            and all(valid[k] == v for k, v in bad.items()))
+
+
 def _malformed_cases():
+    """Every (kind, record name) of `VALID` crossed with records near its valid one and records of no kind; a record that is a
+    bare int (a drain's `result`) gets the values that are no int."""
     out = []
     for case, (_kind, _verb, record, _name, _staged) in sorted(VALID.items()):
-        pool = [*mutants(record, seed=1546, n=5), *non_records(seed=len(case), n=2)[:3]]
-        for i, bad in enumerate(pool[:8]):
+        scalars = non_records(seed=len(case), n=2)
+        picks = [scalars[i] for i in (0, 5, 7, 8, 11, 14)]  # None, 3.5, "outcome", [], {"x": 1}, b"{}"
+        if isinstance(record, dict):
+            pool = [b for b in mutants(record, seed=1546, n=0) if not _is_still_valid(case, record, b)][:5] + picks[:3]
+        else:
+            pool = [*picks, "0", [0], {"status": 0}, 3.5]
+        for i, bad in enumerate(pool):
             out.append(pytest.param(case, bad, id=f"{case}-{i}"))
     return out
 
 
 @pytest.mark.parametrize(("case", "bad"), _malformed_cases())
-def test_a_malformed_outcome_page_or_result_is_staged_refused_and_owes_nothing(scene, evidence_store, case, bad):
-    """A record of any malformed shape (a key dropped, an unknown key, a wrong type, non-records, raw bytes) on any verb is
-    staged `refused/<name>{reason}` and never as `<name>`. (PR2, "Done when")"""
+def test_a_malformed_record_of_any_kind_and_name_is_staged_refused_and_a_refused_outcome_or_result_reads_bad_record(
+        scene, evidence_store, case, bad):
+    """Whole class, every kind by every record name (outcome, page, arms, arm, result, readiness knowledge): a malformed
+    record is staged `refused/<name>{reason}`, never `<name>`, and owes nothing; a refused `outcome` or `result` reads
+    `bad_record` in the ending. (PR2, PR9, "Done when": every kind)"""
     kind, verb, _record, name, _staged = VALID[case]
     planted = plant(scene, kind)
-    drive(scene, planted, lambda c: send(c, verb, record=bad) and 0, **evidence_store.seams)
+
+    def job(c) -> int:
+        if verb == VERB_ARM:
+            send(c, VERB_ARMS, record=sent_arms((ARM_RUN, ARM_WORLD)))
+            send(c, verb, run_id=ARM_RUN, record=bad)
+        else:
+            send(c, verb, record=bad)
+        return 0
+
+    drive(scene, planted, job, **evidence_store.seams)
     staged = facts(scene.dsn, scene.claim)
     _refused(staged, name)
     assert name not in staged, "a malformed record was staged as a fact"
     assert uploads(scene.dsn, scene.claim) == {}
+    if name in ("outcome", "result"):
+        end = decide(DECIDE_KIND[kind], staged, {}, "exited")
+        assert (end.stage, end.failure_reason) == ("failed", "bad_record"), (end.stage, end.failure_reason)
 
 
 def test_a_record_missing_altogether_is_staged_refused(scene, evidence_store):
@@ -251,13 +299,23 @@ def test_an_arm_fact_is_staged_only_for_a_run_on_the_roster_and_its_malformed_re
         assert f"arm/{arm['run_id']}" not in staged
 
 
-def test_an_arm_fact_before_any_roster_is_not_staged(scene, evidence_store):
-    """With no `arms` roster staged no run is on it: an `arm/<id>` fact is not staged. (PR2)"""
+def test_an_arm_fact_before_the_roster_is_refused_and_the_same_fact_after_it_lands(scene, evidence_store):
+    """The roster (`arms`) is staged before the first `arm/<id>`: an arm fact sent before it is not staged (no roster names
+    its run); once the roster is staged the same fact is, as its control. (PR2, G11: roster before the first arm)"""
     planted = plant(scene, "learning")
-    run = str(uuid.uuid4())
-    drive(scene, planted, lambda c: send(c, "arm", run_id=run, record=sent_arm()) and 0,
-          **evidence_store.seams)
-    assert f"arm/{run}" not in facts(scene.dsn, scene.claim)
+    run, world = str(uuid.uuid4()), str(uuid.uuid4())
+    seen: dict = {}
+
+    def job(c) -> int:
+        send(c, "arm", run_id=run, record=sent_arm())
+        seen["before"] = dict(facts(scene.dsn, scene.claim))
+        send(c, "arms", record=sent_arms((run, world)))
+        send(c, "arm", run_id=run, record=sent_arm())
+        return 0
+
+    drive(scene, planted, job, **evidence_store.seams)
+    assert f"arm/{run}" not in seen["before"]
+    assert facts(scene.dsn, scene.claim)[f"arm/{run}"] == sent_arm(), "control: with the roster staged the arm fact lands"
 
 
 # --- PR8: an object needs its fact --------------------------------------------------------------------------------------------
@@ -267,21 +325,19 @@ def _stored(scene, obj: str) -> str | None:
 
 
 def test_a_bundle_put_before_any_outcome_is_refused_and_leaves_no_row_no_spool_and_no_object(scene, evidence_store):
-    """With no `outcome` (or `refused/outcome`) staged, a `put` of the bundle is refused: no upload row, none of its bytes in
-    the spool, nothing in the bucket; with the outcome staged the same put is accepted (control). (PR8)"""
+    """With no `outcome` (or `refused/outcome`) staged, a `put` of the bundle is refused: no upload row, nothing in the bucket;
+    with the outcome staged the same put is accepted (control). The spool is cleared at refusal or at the job's exit. (PR8)"""
     planted = plant(scene, "investigation")
     got: dict = {}
 
     def job(c) -> int:
         got["early"] = c.refused("evidence.put", object="bundle", part=0, last=True, data=BUNDLE)
-        got["spool_early"] = spool_bytes(scene)
         send(c, "outcome", record=inv_outcome())
         got["late"] = put_object(c, "bundle", BUNDLE)
         return 0
 
     drive(scene, planted, job, **evidence_store.seams)
     assert got["early"].code
-    assert BUNDLE not in got["spool_early"]
     assert got["late"], "control: the put after the outcome was refused"
     assert uploads(scene.dsn, scene.claim)["bundle"]["status"] == "uploaded"
     assert len(evidence_store.garage.list(f"t/{scene.tenant}/")) == 1
@@ -387,33 +443,45 @@ def _end_by_take_over(scene, planted) -> None:
     asyncio.run(go())
 
 
-@pytest.mark.parametrize("ender", ["cancel", "take-over", "learning-take-over"])
+@pytest.mark.parametrize("ender", ["none", "none-learning", "cancel", "take-over", "learning-take-over"])
 def test_a_write_after_the_references_end_is_refused_and_one_before_it_was_not_lost(scene, evidence_store, ender):
-    """The job stages `progress` and puts a small object before its owner row ends (by the store's own cancel or take-over) and
-    again after: the facts staged before stand and the late `progress`, `arms` and put leave no new fact; no upload row
-    is made for the late put and nothing is promoted. Codes and lock mode are not pinned. (PR7)"""
-    kind = "learning" if ender == "learning-take-over" else "investigation"
+    """The job stages `progress`, its outcome, its page or roster fact and a bundle before its owner row ends (by the store's
+    own cancel or take-over); afterwards each late write is one that is OWED and valid (a new `progress`, an owed object put,
+    an arm fact of a roster id): with no end (control) they all land, after an end none does: no new fact, no upload row,
+    nothing promoted. Codes and lock mode are not pinned. (PR7)"""
+    kind = "learning" if ender.endswith("learning") or ender == "learning-take-over" else "investigation"
     planted = plant(scene, kind)
     seen: dict = {}
     early = LEARNING_PROGRESS if kind == "learning" else INV_PROGRESS
     late = {**LEARNING_PROGRESS, "sibling_cost_usd": 5.0} if kind == "learning" else {"cost_usd": 5.0}
+    arm, world = str(uuid.uuid4()), str(uuid.uuid4())
+    owed = EPISODE_PAGE if kind == "learning" else RUN_PAGE
 
     def job(c) -> int:
         send(c, "progress", record=early)
         send(c, "outcome", record=SMALL_OUTCOME[kind])
+        send(c, "arms", record=sent_arms((arm, world))) if kind == "learning" else send(c, "page", record=sent_page())
         put_object(c, "bundle", BUNDLE)
         seen["before"] = facts(scene.dsn, scene.claim)
-        (_end_by_cancel if ender == "cancel" else _end_by_take_over)(scene, planted)
+        if not ender.startswith("none"):
+            (_end_by_cancel if ender == "cancel" else _end_by_take_over)(scene, planted)
         send(c, "progress", record=late)
-        send(c, "arms", record=sent_arms())
-        send(c, "evidence.put", object=EPISODE_PAGE if kind == "learning" else RUN_PAGE, part=0, last=True, data=PAGE)
+        if kind == "learning":
+            send(c, "arm", run_id=arm, record=sent_arm())
+        send(c, "evidence.put", object=owed, part=0, last=True, data=PAGE)
         seen["after"] = facts(scene.dsn, scene.claim)
         return 0
 
     drive(scene, planted, job, **evidence_store.seams)
     assert "progress" in seen["before"], "control: the writes before the end landed"
     assert "outcome" in seen["before"], "control: the writes before the end landed"
-    assert seen["after"] == seen["before"], "a fact was written after the reference ended"
     rows = uploads(scene.dsn, scene.claim)
+    if ender.startswith("none"):
+        assert seen["after"]["progress"] == late, "control: a late `progress` of a live claim lands"
+        assert set(rows) == {"bundle", owed}, "control: an owed put of a live claim is accepted"
+        if kind == "learning":
+            assert f"arm/{arm}" in seen["after"], "control: an arm fact of a roster id lands"
+        return
+    assert seen["after"] == seen["before"], "a fact was written after the reference ended"
     assert set(rows) <= {"bundle"}, f"an upload row was written after the end: {sorted(rows)}"
     assert accepted(scene.dsn, scene.claim) == [], "the helper promoted (only the applier may, PR3)"

@@ -16,7 +16,7 @@ from defender.tests.jobs.test_1344_learning_jobs import (
     learning_worker,
     post_child,
 )
-from defender.tests.support.evidence._facts1546 import arm_facts, arm_page, staged_arm, staged_page
+from defender.tests.support.evidence._facts1546 import UP, arm_facts, arm_page, staged_arm, staged_page, up
 from defender.tests.support.jobs._evidence_flows1546 import (
     EPISODE_PAGE,
     INPUTS,
@@ -41,6 +41,7 @@ from defender.tests.support.jobs._evidence_flows1546 import (
     stage_fact,
     stage_upload,
 )
+from defender.tests.support.jobs._ending1546 import plant_claim, plant_complete_source, plant_uploads, queue_learning_job
 from defender.tests.support.jobs._jobs1342 import MALICIOUS_REPORT, T1, T2, job_end, job_store, lapse_lease, row
 from defender.tests.support.jobs._worker1342 import _child, _FAST, _queued, _until, _worker
 from defender.tests.support.jobs import _worker1342 as _shared
@@ -221,14 +222,22 @@ async def test_another_claims_uploads_for_the_same_owner_are_never_promoted(worl
 
 # --- learning job ------------------------------------------------------------------------------------------------------
 
-async def _learning(world, outcome, *, objects=None, **child):
-    """One complete source (the store's finish) and its queued job; the worker runs it with the staged rows."""
-    from defender.tests.jobs.test_1344_learning_jobs import queued_job
+async def _queued_learning(world, store, ticket: str = "J-1") -> tuple[str, str]:
+    """A `complete` source with its facts-free rows planted and one queued learning job: `(job id, source id)`. Not
+    `queued_job`: that finishes a source with no facts, which under r8 reads `none` and queues nothing."""
+    dsn = world["dsn"]
+    alert, source = await plant_complete_source(dsn, store, T1, ticket=ticket)
+    token = plant_claim(dsn, tenant=T1, kind="investigation", ref=source)  # the source's own claim and its accepted bundle
+    plant_uploads(dsn, token, {"bundle": up(UP, "clean")})
+    execute(dsn, "UPDATE jobs.uploads SET accepted_at = now() WHERE token = %s", (token,))
+    return await queue_learning_job(dsn, T1, alert.alert_id, source), source
 
+
+async def _learning(world, outcome, *, objects=None, **child):
+    """One complete source and its queued job (planted rows, as a #1546 complete end leaves them); the worker runs it."""
     dsn = world["dsn"]
     async with job_store(dsn) as store:
-        job = await queued_job(world, store, ticket="J-1")
-        source = execute(dsn, "SELECT investigation_id FROM jobs.learning_jobs WHERE id = %s", (job,))[0][0]
+        job, source = await _queued_learning(world, store)
         staging = Staging(dsn, world["root"], "learning", lambda launch: launch.job_id, job_child(world, **child),
                           staged={"started": STARTED, "outcome": outcome},
                           objects={EPISODE_PAGE: PAGE, "bundle": BUNDLE} if objects is None else objects,
@@ -268,11 +277,9 @@ async def test_screened_findings_are_stored_with_the_ending(world):
     from defender.tests.support.jobs import _findings1487 as F
 
     # a row id is the job's: the job id is only known once queued, so stage after it is known (rewrite the outcome fact)
-    from defender.tests.jobs.test_1344_learning_jobs import queued_job
-
     dsn = world["dsn"]
     async with job_store(dsn) as store:
-        job = await queued_job(world, store, ticket="J-1")
+        job, _ = await _queued_learning(world, store)
 
         def stage(token: str) -> None:
             return None
@@ -294,11 +301,9 @@ async def test_a_learning_jobs_arms_databases_ride_in_its_bundle_and_a_non_clean
     PR8)"""
     arms = arm_facts(**{"a-1": staged_arm("clean", "rendered"), "a-2": staged_arm("clean", "render_failed"),
                         "a-3": staged_arm("tainted", "none")})
-    from defender.tests.jobs.test_1344_learning_jobs import queued_job
-
     dsn = world["dsn"]
     async with job_store(dsn) as store:
-        job = await queued_job(world, store, ticket="J-1")
+        job, _ = await _queued_learning(world, store)
         staging = Staging(dsn, world["root"], "learning", lambda launch: launch.job_id, job_child(world),
                           staged={"started": STARTED, **arms, "outcome": learning_outcome()},
                           objects={EPISODE_PAGE: PAGE, "bundle": BUNDLE, arm_page("a-1"): PAGE})
@@ -313,8 +318,6 @@ async def test_a_learning_jobs_arms_databases_ride_in_its_bundle_and_a_non_clean
 async def test_a_post_step_claims_with_empty_inputs_and_its_hold_token_is_its_claim_token(world):
     """The post-step's claim has no inputs; the hold row's `holder`, the claim's token and the claim the child was handed are
     one value; the work-waits answer stays the helper's exit status. (PR7, A-O6, G7)"""
-    from defender.tests.jobs.test_1344_learning_jobs import queued_job
-
     dsn = world["dsn"]
     post = post_child(world, exit=0, answers=False)
     seen: dict = {}
@@ -326,7 +329,7 @@ async def test_a_post_step_claims_with_empty_inputs_and_its_hold_token_is_its_cl
             return super()._launch(launch)
 
     async with job_store(dsn) as store:
-        job = await queued_job(world, store, ticket="J-1")
+        job, _ = await _queued_learning(world, store)
         staging = Recording(dsn, world["root"], "post-step", lambda launch: launch.tenant_id, post)
         await learning_worker(world, store, job=job_child(world, files={}), post=staging).drain()
     staging.assert_ran()

@@ -306,8 +306,8 @@ class Store:
         claim = uuid.uuid4().hex
         self.garage.put(object_key(tenant, owner_kind, owner, claim, obj), data, sse_key=made.plaintext)
         self.garage.tenant_prefix(tenant)
-        execute(scene.dsn, "INSERT INTO jobs.claims (token, tenant_id, kind, investigation_id) VALUES (%s, %s, "
-                           "'investigation', %s)", (claim, tenant, owner))
+        execute(scene.dsn, "INSERT INTO jobs.claims (token, tenant_id, kind, investigation_id, inputs) VALUES "
+                           "(%s, %s, 'investigation', %s, '[]'::jsonb)", (claim, tenant, owner))
         execute(scene.dsn, "INSERT INTO jobs.uploads (token, object, size, sha256, wrapped_key, status, created_at, "
                            "accepted_at) VALUES (%s, %s, %s, %s, %s, 'uploaded', now(), now())",
                 (claim, obj, len(data), sha(data), made.wrapped))

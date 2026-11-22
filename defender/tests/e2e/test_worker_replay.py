@@ -1,7 +1,7 @@
 """#1342 O16: one hermetic replay through the real worker lane, child process included.
 
-The real `Worker` (in-process) over a per-test database claims a queued investigation, writes the
-launch files and spawns `_helper_child1170.py`: the real per-job host helper (#1170 r4: admission, launch check, publish
+The real `Worker` (in-process) over a per-test database claims a queued investigation, stages its claim and
+spawns `_helper_child1170.py`: the real per-job host helper (#1170 r4: admission, launch check, publish
 and the run's folders are its) whose job container is `_job_entry1342.py`, which runs the real in-container job entry with the replay harness's
 seams (an unboxed executor handed through the lifecycle's `start_box` seam, never the environment;
 a replay model closing with the golden's disposition). The row is read back from the database."""
@@ -30,10 +30,26 @@ from defender.tests.support.jobs._jobs1342 import (
     register_tenant,
     row,
 )
-from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
+from defender.tests.support.jobs._evidence_flows1546 import claim_of, facts
+from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — fixture
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING, remove_postgres_mapping, seed_postgres
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.e2e]
+
+
+def _staged(dsn: str, investigation: str) -> dict:
+    """The facts the helper staged under the investigation's claim (#1546: the end is read from rows, never job-end or launch
+    files)."""
+    token = claim_of(dsn, "investigation", investigation)
+    assert token, "premise: the worker's claim wrote a claim row"
+    return facts(dsn, token)
+
+
+def _launch(dsn: str, investigation: str) -> dict:
+    """The launch record as the claim holds it (`jobs.claims.launch`): alert digest, box token, label."""
+    [(found,)] = execute(dsn, "SELECT launch FROM jobs.claims WHERE kind = 'investigation' AND investigation_id = %s",
+                         (investigation,))
+    return found
 
 
 
@@ -109,16 +125,16 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         closed = committed_record(runs / inv.investigation_id)
         assert closed is not None, "the replay's close left no closing record in the run's session database"
         assert closed.disposition == disposition, closed
-        assert (runs / f"{inv.investigation_id}.job-end.json").is_file()
-        assert Path(runs / f"{inv.investigation_id}.launch.json").is_file()
-        assert json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8")) == {
-            "setup": "done", "box": "started", "report_committed": True, "scrub_verified": True,
-            "cut_short": None}
+        for leftover in (".job-end.json", ".launch.json"):
+            assert not (runs / f"{inv.investigation_id}{leftover}").exists(), f"the retired {leftover} file was written"
+        outcome = _staged(migrated_database, inv.investigation_id)["outcome"]
+        assert {k: outcome[k] for k in ("setup", "box", "report_committed", "scrub", "cut_short")} == {
+            "setup": "done", "box": "started", "report_committed": True, "scrub": "clean", "cut_short": None}
         from defender.records import RunPaths
 
-        launch = json.loads((runs / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))
+        launch = _launch(migrated_database, inv.investigation_id)
         held = RunPaths(runs / inv.investigation_id).alert.read_bytes()
-        assert held == (runs / f"{inv.investigation_id}.alert.json").read_bytes() == golden_bytes
+        assert held == golden_bytes
         assert hashlib.sha256(held).hexdigest() == launch["digest"]
         assert is_box_token(launch["box_token"]), launch
         assert (tmp_path / "marks" / "start-token").read_text(encoding="utf-8") == launch["box_token"], \
@@ -127,7 +143,7 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
 
 async def test_o8_a_raise_after_the_real_drivers_close_still_records_the_report_committed(
         migrated_database, tmp_path, monkeypatch, short_root):  # noqa: F811
-    """The replay model commits the golden's report and the next model request raises (`KeyboardInterrupt`) inside the real driver: the job-end record still says `report_committed: true`, because the driver's own review state (the holder's dict) closed. (O8, M2, r5 C2)"""
+    """The replay model commits the golden's report and the next model request raises (`KeyboardInterrupt`) inside the real driver: the staged outcome still says `report_committed: true`, because the driver's own review state (the holder's dict) closed. (O8, M2, r5 C2)"""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     root = short_root
@@ -149,7 +165,7 @@ async def test_o8_a_raise_after_the_real_drivers_close_still_records_the_report_
             row = await store.get_investigation(t.tenant_id, inv.investigation_id)
 
         runs = root / t.tenant_id / "runs"
-        end = json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8"))
+        end = _staged(migrated_database, inv.investigation_id)["outcome"]
         assert (tmp_path / "marks" / "fault-raised").is_file(), "premise: the driver made a request after the close and it raised"
         assert committed_record(runs / inv.investigation_id) is not None, "premise: the closing record was committed before the fault"
         assert (end["setup"], end["box"]) == ("done", "started"), end
@@ -226,7 +242,7 @@ async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_alert_and_the_
             assert (await store.get_alert(t.tenant_id, alert.alert_id)).title == launched_with, "a save never retitles a stored alert"
 
         runs = root / t.tenant_id / "runs"
-        launch = json.loads((runs / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))
+        launch = _launch(migrated_database, inv.investigation_id)
         stamp = json.loads((runs / inv.investigation_id / "provenance.json").read_text(encoding="utf-8"))
         assert (launch["label"], stamp["alert_label"]) == (launched_with, launched_with)
 
@@ -310,8 +326,9 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
         spent = _priced_spend(**PRICED_CALLS)
         assert stored["cost_usd"] == pytest.approx(spent, rel=1e-9)
         assert lower_limit(migrated_database, inv.investigation_id) is False
-        end = json.loads((runs / f"{inv.investigation_id}.job-end.json").read_text(encoding="utf-8"))
-        assert set(end) == {"setup", "box", "report_committed", "scrub_verified", "cut_short"}, end
+        outcome = _staged(migrated_database, inv.investigation_id)["outcome"]
+        assert outcome["cost_usd"] == pytest.approx(spent, rel=1e-9), "the staged outcome's cost is not the row's"
+        assert (outcome["report_committed"], outcome["scrub"]) == (True, "clean"), outcome
         result = _run_result(runs / inv.investigation_id)
         assert result["total_cost_usd"] == pytest.approx(spent, abs=1e-6), "the run file's total is not the job's cost"
         assert result["total_cost_is_lower_limit"] is False
@@ -425,7 +442,7 @@ async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_rep
         assert got[faulted]["cost_usd"] == pytest.approx(lacking_review, rel=1e-9)
         assert lower_limit(migrated_database, faulted) is True
         assert lower_limit(migrated_database, control) is False
-        end = json.loads((runs / f"{faulted}.job-end.json").read_text(encoding="utf-8"))
+        end = _staged(migrated_database, faulted)["outcome"]
         assert end["report_committed"] is True, end
         result = _run_result(runs / faulted)
         assert (result["total_cost_usd"], result["total_cost_is_lower_limit"]) == (pytest.approx(lacking_review, abs=1e-6), True)

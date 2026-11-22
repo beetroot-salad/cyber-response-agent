@@ -1,0 +1,9 @@
+# TEST-ONLY layer over the job image (#1546 done-when 1): the real investigation entry's replay driver
+# (`defender/tests/support/jobs/_job_entry1342.py`, bound with the code copy) imports pytest through the replay harness,
+# and the job image installs the runtime extra only. Nothing else changes. CI builds it after the job image; the e2e
+# names it with DEFENDER_JOB_IMAGE:
+#   docker build -f tooling/testing/Dockerfile.job-replay -t defender-job-replay:latest .
+ARG BASE=defender-job:latest
+FROM ${BASE}
+# The version the lock pins for the dev extra.
+RUN uv pip install --python /opt/defender-job/.venv/bin/python --no-cache pytest==9.0.3

@@ -5,6 +5,8 @@ JobTenant halves are in `test_1546_helper_folders.py`."""
 from __future__ import annotations
 
 import json
+import os
+import signal
 import sys
 import threading
 import time
@@ -146,13 +148,12 @@ def _part(c, obj, n, last, data, **extra):
 def test_an_object_streamed_with_a_gap_a_repeat_no_end_or_a_wrong_digest_is_refused_and_its_spool_removed(
         scene, evidence_store, fault):
     """A part sequence that skips a part, repeats one, arrives out of order, never marks its last part, or ends with a digest
-    that is not the bytes' refuses that object: no `uploaded` row, none of its bytes left in the spool, nothing in the bucket;
-    an object streamed correctly beside it (control) is uploaded. (PR2, flow step 2)"""
+    that is not the bytes' refuses that object: no `uploaded` row, nothing in the bucket, and none of its bytes left in the
+    spool once the job has exited (cleared at the refusal or at exit, not demanded mid-job); an object streamed correctly beside
+    it (control) is uploaded. (PR2, flow step 2)"""
     planted = plant(scene, "investigation")
     marker = (b"MARKER-1546-" + fault.encode()) * 40
     chunks = [marker[:100], marker[100:200], marker[200:]]
-    got: dict = {}
-
     def job(c) -> int:
         send(c, "outcome", record=inv_outcome())
         if fault == "gap":
@@ -171,7 +172,6 @@ def test_an_object_streamed_with_a_gap_a_repeat_no_end_or_a_wrong_digest_is_refu
         else:
             for n, chunk in enumerate(chunks):
                 _part(c, "bundle", n, n == 2, chunk, **({"sha256": sha(b"other")} if n == 2 else {}))
-        got["spool"] = spool_bytes(scene)
         send(c, "page", record=sent_page())
         put_object(c, RUN_PAGE, PAGE)
         return 0
@@ -180,7 +180,7 @@ def test_an_object_streamed_with_a_gap_a_repeat_no_end_or_a_wrong_digest_is_refu
     rows = uploads(scene.dsn, scene.claim)
     assert rows.get("bundle", {}).get("status") != "uploaded"
     assert rows[RUN_PAGE]["status"] == "uploaded", "control: a correct object beside it was uploaded"
-    assert marker[:60] not in got["spool"], "the refused object's bytes stayed in the spool"
+    assert marker[:60] not in spool_bytes(scene), "the refused object's bytes stayed in the spool after the job's exit"
     assert evidence_store.garage.list(f"t/{scene.tenant}/") == [_key(scene, planted, RUN_PAGE)]
 
 
@@ -282,6 +282,37 @@ def test_a_store_that_stays_down_past_the_budget_refuses_the_object_and_the_help
     assert took < 60, took
 
 
+@pytest.mark.parametrize("store_up", [True, False], ids=["store-up", "store-down"])
+def test_after_a_stop_uploads_continue_only_within_the_30_second_grace(scene, evidence_store, store_up):
+    """The worker's stop (SIGTERM to the helper) with an object spooled: with the store up the object is still uploaded after
+    the stop; with the store down for good and the per-object budget at its design value (120 s) the helper ends within the
+    30 s stop grace (plus a margin), the object is not `uploaded`, and nothing reached the store. (flow step 3: stop grace)"""
+    planted = plant(scene, "investigation")
+    marks: dict = {}
+    with s3_relay(evidence_store.garage.endpoint) as relay:
+        if not store_up:
+            relay.down()
+        seams = {**evidence_store.seams, "evidence": evidence_store.blob_store(relay.endpoint), "upload_budget": 120.0}
+
+        def job(c) -> int:
+            send(c, "outcome", record=inv_outcome())
+            put_object(c, "bundle", BUNDLE)
+            marks["signalled"] = time.monotonic()
+            os.kill(os.getpid(), signal.SIGTERM)  # the worker's stop: the helper takes it on this thread
+            assert c.stopping.wait(15), "the helper never stopped the container"
+            return 0
+
+        drive(scene, planted, job, **seams)
+        took = time.monotonic() - marks["signalled"]
+    status = (uploads(scene.dsn, scene.claim).get("bundle") or {}).get("status")
+    if store_up:
+        assert status == "uploaded", "control: with the store up the spooled object is uploaded after the stop"
+        return
+    assert took < 45, f"uploads outlasted the 30 s stop grace: {took:.0f} s"
+    assert status != "uploaded"
+    assert evidence_store.garage.list(f"t/{scene.tenant}/") == []
+
+
 # --- setup: an unconfigured store or key login is refused, terminally ---------------------------------------------------------
 
 @pytest.mark.parametrize("missing", ["store", "key-login", "both"])
@@ -342,56 +373,92 @@ def test_a_learning_job_pulls_its_input_and_everything_else_is_out_of_claim_with
 
 @pytest.mark.parametrize("why", ["tainted", "expired", "offboarded"])
 def test_a_pull_of_a_set_member_that_is_unusable_is_unavailable_never_its_bytes(scene, evidence_store, why):
-    """A set member whose owner is tainted, whose evidence expired, or whose objects and rows an offboarding removed is
-    refused `unavailable` (not `out_of_claim`): PR6, A-O6. (The exact offboarded signal is a design gap: rows gone, claim kept.)"""
+    """A set member whose owner is tainted, whose evidence expired (retention's effect: state `expired`, object rows gone), or
+    whose tenant is offboarded (tenant state `offboarded` plus the offboarding pass's effect: the tenant's objects, facts and
+    uploads gone, claims kept with launch facts nulled) is refused `unavailable` (not `out_of_claim`): PR6, A-O6."""
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
     store = evidence_store
     planted, _ = _learning_with_inputs(scene, store)
     source = planted.source
+    source_claims = "SELECT token FROM jobs.claims WHERE investigation_id = %s"
     if why == "tainted":
         execute(scene.dsn, "UPDATE jobs.investigations SET stage = 'failed', failure_reason = 'no_report', "
                            "evidence_state = 'partial', scrub = 'tainted' WHERE id = %s", (source,))
-    else:
-        execute(scene.dsn, "DELETE FROM jobs.uploads WHERE token IN (SELECT token FROM jobs.claims "
-                           "WHERE investigation_id = %s)", (source,))
-        execute(scene.dsn, "UPDATE jobs.investigations SET evidence_state = %s WHERE id = %s",
-                ("expired" if why == "expired" else "none", source))
+    elif why == "expired":
+        execute(scene.dsn, f"DELETE FROM jobs.uploads WHERE token IN ({source_claims})", (source,))  # noqa: S608
+        execute(scene.dsn, "UPDATE jobs.investigations SET evidence_state = 'expired' WHERE id = %s", (source,))
     got: dict = {}
-    drive(scene, planted, lambda c: got.update(code=c.refused("evidence.pull", owner=source, object="bundle", part=0).code)
-          or 0, **store.seams)
+
+    def job(c) -> int:
+        if why == "offboarded":  # an offboarding of the tenant while the job runs: the state, then the pass's effect
+            move_tenant(scene.dsn, scene.tenant, state="offboarded")
+            for key in store.garage.list(f"t/{scene.tenant}/"):
+                store.garage.delete(key)
+            for table in ("staged_facts", "uploads"):
+                execute(scene.dsn, f"DELETE FROM jobs.{table} WHERE token IN ({source_claims})", (source,))  # noqa: S608
+            execute(scene.dsn, f"UPDATE jobs.claims SET launch = NULL WHERE token IN ({source_claims})", (source,))  # noqa: S608
+        got["code"] = c.refused("evidence.pull", owner=source, object="bundle", part=0).code
+        return 0
+
+    drive(scene, planted, job, **store.seams)
     assert got["code"] == UNAVAILABLE
 
 
-def test_an_accepted_object_that_is_missing_or_does_not_match_its_digest_is_a_store_fault_never_wrong_bytes(scene,
-                                                                                                           evidence_store):
+def test_an_accepted_object_that_does_not_match_its_digest_is_a_store_fault_never_wrong_bytes(scene, evidence_store):
     """Every read checks the recorded digest: a pull of an object whose stored bytes were replaced (under the same data key)
-    is refused `store_fault`, and so is one whose object was deleted; neither answers bytes, and neither is `out_of_claim` or
-    `unavailable`. The untouched pull is the control. (A-O3, A-O6)"""
+    is refused `store_fault`, never answered, and neither `out_of_claim` nor `unavailable`. The untouched pull is the
+    control. (A-O3, A-O6)"""
     store = evidence_store
     planted, data = _learning_with_inputs(scene, store)
     other = another_investigation(scene)
     store.plant_accepted(scene, scene.tenant, other, "bundle", b"the untouched bundle")
-    gone = another_investigation(scene)
-    gone_claim = store.plant_accepted(scene, scene.tenant, gone, "bundle", b"a bundle later deleted")
     [(tampered_claim,)] = execute(scene.dsn, "SELECT token FROM jobs.claims WHERE investigation_id = %s",
                                   (planted.source,))
     wrapped = uploads(scene.dsn, tampered_claim)["bundle"]["wrapped_key"]
     store.garage.put(object_key(scene.tenant, "investigation", planted.source, tampered_claim, "bundle"),
                      b"X" * len(data), sse_key=store.keys.unwrap(scene.tenant, wrapped))
-    store.garage.delete(object_key(scene.tenant, "investigation", gone, gone_claim, "bundle"))
     execute(scene.dsn, "UPDATE jobs.claims SET inputs = %s::jsonb WHERE token = %s", (
-        json.dumps([{"owner": o, "object": "bundle"} for o in (planted.source, other, gone)]), scene.claim))
+        json.dumps([{"owner": o, "object": "bundle"} for o in (planted.source, other)]), scene.claim))
     got: dict = {}
 
     def job(c) -> int:
         got["control"] = pull_object(c, other, "bundle")
         got["tampered"] = c.refused("evidence.pull", owner=planted.source, object="bundle", part=0)
-        got["missing"] = c.refused("evidence.pull", owner=gone, object="bundle", part=0)
         return 0
 
     drive(scene, planted, job, **store.seams)
     assert got["control"] == b"the untouched bundle"
     assert got["tampered"].code == STORE_FAULT
-    assert got["missing"].code == STORE_FAULT
+
+
+def test_an_accepted_object_that_is_missing_is_a_store_fault_that_is_retried_never_unavailable(scene, evidence_store):
+    """An accepted object absent from the store (deleted) is a store fault: every refusal of its pull is `store_fault` (not
+    `out_of_claim` or `unavailable`), and once the object is back the same pull answers its bytes: the fault is retried, not
+    final. Whether the helper retries inside the pull or the job asks again is not pinned. (A-O6, flow: a missing object)"""
+    store = evidence_store
+    planted, data = _learning_with_inputs(scene, store)
+    [(source_claim,)] = execute(scene.dsn, "SELECT token FROM jobs.claims WHERE investigation_id = %s", (planted.source,))
+    wrapped = uploads(scene.dsn, source_claim)["bundle"]["wrapped_key"]
+    key = object_key(scene.tenant, "investigation", planted.source, source_claim, "bundle")
+    sse = store.keys.unwrap(scene.tenant, wrapped)
+    store.garage.delete(key)
+    threading.Timer(2.0, lambda: store.garage.put(key, data, sse_key=sse)).start()
+    got: dict = {"refusals": []}
+
+    def job(c) -> int:
+        for _ in range(30):
+            try:
+                got["bytes"] = pull_object(c, planted.source, "bundle")
+                return 0
+            except Refused as refused:
+                got["refusals"].append(refused.code)
+                time.sleep(1.0)
+        return 0
+
+    drive(scene, planted, job, **store.seams)
+    assert got.get("bytes") == data, got["refusals"]
+    assert set(got["refusals"]) <= {STORE_FAULT}, got["refusals"]
 
 
 @pytest.mark.parametrize("kind", ["investigation", "post-step"])
@@ -418,7 +485,8 @@ def test_a_job_that_claims_an_upload_it_did_not_make_or_another_claims_object_ch
     """A job forges what it can: files in its root that look like outcomes and receipts, an outcome naming uploads, a `page`
     fact `rendered` it never pushed, `put`s addressed to another claim's object (by key path, `..`, an unknown name), and a
     pull of another claim's object. Afterwards: the only upload row is its own legitimate bundle, the other claim's stored
-    bytes and rows are unchanged, no forged outcome is staged, and no object lies outside this claim's prefix. ("Done when": forged receipt)"""
+    bytes and rows are unchanged, no forged outcome is staged, and no object lies outside this claim's prefix.
+    A job-written receipt or outcome, or a claimed upload it did not make, changes nothing. ("Done when": forged receipt)"""
     store = evidence_store
     other = another_investigation(scene)
     other_claim = store.plant_accepted(scene, scene.tenant, other, "bundle", b"another claim's accepted bundle")
