@@ -67,6 +67,23 @@ imported on first start only):
    re-authenticate" banner the API's `prompt=login` makes the provider show on a later sign-in) and `login/messages/`.
    Restart the provider if it caches themes.
 
+## Upgrade from before #1620
+
+No migration. The API now refuses to start when the sign-in realm does not accept its sign-in client and redirect
+URI (the rest of the sign-in request, such as its PKCE method, is still met only at first sign-in): before
+upgrading, check that the realm's sign-in client lists `<frontend origin>/api/auth/callback` among its valid redirect
+URIs (a realm imported from an older realm file may still list only the old callback). A refused start names the
+client and the redirect URI. Each start leaves one unfinished login session in the realm until its login timeout.
+
+## Upgrade from before #1565
+
+No migration. The learning store now refuses an item that arrives at a key it already holds with other content
+(findings, pitfalls, curation requests), where it used to drop it silently; the same content is still a no-op. A run's
+pitfalls are filed in one call, refused whole on a clash. From this upgrade on, a curation request retried across an
+upgrade that changes how a run's pitfall rows are built refiles them with other content at their held ids, and is
+refused at every try until it is dead: before such an upgrade, let the lead-author lane finish the requests it holds
+(none `in_batch`).
+
 ## Upgrade from before #1504
 
 A catalog system record's non-GET reads must now be exactly the routes its adapter sends (`READ_ROUTES` in the adapter

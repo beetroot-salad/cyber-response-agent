@@ -190,7 +190,7 @@ def stored(migrated_database, data_root, tmp_path):  # noqa: F811 — the import
     tenant = set_up_tenant(data_root)
     register_tenant(dsn, str(tenant.id))
     with blocking(dsn) as store:
-        store.publish_findings(str(tenant.id), "run-1", [finding(f) for f in ("f1", "f2", "f3", "f4")], kind="finding")
+        store.publish_finding_channels(str(tenant.id), "run-1", {"finding": [finding(f) for f in ("f1", "f2", "f3", "f4")]})["finding"]
         claim = store.claim(str(tenant.id), AUTHOR_LANE, owner="host-a", thresholds=ONE)
         store.in_review(claim, 7, {("finding", "f1"): _outcome("waiting"), ("finding", "f2"): _outcome("held", "curator_held", SCRIPT_PAYLOAD),
                                    ("finding", "f3"): _outcome("dead", "malformed_row", IMG_PAYLOAD)})
@@ -240,7 +240,7 @@ def test_one_more_row_moves_exactly_one_number(stored):
     before = _view(stored)
 
     with blocking(dsn) as store:
-        store.publish_findings(str(paths.tenant.id), "run-2", [finding("f9")], kind="finding")
+        store.publish_finding_channels(str(paths.tenant.id), "run-2", {"finding": [finding("f9")]})["finding"]
     after = _view(stored)
 
     b, a = _channel(before, "findings"), _channel(after, "findings")
@@ -463,7 +463,7 @@ def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
     tenant = set_up_tenant(data_root, H.TID)
     register_tenant(migrated_database, str(tenant.id))
     with blocking(migrated_database) as store:
-        store.publish_findings(str(tenant.id), "run-1", [finding("g-1"), finding("g-2")], kind="finding")
+        store.publish_finding_channels(str(tenant.id), "run-1", {"finding": [finding("g-1"), finding("g-2")]})["finding"]
     area = run_visualizations_dir / tenant.id / "learning"
     area.mkdir(parents=True)
     (area / "queues.html").write_text("STALE", encoding="utf-8")
@@ -506,7 +506,7 @@ def test_1279_o1_two_tenants_each_keep_their_own_pages_in_their_own_publish_area
     for t in (a, b):
         register_tenant(migrated_database, str(t.id))
     with blocking(migrated_database) as store:
-        store.publish_findings(str(a.id), "run-a", [finding("g-1")], kind="finding")
+        store.publish_finding_channels(str(a.id), "run-a", {"finding": [finding("g-1")]})["finding"]
     area = {t.id: run_visualizations_dir / t.id / "learning" for t in (a, b)}
     before = _in_tree_pages()
     env = {"DEFENDER_DEPLOYMENT": "dev", "DEFENDER_DATABASE_DSN": migrated_database}

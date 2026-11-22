@@ -1126,10 +1126,10 @@ def faultable_store(*, fail: tuple[str, ...] = ()) -> Any:
     class FaultableStore(MemoryStore):
         fail_kinds: set[str] = field(default_factory=set)
 
-        def publish_findings(self, tenant: str, run_id: str, rows: Any, *, kind: str) -> tuple[int, int]:
+        def _publish_kind(self, tenant: str, kind: str, rows: list[Any]) -> tuple[int, int]:
             if kind in self.fail_kinds:
                 raise ConnectionError(f"the learning store cannot be reached (inserting {kind})")
-            return super().publish_findings(tenant, run_id, rows, kind=kind)
+            return super()._publish_kind(tenant, kind, rows)
 
     return FaultableStore(fail_kinds=set(fail))
 

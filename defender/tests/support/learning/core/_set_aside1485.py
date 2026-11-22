@@ -117,7 +117,7 @@ async def parked_set(store: Any, tenant: str, *, tag: str = "") -> dict[str, Any
     author = await claim(store, tenant)
     await store.in_review(author, 7, {})
     revert = await store.claim_revert(tenant, owner="cli")
-    await store.add_pitfall(tenant, pitfall(f"p{tag}"))
+    bool(await store.add_pitfalls(tenant, [pitfall(f"p{tag}")]))
     lead = await store.claim(tenant, "lead_author", owner="host-a", thresholds=ONE)
     await store.in_review(lead, 8, {})
     tick = await store.begin_feedback_tick(tenant, owner="host-a")

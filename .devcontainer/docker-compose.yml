@@ -12,6 +12,10 @@ services:
         HCLOUD_VERSION: ${HCLOUD_VERSION:-1.62.2}
         CODEX_VERSION: ${CODEX_VERSION:-0.137.0}
     container_name: response-devcontainer
+    # The app (`.devcontainer/dev-app.sh`), loopback only. The sign-in realm registers exactly
+    # http://localhost:8000/api/auth/callback, so the host's browser must reach the app at that port.
+    ports:
+      - "127.0.0.1:8000:8000"
     env_file:
       - ../.env
     environment:

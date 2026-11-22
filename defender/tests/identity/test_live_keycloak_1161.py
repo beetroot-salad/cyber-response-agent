@@ -315,3 +315,53 @@ def test_1540_f5_the_dev_login_page_links_the_theme_stylesheet_and_serves_it_and
     assert refs, "the theme's stylesheet references its illustration and tokens"
     answers = {ref: httpx.get(urllib.parse.urljoin(sheet_url, ref)).status_code for ref in refs}
     assert set(answers.values()) == {200}, answers
+
+
+def _signin_adapter(live: Live, redirect_uri: str) -> Any:
+    """The API's sign-in adapter as start builds it against this Keycloak (#1620)."""
+    from defender.identity.keycloak import KeycloakSignIn
+
+    issuer = httpx.get(f"{live.realm_url}/.well-known/openid-configuration").json()["issuer"]
+    admin = _client(_realm_export(), "defender-api-admin")
+    return KeycloakSignIn(issuer=issuer, client_id=live.client[0], client_secret=live.client[1],
+                          redirect_uri=redirect_uri, admin_client_id=admin["clientId"],
+                          admin_client_secret=admin["secret"], server_url=live.base)
+
+
+def _probe(adapter: Any) -> str | None:
+    """None if the probe holds, else its refusal."""
+    import anyio
+
+    from defender.identity import SignInUnavailable
+
+    async def run() -> str | None:
+        try:
+            await adapter.probe()
+        except SignInUnavailable as refused:
+            return str(refused)
+        finally:
+            await adapter.close()
+        return None
+
+    return anyio.run(run)
+
+
+def test_1620_the_probe_holds_for_the_registered_callback_and_refuses_another_naming_the_redirect_step(live):
+    """Keycloak answers the browser's sign-in request as the stand-in models it: the realm's registered callback holds;
+    a callback it does not list is refused at the redirect step, naming the client and that callback."""
+    assert _probe(_signin_adapter(live, live.callback)) is None
+    unlisted = "http://localhost:9999/api/auth/callback"
+    message = _probe(_signin_adapter(live, unlisted))
+    assert message is not None, "an unlisted callback passed"
+    assert "redirect step" in message, message
+    assert unlisted in message, message
+    assert live.client[0] in message, message
+
+
+def test_1620_a_request_it_refuses_but_whose_callback_it_trusts_is_sent_back_there_with_an_error(live):
+    """The third answer the stand-in models (#1620 C3): a malformed challenge is sent to the callback with `error`."""
+    answer = httpx.get(live.authorize_url("s", "n", "abc"))
+    assert answer.status_code == 302, answer.status_code
+    location = urllib.parse.urlsplit(answer.headers["location"])
+    assert f"{location.scheme}://{location.netloc}{location.path}" == live.callback, answer.headers["location"]
+    assert urllib.parse.parse_qs(location.query)["error"] == ["invalid_request"], answer.headers["location"]
