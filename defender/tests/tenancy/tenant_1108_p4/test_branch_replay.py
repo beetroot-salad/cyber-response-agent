@@ -127,6 +127,9 @@ def _launch(scene: Scene, *, argv_extra=(), **seams) -> Launch:
     seams.setdefault("judge", S.quiet_judge())
     seams.setdefault("oracle", S.oracle(then=S.submit()).model)
     seams.setdefault("verifier", S.passing_verifier().model)
+    # #1618 FORCED (`knowledge_1618._support`'s seam list): every launch reads Forgejo through the one fetch seam, the real
+    # child over the scene's remote; the launcher's own default child would need the host's database to admit the tenant
+    seams.setdefault("fetch", K.fetch_seam(scene.t))
     message = ""
     minted = None
     argv = ["--tenant", scene.t.tenant_id, scene.src.name, str(T.BRANCH_MESSAGE_ID), *argv_extra]

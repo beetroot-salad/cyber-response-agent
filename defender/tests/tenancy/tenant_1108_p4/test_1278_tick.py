@@ -728,11 +728,11 @@ def test_1618_k7_a_tick_in_the_job_container_never_sweeps(world, post_step_helpe
     box = BoxSpy()
 
     def container_tick(paths, *, store):
-        # the drain as the container runs it: no `directory=` or `identity=` of the host's, so it finds its job container by
-        # the job socket (`drains._job_container`) and relays records, credential and `batch.start` to the helper; only the
-        # forge's API client is the fake's (as `_relay_tick`)
-        return drains.author_drain(paths, store=store, client=w.t.forge.client, trigger_author=writer,
-                                   start_box=box.start, stop_box=box.stop)
+        # the drain as the container runs it (as `_relay_tick`): no `directory=` or `identity=` of the host's; its job
+        # container is the real helper's, which answers records, `forge.token` and `batch.start`; only the forge's API client
+        # is the fake's
+        return drains.author_drain(paths, store=store, container=helper.container(), client=w.t.forge.client,
+                                   trigger_author=writer, start_box=box.start, stop_box=box.stop)
 
     with counting_calls(sweep=sweep_dead_owners) as seen:
         rc = post_step_in_container(None, w.t.tenant_id, forward=helper.ask, author_tick=container_tick)
