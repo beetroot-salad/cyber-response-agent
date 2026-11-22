@@ -369,7 +369,8 @@ sys.exit(main(sys.argv[2:], directory=directory, identity=VaultHTTP(spec["tenant
 '''
 
 
-def child_report(t: Any, tmp_path: Path, dest: Path, commit: str | None = None, *, timeout: float = 120.0) -> Report:
+def child_report(t: Any, tmp_path: Path, dest: Path, commit: str | None = None, *, timeout: float = 120.0,
+                 trigger: str | None = None) -> Report:
     """Run the fetch child as a real subprocess for `dest` (made by the caller) and return its report line (`ok <commit>` /
     `refused <transient|lasting> <reason>`). FORCED: see `_CHILD_WRAPPER`."""
     wrapper = tmp_path / "fetch_child_wrapper.py"
@@ -380,6 +381,8 @@ def child_report(t: Any, tmp_path: Path, dest: Path, commit: str | None = None, 
     argv = [t.tenant_id, "--data-root", str(location_path(t.data_root)), "--dest", str(dest)]
     if commit is not None:
         argv += ["--commit", commit]
+    if trigger:  # who asked, as the product's caller passes it (D9: readiness and onboarding also check main's protection)
+        argv += ["--trigger", trigger]
     env = {**os.environ, "PYTHONPATH": str(IMPORT_ROOT)}
     done = subprocess.run([sys.executable, str(wrapper), str(spec), *argv], cwd=IMPORT_ROOT, env=env,  # noqa: S603
                           capture_output=True, text=True, check=False, timeout=timeout)
@@ -411,9 +414,11 @@ class Fetch:
     def once(self, arm: Callable[[], Any], heal: Callable[[], Any] = lambda: None) -> None:
         self.faults.append((arm, heal))
 
-    def __call__(self, tenant_id: Any, dest: Path, *, data_root: Any, commit: str | None = None, **_kw: Any) -> str:
+    def __call__(self, tenant_id: Any, dest: Path, *, data_root: Any, commit: str | None = None, trigger: str | None = None,
+                 **_kw: Any) -> str:
         dest = Path(dest)
         call = {"tenant": str(tenant_id), "dest": dest, "data_root": Path(location_path(data_root)), "commit": commit,
+                "trigger": trigger,
                 "was_empty_dir": dest.is_dir() and not dest.is_symlink() and not any(dest.iterdir()), "line": None}
         self.calls.append(call)
         arm, heal = self.faults.pop(0) if self.faults else (lambda: None, lambda: None)
@@ -425,7 +430,7 @@ class Fetch:
         folder.mkdir()
         scene = SimpleNamespace(tenant_id=str(tenant_id), origin=self.origin_of(str(tenant_id)), data_root=data_root)
         try:
-            call["line"] = child_report(scene, folder, dest, commit).line
+            call["line"] = child_report(scene, folder, dest, commit, trigger=trigger).line
         finally:
             heal()
             shutil.rmtree(folder, ignore_errors=True)

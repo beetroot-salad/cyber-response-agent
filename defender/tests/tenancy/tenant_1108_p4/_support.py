@@ -302,6 +302,7 @@ def publish_placed(scratch: Path, *, root: Path, tenant_id: str,
             git(work, "remote", "add", "origin", origin)
         git(work, "fetch", remote, "+refs/heads/*:refs/remotes/origin/*")
         forge = ForgeHTTP(remote=remote, origin=origin)
+        server.api = forge.reply  # #1618 D9: a fetch child of its own process reads `main`'s protection over HTTP
         vault = VaultHTTP(tenant_id)
         identity = vault.identity()
         yield PublishedTenant(

@@ -1072,6 +1072,9 @@ class GitHTTP:
         self._push_faults: list[dict] = []
         #: Per push served: `"landed"`, `"landed-reply-lost"` or `"refused"`.
         self.pushes: list[str] = []
+        #: #1618 D9: the forge API on the same host, as Forgejo serves it beside git (`ForgeHTTP.reply`), so a process of
+        #: its own (the fetch child) reaches the scene's forge fake over HTTP. `/api/` requests go to it, never into `seen`.
+        self.api = None
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -1109,8 +1112,28 @@ class GitHTTP:
                 handler.rfile.readline()
         return handler.rfile.read(int(handler.headers.get("Content-Length") or 0))
 
+    def _serve_api(self, handler, body):
+        request = httpx.Request(handler.command, f"{self.url}{handler.path}", headers=dict(handler.headers.items()),
+                                content=body)
+        try:
+            response = self.api(request)
+        except httpx.HTTPError:
+            handler.close_connection = True
+            return
+        payload = response.read()
+        handler.send_response(response.status_code)
+        for name, value in response.headers.items():
+            if name.lower() not in ("content-length", "transfer-encoding", "content-encoding"):
+                handler.send_header(name, value)
+        handler.send_header("Content-Length", str(len(payload)))
+        handler.end_headers()
+        handler.wfile.write(payload)
+
     def _serve(self, handler):  # noqa: C901 — one request path; #1618 added the scripted push faults
         parts = urlsplit(handler.path)
+        if self.api is not None and parts.path.startswith("/api/"):
+            self._serve_api(handler, self._body(handler))
+            return
         service = parse_qs(parts.query).get("service", [""])[0] or parts.path.rsplit("/", 1)[-1]
         body = self._body(handler)
         expected = "Bearer " + self.token
