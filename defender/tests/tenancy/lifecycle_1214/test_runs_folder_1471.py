@@ -15,7 +15,6 @@ pytest.importorskip("httpx")
 
 from defender.tests.support.jobs._jobs1342 import FIXTURE_ALERT_MAPPING, ScriptedChild, job_store, make_worker, seed_alert_mapping  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld, lifecycle_config  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214.test_resume_and_backfill import _plant_clone  # noqa: E402
 
 pytestmark = pytest.mark.postgres
 
@@ -55,19 +54,12 @@ def test_a_new_tenant_is_active_with_a_real_empty_runs_folder_and_prepare_made_i
     assert seen == [True], "the runs folder was not there when the first publish ran"
 
 
-def test_prepare_makes_the_runs_folder_beside_a_kept_clone_too(world):
-    """A kept clone skips the clone step, yet the tenant ends active with `runs/` and the clone's files untouched (R13-0)."""
-    tenant = world.create()
-    _at_prepare(world, tenant)
-    _plant_clone(world, tenant, world.call(world.tenants.forge_wiring, tenant).origin)
-    world.drive()
-    assert world.item(tenant)["state"] == "active"
-    assert (world.data_root / tenant / "knowledge" / "keep.txt").read_text() == "mine"
-    assert _runs(world, tenant).is_dir() and not _runs(world, tenant).is_symlink()
+# 1618 K8: "prepare makes the runs folder beside a kept clone too" is retired with the clone (prepare keeps no clone to skip to;
+# `test_resume_and_backfill` retires `_plant_clone` the same way). The new-tenant case above is prepare's one path.
 
 
 def test_a_link_at_the_runs_folder_fails_prepare_and_nothing_is_followed(world, tmp_path):
-    """`<T>/runs` a link: prepare fails like a linked `knowledge/` does, the target gets nothing, no publish (R13-0)."""
+    """`<T>/runs` a link: prepare fails like a linked `knowledge/` does, the target gets nothing, no fetch (R13-0)."""
     tenant = world.create()
     _at_prepare(world, tenant)
     elsewhere = tmp_path / "elsewhere"

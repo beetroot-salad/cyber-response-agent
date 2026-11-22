@@ -55,7 +55,7 @@ LAUNCHER = textwrap.dedent("""
         from defender import run
         run.main([alert, "--tenant", tenant, "--no-learn"], directory=Blocking(),
                  preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
-                 enqueue=lambda *a, **k: False, publish=lambda *a, **k: "")
+                 enqueue=lambda *a, **k: False, fetch=lambda *a, **k: "")  # #1618: the fetch seam replaced publish=
     elif entry == "drain":
         from defender.learning.core import cli
         cli.main(["loop.py", "--author-drain", "--tenant", tenant], directory=Blocking())

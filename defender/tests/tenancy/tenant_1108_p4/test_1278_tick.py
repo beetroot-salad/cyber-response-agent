@@ -790,9 +790,11 @@ def test_1618_b12_a_container_tick_builds_its_batch_on_the_base_the_helper_answe
     # K7, container side: its private repository is in its own tmpfs, never an entry of the host's `.repo-scratch/` (whose sweep a
     # container never runs) and never under `<T>`; the fetch by id and the push both reached the listener while watched
     assert watch.snapshots, "premise: the container's fetch and push were not observed"
-    # (the container runs in this process; an entry of the helper's own host-side delivery, a live host owner, may stand)
-    mine = f".owner-{os.getpid()}-"
-    assert not [n for snap in watch.snapshots for n in snap["names"] if mine in n], [snap["names"] for snap in watch.snapshots]
+    # (the container runs in this process; the one owner an entry may name is the helper's, whose host-side delivery answered
+    # `batch.start` and `forge.token`: every entry seen is the helper process's own, none is this process's)
+    owners = {n.split(".owner-", 1)[1].split("-", 1)[0] for snap in watch.snapshots for n in snap["names"]}
+    assert owners <= {str(helper._process.helper_pid)}, (owners, helper._process.helper_pid, [s["names"] for s in watch.snapshots])
+    assert str(os.getpid()) not in owners
     assert all(snap["under_tenant"] == [] for snap in watch.snapshots), [snap["under_tenant"] for snap in watch.snapshots]
 
 

@@ -815,8 +815,9 @@ def test_f9_the_publish_step_reads_the_copy_it_fetched_not_the_kept_export_or_cl
 
 def test_d9_readiness_refuses_at_publish_when_main_is_not_protected_and_reads_the_protection_as_the_control_shows(
         tmp_path, monkeypatch, migrated_database):
-    """With `main` unprotected on the forge (the branch read says so, no rule is there) the check is refused at `publish` naming the
-    protection; with it protected the same helper reaches the container, having asked the forge. (D9, F5)"""
+    """With `main` unprotected on the forge (the branch read says so, no rule is there) the check is refused at `publish` (its sentence
+    names only the class, as D10 pins under P-2) and the fetch the helper asked for readiness answered `refused lasting` naming the
+    protection; with it protected the same helper reaches the container, having asked the forge. (D9, D10, F5)"""
     from defender.tests.support.jobs._readiness1618 import readiness_fetching
 
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
@@ -826,8 +827,14 @@ def test_d9_readiness_refuses_at_publish_when_main_is_not_protected_and_reads_th
         assert [r for r in forge.requests if "/branch" in r.url.path], "control: the check never asked the forge about main's protection"
         forge.protection = {**forge.protection, "protected": False, "user_can_push": True}
         forge.refuse("/branch_protections/main", 404, method="GET")
-        ran = readiness_fetching(scene, fetch=_ready_fetch(scene), client=forge.client, container=lambda c: 0)
+        fetch = _ready_fetch(scene)
+        ran = readiness_fetching(scene, fetch=fetch, client=forge.client, container=lambda c: 0)
 
         sentence = assert_refused_shape(ran.result(), "publish")
-        assert "protect" in norm(sentence), sentence
+        [call] = fetch.calls
+        assert call["trigger"] == "readiness", call
+        assert call["line"].split()[:2] == ["refused", "lasting"], call["line"]
+        assert "protect" in call["line"], f"the fetch was not refused for main's protection: {call['line']!r}"
+        assert "lasting" in norm(sentence), sentence
+        assert ran.knowledge is None, "a refused fetch settled a source"
         assert ran.docker.boxes == []
