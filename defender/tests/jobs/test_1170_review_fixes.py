@@ -158,15 +158,16 @@ class _Tenant:
         return type("R", (), {"episode": lambda _self, _job: _Episode(pages)})()
 
 
-def test_a_learning_jobs_sibling_pages_are_each_copied_after_its_container_and_a_missing_one_is_skipped(monkeypatch):
-    """`_learning_exited` on a container that ran: every sibling's saved page goes to `mirror_page` under its run id; a sibling
-    with no page copies nothing."""
+def test_a_learning_jobs_sibling_pages_are_never_copied_from_the_job_writable_folders_after_its_container(monkeypatch):
+    """#1546 A-O8 (conflict updated: the page mirror is gone): `_learning_exited` on a container that ran reads no sibling's
+    page from the episode folder and mirrors none; the pages are the renderer's bytes, pushed over the socket."""
     from defender.presentation import visualize_run
 
     other = "b04cb885-466e-4ecd-89c7-4cfdd0e4f8b2"
     copied: list[tuple[str, str]] = []
-    monkeypatch.setattr(visualize_run, "mirror_page",  # lint-monkeypatch: ok — the dev copy's own write is publish_page's tests'
-                        lambda page, run_id, _tenant: copied.append((run_id, page)) or "copied")
+    # `raising=False`: the mirror function is deleted by the design, so absent is the target state.
+    monkeypatch.setattr(visualize_run, "mirror_page",  # lint-monkeypatch: ok — a recorder that the design says is never called
+                        lambda page, run_id, _tenant: copied.append((run_id, page)) or "copied", raising=False)
     tenant = _Tenant({RUN: "<html>one</html>", other: None})
     state = _learning._Learning(tenant, "c" * 40, Path("/scratch"))
     state.siblings = dict.fromkeys((RUN, other))  # only the ids are read
@@ -176,4 +177,4 @@ def test_a_learning_jobs_sibling_pages_are_each_copied_after_its_container_and_a
     session.prepared = Prepared(launch={}, command=[], state=state)
 
     _learning._learning_exited(session, 0)
-    assert copied == [(RUN, "<html>one</html>")]
+    assert copied == [], "a sibling's page was copied out of a job-writable folder"

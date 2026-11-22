@@ -204,29 +204,24 @@ def test_a6_the_host_half_and_the_run_half_each_run_once_in_a_job_and_in_the_ope
         (lane, calls.by_thread, publishes, ran)
 
 
-def test_a10_the_job_leaves_its_page_in_its_run_folder_and_the_helper_copies_it_to_the_publish_folder_after_exit(
+def test_a10_the_job_renders_its_page_as_bytes_and_the_helper_copies_nothing_to_the_publish_folder(
         scene, monkeypatch, tmp_path):
-    """While the entry runs the shared publish folder is untouched; after the container exits the helper has copied the job's page there, under the tenant. (A10, A8)"""
+    """#1546 A-O8 (conflict updated: was the helper's page mirror): the job's page never lands in the shared publish folder by
+    the helper, during or after the entry; the run folder keeps whatever the job wrote, which nothing reads back. (A10, A8)"""
     publish_dir = tmp_path / "published"
     publish_dir.mkdir()
     monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")
     monkeypatch.setenv("DEFENDER_RUN_VISUALIZATIONS_DIR", str(publish_dir))
     inv, page = str(uuid.uuid4()), "<html>run page 1170</html>"
     scene.plant(inv)
-    during: list[list[str]] = []
 
     def visualize(run: Any, **_kw: Any) -> None:
-        run.observability.runtime_html.write(page)  # the job's half of `publish_page`: the record in its run folder
-        during.append(sorted(str(p.relative_to(publish_dir)) for p in publish_dir.rglob("*") if p.is_file()))
+        run.observability.runtime_html.write(page)  # the job's own record of its page, in its run folder
 
     got = enter(scene, inv, lifecycle=_investigation(), preflight=lambda *a, **k: 0, visualize=visualize)
 
     _clean(got)
-    assert during == [[]], f"the job wrote to the shared publish folder itself: {during}"
-    landed = [p for p in publish_dir.rglob("*") if p.is_file()]
-    assert [p.read_text(encoding="utf-8") for p in landed] == [page], "the helper did not copy the job's page"
-    assert landed[0].relative_to(publish_dir).parts[0] == scene.tenant, "the page is not under its tenant"
-    assert (scene.runs / inv).is_dir(), "control: the run folder (with the page record) is kept"
+    assert [p for p in publish_dir.rglob("*") if p.is_file()] == [], "the helper mirrored a page it read from the job's folder"
 
 
 # --- A5 and the signal: real processes -----------------------------------------------------------------------------

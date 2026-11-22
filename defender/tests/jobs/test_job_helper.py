@@ -20,6 +20,10 @@ import uuid
 from pathlib import Path
 
 import pytest
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — #1546: fixtures of `evidence_store`
+from defender.tests.support.jobs import _helper_evidence1546 as _h1546
+from defender.tests.support.jobs._helper_evidence1546 import drive, plant
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — #1546: fixture of `evidence_store`
 from defender.tests.support.jobs._job_helper import (
     ASK_LAUNCH,
     CANARY,
@@ -48,6 +52,7 @@ BOX_RUNTIMES = _BoxSpec.RUNTIMES
 # The shared fixtures (`_job_helper`'s docs): `process_state` is autouse, `scene` the default helper scene.
 process_state = J.process_state
 scene = J.scene
+evidence_store = _h1546.evidence_store  # #1546: the real store the investigation helper now needs
 
 pytestmark = [pytest.mark.postgres, pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="reads /proc and uses prctl(PR_SET_PDEATHSIG), Linux only")]
@@ -119,22 +124,24 @@ def test_claim_flow_the_helper_starts_one_labelled_container_serves_it_and_clean
 
 # --- O1-O4, A7-A8, H9: what the container is given ------------------------------------------------------------------
 
-def test_o1_the_job_container_mounts_its_tenants_folder_the_code_read_only_and_its_socket_and_nothing_else(
-        scene, monkeypatch):
-    """Exactly three binds: `<root>/<T>` read-write at the same path, one read-only code tree, the job socket; none of
-    another tenant, `.host-locks`, host /tmp, the docker socket or a secret file; the image is the one the setting names.
-    (O1, O2, A7)"""
+def test_o1_the_job_container_mounts_its_own_root_and_inputs_the_code_read_only_and_its_socket_and_nothing_else(
+        scene, monkeypatch, evidence_store):
+    """#1546 A-O9 (conflict updated: was the tenant's folder): four binds, `.job-roots/<claim>` read-write at its own path,
+    `.job-inputs/<claim>` read-only, one read-only code tree, the job socket; none of the tenant's folder, another tenant,
+    `.host-locks`, host /tmp, the docker socket or a secret file; the image is the one the setting names. (O1, O2, A7)"""
     from defender import job_host
 
     monkeypatch.setenv(job_host.IMAGE_ENV, "registry.invalid/defender-job:1170")
-    _inv, docker, ran, _s = _go(scene, lambda c: 0)
+    ran = drive(scene, plant(scene, "investigation"), lambda c: 0, **evidence_store.seams)
+    docker = ran.docker
 
     assert ran.rc == 0
     box = docker.box
-    own = str(scene.root / scene.tenant)
-    assert {"source": own, "target": own, "readonly": False} in box.mounts, box.mounts
+    root, inputs = str(scene.root / ".job-roots" / scene.claim), str(scene.root / ".job-inputs" / scene.claim)
+    assert {"source": root, "target": root, "readonly": False} in box.mounts, box.mounts
+    assert {"source": inputs, "target": inputs, "readonly": True} in box.mounts, box.mounts
     binds = [m for m in box.mounts if m["source"]]  # a tmpfs names no source
-    rest = [m for m in binds if m["source"] != own]
+    rest = [m for m in binds if m["source"] not in (root, inputs)]
     assert len(rest) == 2, box.mounts
     sockets = [m for m in rest if Path(box.env[job_host.SOCKET_ENV]).is_relative_to(m["target"])]
     assert len(sockets) == 1, (rest, box.env)
@@ -142,6 +149,7 @@ def test_o1_the_job_container_mounts_its_tenants_folder_the_code_read_only_and_i
     assert code["readonly"], f"the code tree is mounted writable: {code}"
     for m in binds:
         source = Path(m["source"])
+        assert not source.is_relative_to(scene.root / scene.tenant), f"a bind names the tenant folder: {m}"
         assert not source.is_relative_to(scene.root / OTHER_TENANT), m
         assert ".host-locks" not in source.parts, m
         assert str(source) != "/tmp", m
@@ -160,7 +168,7 @@ _VALUED = frozenset({"--name", "--user", "--label", "--runtime", "--tmpfs", "--s
 #: Each flag the job container may carry before its image, with how many times: exactly these and no other (O1, A7, H9;
 #: `--network` only when the deployment names one, `--env` once per setting).
 _FLAG_COUNTS = {"-i": 1, "--rm": 1, "--init": 1, "--name": 1, "--user": 1, "--label": 4, "--pull=never": 1,
-                "--runtime": 1, "--read-only": 1, "--tmpfs": 1, "--security-opt": 1, "--cap-drop": 1, "--mount": 3,
+                "--runtime": 1, "--read-only": 1, "--tmpfs": 1, "--security-opt": 1, "--cap-drop": 1, "--mount": 4,
                 "--workdir": 1, "--network": 1}
 
 
@@ -186,18 +194,18 @@ def _run_flags(argv: list[str], image: str) -> list[tuple[str, str | None]]:
 
 
 def test_o1_the_job_containers_start_carries_exactly_the_allowed_flags_with_the_job_runtime_and_its_hardening(
-        scene, monkeypatch):
+        scene, monkeypatch, evidence_store):
     """Before the image, the job container's `docker run` carries exactly `-i --rm --init --name --user`, four
     `--label`s (tenant, claim, job kind, helper), `--pull=never`, `--runtime` the job runtime derived from the box runtime the deployment sets (#1469), `--read-only`, one `--tmpfs`,
-    `--security-opt no-new-privileges`, `--cap-drop ALL`, exactly one `--network` (the job network, N5), three
-    `--mount`s, `--workdir` and `--env`s: nothing else (`--pid host`, `--privileged`, `--cap-add`, `-v`, a second
+    `--security-opt no-new-privileges`, `--cap-drop ALL`, exactly one `--network` (the job network, N5), four
+    `--mount`s (#1546: root, inputs, code, socket), `--workdir` and `--env`s: nothing else (`--pid host`, `--privileged`, `--cap-add`, `-v`, a second
     runtime). (O1, A7, H9, N5)"""
     from defender import job_host
     from defender.box import BoxSpec
 
     monkeypatch.setenv(job_host.IMAGE_ENV, "registry.invalid/defender-job:1170")
     runtime = BoxSpec.from_env(os.environ).runtime
-    _inv, docker, _ran, _s = _go(scene, lambda c: 0)
+    docker = drive(scene, plant(scene, "investigation"), lambda c: 0, **evidence_store.seams).docker
 
     pairs = _run_flags(docker.box.argv, "registry.invalid/defender-job:1170")
     counts: dict[str, int] = {}
