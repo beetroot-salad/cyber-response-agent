@@ -123,9 +123,9 @@ async def test_o2_only_needs_person_batches_are_listed_and_parking_one_lists_it(
         await publish(store, BLUE, "p")
         in_review = await claim(store, BLUE)
         await store.in_review(in_review, 9, {})
-        await store.add_pitfall(BLUE, {"schema_version": 1, "pitfall_id": "wk", "source_run": "r", "system": "elastic",
+        bool(await store.add_pitfalls(BLUE, [{"schema_version": 1, "pitfall_id": "wk", "source_run": "r", "system": "elastic",
                                        "query_id": "elastic.esql", "goal": "g", "executed_query": "x",
-                                       "stderr_digest": "exit=1; wk", "error_class": "agent-fixable"})
+                                       "stderr_digest": "exit=1; wk", "error_class": "agent-fixable"}]))
         working = await store.claim(BLUE, "lead_author", owner="host-a", thresholds=ONE)
         phases = {str(b.id): b.phase for b in await store.batches(BLUE)}
         assert sorted(phases.values()) == ["ended", "ended", "ended", "in_review", "working"], "premise: one of each phase"

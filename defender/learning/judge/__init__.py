@@ -161,7 +161,8 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
             trace_name=WIRE_LOG_NAMES.agent_trace(agent_id), label=agent_id)
         output = TypedOutput(
             name="verdict", description="File your verdict: the reply the task describes.",
-            schema=run_mod.reply_schema(scope), retries=_REPLY_RETRIES,
+            schema=run_mod.reply_schema(scope, shown_its_facts=shown_its_facts),
+            retries=_REPLY_RETRIES,
             check=run_mod.reply_check(scope=scope, reachable_systems=reachable_systems,
                                       shown_its_facts=shown_its_facts))
         doc, sent, failure = None, None, None
@@ -516,6 +517,9 @@ class _Pass:
         self.order: list[str] = []
         #: The finding ids each queue held when this pass first looked (`_place`).
         self.queued_ids: dict[str, frozenset[str]] = {}
+        #: Why a channel's held-id check could not read its sink, by channel (`_queued_ids`): the
+        #: world's commit stops on it (#1565), even when a later read succeeds.
+        self.unread_sinks: dict[str, Exception] = {}
         self.family: dict[str, Any] | None = prior.family if prior is not None else None
         self.ledger: list[dict[str, Any]] = []
         self.user = _empty_user()
@@ -762,12 +766,12 @@ class _Pass:
                 channel = FINDINGS if defender else QUESTIONER_FINDINGS
                 if fid in self._queued_ids(channel):
                     # A25: a pre-change pass may have queued this id before it stopped.
-                    # Name the new finding rather than silently losing it to queue dedup.
+                    # Name the new finding rather than let it collide at the queue (#1565).
                     name = "defender" if defender else "questioner"
                     return route_mod.LANE_UNQUEUEABLE, (
                         f"the {name} queue already holds a row with id {fid!r} — one a "
-                        "pass before this record queued — so its dedup on finding_id would "
-                        "drop this finding silently; it is recorded here instead")
+                        "pass before this record queued — so the store would refuse this "
+                        "finding there as a collision; it is recorded here instead")
                 (defender_rows if defender else world_rows).append(row)
             except JudgeRefused as refused:
                 return route_mod.LANE_UNQUEUEABLE, str(refused)
@@ -793,9 +797,10 @@ class _Pass:
         if channel.name not in self.queued_ids:
             try:
                 self.queued_ids[channel.name] = self.state.queued_ids(channel)
-            except Exception:  # noqa: BLE001 — an unreadable sink (episode record or store) is met again by the append
-                # The append meets the same read refusal and stops the pass loudly with
-                # this world's row left `queueing` (A6); no row is silently deduplicated.
+            except Exception as unread:  # noqa: BLE001 — an unreadable sink stops this world's commit
+                # Never taken as "nothing held" (#1565): the commit raises it before any
+                # append, the pass stopping loudly with this world's row left `queueing` (A6).
+                self.unread_sinks.setdefault(channel.name, unread)
                 return frozenset()
         return self.queued_ids[channel.name]
 
@@ -809,6 +814,9 @@ class _Pass:
         which a re-run refuses."""
         row[STATE_KEY] = QUEUEING
         self._write()
+        for channel, rows in ((FINDINGS, defender_rows), (QUESTIONER_FINDINGS, world_rows)):
+            if rows and channel.name in self.unread_sinks:
+                raise self.unread_sinks[channel.name]
         report = enqueue_mod.enqueue_report(
             self.episode.dir, row, state=self.state,
             drawn=enqueue_mod.DrawnRows(defender=defender_rows, world=world_rows))

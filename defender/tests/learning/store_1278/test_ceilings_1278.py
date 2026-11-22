@@ -172,7 +172,7 @@ async def test_each_counter_does_nothing_below_its_ceiling_and_takes_the_designs
     drive, fates = DRIVERS[counter]
     knobs = {"max_attempts": ceiling, "refusal_ceiling": ceiling, "generation_ceiling": ceiling}
     async with learning_store(dsn, **knobs) as store:
-        await store.publish_findings(TENANT, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(TENANT, "run-1", {"finding": [finding("f1")]}))["finding"]
         assert await drive(store, dsn, ceiling) == fates(ceiling)
 
 
@@ -180,7 +180,7 @@ async def test_each_counter_does_nothing_below_its_ceiling_and_takes_the_designs
 async def test_an_item_held_at_its_attempt_ceiling_is_claimed_by_no_one(dsn, ceiling):
     """Control: a held item is out of the queue until a person releases it, then it is claimed again. (D8, O7)"""
     async with learning_store(dsn, max_attempts=ceiling) as store:
-        await store.publish_findings(TENANT, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(TENANT, "run-1", {"finding": [finding("f1")]}))["finding"]
         for _ in range(ceiling):
             await store.end_no_commits(await _claim(store), {})
         assert (await _item(store)).status == "held"

@@ -38,14 +38,14 @@ async def _prep_nothing(w, store):
 
 
 async def _prep_one_finding(w, store):
-    await store.publish_findings(w.tid, "run-0", [finding("due")], kind="finding")
+    await store.publish_finding_channels(w.tid, "run-0", {"finding": [finding("due")]})
 
 
 #: verb -> (what to set up while the tenant is active, the table whose lock holds the verb open, the call).
 VERBS = {
     "publish_findings": (_prep_nothing, "work_items",
-                         lambda w, s: s.publish_findings(w.tid, "run-1", [finding("f-new")], kind="finding")),
-    "add_pitfall": (_prep_nothing, "work_items", lambda w, s: s.add_pitfall(w.tid, _pitfall("p-new"))),
+                         lambda w, s: s.publish_finding_channels(w.tid, "run-1", {"finding": [finding("f-new")]})),
+    "add_pitfall": (_prep_nothing, "work_items", lambda w, s: s.add_pitfalls(w.tid, [_pitfall("p-new")])),
     "enqueue_request": (_prep_nothing, "work_items", lambda w, s: s.enqueue_request(w.tid, "run-1", "case-1", {"case": "c"})),
     "claim": (_prep_one_finding, "work_items", lambda w, s: s.claim(w.tid, AUTHOR_LANE, owner="host-a", thresholds=ONE)),
     "claim_revert": (_prep_nothing, "batches", lambda w, s: s.claim_revert(w.tid, owner="cli")),

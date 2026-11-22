@@ -1,40 +1,38 @@
-// The signed-in home (F4; alert list design O8, O11): who is signed in, a link to each of their tenants' alerts, each
-// open invitation with Accept, and with neither, that Sluice is invite-only. A sign-out.
+// The signed-in home (F4; alert list design O8, O11): a link to each of the person's tenants' alerts, each open
+// invitation with Accept, and with neither, that Sluice is invite-only. Who is signed in, and sign-out, are in the
+// top bar.
 import { useState } from "react";
 import { addressOf } from "../addresses";
 import { useActions, useMe, type AcceptResult, type Person } from "../shell/provider";
+import { TopBar } from "./TopBar";
 
 export function Home() {
   const me = useMe();
-  const actions = useActions();
   const lone = me.tenants.length === 1;
   return (
-    <main data-screen="home">
-      <h1>Home</h1>
-      <p>
-        Signed in as <span data-field="email">{me.user.email}</span>
-      </p>
-      {me.tenants.length > 0 ? (
-        <ul data-list="tenants">
-          {me.tenants.map(({ tenant_id }) => (
-            <li key={tenant_id}>
-              <a href={addressOf("alerts", [tenant_id])}>{lone ? "Alerts" : `Alerts — ${tenant_id}`}</a>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {me.invitations.length > 0 ? (
-        <ul data-list="invitations">
-          {me.invitations.map((invitation) => (
-            <Invitation key={invitation.id} id={invitation.id} />
-          ))}
-        </ul>
-      ) : null}
-      {me.tenants.length === 0 && me.invitations.length === 0 ? <InviteOnly me={me} /> : null}
-      <button type="button" data-action="sign-out" onClick={() => actions.signOut()}>
-        Sign out
-      </button>
-    </main>
+    <>
+      <TopBar />
+      <main data-screen="home">
+        <h1>Home</h1>
+        {me.tenants.length > 0 ? (
+          <ul data-list="tenants">
+            {me.tenants.map(({ tenant_id }) => (
+              <li key={tenant_id}>
+                <a href={addressOf("alerts", [tenant_id])}>{lone ? "Alerts" : `Alerts — ${tenant_id}`}</a>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {me.invitations.length > 0 ? (
+          <ul data-list="invitations">
+            {me.invitations.map((invitation) => (
+              <Invitation key={invitation.id} id={invitation.id} />
+            ))}
+          </ul>
+        ) : null}
+        {me.tenants.length === 0 && me.invitations.length === 0 ? <InviteOnly me={me} /> : null}
+      </main>
+    </>
   );
 }
 

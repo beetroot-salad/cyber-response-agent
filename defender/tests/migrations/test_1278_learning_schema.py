@@ -239,7 +239,7 @@ async def test_a_tenant_that_is_not_active_gets_no_new_batch_and_no_new_findings
     from defender.tests.support.learning.core._store1278 import store_mod
 
     async with learning_store(db) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
         execute(db, """UPDATE tenancy.tenants SET state = 'offboarding', pending_action = 'offboard',
                        step = 'offboard', step_actor = 'service' WHERE id = %s""", (BLUE,))
         before = ([(i.kind, i.key, i.status) for i in await store.work(BLUE)], list(await store.batches(BLUE)))
@@ -247,7 +247,7 @@ async def test_a_tenant_that_is_not_active_gets_no_new_batch_and_no_new_findings
         with pytest.raises(store_mod().TenantInactive):
             await store.claim(BLUE, AUTHOR_LANE, owner="holder", thresholds=ONE)
         with pytest.raises(store_mod().TenantInactive):
-            await store.publish_findings(BLUE, "run-2", [finding("f2")], kind="finding")
+            (await store.publish_finding_channels(BLUE, "run-2", {"finding": [finding("f2")]}))["finding"]
 
         after = ([(i.kind, i.key, i.status) for i in await store.work(BLUE)], list(await store.batches(BLUE)))
     assert after == before

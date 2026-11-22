@@ -24,9 +24,11 @@ from defender.tests.support.api._server1083 import (
     OPS,
     ORIGIN,
     PROGRAMS_REALM,
+    REALM_STEPS,
     REALMS,
     SETTING_NAMES,
     SIGNIN_REALM,
+    STEP_KINDS,
     STEPS,
     Child,
     Fail,
@@ -165,7 +167,8 @@ async def _attempt(case: str, environ: dict[str, str], dsn: str, fails: tuple[Fa
 
 def test_the_probe_failure_table_covers_every_step_of_both_realms():
     """The fault table has failures for every probe step of both realms; no setting name hides in another. (O3, Am-7)"""
-    assert set(FAULTS) == {(realm, step) for realm in REALMS for step in STEPS}
+    assert set(FAULTS) == {(realm, step) for realm in REALMS for step in REALM_STEPS[realm]}
+    assert set(STEP_KINDS) == {step for realm in REALMS for step in REALM_STEPS[realm]}
     assert STEPS[0] == "discovery"
     assert all(FAULTS.values())
     assert not [(a, b) for a in SETTING_NAMES for b in SETTING_NAMES if a != b and a in b]

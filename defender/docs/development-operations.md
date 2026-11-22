@@ -146,10 +146,22 @@ token when unsealed, first by its lookup-self, then by a metadata read under the
 answered to which call and names the settings that answer can come from (a 403: `DEFENDER_OPENBAO_ADDR`,
 `DEFENDER_API_OPENBAO_TOKEN_FILE`, `DEFENDER_OPENBAO_KV_MOUNT` for the read, and the token's policy; anything else:
 `DEFENDER_OPENBAO_ADDR`), never which one is wrong (#1532), probes each
-realm (discovery names the configured issuer, signing keys fetch, the admin client reads users or clients) and binds
-the port before the bootstrap writes anything; a failure ends the program with that step's message on stderr. Not checked at start: the sign-in client's own secret, the
-redirect URI's equality with the realm's, and whether an admin role is write-capable (a read-only role passes);
+realm (discovery names the configured issuer, signing keys fetch, the admin client reads users or clients; the
+sign-in realm then accepts the sign-in client and the redirect URI `<origin>/api/auth/callback`, #1620; the rest of
+the sign-in request, such as the flow it runs and its PKCE method, is not checked) and binds the port before the bootstrap writes anything; a failure
+ends the program with that step's message on stderr. Not checked at start: the sign-in client's own secret and
+whether an admin role is write-capable (a read-only role passes);
 each surfaces at first use. Lessons and the connection check answer 501 naming their issue (#1082). A stop signal leaves the app and closes every connection.
+
+**The quick way: `.devcontainer/dev-app.sh start`** (then `status`, `stop`), from the dev container: it writes the
+settings above for the dev stack and starts the API, Vite and, if none is running, the lifecycle service in the
+background. The browser on the host opens `http://localhost:8000`; the first administrator is `admin@dev.local`, whose
+set-password mail is in Mailpit at `http://localhost:8025`. The script's header says what it starts and checks.
+
+Keycloak imports the realm files on its first start only. A dev Keycloak made before #1161 still has the old callback,
+`http://localhost:8000/auth/callback`, and the API refuses to start at its redirect step until
+`http://localhost:8000/api/auth/callback` is added to the `defender-api` client's redirect URIs (the admin console, or
+recreating Keycloak's data).
 
 Walk-through (needs the dev PostgreSQL, Keycloak with both realms imported, Mailpit, the lifecycle's Forgejo and
 OpenBao from `provision-dev-issuer.sh` with `playground-issuer/lifecycle.env`, the database migrated to head, and

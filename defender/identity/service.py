@@ -4,10 +4,8 @@ bootstrap and the sender. The only code that sends. Routes translate; repositori
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import datetime as _dt
-import hashlib
 import logging
 import re
 import secrets
@@ -32,7 +30,7 @@ from .errors import (
     SignInUnavailable,
     TenantNotActive,
 )
-from . import roles
+from . import pkce, roles
 from .memory import secret_hash
 from .ports import ExpiryWarning, IdentityRepository, MailPort, ProgramsPort, SignInPort
 from .models import CredentialKind, Membership, Program, ProgramCredential, Role, Session, SignInAttempt, User, postgres_text
@@ -127,7 +125,7 @@ class Refused:
     return_path: str | None
 
 
-#: What a sign-in `state` (and its token) of ours looks like: exactly what `begin_signin` mints, `token_urlsafe(32)`,
+#: What a sign-in `state` (and its token) of ours looks like: exactly what `pkce.new_secret` mints, `token_urlsafe(32)`,
 #: 43 URL-safe characters. Any other shape names no cookie (#1566).
 _STATE = re.compile(r"[A-Za-z0-9_-]{43}", re.ASCII)
 _ATTEMPT_COOKIE_PREFIX = "__Host-defender_prelogin_"
@@ -189,10 +187,6 @@ def _audit_removal(program_id: ProgramId, revoked: list[CredentialId], *, actor:
     for credential_id in revoked:
         audit.emit("program_credential.revoke", actor=actor, tenant_id=tenant_id, target=credential_id)
     audit.emit("program.remove", actor=actor, tenant_id=tenant_id, target=program_id)
-
-
-def _pkce_challenge(verifier: str) -> str:
-    return base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode()
 
 
 class IdentityService:
@@ -439,9 +433,9 @@ class IdentityService:
         `cookies` is what the browser sent: of its attempt cookies, those naming no open attempt are cleared, and the
         oldest open ones too, so that with this one it keeps at most `OPEN_SIGNIN_ATTEMPTS_KEPT`. Every read comes
         before the one write, the row, so a start that fails stores nothing."""
-        state, nonce, verifier, token = (secrets.token_urlsafe(32) for _ in range(4))
+        state, nonce, verifier, token = (pkce.new_secret() for _ in range(4))
         try:
-            url = await self._signin.begin_signin(state=state, nonce=nonce, code_challenge=_pkce_challenge(verifier))
+            url = await self._signin.begin_signin(state=state, nonce=nonce, code_challenge=pkce.challenge(verifier))
             clear = await self._crowded(cookies or {})
             await self._repo.add_signin_attempt(SignInAttempt(
                 state=state, token_hash=secret_hash(token), nonce=nonce, verifier=verifier, return_path=return_path,

@@ -51,8 +51,8 @@ async def test_o6_a_tenant_off_active_takes_no_new_batch_and_no_published_findin
     waiting items stay as they were; an active tenant beside it still works. (O6, Offboarding, D11a)"""
     S = store_mod()
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
-        await store.publish_findings(GREEN, "run-1", [finding("g1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
+        (await store.publish_finding_channels(GREEN, "run-1", {"finding": [finding("g1")]}))["finding"]
         move_tenant(dsn, BLUE, state=state)
 
         with pytest.raises(S.TenantInactive):
@@ -60,9 +60,9 @@ async def test_o6_a_tenant_off_active_takes_no_new_batch_and_no_published_findin
         with pytest.raises(S.TenantInactive):
             await store.claim_revert(BLUE, owner="cli")
         with pytest.raises(S.TenantInactive):
-            await store.publish_findings(BLUE, "run-2", [finding("f2")], kind="finding")
+            (await store.publish_finding_channels(BLUE, "run-2", {"finding": [finding("f2")]}))["finding"]
         with pytest.raises(S.TenantInactive):
-            await store.publish_findings(BLUE, "run-2", [world_finding("q2")], kind="questioner_finding")
+            (await store.publish_finding_channels(BLUE, "run-2", {"questioner_finding": [world_finding("q2")]}))["questioner_finding"]
 
         assert await store.batches(BLUE) == []
         assert sorted(await _items(store, BLUE)) == [("finding", "f1")], "a refused publish inserted a row"
@@ -78,12 +78,12 @@ async def test_o6_cancel_is_set_on_the_tenants_working_batches_and_no_other(dsn)
     working batch are left alone; the working holder's next renewal is a stop. (Offboarding, O3)"""
     S = store_mod()
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
         reviewed = await store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds=ONE)
         await store.in_review(reviewed, 7, {})
-        await store.add_pitfall(BLUE, _pitfall("p1"))
+        bool(await store.add_pitfalls(BLUE, [_pitfall("p1")]))
         working = await store.claim(BLUE, LEAD_LANE, owner="host-a", thresholds=ONE)
-        await store.publish_findings(GREEN, "run-1", [finding("g1")], kind="finding")
+        (await store.publish_finding_channels(GREEN, "run-1", {"finding": [finding("g1")]}))["finding"]
         other = await store.claim(GREEN, AUTHOR_LANE, owner="host-b", thresholds=ONE)
 
         await store.request_cancel(BLUE)
@@ -100,7 +100,7 @@ async def test_o6_a_holder_told_to_stop_that_stops_cleanly_costs_its_items_nothi
     and the batch ended. (Offboarding, D8)"""
     S = store_mod()
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
         claim = await store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds=ONE)
         await store.request_cancel(BLUE)
         with pytest.raises(S.Stop):
@@ -118,7 +118,7 @@ async def test_o6_a_batch_whose_lease_lapsed_is_ended_by_the_offboarding_itself(
     """A holder that never answers the cancel is ended by recovery once its lease lapses: the batch ended, nothing left in
     the batch. (Offboarding, D8 invariant)"""
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
         claim = await store.claim(BLUE, AUTHOR_LANE, owner="lost-host", thresholds=ONE)
         await store.request_cancel(BLUE)
         lapse_lease(dsn, claim.batch_id)
@@ -146,14 +146,14 @@ def _learning_rows_of(dsn: str, tenant: str) -> dict[str, int]:
 
 async def _populate(store, tenant: str, tag: str) -> object:
     """Items in every kind and state the tick leaves, batches working, in review and ended, and a commit record row."""
-    await store.publish_findings(tenant, f"run-{tag}", [finding(f"{tag}-f1"), finding(f"{tag}-f2")], kind="finding")
-    await store.publish_findings(tenant, f"run-{tag}", [world_finding(f"{tag}-q1")], kind="questioner_finding")
-    await store.add_pitfall(tenant, _pitfall(f"{tag}-p1"))
+    (await store.publish_finding_channels(tenant, f"run-{tag}", {"finding": [finding(f"{tag}-f1"), finding(f"{tag}-f2")]}))["finding"]
+    (await store.publish_finding_channels(tenant, f"run-{tag}", {"questioner_finding": [world_finding(f"{tag}-q1")]}))["questioner_finding"]
+    bool(await store.add_pitfalls(tenant, [_pitfall(f"{tag}-p1")]))
     await store.enqueue_request(tenant, f"run-{tag}", f"case-{tag}", {"case": tag})
     authored = await store.claim(tenant, AUTHOR_LANE, owner="host-a", thresholds=ONE)
     await store.record_commit(authored, oid(1), oid(2), oid(3), changes_of(f"agent/lessons/{tag}.md"))
     await store.in_review(authored, 7, {})
-    await store.publish_findings(tenant, f"run-{tag}", [finding(f"{tag}-f9")], kind="finding")
+    (await store.publish_finding_channels(tenant, f"run-{tag}", {"finding": [finding(f"{tag}-f9")]}))["finding"]
     working = await store.claim(tenant, LEAD_LANE, owner="host-a", thresholds=ONE)
     return working
 
@@ -214,7 +214,7 @@ def _offboard(world, dsn: str, tenant: str) -> None:
 def _seed_working(dsn: str, tenant: str):
     async def go():
         async with learning_store(dsn) as store:
-            await store.publish_findings(tenant, "run-1", [finding("f1")], kind="finding")
+            (await store.publish_finding_channels(tenant, "run-1", {"finding": [finding("f1")]}))["finding"]
             claim = await store.claim(tenant, AUTHOR_LANE, owner="host-a", thresholds=ONE)
             await store.record_commit(claim, oid(1), oid(2), oid(3), changes_of("agent/lessons/x.md"))
             return claim
