@@ -159,6 +159,9 @@ start_lifecycle() {
   (
     cd "$REPO"
     set +u; source "$ISSUER/lifecycle.env"; set -u
+    # #1592: the request worker's two settings, which .devcontainer/forgejo/setup.sh's header says how to read.
+    [ -n "${DEFENDER_LIFECYCLE_KEYCLOAK_SOURCE_ID:-}" ] && [ -n "${DEFENDER_LIFECYCLE_FORGE_SESSIONS_DSN:-}" ] \
+      || die "$ISSUER/lifecycle.env sets no DEFENDER_LIFECYCLE_KEYCLOAK_SOURCE_ID or DEFENDER_LIFECYCLE_FORGE_SESSIONS_DSN: run .devcontainer/forgejo/setup.sh and add both, as its header says"
     export PYTHONPATH="$REPO"
     launch lifecycle "$PY" -m defender.lifecycle serve
   )
