@@ -34,9 +34,12 @@ world = _learning.world
 #: with the job's `shared/` (an oracle scratch in it) and an oracle box's runner beside it, and the socket folder.
 LEFT = ("{root}/.job-scratch/{claim}/shared/defender-oracle-x/inputs",
         "{root}/.job-scratch/{claim}/oracle-x/defender-oracle-runner-y",
-        "{root}/.job-sockets/{claim}/held")
+        "{root}/.job-sockets/{claim}/held",
+        # #1546 A-O1/A-O2: the claim's own data root, read-only inputs and the helper's spool
+        "{root}/.job-roots/{claim}/tenant/runs/r1", "{root}/.job-inputs/{claim}/run-knowledge", "{root}/.job-spool/{claim}")
 #: What must be gone.
-GONE = ("{root}/.job-scratch/{claim}", "{root}/.job-sockets/{claim}")
+GONE = ("{root}/.job-scratch/{claim}", "{root}/.job-sockets/{claim}", "{root}/.job-roots/{claim}",
+        "{root}/.job-inputs/{claim}", "{root}/.job-spool/{claim}")
 #: Claims no live worker holds: what a killed worker's helpers left.
 DEAD = "d" * 32
 STUCK = "e" * 32
@@ -296,3 +299,51 @@ async def test_1557_o5_a_childs_folders_stay_while_its_helper_still_runs_after_t
         if claim:
             for template in (*GONE, OWNER):
                 shutil.rmtree(_fill(template, root, claim), ignore_errors=True)
+
+
+# --- #1546 A-O2: the removal is link-safe and touches only the worker's own claims -----------------------------------------
+
+@pytest.mark.anyio
+@pytest.mark.postgres
+@pytest.mark.parametrize("base", [".job-roots", ".job-inputs", ".job-spool"])
+async def test_1546_a_link_in_a_claims_root_inputs_or_spool_is_removed_not_followed_and_nothing_else_is_touched(
+        world, tmp_path, base):
+    """The child's claim folder under `base` holds a link to a folder outside it and a link to a tenant's file; another
+    live claim's folders and a tenant's folder stay. After the end the claim's folder and the links are gone, what they
+    pointed at is intact. (A-O2: removes only its own claims' folders, link-safe)"""
+    root = world["root"]
+    decoy = tmp_path / "decoy"
+    decoy.mkdir()
+    (decoy / "precious.json").write_text("{}", encoding="utf-8")
+    kept_tenant = root / "00000000-0000-4000-8000-000000000000" / "episodes" / "e" / "kept.json"
+    kept_tenant.parent.mkdir(parents=True)
+    kept_tenant.write_text("{}", encoding="utf-8")
+    _plant(root, LIVE)
+    _own(root, LIVE, ALIVE)
+    async with job_store(world["dsn"]) as store:
+        inv = await _queued(store)
+        child = _child(world, files=_committed())
+        # the link is made by the helper stand-in, inside the claim's folder, once the worker's claim is known
+        folder = {"link": f"{root}/{base}/{{claim}}/escape"}
+        await _worker(world, store, _LinkLeaver(child, folder, decoy)).drain()
+    claim = child.seen()["claim"]
+    assert not os.path.lexists(root / base / claim), "the claim's folder was left"
+    assert (decoy / "precious.json").is_file(), "the removal followed a link out of the claim's folder"
+    assert kept_tenant.is_file(), "a tenant's folder was touched"
+    assert all(_fill(t, root, LIVE).exists() for t in LEFT), "another live claim's folders were removed"
+    assert row(world["dsn"], inv)["stage"] == "completed"
+
+
+class _LinkLeaver:
+    """`child_argv` that, once the worker's claim is minted and the child started, has the child's claim folder under a base
+    hold a link: made by a helper-like step in the child's own command."""
+
+    def __init__(self, child, folder: dict, target: Path) -> None:
+        self.child, self.folder, self.target = child, folder, target
+
+    def __call__(self, launch):
+        argv = self.child(launch)
+        script = ("import os,sys; c=os.environ['DEFENDER_BOX_CLAIM']; p=sys.argv[1].replace('{claim}', c); "
+                  "os.makedirs(os.path.dirname(p), exist_ok=True); os.symlink(sys.argv[2], p); "
+                  "os.execv(sys.executable, [sys.executable] + sys.argv[3:])")
+        return [argv[0], "-c", script, self.folder["link"], str(self.target), *argv[1:]]

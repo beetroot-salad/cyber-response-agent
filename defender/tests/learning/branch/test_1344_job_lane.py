@@ -842,3 +842,102 @@ def test_the_job_entrys_role_check_covers_the_roles_its_siblings_run(monkeypatch
         monkeypatch.setenv(var, "k-test")
     assert job._preflight(branching=True) == 0, "control: the shipped models pass with every key set"
     assert job._preflight("no-such-model", branching=True) == 2
+
+
+# --- #1546: a learning job's source arrives as a pulled bundle -----------------------------------------------------------
+
+def _1546_source_files(tenant_dir: Path, src: Path) -> dict[str, bytes]:
+    """The source's root as its bundle holds it: its run folder and session store, root-relative."""
+    found = {str(p.relative_to(tenant_dir)): p.read_bytes() for p in sorted(src.rglob("*")) if p.is_file()}
+    sessions = tenant_dir / "sessions"
+    for db in sorted(sessions.glob("*.db")) if sessions.is_dir() else []:
+        found[str(db.relative_to(tenant_dir))] = db.read_bytes()
+    return found
+
+
+def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pushes(tmp_path, monkeypatch):  # noqa: PLR0915 — one flow
+    """With its source's host folder and session database gone, the job pulls only `(source, bundle)`, unpacks it to
+    `runs/<source>/`, sends one outcome (`completed`, findings inside), then pushes `page/learning.html` and `bundle`, the
+    outcome first; no learning-end record is written to a folder; its bundle holds its episode, not the pulled source's run
+    folder or the helper's copies. (Done when: source folder absent; A-O1, A-O2, PR1, PR8, D1)"""
+    import contextlib
+    import shutil
+
+    from defender import job_socket
+    from defender.tests.support.jobs._evidence_flows1546 import EPISODE_PAGE, members, pack, sha
+    from defender.learning.branch import job_entry
+    L = sys.modules[__name__]
+    from defender.tests.learning.branch.test_triplet_launcher import _calls
+    from defender.tests.learning.oracle.live_contracts import _spec1224 as S
+    from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, handed_records
+    from defender.tests.support.jobs._socket_standin1170 import materialise as materialise_export
+    from defender.tests.support.learning.branch import _triplet_947 as T
+    from defender.tests.support.learning.judge import _judge_921 as J
+
+    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
+    est = S.estate(tmp_path)
+    _base, src = S.source_run(tmp_path, est, calls=_calls())
+    tenant_dir = src.parent.parent
+    tenant = tenant_dir.name
+    source_files = _1546_source_files(tenant_dir, src)
+    assert any(name.startswith("sessions/") for name in source_files), "premise: the source has a session store"
+    source_bundle = pack(source_files)
+    shutil.rmtree(src)  # A-O1: the host keeps nothing of the finished run
+    shutil.rmtree(tenant_dir / "sessions", ignore_errors=True)
+
+    def pull(fields):
+        if (fields.get("owner"), fields.get("object")) != (src.name, "bundle"):
+            raise job_socket.Refused("not among the claim's inputs", "not-an-input")
+        return {"data": source_bundle, "last": True}
+
+    pushed: dict[str, bytes] = {}
+    parts: dict[str, list[bytes]] = {}
+    order: list[str] = []
+
+    def put(fields):
+        order.append(f"put:{fields['object']}")
+        parts.setdefault(fields["object"], []).append(fields["data"])
+        if not fields["last"]:
+            return {}
+        pushed[fields["object"]] = b"".join(parts.pop(fields["object"]))
+        return {"size": len(pushed[fields["object"]]), "sha256": sha(pushed[fields["object"]])}
+
+    ended: list[dict] = []
+
+    def outcome(fields):
+        order.append("outcome")
+        ended.append(fields["record"])
+        return {}
+
+    asking = L.Watch(*S.questioner_for().replies)
+    seams = dict(questioner=asking, preflight=S.no_preflight, live_tree=T.source_capture(), roster=est.roster(),
+                 judge=L.WatchJudge(default=J.as_reply_text(J.reply_doc(bucket="none", systems=[]))),
+                 oracle=S.oracle(then=S.submit()).model, verifier=S.passing_verifier().model,
+                 directory=est.launch_directory(tenant), spawn=J.FakeSibling(), candidates=L.choose(T.BRANCH_MESSAGE_ID))
+    answers = {"export.materialise": materialise_export(tenant), "evidence.pull": pull, "evidence.put": put,
+               "outcome": outcome, "arms": lambda f: order.append("arms") or {}}
+    launch = {"kind": "learning", "job": L.JOB, "records": handed_records(seams["directory"], tenant)}
+    previous = signal.signal(signal.SIGTERM, L._unexpected_sigterm)
+    try:
+        with SocketStandIn(tenant, launch=launch, answers=answers) as helper:
+            with contextlib.suppress(SystemExit):
+                job_entry.main(["--job", L.JOB, "--tenant", tenant, "--source", src.name],
+                               environ=helper.environ(), **seams)
+            asked = [name for name, _ in helper.asked]
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+    assert "evidence.pull" in asked, "the job never pulled its source"
+    assert src.is_dir(), "the source bundle was not unpacked into the job's root as runs/<source>/"
+    assert len(ended) == 1, f"no outcome reached the socket: {asked}"
+    assert ended[0]["status"] == "completed", ended[0]
+    assert set(ended[0]["findings"]) == {"state", "text"}
+    assert set(pushed) == {EPISODE_PAGE, "bundle"}, sorted(pushed)
+    assert order.index("outcome") < min(order.index(f"put:{o}") for o in pushed), order
+    assert pushed[EPISODE_PAGE].lstrip().lower().startswith(b"<!doctype html") or b"<html" in pushed[EPISODE_PAGE]
+    runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
+    assert not (runs / f"{L.JOB}.learning-end.json").exists(), "the end still went through the folder"
+    inside = members(pushed["bundle"])
+    assert not [n for n in inside if n.startswith(f"runs/{src.name}/")], "the job's bundle holds the pulled source"
+    assert any(n.startswith(f"episodes/{L.JOB}/") for n in inside), sorted(inside)
+    assert not [n for n in inside if n.startswith((f"runs/{L.JOB}.launch.json", "run-knowledge/", "exports/"))]
