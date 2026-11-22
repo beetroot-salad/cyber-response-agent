@@ -1,42 +1,26 @@
 """#1618 (flow 5, D9, D10): the readiness helper reads the tenant's knowledge through the fetch child, not the launch-time publish.
 
-FORCED: the seam `job_host.main(..., fetch=)` replaces `publish=` (the design names no seam). It is called
-`fetch(tenant_id, dest, *, data_root, **_)` with `dest` an empty folder the helper made, and answers the child's one report line:
-`ok <commit>` (the folder then holds `agent/` and `settings/` at that commit) or `refused <transient|lasting> <reason>`. The FORCED
+FORCED: the seam `job_host.main(..., fetch=)` replaces `publish=`; its one shape and the whole seam list are in
+`knowledge_1618._support` (`fetch(tenant_id, dest, *, data_root, commit=None) -> report line`, the real child by default). The FORCED
 `client=` seam (the forge client the drain's delivery uses, `job_host.main(client=)`) carries the branch-protection check (D9).
 `readiness_fetching` is `_readiness1471.readiness` with that seam in place of `publish` (which `drive_helper` always adds)."""
 from __future__ import annotations
 
 import contextlib
 import io
-import shutil
 import uuid
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from defender.tests.support.jobs._job_helper import ContainerStandIn, HelperRan, HelperScene, make_signer
 from defender.tests.support.jobs._readiness1471 import Readied, entry_of
 
 
-class ScriptedFetch:
-    """Records each call (tenant, destination, the destination's state at the call, the keywords) and answers the queued `answers`,
-    else `ok <the scene's published commit>` after filling `dest` with the scene's published `agent/` and `settings/`."""
+def fetching(scene: HelperScene) -> Any:
+    """The one fetch seam over the scene's tenant: the real child against the scene's bare remote (`K.fetch_seam`)."""
+    from defender.tests.tenancy.knowledge_1618 import _support as K
 
-    def __init__(self, scene: HelperScene) -> None:
-        self.scene = scene
-        self.calls: list[dict[str, Any]] = []
-        self.answers: list[str] = []
-
-    def __call__(self, tenant_id: str, dest: Path, *, data_root: Path, **kw: Any) -> str:
-        dest = Path(dest)
-        self.calls.append({"tenant": str(tenant_id), "dest": dest, "kw": kw,
-                           "was_empty_dir": dest.is_dir() and not dest.is_symlink() and not any(dest.iterdir())})
-        if self.answers:
-            return self.answers.pop(0)
-        for half in ("agent", "settings"):
-            shutil.copytree(Path(self.scene.t.clone) / half, dest / half, symlinks=True)
-        return f"ok {self.scene.t.commit}"
+    return K.fetch_seam(scene.t)
 
 
 def readiness_fetching(scene: HelperScene, *, fetch: Callable[..., str], client: Any = None, signer: Any = None,

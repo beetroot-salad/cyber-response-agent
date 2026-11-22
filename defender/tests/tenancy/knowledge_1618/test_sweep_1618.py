@@ -12,7 +12,7 @@ from defender.tests.tenancy.knowledge_1618 import _support as K
 
 
 def _roots(t) -> dict[str, Path]:
-    # FORCED: a `.repo-scratch/` entry is `<tenant id>` + `.owner-<pid>-<start>-<tag>` (owned_temporary's grammar)
+    # FORCED: a `.repo-scratch/` entry is `<tenant id>` + `.owner-<pid>-<start>-<tag>` (`owned_temporary`'s names, via `A.named`)
     return {"run-knowledge": A.run_copies(t), "drafts": K.tenant_root(t) / "drafts",
             "repo-scratch": K.tenant_root(t).parent / ".repo-scratch"}
 

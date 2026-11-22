@@ -246,8 +246,28 @@ def test_1618_f6_a_later_fetch_in_the_same_repository_leaves_the_holders_unpushe
     assert d.repository.branch_tip(batch.branch) == sha
     assert branch_tip(repo[1], batch.branch) is None, "premise: nothing of the batch is on the remote"
     merged = advance_remote(repo, tmp_path)
+    # A lapsed holder's branch is a real case: the same-named remote branch is pushed, then force-moved to a commit
+    # that is not its descendant, between the opening fetch and the later fetch.
+    first, second = _force_moved_remote_branch(repo, tmp_path, batch.branch)
 
     d.repository.fetch()  # FORCED: the repository's fetch entry (today's name); the design's later fetches name their refs, no wildcard and no prune
 
+    assert branch_tip(repo[1], batch.branch) == second != first, "premise: the remote's batch branch was force-moved"
     assert d.repository.branch_tip(batch.branch) == sha, "the holder's unpushed branch was moved or pruned by a fetch"
     assert d.repository.holds_commit(merged), "control: the fetch did bring the merge"
+
+
+def _force_moved_remote_branch(repo, tmp_path, branch):
+    """Push `branch` to the remote at one commit, then force it to a sibling commit (same parent): `(first, second)`."""
+    writer = tmp_path / "lapsed-holder"
+    git(writer.parent, "clone", repo[1], writer)
+    git(writer, "checkout", "-b", branch)
+    tips = []
+    for text in ("first push\n", "force-moved\n"):
+        git(writer, "reset", "--hard", "origin/main")
+        (writer / "agent" / "lessons" / "lapsed.md").write_text(text, encoding="utf-8")
+        git(writer, "add", "-A")
+        git(writer, "commit", "-m", "lapsed holder")
+        git(writer, "push", "--force", "origin", f"HEAD:refs/heads/{branch}")
+        tips.append(git(writer, "rev-parse", "HEAD"))
+    return tuple(tips)

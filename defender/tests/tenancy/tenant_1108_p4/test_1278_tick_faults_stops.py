@@ -30,6 +30,7 @@ from defender.tests.support.learning.core._tickfaults1278 import (
 from defender.tests.tenancy.tenant_1108_p4._drain_support import critical_text, without_clone
 from defender.tests.tenancy.tenant_1108_p4.test_1278_tick_faults import (
     LANES,
+    the_batch,
 )
 
 pytestmark = [pytest.mark.postgres, pytest.mark.usefixtures("tick_impl")]  # the tick over each store implementation (conftest)
@@ -63,6 +64,7 @@ STOP_POINTS = (
     StopPoint("second_curator_before_its_commit", 1, 2, curator=1, point=BEFORE_COMMIT),
     StopPoint("second_curator_after_its_commit", 2, 2, curator=1, point=AFTER_COMMIT),
     StopPoint("during_the_push", 2, 2, push=True),
+    StopPoint("during_the_push_which_then_fails", 2, 2, push=True, push_fails=True),  # 1618-tradeoff: a stop whose push fails loses the work
 )
 
 
@@ -78,7 +80,15 @@ def test_the_stop_points_cover_each_curator_before_and_after_its_commit_and_the_
     assert {len(c) for c in CURATORS.values()} == {2}
     assert [(p.curator, p.point) for p in STOP_POINTS if p.curator is not None] == [
         (0, BEFORE_COMMIT), (0, AFTER_COMMIT), (1, BEFORE_COMMIT), (1, AFTER_COMMIT)]
-    assert [p.name for p in STOP_POINTS if p.push] == ["during_the_push"]
+    assert [p.name for p in STOP_POINTS if p.push] == ["during_the_push", "during_the_push_which_then_fails"]
+
+
+def _the_takeover_abandons(w, s, batch) -> None:  # 1618-tradeoff: nothing is on the remote, so the takeover abandons the batch, the attempt counted
+    assert w.t.server.pushes == ["refused"], "premise: the one push the remote saw was refused"
+    assert s.batches()[batch.id].outcome == "abandoned", "the takeover delivered what only the stopped holder had"
+    assert s.branch_tip_on_remote(batch.branch) is None
+    assert all(i.attempts >= 1 for i in s.items().values()), "the stopped attempt was forgiven"
+    assert [pr["head"]["ref"] for pr in s.open_prs()] != [batch.branch]
 
 
 @pytest.mark.parametrize(("lane", "stop", "how"), _stop_cases())
@@ -100,8 +110,10 @@ def test_a_stop_anywhere_in_a_claim_runs_no_further_curator_commit_or_pr_and_lea
         spy = PushSpy(cast, mp)
     else:
         first = ask_for_stop_and_wait(w)
-        spy = PushSpy(cast, mp, before=lambda n: first(None) if n == 1 else None,
-                      fail_from=2 if stop.push_fails else None)
+        spy = PushSpy(cast, mp, before=lambda n: first(None) if n == 1 else None)
+        if stop.push_fails:  # 1618: the stop path's push is refused by the remote (nothing lands), no longer by a spy
+            without_clone(w.t)
+            w.t.server.fail_push("refuse", times=1)
     try:
         if signalled:
             child = s.run_in_child(cast, "stop")
@@ -137,6 +149,9 @@ def test_a_stop_anywhere_in_a_claim_runs_no_further_curator_commit_or_pr_and_lea
     w.monkeypatch.setenv(RENEW_ENV, "600")
     again = Cast(s, tag='-again')
     s.run(again)
+    if stop.push_fails:
+        _the_takeover_abandons(w, s, batch)
+        return
     assert again.started() == [], "the takeover ran a curator again"
     [pr] = s.open_prs()
     after = s.only_batch()
@@ -213,7 +228,7 @@ def test_1618_k10_a_stop_whose_budgeted_push_is_refused_loses_the_batch_and_the_
     child = s.run_in_child(cast, "stop-refused")
     child.wait(seconds=STOP_BOUND)
 
-    [first] = s.batches().values()
+    first = the_batch(s, caplog)
     assert w.t.server.pushes == ["refused"], "premise: the stop path pushed once and was refused"
     assert len(cast.commits()) == 1, critical_text(caplog)
     assert s.branch_tip_on_remote(first.branch) is None

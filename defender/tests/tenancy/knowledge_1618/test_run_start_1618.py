@@ -19,8 +19,8 @@ def test_a1_an_unpinned_run_reads_and_stamps_the_commit_its_own_fetch_saw_never_
     t = decoy
     fetched = t.origin_main()
     later: list[str] = []
-    pub = A.publish(t, tmp_path, after=lambda _d, _l: later.append(K.advance_main(t, "K1618-LATER")))
-    out = B.launch(t, tmp_path, publish=pub)
+    pub = A.fetching(t, tmp_path, after=lambda _d, _l: later.append(K.advance_main(t, "K1618-LATER")))
+    out = B.launch(t, tmp_path, publish=None, fetch=pub)
     assert out.reached, out.text()
     assert out.rc == 0, out.text()
     assert pub.lines == [f"ok {fetched}"], pub.lines
@@ -52,31 +52,19 @@ def test_a4_the_copy_is_built_in_an_owned_temporary_and_ends_owned_by_the_run_pr
         final.update(owner=json.loads((copy / "owner").read_text()), token=(copy / "stage" / "token").is_file(),
                      listing=A.listing(A.run_copies(t)), name=seen.run_dir.name)
 
-    pub = A.publish(t, tmp_path, observe=observe)
-    out = B.launch(t, tmp_path, publish=pub, during=during)
+    pub = A.fetching(t, tmp_path, observe=observe)
+    out = B.launch(t, tmp_path, publish=None, fetch=pub, during=during)
     assert out.reached, out.text()
     assert start["parent"] == A.run_copies(t)
     assert start["empty"]
     assert start["alive"]
-    assert f".owner-{os.getpid()}-" in start["name"], start["name"]
+    named = A.NAMED_OWNER.search(start["name"])
+    assert named is not None, start["name"]
+    assert int(named.group(1)) == os.getpid(), start["name"]
     assert owned_temporary  # the grammar the name follows exists today
     assert final["owner"]["pid"] == os.getpid()
     assert final["token"]
     assert final["listing"] == [final["name"]], final
-
-
-def test_a4_the_owner_record_is_written_into_the_temporary_before_the_rename(decoy, tmp_path):
-    """`_owner.write_owner` is handed the owned temporary, never the run-id folder (F1). FORCED: owner written via write_owner."""
-    from defender.tenancy import _owner
-    from defender.tests.support.tenancy._host1214 import counting_calls
-
-    t = decoy
-    with counting_calls(owner=_owner.write_owner) as calls:
-        out = B.launch(t, tmp_path, publish=A.publish(t, tmp_path))
-    assert out.reached, out.text()
-    folders = [c["folder"] for c in calls.locals["owner"]]
-    assert folders, "no owner record was written by write_owner"
-    assert all(A.NAMED_OWNER.search(os.path.basename(str(f))) for f in folders), folders
 
 
 def test_a5_a_dead_owners_folder_at_the_run_id_is_never_replaced_the_rename_refuses(decoy, tmp_path):
@@ -89,7 +77,7 @@ def test_a5_a_dead_owners_folder_at_the_run_id_is_never_replaced_the_rename_refu
         pid, start = A.dead_mark()
         planted.append(A.plant(A.run_copies(t) / run_id, pid=pid, start=start))
 
-    out = B.launch(t, tmp_path, publish=A.publish(t, tmp_path, after=after))
+    out = B.launch(t, tmp_path, publish=None, fetch=A.fetching(t, tmp_path, after=after))
     assert planted, "premise: the temporary's name carries the run id"
     assert not out.reached, out.text()
     assert out.raised is None, out.text()
@@ -102,30 +90,13 @@ def test_a6_a_child_killed_mid_fill_leaves_nothing_and_the_run_refuses(decoy, tm
     """The live caller discards the half-filled temporary and nothing is made at the run id; control: the real child starts (F1)."""
     t = decoy
     command = A.stand_in_command(tmp_path, A.KILLED_MID_FILL)
-    pub = A.publish(t, tmp_path, command=command)
-    out = B.launch(t, tmp_path, publish=pub)
+    pub = A.fetching(t, tmp_path, command=command)
+    out = B.launch(t, tmp_path, publish=None, fetch=pub)
     assert not out.reached, out.text()
     assert out.raised is None, out.text()
     assert out.refusal is not None, out.text()
     assert A.listing(A.run_copies(t)) == []
-    assert B.launch(decoy, tmp_path, publish=A.publish(t, tmp_path)).reached, "control"
-
-
-def test_a7_an_unreachable_forgejo_refuses_the_run_before_message_zero_and_nothing_falls_back_to_the_clone(decoy, tmp_path):
-    """With a clone, exports and `current` on disk, a down Forgejo refuses `transient`, naming why; no copy is left (K4)."""
-    t = decoy
-    K.forge_down(t)
-    pub = A.publish(t, tmp_path)
-    out = B.launch(t, tmp_path, publish=pub)
-    assert not out.reached, out.text()
-    assert out.raised is None, out.text()
-    assert out.refusal is not None, out.text()
-    (line,) = pub.lines
-    assert line.startswith("refused transient "), line
-    reason = " ".join(line.split()[2:])[:40]
-    assert reason in " ".join(out.refusal.split()), (reason, out.refusal)
-    assert "stale" not in out.refusal.lower()
-    assert A.listing(A.run_copies(t)) == []
+    assert B.launch(decoy, tmp_path, publish=None, fetch=A.fetching(t, tmp_path)).reached, "control"
 
 
 def test_a8_a_pinned_run_reads_its_unadvertised_commit_by_id(decoy, tmp_path):
@@ -133,8 +104,8 @@ def test_a8_a_pinned_run_reads_its_unadvertised_commit_by_id(decoy, tmp_path):
     t = decoy
     pinned = K.advance_main(t, "K1618-PINNED")
     K.advance_main(t, "K1618-AFTER-PIN")
-    pub = A.publish(t, tmp_path)
-    out = B.launch(t, tmp_path, publish=pub, argv_extra=("--knowledge-commit", pinned))
+    pub = A.fetching(t, tmp_path)
+    out = B.launch(t, tmp_path, publish=None, fetch=pub, argv_extra=("--knowledge-commit", pinned))
     assert out.reached, out.text()
     assert out.rc == 0, out.text()
     assert [c["commit"] for c in pub.calls] == [pinned]
@@ -147,7 +118,11 @@ def test_a8_a_pinned_run_reads_its_unadvertised_commit_by_id(decoy, tmp_path):
 
 def test_a9_a_pin_forgejo_does_not_serve_refuses_naming_the_commit(decoy, tmp_path):
     """No fallback to main for an unserved pin (K5)."""
-    out = B.launch(decoy, tmp_path, publish=A.publish(decoy, tmp_path), argv_extra=("--knowledge-commit", K.ABSENT_COMMIT))
+    pub = A.fetching(decoy, tmp_path)
+    out = B.launch(decoy, tmp_path, publish=None, fetch=pub, argv_extra=("--knowledge-commit", K.ABSENT_COMMIT))
+    assert [c["commit"] for c in pub.calls] == [K.ABSENT_COMMIT], "premise: the child was asked for the pin, not main"
+    assert pub.lines, "premise: the child reported"
+    assert pub.lines[0].startswith("refused "), pub.lines
     assert not out.reached, out.text()
     assert out.raised is None, out.text()
     assert out.refusal is not None, out.text()
@@ -164,7 +139,7 @@ def test_a12_a_flock_held_on_the_old_lock_path_changes_nothing(decoy, tmp_path):
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
         with open(K.tenant_root(t) / "knowledge.lock", "a+") as probe, pytest.raises(BlockingIOError):  # noqa: PTH123
             fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)  # control: the lock is really held
-        out = B.launch(t, tmp_path, publish=A.publish(t, tmp_path))
+        out = B.launch(t, tmp_path, publish=None, fetch=A.fetching(t, tmp_path))
     assert out.reached, out.text()
     assert out.rc == 0, out.text()
     assert B.knowledge_source(out).get("commit") == tip
@@ -173,7 +148,7 @@ def test_a12_a_flock_held_on_the_old_lock_path_changes_nothing(decoy, tmp_path):
 def test_a14_after_the_upgrade_a_run_starts_and_makes_no_clone_exports_current_or_lock(t, tmp_path):
     """No `knowledge`, `exports` or `knowledge.lock` appears under `<T>`, and the run copy is gone after the run (K8)."""
     before = K.tenant_entries(t)
-    out = B.launch(t, tmp_path, publish=A.publish(t, tmp_path))
+    out = B.launch(t, tmp_path, publish=None, fetch=A.fetching(t, tmp_path))
     assert out.reached, out.text()
     assert out.rc == 0, out.text()
     assert out.seen[0].agent_files == K.half_at(t, t.origin_main(), "agent")

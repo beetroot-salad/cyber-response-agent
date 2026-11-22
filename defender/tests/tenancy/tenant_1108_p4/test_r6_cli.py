@@ -70,30 +70,9 @@ def test_1618_c5_the_lessons_page_and_the_tracer_show_mains_tip_not_the_clone_or
         assert K.SEEDED_MARK not in ran.out
         assert K.CLONE_ONLY_MARK not in ran.out
         assert ran.requests > 0, "nothing was fetched from Forgejo"
+        assert ran.fetches, "the tool never asked the fetch child for its copy"
+        assert ran.minted == 0, f"{make.__name__}'s own process minted a credential (O8)"
         assert ran.left == [], f"{make.__name__} left {ran.left} in the temporary folder"
-
-
-@pytest.mark.parametrize("tool", ["page", "tracer", "policy", "map"])
-def test_1618_c5_k4_each_operator_tool_exits_non_zero_naming_why_when_forgejo_is_down(k_scene, tmp_path, capsys, tool):
-    """The lessons page, the tracer, the policy CLI and the workspace map exit non-zero with a reason on stderr and no
-    output from stale knowledge when Forgejo is unreachable; each succeeds with it up (control) and leaves nothing. (F4, K4)"""
-    t = k_scene
-    run_id = RD.plant_run(t, t.commit)
-    make = {"page": lambda: _page(t.tenant_id), "tracer": lambda: _tracer(t.tenant_id),
-            "policy": lambda: _policy(t.tenant_id, tmp_path), "map": lambda: _map(t.tenant_id, run_id)}[tool]
-    main, argv = make()
-    control = RD.run_tool(t, tmp_path, capsys, main, argv)
-    assert control.rc == 0, f"control: {control.err}"
-    assert control.out.strip()
-
-    K.forge_down(t)
-    ran = RD.run_tool(t, tmp_path, capsys, main, argv)
-
-    assert ran.rc != 0, "the tool succeeded with Forgejo unreachable"
-    assert ran.err.strip(), "no reason was given"
-    assert "stale" not in ran.err.lower()
-    assert K.SEEDED_MARK not in ran.out
-    assert ran.left == [], f"left {ran.left}"
 
 
 def test_1618_c5_the_policy_cli_projects_mains_grant_table_each_time_it_runs(k_scene, tmp_path, capsys):

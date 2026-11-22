@@ -707,9 +707,9 @@ def test_p2_d7_a_tenant_value_with_markup_and_quotes_reaches_the_refusal_sentenc
 # --- #1618 D3/D5/D9/D10: the `publish` step is a fetch of main into a temporary copy (knowledge_copy merged in) -------------
 
 def _ready_fetch(scene):
-    from defender.tests.support.jobs._readiness1618 import ScriptedFetch
+    from defender.tests.support.jobs._readiness1618 import fetching
 
-    return ScriptedFetch(scene)
+    return fetching(scene)
 
 
 def test_d10_readiness_fetches_main_once_into_an_empty_temporary_and_the_copy_is_gone_when_the_helper_ends(
@@ -724,7 +724,8 @@ def test_d10_readiness_fetches_main_once_into_an_empty_temporary_and_the_copy_is
 
         assert ran.docker.job_ran, f"a fetch that answered ok did not reach the container: {ran.said()}"
         [call] = fetch.calls
-        assert (call["tenant"], call["was_empty_dir"], call["kw"].get("commit")) == (scene.tenant, True, None)
+        assert (call["tenant"], call["was_empty_dir"], call["commit"]) == (scene.tenant, True, None)
+        assert call["line"].startswith("ok "), call
         known = ran.knowledge
         assert isinstance(known, dict), ran.said()
         assert (known["kind"], known["commit"]) == ("fresh", scene.t.commit), known
@@ -732,30 +733,72 @@ def test_d10_readiness_fetches_main_once_into_an_empty_temporary_and_the_copy_is
         assert not call["dest"].exists(), "the temporary copy outlived the helper"
 
 
-@pytest.mark.parametrize("line", ["refused transient forge unreachable " + PUBLISH_CANARY,
-                                  "refused lasting agent/.tenant-id names another tenant " + PUBLISH_CANARY])
+def _forge_down(scene):
+    from defender.tests.tenancy.knowledge_1618 import _support as K
+
+    K.forge_down(scene.t)
+
+
+def _main_names_another_tenant(scene):
+    from defender.tests.tenancy.knowledge_1618 import _support as K
+
+    K.advance_main(scene.t, files={"agent/.tenant-id": PUBLISH_CANARY + "\n"})
+
+
+@pytest.mark.parametrize(("arm", "klass"), [(_forge_down, "transient"), (_main_names_another_tenant, "lasting")],
+                         ids=["forge-down", "main-names-another-tenant"])
 def test_d10_a_refused_fetch_is_refused_at_publish_naming_its_class_never_the_reply_and_leaves_no_knowledge_record(
-        tmp_path, monkeypatch, migrated_database, line):
-    """`refused transient|lasting <reason>` reads `refused` at `publish` with the class word in the sentence, none of the reply text, no
-    knowledge record (no `stale` over the published copy this scene still holds) and no container; `ok` over the same scene reaches
-    the container (control). (D10, D2, P-2, K9)"""
+        tmp_path, monkeypatch, migrated_database, arm, klass):
+    """The real child's `refused transient|lasting <reason>` (armed by the remote's state) reads `refused` at `publish` with the class
+    word in the sentence, none of the reply text, no knowledge record (no `stale` over the published copy this scene still holds) and
+    no container; the same helper over the same scene reaches the container first (control). (D10, D2, P-2, K9)"""
     from defender.tests.support.jobs._readiness1618 import readiness_fetching
 
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
         control = readiness_fetching(scene, fetch=_ready_fetch(scene), container=lambda c: 0)
         assert control.docker.job_ran, f"control: an ok fetch did not reach the container: {control.said()}"
+        arm(scene)
         fetch = _ready_fetch(scene)
-        fetch.answers.append(line)
         ran = readiness_fetching(scene, fetch=fetch, container=lambda c: 0)
 
         sentence = assert_refused_shape(ran.result(), "publish")
-        assert line.split()[1] in norm(sentence), f"the sentence does not name its class: {sentence!r}"
+        [call] = fetch.calls
+        assert call["line"].split()[:2] == ["refused", klass], f"the armed fault did not make the child say {klass}: {call['line']!r}"
+        assert klass in norm(sentence), f"the sentence does not name its class: {sentence!r}"
         assert "FORGE-REPLY-CANARY" not in ran.record_path.read_text(encoding="utf-8")
         assert "/srv/forge" not in ran.record_path.read_text(encoding="utf-8")
         assert ran.knowledge is None, "a refused fetch settled a source"
         assert ran.docker.boxes == []
         assert ran.ran.rc == 0
-        assert not fetch.calls[0]["dest"].exists(), "a refused fetch left its temporary copy"
+        assert not call["dest"].exists(), "a refused fetch left its temporary copy"
+
+
+def test_f9_the_publish_step_reads_the_copy_it_fetched_not_the_kept_export_or_clone(tmp_path, monkeypatch, migrated_database):
+    """With `main` moved on the remote (the kept export and the clone still hold the seed) the later steps and the record are the
+    fetched copy's: the new commit, and a grant `main` withheld is not signed for; before the move the same helper signs it. (F9, K3)"""
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+    from defender.tests.support.jobs._readiness1471 import grants_text
+    from defender.tests.support.jobs._readiness1618 import readiness_fetching
+    from defender.tests.tenancy.knowledge_1618 import _support as K
+
+    def withhold_identity(d: dict) -> None:
+        for verb in d["identity"]:
+            d["identity"][verb] = {"roles": [], "reason": "withheld for #1618's readiness copy"}
+
+    with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=("identity",)) as scene:
+        signer = make_signer()
+        control = readiness_fetching(scene, fetch=_ready_fetch(scene), signer=signer, container=lambda c: 0)
+        assert control.docker.job_ran, control.said()
+        assert [A.grant_of(A.claims_of_payload(p)) for p in signer.payloads] == [[("identity", "r")]], "control: seed grants identity"
+        assert control.knowledge["commit"] == scene.t.commit
+
+        moved = K.advance_main(scene.t, files={"settings/verb-grants.yaml": grants_text(withhold_identity)})
+        signer = make_signer()
+        ran = readiness_fetching(scene, fetch=_ready_fetch(scene), signer=signer, container=lambda c: 0)
+
+        assert ran.docker.job_ran, ran.said()
+        assert ran.knowledge["commit"] == moved != scene.t.commit, ran.knowledge
+        assert signer.payloads == [], "the check signed a grant the fetched main withholds (it read the kept export or clone)"
 
 
 def test_d9_readiness_refuses_at_publish_when_main_is_not_protected_and_reads_the_protection_as_the_control_shows(

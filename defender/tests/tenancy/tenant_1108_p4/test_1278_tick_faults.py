@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import shutil
 
 import pytest
 
@@ -31,7 +30,7 @@ from defender.tests.support.learning.core._tickfaults1278 import (
     raise_in,
 )
 from defender.tests.tenancy.knowledge_1618 import _support as K
-from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, critical_text, drafts_dir, without_clone
+from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, critical_text, without_clone
 from defender.tests.tenancy.tenant_1108_p4._support import git
 
 pytestmark = [pytest.mark.postgres, pytest.mark.usefixtures("tick_impl")]  # the tick over each store implementation (conftest)
@@ -70,6 +69,8 @@ class Step:
     name: str
     commits: bool
     arm: Any
+    #: #1618: the fault loses the commits (they were never pushed): the takeover abandons the batch and the attempt stays counted.
+    redone: bool = False
 
 
 def _arm_start_batch(s: Scene, mp: pytest.MonkeyPatch):
@@ -107,6 +108,13 @@ def _arm_stop_box_with_commits(s: Scene, mp: pytest.MonkeyPatch):
     return Cast(s), RefusingBox(stop=True)
 
 
+def _arm_push(s: Scene, mp: pytest.MonkeyPatch):
+    """The end push is refused by the remote (403, nothing lands), on a host with no clone: re-armed through the remote's state."""
+    without_clone(s.w.t)
+    s.w.t.server.fail_push("refuse", times=1)
+    return Cast(s), None
+
+
 def _arm_open_pr(s: Scene, mp: pytest.MonkeyPatch):
     from defender.learning.author.version_control import store_delivery
 
@@ -138,6 +146,7 @@ STEPS = (
     Step("stop_box_after_a_batch_with_no_commit", False, _arm_stop_box_no_commits),
     Step("curator_halts_after_its_commit", True, _arm_curator_halts_after_commit),
     Step("stop_box_after_a_batch_with_commits", True, _arm_stop_box_with_commits),
+    Step("push", True, _arm_push, redone=True),  # 1618-tradeoff: the unpushed work is redone, not delivered by a takeover
     Step("record_read_before_the_pr", True, _arm_commit_record_read),
     Step("pr_open", True, _arm_open_pr),
 )
@@ -153,7 +162,7 @@ def test_the_step_table_names_each_step_of_the_claims_life_once():
     """The fault domain is the claim's steps, each once: a step added with no entry is a failure here. (Uncontained fault)"""
     assert [s.name for s in STEPS] == [
         "start_batch", "start_box", "curator_halts_before_its_commit", "stop_box_after_a_batch_with_no_commit",
-        "curator_halts_after_its_commit", "stop_box_after_a_batch_with_commits", "record_read_before_the_pr",
+        "curator_halts_after_its_commit", "stop_box_after_a_batch_with_commits", "push", "record_read_before_the_pr",
         "pr_open"]
     assert {s.commits for s in STEPS} == {True, False}
 
@@ -180,7 +189,24 @@ def test_a_fault_the_tick_does_not_contain_leaves_the_batch_to_a_takeover_with_c
     [batch] = s.batches().values()
     items = s.items()
     assert items, "premise: the lane has items"
-    if step.commits:
+    if step.redone:
+        assert (batch.phase, batch.outcome) == ("working", None), critical_text(caplog)
+        assert lease_seconds_left(w.dsn, batch.id) <= 0, "a holder whose push failed kept its lease"
+        assert w.t.server.pushes == ["refused"], "premise: the remote refused the push"
+        assert s.branch_tip_on_remote(batch.branch) is None, "premise: nothing landed"
+        assert cast.commits(), "premise: the step is one after a commit"
+        again = Cast(s, tag="-again")
+        s.run(again)
+        assert s.batches()[batch.id].phase == "ended"
+        assert s.batches()[batch.id].outcome == "abandoned", "the takeover delivered what only the lost holder had"
+        assert s.open_prs() == [] or [pr["head"]["ref"] for pr in s.open_prs()] != [batch.branch]
+        if pre_attempts == "at_ceiling":
+            assert {i.status for i in s.items().values()} == {"held"}, "the abandoned attempt was forgiven at the ceiling"
+            assert {i.attempts for i in s.items().values()} == {before + 1}
+        else:
+            assert again.started(), "the abandoned batch's items were not authored again"
+            assert {i.attempts for i in s.items().values()} == {before + 2}, "the abandoned attempt was forgiven"
+    elif step.commits:
         assert (batch.phase, batch.outcome) == ("working", None), critical_text(caplog)
         assert lease_seconds_left(w.dsn, batch.id) <= 0, "a crashed holder with commits kept its lease"
         assert [r.commit for r in call(w.dsn, "commit_record", w.t.tenant_id)] == cast.commits()
@@ -211,6 +237,13 @@ def test_a_fault_the_tick_does_not_contain_leaves_the_batch_to_a_takeover_with_c
 # =====================================================================================================================
 
 
+def the_batch(s, caplog):
+    """The one batch the lane's first tick made: a named premise, so a tick that made none (or two) fails here, not in an unpack."""
+    rows = list(s.batches().values())
+    assert len(rows) == 1, f"premise: the tick made {len(rows)} batches, not one ({critical_text(caplog)})"
+    return rows[0]
+
+
 def _author_scene(w, lane=AUTHOR_LANE):
     """`lane` seeded for both its curators, over a host with no clone."""
     without_clone(w.t)
@@ -227,13 +260,40 @@ def test_1618_k10_an_end_push_that_succeeds_leaves_every_commit_of_the_batch_on_
 
     s.run(cast)
 
-    [batch] = s.batches().values()
+    batch = the_batch(s, caplog)
     assert len(cast.commits()) == 2, f"premise: two curators committed ({critical_text(caplog)})"
     on_remote = git(w.t.remote, "rev-list", "--reverse", f"{batch.base}..refs/heads/{batch.branch}").split()
     assert on_remote == cast.commits()
     assert [r.commit for r in call(w.dsn, "commit_record", w.t.tenant_id)] == on_remote
     assert w.t.server.pushes == ["landed"]
     assert [pr["head"]["ref"] for pr in s.open_prs()] == [batch.branch]
+
+
+def _scene_on_a_fresh_data_root(w, s):
+    """`s`'s lane on another host: a new data root holding only the tenant's placed folder (clone and exports removed), the same database,
+    forge and remote. Nothing of the first tick's disk is reachable from it."""
+    import dataclasses
+    from types import SimpleNamespace
+
+    from defender.learning.core.config import LoopPaths
+    from defender.tests.support.tenancy import _tenants1106 as tenants
+    from defender.tests.support.jobs._short_root import short_root
+    from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV
+
+    other = short_root()
+    assert other != w.t.data_root, "premise: another data root"
+    assert not list(other.iterdir()), "premise: a fresh empty data root"
+    tenants.place_tenant(other, w.t.tenant_id)
+    t2 = dataclasses.replace(w.t, data_root=other, tenant=tenants.accept(other, w.t.tenant_id))
+    fields = {f.name for f in dataclasses.fields(w.t)}
+    for key, value in vars(w.t).items():  # the case's recorded wiring (`bind_forge`, carried values), not disk
+        if key not in fields:
+            object.__setattr__(t2, key, value)
+    without_clone(t2)
+    w.monkeypatch.setenv(DATA_ROOT_ENV, str(other))
+    paths = t2.tenant.learning_paths(LoopPaths, repo_root=w.paths.repo_root)
+    assert K.tenant_root(t2) != K.tenant_root(w.t)
+    return Scene(SimpleNamespace(**{**vars(w), "t": t2, "paths": paths}), s.lane)
 
 
 @pytest.mark.parametrize("elsewhere", [False, True], ids=["same-host", "other-host-sharing-no-disk"])
@@ -246,18 +306,17 @@ def test_1618_k10_an_end_push_that_landed_but_lost_its_reply_is_delivered_by_a_t
 
     s.run(cast)
 
-    [batch] = s.batches().values()
+    batch = the_batch(s, caplog)
     assert w.t.server.pushes == ["landed-reply-lost"], "premise: the push landed and its reply was lost"
     assert s.branch_tip_on_remote(batch.branch) == cast.commits()[-1]
     assert (batch.phase, s.open_prs()) == ("working", []), critical_text(caplog)
     assert lease_seconds_left(w.dsn, batch.id) <= 0
-    if elsewhere:  # a replacement host or container: nothing of the first tick's is on its disk
-        shutil.rmtree(drafts_dir(w.t), ignore_errors=True)
-        shutil.rmtree(K.tenant_root(w.t) / "run-knowledge", ignore_errors=True)
-        shutil.rmtree(K.tenant_root(w.t).parent / ".repo-scratch", ignore_errors=True)
     again = Cast(s, tag="-again")
+    runner = s
+    if elsewhere:  # a replacement host: a fresh empty data root of its own, only the database and the forge are shared
+        runner = _scene_on_a_fresh_data_root(w, s)
 
-    s.run(again)
+    runner.run(again)
 
     assert again.started() == [], "the takeover ran a curator again"
     [pr] = s.open_prs()
@@ -277,7 +336,7 @@ def test_1618_k10_an_end_push_the_remote_refused_leaves_nothing_to_deliver_and_t
 
     s.run(cast)
 
-    [first] = s.batches().values()
+    first = the_batch(s, caplog)
     assert w.t.server.pushes == ["refused"], "premise: the push was refused"
     assert s.branch_tip_on_remote(first.branch) is None
     assert len(cast.commits()) == 2, f"premise: the batch had commits ({critical_text(caplog)})"

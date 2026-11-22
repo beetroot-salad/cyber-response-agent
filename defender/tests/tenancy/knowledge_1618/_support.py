@@ -279,6 +279,21 @@ def repo_scratch(t: Any) -> list[str]:
 # Seams for production names that do not exist yet. Each imports lazily (so collection never fails) and calls.
 # =====================================================================================================================
 
+# FORCED seam list, ALL in this one place (production spellings are the implementer's; one name per seam, binding):
+#   every reader of a knowledge copy takes ONE seam shape, `fetch(tenant_id, dest, *, data_root, commit=None) -> report line`
+#   (`ok <commit>` | `refused <transient|lasting> <reason>`), default = the real fetch child (`Fetch` below, `K.child_report`):
+#   - `run.main(..., fetch=)`         (replaces slice A's forced `publish=`; `_slice_a.Publish` is the same shape over the launcher);
+#   - `job_host.main(..., fetch=)`    the learning helper, readiness and the other helper kinds; also the `ProcessHelper` driver;
+#   - `HostActor(..., fetch=)`        onboarding's `prepare` (replaces `publish=`);
+#   - `<operator tool>.main(argv, *, directory=None, fetch=None)` for the lessons page, tracer, policy CLI, workspace map, and
+#     the branch launcher `cli.learning.branch.main(..., fetch=)`; `fetch=None` is production (the tool runs the child). The
+#     tool/launcher process mints no credential itself (O8): there is no `identity=` seam any more.
+#   - the judge: no seam of its own; in a job container its default copy path is the helper's `copy.make(commit=)` over the
+#     socket `job_socket.SOCKET_ENV` names, and a refusal surfaces as `job_socket.Refused` (code and reason from the helper).
+#   Other FORCED names: `fetch_copy` / `fetch_child_main` / `sweep_dead_owners` (below), `<T>/run-knowledge/<run_id>` owner record
+#   written before the rename, `.repo-scratch/<tenant id>.owner-...` (owned_temporary's grammar), the launcher
+#   `investigation.publish_launch.launch_publish(..., dest=, commit=, command=)`.
+
 #: FORCED: the in-process entry lives beside today's `publish_for_run` (`version_control/publish.py`), as a new module.
 FETCH_MODULE = "defender.learning.author.version_control.fetch"
 #: FORCED: the child's `python -m` module, beside today's `publish_child` (`version_control/publish_child.py`).
@@ -370,6 +385,56 @@ def child_report(t: Any, tmp_path: Path, dest: Path, commit: str | None = None, 
                           capture_output=True, text=True, check=False, timeout=timeout)
     lines = [line for line in done.stdout.splitlines() if line.strip()]
     return Report(done.returncode, lines[-1] if lines else "", done.stderr)
+
+
+class Fetch:
+    """THE fetch seam, one shape for every reader (design flows 1-4): `fetch(tenant_id, dest, *, data_root, commit=None) -> line`,
+    the line being the child's one report (`ok <commit>` | `refused <transient|lasting> <reason>`).
+
+    It runs the REAL fetch child (`child_report`) against the scene's bare remote over its real listener; it is a recorder, not a
+    fake. Faults are made only by remote state (`forge_down`, `advance_main`, an absent commit, `server.refuse`): nothing here
+    answers a line of its own. `calls` records each ask (tenant, dest, data_root, commit, whether `dest` was an empty folder, the
+    line answered). `once(arm, heal)` queues a remote-state fault for the next call only: `arm()` runs before the child is
+    spawned and `heal()` after it reported."""
+
+    def __init__(self, t: Any, work: Path | None = None, *, origin_of: Callable[[str], str] | None = None,
+                 before: Callable[[str], None] | None = None) -> None:
+        import tempfile
+
+        self.t = t
+        self.work = Path(work) if work is not None else Path(tempfile.mkdtemp(prefix="fetch-seam-1618-"))
+        self.origin_of = origin_of or (lambda _tenant: t.origin)
+        self.before = before
+        self.calls: list[dict[str, Any]] = []
+        self.faults: list[tuple[Callable[[], Any], Callable[[], Any]]] = []
+
+    def once(self, arm: Callable[[], Any], heal: Callable[[], Any] = lambda: None) -> None:
+        self.faults.append((arm, heal))
+
+    def __call__(self, tenant_id: Any, dest: Path, *, data_root: Any, commit: str | None = None, **_kw: Any) -> str:
+        dest = Path(dest)
+        call = {"tenant": str(tenant_id), "dest": dest, "data_root": Path(location_path(data_root)), "commit": commit,
+                "was_empty_dir": dest.is_dir() and not dest.is_symlink() and not any(dest.iterdir()), "line": None}
+        self.calls.append(call)
+        arm, heal = self.faults.pop(0) if self.faults else (lambda: None, lambda: None)
+        if self.before is not None:
+            self.before(str(tenant_id))
+        arm()
+        self.work.mkdir(parents=True, exist_ok=True)
+        folder = self.work / f"call-{len(self.calls)}"
+        folder.mkdir()
+        scene = SimpleNamespace(tenant_id=str(tenant_id), origin=self.origin_of(str(tenant_id)), data_root=data_root)
+        try:
+            call["line"] = child_report(scene, folder, dest, commit).line
+        finally:
+            heal()
+            shutil.rmtree(folder, ignore_errors=True)
+        return call["line"]
+
+
+def fetch_seam(t: Any, work: Path | None = None, **kw: Any) -> Fetch:
+    """The scene's fetch seam (see `Fetch`)."""
+    return Fetch(t, work, **kw)
 
 
 def sweep(t: Any) -> None:

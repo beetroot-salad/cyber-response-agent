@@ -180,43 +180,57 @@ def test_o6_a_post_move_run_is_judged_on_the_export_at_its_knowledge_commit(scen
     assert current_commit(scene.t.tenant) == scene.k2, "the judge moved `current`"
 
 
-def _copy_from_forgejo(scene: Scene, asked: list):
-    """The job-lane judge's `knowledge_copy` seam (#1618 FORCED): a copy of `commit` made by the fetch child through the
-    helper's `copy.make(commit=)`, here the child's work in-process into a folder this stands in for the helper making."""
-    def copy(commit: str) -> Path:
-        from defender.tests.tenancy.knowledge_1618 import _support as K
+@pytest.fixture
+def helper(scene, tmp_path, monkeypatch):
+    """The job helper's socket (`copy.make`), named by the job-socket environment the judge's in-container default path reads
+    (#1618 FORCED, `_support`'s seam list): it answers by the real fetch child over the scene's remote."""
+    from defender.tests.tenancy.knowledge_1618 import _readers_1618 as RD
 
-        asked.append(commit)
-        dest = K.owned_dest(scene.ep.parent.parent / ".k1618-copies", "judge")
-        K.fetch_copy(scene.t, dest, commit)
-        return dest
-    return copy
+    with RD.helper_socket(scene.t, tmp_path, monkeypatch) as stand_in:
+        yield stand_in
 
 
-def _shown_with(scene: Scene, copy) -> str:
+def _shown_with(scene: Scene) -> str:
     judge = J.scripted_judge()
-    J.grade(scene.ep, judge=judge, git_show=scene.product, draws=1, knowledge_copy=copy)
+    J.grade(scene.ep, judge=judge, git_show=scene.product, draws=1)
     assert judge.prompts, "the judge model was never called"
     return "\n".join(judge.prompts)
 
 
-def test_1618_k5_a_post_move_run_is_judged_on_the_body_at_its_commit_copied_from_forgejo(scene):
+def test_1618_k5_a_post_move_run_is_judged_on_the_body_at_its_commit_copied_from_forgejo(scene, helper):
     """The judge shows the lesson body at the sibling's knowledge commit as the helper's copy holds it (fetched by id);
     no export is made and nothing else is read. (F3, K5)"""
     _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1})
-    asked: list = []
     shutil.rmtree(export_dir(scene.t.tenant, scene.k1))
 
-    _only(_shown_with(scene, _copy_from_forgejo(scene, asked)), EXPORT)
+    _only(_shown_with(scene), EXPORT)
 
-    assert set(asked) == {scene.k1}, f"the judge asked for another commit: {asked}"
+    assert {f.get("commit") for name, f in helper.requests if name == "copy.make"} == {scene.k1}, helper.requests
     assert not export_dir(scene.t.tenant, scene.k1).exists(), "an export was made inside the judge's pass"
 
 
-@pytest.mark.parametrize("cause", ["unreachable", "unserved"])
-def test_1618_k4_k5_a_refused_copy_refuses_the_judge_pass_naming_why(scene, cause):
-    """When the helper refuses the copy (Forgejo down, or a commit it does not serve) the pass is `JudgeRefused` naming why,
-    the model is never called and nothing is graded; the readable case above is the control. (F3, K4, K5)"""
+def test_1618_f3_the_judges_default_copy_path_asks_the_helper_and_the_judge_never_fetches_itself(scene, helper):
+    """With no copy seam the judge's pass asks the helper (`copy.make`) for each body's commit over the job socket, and its own
+    process mints no credential and opens no git connection: a judge fetching inside the container could not. (F3, O8)"""
+    from defender.learning.author.version_control.auth import ForgejoIdentity
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1})
+    judge_requests = len(scene.t.server.seen)
+    with counting_calls(mint=ForgejoIdentity.token) as minted:
+        _only(_shown_with(scene), EXPORT)
+
+    asked = [f.get("commit") for name, f in helper.requests if name == "copy.make"]
+    assert asked, "the judge never asked the helper"
+    assert set(asked) == {scene.k1}, f"the judge did not ask the helper for its body's commit: {helper.requests}"
+    assert minted.counts["mint"] == 0, "the judge minted a credential of its own (it fetched in the container)"
+    assert len(scene.t.server.seen) > judge_requests, "control: the helper's child never reached Forgejo"
+
+
+@pytest.mark.parametrize("cause", ["unserved"])  # the unreachable arm is `test_readers_1618` (every reader, naming the cause)
+def test_1618_k4_k5_a_refused_copy_refuses_the_judge_pass_naming_why(scene, helper, cause):
+    """When the helper refuses `copy.make` (Forgejo down, or a commit it does not serve; the helper's own typed refusal) the pass
+    is `JudgeRefused` naming why, the model is never called and nothing is graded; the readable case above is the control. (F3, K4, K5)"""
     from defender.learning.judge import JudgeRefused
 
     commit = scene.k1 if cause == "unreachable" else ABSENT_COMMIT
@@ -228,11 +242,11 @@ def test_1618_k4_k5_a_refused_copy_refuses_the_judge_pass_naming_why(scene, caus
     judge = J.scripted_judge()
 
     with pytest.raises(JudgeRefused) as refused:
-        J.grade(scene.ep, judge=judge, git_show=scene.product, draws=1,
-                knowledge_copy=_copy_from_forgejo(scene, []))
+        J.grade(scene.ep, judge=judge, git_show=scene.product, draws=1)
 
     assert judge.prompts == [], "the model was called on a pass that could not read its knowledge"
     assert str(refused.value).strip()
+    assert [name for name, _f in helper.requests] == ["copy.make"], "the refusal did not come from the helper's answer"
     if cause == "unserved":
         assert commit in str(refused.value), str(refused.value)
 

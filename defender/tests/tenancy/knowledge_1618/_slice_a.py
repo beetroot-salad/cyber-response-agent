@@ -1,12 +1,12 @@
 """Slice A helpers for #1618: the run-start seam over the production launcher, real caller processes, planted owners, and a
 static census scanner. Policy under test (owner records, renames, sweeps) is never implemented here.
 
-FORCED names (hoist into `_support` if the orchestrator agrees):
+The seam list lives in `_support` (one place). Slice-A specifics (the launcher):
 - the run launcher stays `defender.investigation.publish_launch.launch_publish` and is handed `dest=` (the caller's owned
   temporary) and `commit=` (a pin) beside today's `data_root=`, `budget=`, `command=`; the `command=` prefix is followed by
   the child's argv `<tenant> --data-root <root> --dest <folder> [--commit <id>]` and nothing else;
-- `run.main` hands its `publish=` seam `(tenant_id, *, data_root, dest, commit=None, **named)` and reads the child's report
-  line (`ok <commit>` / `refused <transient|lasting> <reason>`) back from it.
+- `run.main(..., fetch=)` is the one fetch seam shape `(tenant_id, dest, *, data_root, commit=None) -> report line`; here
+  it is the production launcher over the real child (`Fetching`).
 """
 from __future__ import annotations
 
@@ -28,8 +28,13 @@ from defender.tests.tenancy.tenant_1108_delivery._support import IMPORT_ROOT
 
 LAUNCHER_MODULE = "defender.investigation.publish_launch"
 LAUNCHER_NAME = "launch_publish"
-#: The grammar `tenancy._owner.owned_temporary` names a folder under (exists today).
-NAMED_OWNER = re.compile(r"\.owner-(\d+)-(\d+)-[0-9a-f]{8}$")
+
+def __getattr__(name: str) -> Any:
+    """`NAMED_OWNER`: `tenancy._owner`'s own pattern for an `owned_temporary` name (exists today), never a copy of its grammar."""
+    if name == "NAMED_OWNER":
+        return importlib.import_module("defender.tenancy._owner")._NAMED_OWNER
+    raise AttributeError(name)
+
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
@@ -70,8 +75,8 @@ def stand_in_command(tmp_path: Path, source: str, *, name: str = "stand-in") -> 
     return [sys.executable, str(script)]
 
 
-class Publish:
-    """`run.main`'s `publish=` over the production launcher (module doc): records what it was handed and each line."""
+class Fetching:
+    """`run.main`'s `fetch=` over the production launcher (module doc): records what it was handed and each line."""
 
     def __init__(self, t: Any, command: list[str], *, observe: Callable[[Path], Any] | None = None,
                  after: Callable[[Path, str], Any] | None = None, budget: float = 120.0) -> None:
@@ -79,7 +84,7 @@ class Publish:
         self.calls: list[dict[str, Any]] = []
         self.lines: list[str] = []
 
-    def __call__(self, tenant_id: Any, *, data_root: Any, dest: Any, commit: str | None = None, **named: Any) -> str:
+    def __call__(self, tenant_id: Any, dest: Any, *, data_root: Any, commit: str | None = None, **named: Any) -> str:
         assert str(tenant_id) == self.t.tenant_id, (tenant_id, self.t.tenant_id)
         self.calls.append({"dest": Path(dest), "commit": commit, "named": dict(named)})
         if self.observe is not None:
@@ -92,8 +97,8 @@ class Publish:
         return line
 
 
-def publish(t: Any, tmp_path: Path, *, command: list[str] | None = None, **hooks: Any) -> Publish:
-    return Publish(t, command if command is not None else child_command(t, tmp_path), **hooks)
+def fetching(t: Any, tmp_path: Path, *, command: list[str] | None = None, **hooks: Any) -> Fetching:
+    return Fetching(t, command if command is not None else child_command(t, tmp_path), **hooks)
 
 
 def run_copies(t: Any) -> Path:
@@ -135,9 +140,15 @@ def owner_file(folder: Path, pid: int, start: str) -> None:
     write_owner(folder, pid, start)
 
 
-def named(prefix: str, pid: int, start: str, tag: str = "0badc0de") -> str:
-    """A folder name in `owned_temporary`'s grammar naming the process `pid`/`start` as owner."""
-    return f"{prefix}.owner-{pid}-{start}-{tag}"
+def named(prefix: str, pid: int, start: str) -> str:
+    """A folder name `owned_temporary(prefix)` would give, but naming the process `pid`/`start` as owner: a real name from the
+    helper with the pid and start fields replaced where the helper's own pattern finds them (no grammar spelled here)."""
+    from defender.tenancy._owner import _NAMED_OWNER, owned_temporary
+
+    name = owned_temporary(prefix)
+    found = _NAMED_OWNER.search(name)
+    assert found is not None, name
+    return f"{name[:found.start(1)]}{pid}{name[found.end(1):found.start(2)]}{start}{name[found.end(2):]}"
 
 
 def plant(folder: Path, *, pid: int | None = None, start: str | None = None, by_name: bool = False) -> Path:
@@ -157,6 +168,23 @@ def process_start(pid: int) -> str:
     return start(pid)
 
 
+def scan_run_copies(folder: Path) -> tuple[list[str], list[str]]:
+    """Watch `folder` (`<T>/run-knowledge/`) from outside: `(owned, unowned)` names of the renamed run copies in it (a name
+    `tenancy._owner` does not read as an `owned_temporary` one) that do / do not hold an owner record. A copy that vanishes
+    while it is read (swept after its owner died) is neither."""
+    from defender.tenancy._owner import _NAMED_OWNER, OWNER_FILE
+
+    owned, unowned = [], []
+    for entry in (sorted(Path(folder).iterdir()) if Path(folder).is_dir() else []):
+        if _NAMED_OWNER.search(entry.name):
+            continue
+        if (entry / OWNER_FILE).is_file():
+            owned.append(entry.name)
+        elif entry.exists():
+            unowned.append(entry.name)
+    return owned, unowned
+
+
 def repos_under(root: Path) -> list[str]:
     """Every folder under `root` that is a git repository (a `HEAD` file beside `objects/`), relative to `root`."""
     found = []
@@ -169,7 +197,7 @@ def repos_under(root: Path) -> list[str]:
 # --- a real run process (the production caller) -----------------------------------------------------------------------
 
 RUN_PROCESS = '''
-import functools, importlib, json, sys, time
+import importlib, json, sys, time
 from pathlib import Path
 
 spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
@@ -180,13 +208,17 @@ directory = tenant_directory(Path(spec["data_root"]), spec["tenant_id"], origin=
 launch = getattr(importlib.import_module(spec["launcher_module"]), spec["launcher_name"])
 
 
+def fetch(tenant_id, dest, *, data_root, commit=None):
+    return launch(tenant_id, data_root=data_root, dest=dest, commit=commit, budget=120.0, command=spec["command"])
+
+
 def lifecycle(**kw):
     Path(spec["ready"]).write_text(str(kw["run"].run_dir), encoding="utf-8")
     time.sleep(600)
 
 
 sys.exit(run_py.main([spec["alert"], "--tenant", spec["tenant_id"], "--no-learn"], directory=directory,
-                     lifecycle=lifecycle, publish=functools.partial(launch, budget=120.0, command=spec["command"]),
+                     lifecycle=lifecycle, fetch=fetch,
                      preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None, enqueue=lambda *a, **k: False))
 '''
 

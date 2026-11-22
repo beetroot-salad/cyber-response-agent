@@ -7,7 +7,11 @@ import pytest
 
 from defender.tests.tenancy.knowledge_1618 import _slice_a as A
 
-LOCK_NAMES = ["LockBusy", "tenant_lock", "publish_locked", "materialise_export", "knowledge_lock"]
+#: K1's own list, by the base's names: the lock and its holder probe; `LockBusy`; the publish child's busy branch
+#: (`publish.py` `_lock_busy`, `_Locked`/`_LOCKED`); materialise's bounded retry (`exports.py` `MATERIALISE_LOCK_WAIT`,
+#: `_LOCK_RETRY`) beside the function that retries.
+LOCK_NAMES = ["LockBusy", "tenant_lock", "knowledge_lock", "knowledge_lock_holder", "_lock_holder", "publish_locked",
+              "_lock_busy", "_Locked", "_LOCKED", "materialise_export", "MATERIALISE_LOCK_WAIT", "_LOCK_RETRY"]
 
 
 def test_a13_the_census_scans_product_code_and_sees_a_kept_name():

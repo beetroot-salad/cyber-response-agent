@@ -769,24 +769,25 @@ def after_the_signal(scene: HelperScene, kind: str, request: str, fields: dict) 
 class HelperRan:
     rc: int | None = None
     raised: BaseException | None = None
-    publishes: int = 0
+    #: The helper's fetch seam (#1618: the real child; every ask it made is in `.calls`).
+    fetch: Any = None
+
+    @property
+    def publishes(self) -> int:
+        """How many times the helper asked for knowledge at launch (the former launch-time publish: now the one fetch)."""
+        return len(self.fetch.calls) if self.fetch is not None else 0
 
 
 def drive_helper(scene: HelperScene, argv: list[str], *, docker: ContainerStandIn, signer: Any,
                  **seams: Any) -> HelperRan:
-    """`job_host.main` on this thread (it takes SIGTERM here), its launch-time publish answered `fresh` at the
-    published commit (as `test_job_entry.run_job` answers the job's today)."""
+    """`job_host.main` on this thread (it takes SIGTERM here); its knowledge comes through the one fetch seam (#1618 FORCED, see
+    `knowledge_1618._support`): the real fetch child over the scene's remote unless the case hands its own `fetch`."""
     from defender import job_host
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+    from defender.tests.tenancy.knowledge_1618 import _support as K
 
     ran = HelperRan()
-
-    def publish(*_a: Any, **_k: Any) -> str:
-        ran.publishes += 1
-        return B.fresh(scene.t.commit)
-
-    if "fetch" not in seams:  # #1618: a case that hands the helper its `fetch` seam has no launch-time publish (r5 deletes it)
-        seams.setdefault("publish", publish)
+    seams.setdefault("fetch", K.fetch_seam(scene.t))
+    ran.fetch = seams["fetch"]
     try:
         ran.rc = job_host.main(argv, docker=docker, signer=signer, **seams)
     except SystemExit as e:
@@ -901,7 +902,6 @@ _DRIVER = textwrap.dedent("""\
     import json, sys
     from defender import job_host
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
     from defender.job_host import _session as S
     cfg = json.loads(sys.argv[1])
     real_answer = S.Registry.answer
@@ -913,7 +913,10 @@ _DRIVER = textwrap.dedent("""\
         return real_answer(self, session, name, fields)
 
     S.Registry.answer = answer
-    sys.exit(job_host.main(cfg["argv"], signer=A.MarkedSigner(), publish=lambda *a, **k: B.fresh(cfg["commit"])))
+    from types import SimpleNamespace
+    from defender.tests.tenancy.knowledge_1618 import _support as K
+    scene = SimpleNamespace(tenant_id=cfg["tenant"], origin=cfg["origin"], data_root=cfg["data_root"])
+    sys.exit(job_host.main(cfg["argv"], signer=A.MarkedSigner(), fetch=K.fetch_seam(scene)))
 """)
 
 
@@ -930,7 +933,7 @@ _PARENT = textwrap.dedent("""\
 
 
 class ProcessHelper:
-    """`job_host.main` as a real process (`python -c driver`, its signer and publish answered as `drive_helper`'s) over a
+    """`job_host.main` as a real process (`python -c driver`, its signer as `drive_helper`'s and its knowledge through the real fetch child, #1618) over a
     `docker` executable first on PATH, whose `run` is a stand-in container: it records itself (labels, argv) under
     `state/containers/<name>`, reads its stdin until EOF and then writes `state/eof` and exits; `ps --filter label=`, `rm`,
     `stop` and `kill` act on those records. `state/started` holds the stand-in container's pid once it runs.
@@ -946,7 +949,8 @@ class ProcessHelper:
         shim.write_text(_SHIM.replace("PYTHON", sys.executable).replace("STATE", str(self.state)), encoding="utf-8")
         shim.chmod(0o755)
         env = child_env({**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"})
-        cfg = json.dumps({"argv": argv, "commit": scene.t.commit, "requests": str(self.state / "requests.log"),
+        cfg = json.dumps({"argv": argv, "commit": scene.t.commit, "tenant": scene.tenant, "origin": scene.t.origin,
+                          "data_root": str(scene.root), "requests": str(self.state / "requests.log"),
                           "exit": str(self.state / "helper-exit")})
         command = [sys.executable, "-c", _PARENT, cfg, _DRIVER] if worker else [sys.executable, "-c", _DRIVER, cfg]
         self.proc = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,

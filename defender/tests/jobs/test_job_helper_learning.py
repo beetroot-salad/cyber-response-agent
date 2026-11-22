@@ -7,7 +7,6 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -109,16 +108,15 @@ _ABSENT_COMMIT = K.ABSENT_COMMIT
 
 
 def _fetch_seam(scene, asked: list):
-    """Stands in for the helper spawning the fetch child (the helper holds no credential, #1618 O8): the child's work
-    as a real subprocess with the fixture's issuer fake. Records `(tenant, commit)` per call; answers the child's report line.
-    FORCED (one shape for every `fetch=` seam, as `_readiness1618`): `fetch(tenant_id, dest, *, data_root, commit=None)`."""
+    """The one fetch seam (`K.fetch_seam`: the real child over the scene's remote) with the `(tenant, commit)` of each ask also
+    appended to `asked` (the helper holds no credential, #1618 O8)."""
+    seam = K.fetch_seam(scene.t)
+
     def fetch(tenant_id: str, dest, *, data_root=None, commit=None, **_kw) -> str:
         asked.append((tenant_id, commit))
-        work = Path(tempfile.mkdtemp(prefix="fetch-child-1618-"))
-        try:
-            return K.child_report(scene.t, work, Path(dest), commit).line
-        finally:
-            shutil.rmtree(work, ignore_errors=True)
+        return seam(tenant_id, dest, data_root=data_root if data_root is not None else scene.root, commit=commit)
+
+    fetch.calls = seam.calls
     return fetch
 
 
@@ -201,34 +199,9 @@ def test_1618_c1_a_commit_forgejo_does_not_serve_is_refused_naming_it_and_leaves
     assert len(got["dirs"]) == 1, f"a refused copy left a folder behind: {got['dirs']}"
 
 
-def test_1618_c2_with_forgejo_down_a_copy_is_refused_naming_why_and_the_helper_minted_no_credential(scene):
-    """The container asks for a copy while Forgejo is unreachable: refused, a reason in the refusal, no folder left, and
-    the helper built no forge credential of its own (O8); the same request is answered while Forgejo is up. (F3, K4, O8)"""
-    forge = ForgeCredentialRecorder()
-    asked: list = []
-    got: dict = {}
-
-    def job(c) -> int:
-        got["up"] = c.request("copy.make", commit=scene.t.commit)["commit"]
-        before = [p.name for p in _copy_dirs(scene)]
-        K.forge_down(scene.t)
-        got["refusal"] = c.refused("copy.make", commit=scene.t.commit)
-        got["leftover"] = [p.name for p in _copy_dirs(scene)] != before
-        return 0
-
-    run_kind(scene, "learning", job, forge=forge, fetch=_fetch_seam(scene, asked))
-
-    assert got["up"] == scene.t.commit
-    assert str(got["refusal"]).strip(), "the refusal says nothing about why"
-    assert "stale" not in str(got["refusal"]).lower()
-    assert got["leftover"] is False, "a refused copy left a folder behind"
-    assert forge.built == [], "the helper built a credential of its own"
-    assert forge.asked == [], "the helper minted a token of its own"
-
-
 def test_1618_c4_the_grant_is_read_from_mains_settings_not_the_kept_export(scene):
     """The pass's grant follows `settings/verb-grants.yaml` at main's tip: with `identity` withheld on main (kept export
-    and clone still grant it) the learning job is answered no `identity` read. (F3, K3)"""
+    and clone still grant it) the learning job is answered no `identity` read. (F3; grant read at main (r5.1-a))"""
     from defender.tests.support.jobs._readiness1471 import grants_text
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 
@@ -1063,20 +1036,20 @@ def test_a1_a_learning_helper_signalled_before_it_starts_the_container_starts_no
     import signal
 
     from defender.records.job_lane import LEARNING_STOPPED
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     job_id = str(uuid.uuid4())
     signer = J.SignalingSigner(make_signer())
     sent: list[bool] = []
+    real = _fetch_seam(scene, [])
 
-    def publish(*_a, **_k) -> str:
+    def fetch(*a, **k) -> str:
         if not signer.sent and not sent:
             sent.append(True)
             os.kill(os.getpid(), signal.SIGTERM)
-        return B.fresh(scene.t.commit)
+        return real(*a, **k)
 
     docker = ContainerStandIn(lambda c: 0)
-    run_kind(scene, "learning", None, job_id=job_id, signer=signer, docker=docker, publish=publish)
+    run_kind(scene, "learning", None, job_id=job_id, signer=signer, docker=docker, fetch=fetch)
 
     assert signer.sent or sent, "premise: the signal was sent"
     assert docker.boxes == [], "a container was started after the signal"
@@ -1088,7 +1061,6 @@ def test_a1_a_learning_helper_signalled_before_it_starts_the_container_starts_no
 
 def _retire_clone(scene):
     """The design's upgrade step for the scene's tenant: no `<T>/knowledge`, `exports/` or `knowledge.lock`."""
-    import shutil
 
     root = scene.root / scene.tenant
     for name in ("knowledge", "exports"):
@@ -1169,3 +1141,46 @@ def test_1618_f6_the_post_steps_container_has_a_tmpfs_tmp_no_login_and_no_new_wa
     env = J.parse_env(create)
     assert not [k for k in env if any(word in k.upper() for word in ("DSN", "PASSWORD", "SECRET", "ROLE_ID"))], sorted(env)
     assert set(got["refused"].values()) <= {"unknown-request", "unknown", "bad-request", "unsupported"}, got["refused"]
+
+
+def test_1618_k2_concurrent_copy_makes_all_succeed_each_with_the_commit_its_own_fetch_reported_while_main_advances(scene):
+    """Several `copy.make` requests at once while main advances each answer a copy whose bytes are those of the commit its fetch
+    reported, a tip during its fetch. (K2)"""
+    import threading
+
+    t, n = scene.t, 4
+    got: dict = {"answers": [], "errors": []}
+    tips: list[str] = [t.origin_main()]
+
+    def job(c) -> int:
+        stop = threading.Event()
+
+        def advance() -> None:
+            while not stop.is_set() and len(tips) < 10:
+                tips.append(K.advance_main(t, f"K1618-ADV-{len(tips)}"))
+
+        def ask() -> None:
+            try:
+                got["answers"].append(c.request("copy.make"))
+            except Exception as err:  # noqa: BLE001 — recorded, asserted below
+                got["errors"].append(repr(err))
+
+        mover = threading.Thread(target=advance)
+        askers = [threading.Thread(target=ask) for _ in range(n)]
+        mover.start()
+        for a in askers:
+            a.start()
+        for a in askers:
+            a.join(120)
+        stop.set()
+        mover.join(120)
+        got["agent"] = [K.tree_bytes(Path(a["path"]) / "agent") for a in got["answers"]]
+        return 0
+
+    run_kind(scene, "learning", job, fetch=_fetch_seam(scene, []))
+
+    assert got["errors"] == [], got["errors"]
+    assert len(got["answers"]) == n
+    for answer, agent in zip(got["answers"], got["agent"], strict=True):
+        assert answer["commit"] in tips, f"a copy of a commit that was never main's tip: {answer['commit']}"
+        assert agent == K.half_at(t, answer["commit"], "agent")

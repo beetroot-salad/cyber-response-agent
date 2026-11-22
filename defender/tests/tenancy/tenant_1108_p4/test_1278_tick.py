@@ -720,3 +720,65 @@ def test_1618_k7_a_tick_in_the_job_container_never_sweeps(world, post_step_helpe
     with counting_calls(sweep=sweep_dead_owners) as control:
         K.sweep(w.t)
     assert control.counts["sweep"] == 1, "control: the counter does not see a sweep"
+
+
+# --- #1618 B12, the container half: the drain's relay mode (`container=`: records, `forge.token` and `batch.start` are the helper's) --------
+
+
+def _relay_tick(w, helper, ask, writer):
+    """The author drain as the post-step's container runs it: over the real post-step helper (`helper.container(ask)`), with the
+    helper's answers passing through `ask`. The container fetches and pushes by itself; only the forge's API client is the fake's."""
+    drains = importlib.import_module("defender.learning.core.drains")
+    box = BoxSpy()
+    container = helper.container(ask)
+    return drains.author_drain(w.paths, container=container, client=w.t.forge.client, trigger_author=writer,
+                               start_box=box.start, stop_box=box.stop, store=container.tick_store())
+
+
+@own_store("the tick is the post-step's, whose store is the port over a real helper")
+def test_1618_b12_a_container_tick_builds_its_batch_on_the_base_the_helper_answered_and_pushes_with_a_forge_token(world, post_step_helper, caplog):  # noqa: F811 — the imported fixture
+    """The helper's `batch.start` answers a `base` that is no longer `main`'s tip: the container fetches it by id, the batch's parent is that base, and the push is made with a `forge.token`. (F6 job lane, K12)"""
+    w = world
+    without_clone(w.t)
+    _seed(w, "f1")
+    helper = post_step_helper()
+    asked, answered, moved = [], {}, {}
+
+    def ask(name, **fields):
+        answer = helper.ask(name, **fields)
+        asked.append(name)
+        if name == "batch.start":
+            answered["base"] = answer["base"]
+            moved["tip"] = K.advance_main(w.t, "K1618-AFTER-THE-HELPERS-ANSWER")  # main moves on after the helper answered
+        return answer
+
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+    _relay_tick(w, helper, ask, writer)
+
+    assert writer.served, f"premise: the container's tick served the batch ({critical_text(caplog)})"
+    assert moved["tip"] != answered["base"], "premise: the helper's base is not main's tip any more"
+    [(branch, _tip)] = remote_branches(w.t.remote).items()
+    assert git(w.t.remote, "rev-parse", f"{branch}^") == answered["base"], "the container did not build on the helper's base"
+    assert "forge.token" in asked, "the container pushed without a forge.token from the helper"
+    assert w.t.server.pushes == ["landed"]
+
+
+@own_store("the tick is the post-step's, whose store is the port over a real helper")
+def test_1618_b12_a_container_tick_refuses_a_base_it_cannot_fetch_by_id_and_authors_nothing(world, post_step_helper, caplog):  # noqa: F811 — the imported fixture
+    """A `base` Forgejo does not serve makes the container's tick refuse: no curator runs, nothing is pushed, no PR opens (the case above is the control that the same tick otherwise serves). (F6 job lane)"""
+    w = world
+    without_clone(w.t)
+    _seed(w, "f1")
+    helper = post_step_helper()
+    before = remote_branches(w.t.remote, prefix="")
+
+    def ask(name, **fields):
+        answer = helper.ask(name, **fields)
+        return {**answer, "base": K.ABSENT_COMMIT} if name == "batch.start" else answer
+
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+    _relay_tick(w, helper, ask, writer)
+
+    assert writer.served == [], f"a curator ran on a base the container does not hold ({critical_text(caplog)})"
+    assert remote_branches(w.t.remote, prefix="") == before, "a batch branch was pushed"
+    assert w.t.forge.creates == []

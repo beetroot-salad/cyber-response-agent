@@ -47,7 +47,8 @@ ITEM_KEYS = ("state", "pending_action", "step", "step_actor")
 
 @pytest.fixture
 def world(tmp_path, data_root):
-    w = LifecycleWorld(tmp_path, data_root)
+    """#1618: the host actor reads knowledge through the one fetch seam (the real child over the forge's repositories)."""
+    w = FetchWorld(tmp_path, data_root)
     yield w
     w.close()
 
@@ -79,7 +80,9 @@ FAILURES = {
     # DC-4: a login failing after the unwrap has spent the wrapper restarts at `wrap`, in the service.
     "install after the unwrap": (lambda w: host_openbao_failing(w, lambda r: r.url.path.endswith("/approle/login")),
                                  ("wrap", "service"), "install", "500"),
-    # 1618 D1/D2: the `prepare` row (a `stale` first-publish line) is retired; the refused fetch is `test_prepare_stays_at_prepare...` below.
+    # 1618 D1/D2: the `prepare` row, re-armed: the first-publish `stale` line is gone; the fault is now the fetch child's refusal
+    # (the listener rejects the first upload-pack), which prepare records and stays at.
+    "prepare": (lambda w: w.refuse_next_fetch("auth"), ("prepare", "host"), "prepare", "refused"),
 }
 
 
@@ -90,7 +93,7 @@ def _names(world, tenant) -> tuple[str, ...]:
 
 def _calls(world) -> int:
     return len(world.forge.calls) + len(world.openbao.calls) + len(world.git.calls) + len(world.integration.calls) \
-        + len(world.publish.calls)
+        + len(world.fetch.calls)
 
 
 @pytest.mark.parametrize("failing", list(FAILURES))
@@ -161,28 +164,21 @@ def test_a_spent_wrapper_found_when_install_is_taken_up_fails_loudly_and_restart
 # 1618 D1/D2/D9: prepare reads the tenant's knowledge through the fetch child (no clone); the first-publish line (`fresh <commit>`), the
 # clone it needed (`_plant_clone`) and the "keeps an existing clone of the recorded repo, refuses any other" case are retired.
 
-@pytest.fixture
-def fetch_world(tmp_path, data_root):
-    w = FetchWorld(tmp_path, data_root)
-    yield w
-    w.close()
-
-
 def _fetch_calls_after_prepare(world, tenant):
     world.drive()
     assert world.item(tenant)["state"] == "active", world.item(tenant)
     return world.fetch.calls
 
 
-def test_d1_prepare_makes_no_clone_and_activates_once_a_fetch_of_main_validates(fetch_world):
+def test_d1_prepare_makes_no_clone_and_activates_once_a_fetch_of_main_validates(world):
     """Prepare fetches `main` into an empty folder it made, discards it, and the tenant goes active with no clone, no `exports` and no
     `current` under `<T>`; the runs folder is still made. (D1, F5, K8)"""
-    world = fetch_world
     tenant = world.create()
     calls = _fetch_calls_after_prepare(world, tenant)
     [call] = calls
     assert (call["tenant"], call["data_root"], call["was_empty_dir"]) == (tenant, world.data_root, True)
-    assert "commit" not in call["kw"] or call["kw"]["commit"] is None, "prepare read a pinned commit, not main"
+    assert call["commit"] is None, "prepare read a pinned commit, not main"
+    assert call["line"].startswith("ok "), call
     assert not call["dest"].exists(), "the temporary copy was kept"
     folder = world.data_root / tenant
     assert sorted(p.name for p in folder.iterdir() if p.name != "runs") == [], sorted(p.name for p in folder.iterdir())
@@ -191,37 +187,38 @@ def test_d1_prepare_makes_no_clone_and_activates_once_a_fetch_of_main_validates(
     assert world.publish.calls == [], "the first-publish seam was still called"
 
 
-@pytest.mark.parametrize("line", ["refused transient forgejo unreachable: connection refused", "refused lasting agent/.tenant-id names another tenant",
-                                  "stale 0123abc", "fresh 0123abc", "ok", "refused", "refused operator why", "ok " + "ab" * 20 + " extra", ""])
-def test_d2_prepare_stays_at_prepare_when_the_fetch_does_not_answer_ok_and_a_commit(fetch_world, line):
-    """Anything but `ok <commit>` fails prepare, which records the line and stays at prepare, the tenant `creating` and nothing left in
-    `<T>`; after resume an `ok` completes it (the same channel's control). (D2, F5, K4)"""
-    world = fetch_world
-    world.fetch.answers.append(line)
+@pytest.mark.parametrize(("how", "klass"), [("down", "transient"), ("auth", None)], ids=["forge-unreachable", "listener-rejects"])
+def test_d2_prepare_stays_at_prepare_when_the_fetch_child_refuses(world, how, klass):
+    """A refusal by the real fetch child (Forgejo's git port closed, or its listener rejecting the read) fails prepare, which
+    records the child's line and stays at prepare, the tenant `creating` and nothing left in `<T>`; after resume the
+    next fetch completes it (the same channel's control). (D2, F5, K4)"""
+    world.refuse_next_fetch(how)
     tenant = world.create()
     world.drive()
     item = world.item(tenant)
     assert (item["state"], item["step"], item["step_actor"]) == ("creating", "prepare", "host"), item
+    [call] = world.fetch.calls
+    assert call["line"].startswith("refused "), call["line"]
+    if klass is not None:
+        assert call["line"].split()[1] == klass, call["line"]
     assert item["failure"], item
-    assert line.strip() in item["failure"], f"the failure does not carry the child's line: {item['failure']!r}"
-    assert len(world.fetch.calls) == 1
-    assert not world.fetch.calls[0]["dest"].exists(), "a refused prepare left its temporary copy"
+    assert call["line"].strip() in item["failure"], f"the failure does not carry the child's line: {item['failure']!r}"
+    assert not call["dest"].exists(), "a refused prepare left its temporary copy"
     assert not (world.data_root / tenant / "knowledge").exists()
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
-    assert len(world.fetch.calls) == 2
+    assert len(world.fetch.calls) == 2 and world.fetch.calls[1]["line"].startswith("ok ")
 
 
-def test_d2_a_prepare_refused_by_the_fetch_over_an_old_export_does_not_fall_back_to_it(fetch_world):
+def test_d2_a_prepare_refused_by_the_fetch_over_an_old_export_does_not_fall_back_to_it(world):
     """A tenant folder still holding a pre-upgrade `exports/current` is no reason to activate when the fetch refuses: the tenant stays at
     prepare (no stale fallback, D3). (D2, K4)"""
-    world = fetch_world
     tenant = world.create()
     world.drive(stop=lambda: world.item(tenant)["step"] == "prepare")
     (world.data_root / tenant / "exports").mkdir(parents=True)
     (world.data_root / tenant / "exports" / "current").write_text("0" * 40 + "\n", encoding="utf-8")
-    world.fetch.answers.append("refused transient forgejo unreachable")
+    world.refuse_next_fetch("down")
     world.drive()
     assert (world.item(tenant)["state"], world.item(tenant)["step"]) == ("creating", "prepare")
 
@@ -235,10 +232,9 @@ def _main_reads_after(world, mark) -> list[Any]:
             and world.forge.credential_of(c) == "bearer"]
 
 
-def test_d4_prepare_checks_that_main_is_protected_and_refuses_when_it_is_not(fetch_world):
+def test_d4_prepare_checks_that_main_is_protected_and_refuses_when_it_is_not(world):
     """Prepare reads `branches/main` as the bot: with the rule gone it stays at prepare (failure naming the protection); once the rule is
     back, resume completes and the read is seen again (the control on the same channel). (D4, D9)"""
-    world = fetch_world
     tenant = world.create()
     world.drive(stop=lambda: world.item(tenant)["step"] == "prepare")
     full = f"{ORG}/{tenant}"
