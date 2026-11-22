@@ -430,7 +430,7 @@ def test_scrub_removes_and_rewrites_nothing(tmp_path):
 
 def test_a_clean_run_dir_passes_the_scrub(tmp_path):
     run = _clean_run_dir(tmp_path)
-    assert scrub(run) is None
+    assert scrub(run) == "clean"  # D2: the walk's verdict is returned
     assert (run / "report.md").is_file()
     assert (run / "gather_raw" / "l-001").is_dir()
 
@@ -945,8 +945,8 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     specs = [value for call in docker.calls
              for flag, value in zip(call.argv[:-1], call.argv[1:], strict=True)
              if flag == "--mount"]
-    assert any(spec == f"type=bind,source={run.run_dir},target={MODEL_RUN}" for spec in specs), (
-        f"the create bound no run folder: {specs}")
+    assert any(spec == f"type=bind,source={run.run_dir},target={MODEL_RUN},readonly" for spec in specs), (
+        f"the create bound no read-only run folder: {specs}")
     for spec in specs:
         keys = sorted(field.split("=", 1)[0] for field in spec.split(","))
         assert keys in (["source", "target", "type"], ["readonly", "source", "target", "type"]), (

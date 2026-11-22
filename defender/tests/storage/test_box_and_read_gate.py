@@ -100,26 +100,26 @@ def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):
         "not by shape")
 
 
-def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
-    """The box still runs with `--network none` and the run dir as its one read-write bind."""
+def test_the_box_keeps_network_none_and_binds_the_run_dir_read_only(run_dir):
+    """The box runs with `--network none` and the run dir as a read-only bind, with no host rw bind. (D4)"""
     from defender.box._lifecycle import _create_argv, _run_lane_mounts
     from defender.box._spec import BoxSpec
 
     argv = _create_argv("defender-run-1077", run_dir, DEFENDER, BoxSpec(), (), lane=_run_lane_mounts(run_dir, DEFENDER, None)).argv
-    joined = " ".join(argv)
     assert argv[argv.index("--network") + 1] == "none", (
         "the box's network is not `none`")
     assert "--read-only" in argv
+    joined = " ".join(argv)
 
     mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
     writable = [m for m in mounts if "readonly" not in m]
-    assert len(writable) == 1, f"the box has more than one read-write bind: {writable}"
+    assert writable == [], f"the box has a read-write host bind: {writable}"
     # The TARGETS are the model view (the run folder at `/runs/current`, the checkout at
     # `/defender`); the SOURCES name this host's trees.
-    assert f"source={run_dir}," in writable[0], (
-        f"the box's one rw bind is not the run dir: {writable[0]}")
-    assert "target=/runs/current" in writable[0], (
-        f"the run dir is not bound at /runs/current: {writable[0]}")
+    run_binds = [m for m in mounts if "target=/runs/current," in m + ","]
+    assert len(run_binds) == 1, run_binds
+    assert f"source={run_dir}," in run_binds[0]
+    assert "readonly" in run_binds[0], f"the run dir is not bound read-only at /runs/current: {run_binds}"
     readonly = [m for m in mounts if "readonly" in m]
     assert any(f"source={DEFENDER}," in m and "target=/defender," in m for m in readonly)
     assert any(f"source={run_dir / 'alert_input'}," in m

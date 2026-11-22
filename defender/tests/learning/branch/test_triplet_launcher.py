@@ -355,9 +355,9 @@ def test_947_launcher_verifies_each_siblings_scrub_verdict(tmp_path):
 
 
 def test_947_a_sibling_without_a_ran_true_scrub_marks_the_episode_incomplete(tmp_path):
-    """A sibling whose scrub verdict is absent, or present but not recording a completed walk, is never archived and the reason names it."""
+    """A sibling whose scrub verdict is absent, `not_run` or `tainted` is never archived and the reason names it. (D3, A-O10)"""
     location_path(T.runs_base)(tmp_path)
-    for scrub_ran, world in ((None, "b"), (False, "c")):
+    for scrub_ran, world in ((None, "b"), (False, "c"), ("tainted", "a")):
         ep = T.episode(tmp_path / world)
 
         def dirs(ep, w, world=world, scrub_ran=scrub_ran):
@@ -369,6 +369,36 @@ def test_947_a_sibling_without_a_ran_true_scrub_marks_the_episode_incomplete(tmp
         assert report["comparable"] is True, report
         assert report["not_comparable"] == ""
         assert (ep / "provenance.json").exists()
+
+
+@pytest.mark.parametrize("planted", [[None, None, None], [False, False, False], ["tainted", "tainted", "tainted"],
+                                     ["tainted", False, None]],
+                         ids=["no-verdicts", "all-not-run", "all-tainted", "mixed-non-clean"])
+def test_a_family_with_no_clean_arm_left_is_not_comparable(tmp_path, planted):
+    """Only when no arm remains is the family not comparable, and each non-`clean` arm is left out. (D3)"""
+    location_path(T.runs_base)(tmp_path)
+    ep = T.episode(tmp_path)
+    by_world = dict(zip(T.WORLDS, planted, strict=True))
+    report = _verify_family(ep, lambda ep, w: T.arm_run_dir(ep, w, scrub_ran=by_world[w]), source=T.provenance_record())
+    assert report["scrub_verified"] == []
+    assert report["archived"] == []
+    assert report["comparable"] is False
+    assert report["not_comparable"]
+    assert not (ep / "provenance.json").exists()
+    assert (ep / "not_comparable.yaml").exists()
+
+
+def test_a_tainted_arm_is_left_out_while_the_clean_arms_stay_comparable(tmp_path):
+    """Two clean arms and one `tainted` one: the tainted arm is not verified or archived, the family stays comparable. (D3)"""
+    location_path(T.runs_base)(tmp_path)
+    ep = T.episode(tmp_path)
+    report = _verify_family(ep, lambda ep, w: T.arm_run_dir(ep, w, scrub_ran="tainted" if w == "b" else True),
+                            source=T.provenance_record())
+    assert sorted(report["scrub_verified"]) == sorted(T.world_id(ep, w) for w in ("a", "c"))
+    assert sorted(report["archived"]) == sorted(T.world_id(ep, w) for w in ("a", "c"))
+    assert report["comparable"] is True
+    assert (ep / "provenance.json").exists()
+    assert not (ep / "worlds" / T.world_id(ep, "b")).exists()
 
 
 def test_a_finished_sibling_without_a_scrub_verdict_gets_its_own_not_archived_record(tmp_path):

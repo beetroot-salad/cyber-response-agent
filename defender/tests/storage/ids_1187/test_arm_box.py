@@ -33,13 +33,13 @@ RUNTIME_ABSENT = (
     "no box under it can start")
 
 EXEC_TIMEOUT = 60.0
-CONTROL = b"arm-box-control-1187"
 SIBLING_SECRET = "SIBLING-ARM-SECRET-1187"
 PROBE_NAME = "_probe_arm_box_1187.py"
 
-#: Every attempt the probe makes on a file or folder the box must not change. `control` is the
-#: one that must land.
+#: Every attempt the probe makes on a file or folder the box must not change. `control` (its tmpfs) is the
+#: one that must land; the run folder itself is read-only (#1546 D4).
 ATTEMPTS = (
+    "run_folder_create",
     "roster_open_write", "roster_append", "roster_create_excl", "roster_unlink",
     "roster_replace_from_run_folder", "roster_rename_into_run_folder", "roster_dotdot_write",
     "roster_symlink_from_run_folder", "roster_hardlink_into_run_folder",
@@ -99,8 +99,9 @@ def visible(path):
         return False
 
 
-control = attempt("control", write(os.path.join(run_dir, "control.txt"), b"arm-box-control-1187"))
+control = attempt("control", write("/tmp/control.txt", b"arm-box-control-1187"))
 writes = [
+    attempt("run_folder_create", write(os.path.join(run_dir, "made-in-box"), b"x")),
     attempt("roster_open_write", write(roster, b'{"evil": 1}')),
     attempt("roster_append", write(roster, b"tamper", "ab")),
     attempt("roster_create_excl", excl),
@@ -176,14 +177,14 @@ def _session(root: Path, runtime: str) -> dict[str, Any]:
     finally:
         stop_box(box)
     probe = json.loads(result.out.decode("utf-8")) if result.rc == 0 else None
-    control = arm / "control.txt"
+    created = arm / "made-in-box"
     return {
         "runtime": runtime, "episode": episode, "arm": arm, "arm_id": arm_id,
         "sibling": sibling, "roster": roster, "rc": result.rc,
         "sandboxed": sandboxed, "name": name,
         "err": result.err.decode("utf-8", "replace"), "probe": probe,
         "before": before, "after": after,
-        "control_on_host": control.read_bytes() if control.is_file() else None,
+        "created_on_host": created.exists(),
     }
 
 
@@ -205,7 +206,7 @@ def arm_box_session(request: pytest.FixtureRequest) -> Iterator[dict[str, Any]]:
         assert session["sandboxed"] is True, session["name"]
         assert session["probe"] is not None, (session["rc"], session["err"])
         assert session["probe"]["control"]["ok"] is True, session["probe"]["control"]
-        assert session["control_on_host"] == CONTROL, "control bytes did not reach the host"
+        assert session["created_on_host"] is False, "a file the arm's box created in its run folder reached the host"
         yield session
     finally:
         # The box writes through the rw bind as root; residue is gitignored.
