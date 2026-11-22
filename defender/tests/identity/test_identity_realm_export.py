@@ -218,7 +218,6 @@ def test_keycloaks_own_email_is_sent_through_mailpit():
 # --- #1592 S3-15: Forgejo's client, and the browser flow it is bound to --------------------------------------
 
 FORGEJO_CLIENT = "forgejo"
-FORGEJO_FLOW = "forgejo browser"
 
 
 def _flow_with_id(realm: dict, reference: str) -> dict:
@@ -244,10 +243,11 @@ def check_forgejo_client_always_asks_for_the_password(realm: dict) -> None:
     bound = client["authenticationFlowBindingOverrides"]["browser"]
     flow = _flow_with_id(realm, bound)
     assert flow["alias"] != realm["browserFlow"], "the client is bound to the realm's own browser flow"
-    assert flow["alias"] == FORGEJO_FLOW, flow["alias"]
-    authenticators = [e.get("authenticator") for e in _executions(realm, flow["alias"])]
+    executions = _executions(realm, flow["alias"])
+    authenticators = [e.get("authenticator") for e in executions]
     assert "auth-cookie" not in authenticators, authenticators
-    assert "auth-username-password-form" in authenticators, authenticators
+    [password] = [e for e in executions if e.get("authenticator") == "auth-username-password-form"]
+    assert password.get("requirement") == "REQUIRED", f"the password form is {password.get('requirement')}: an ALTERNATIVE or DISABLED form lets a session skip it"
     own = [e.get("authenticator") for e in _executions(realm, realm["browserFlow"])]
     assert "auth-cookie" in own, "the product's own sign-in lost its Cookie step"
 
@@ -258,7 +258,7 @@ def test_1592_the_forgejo_client_is_bound_to_a_browser_flow_without_the_cookie_s
 
 
 def test_1592_the_forgejo_check_can_fail():
-    """S3-15: a client bound to the realm's own browser flow, with no override, or with no secret, is refused."""
+    """S3-15: a client bound to the realm's own browser flow, with no override, no secret or an optional password step, is refused."""
     realm = _committed_realm()
     check_forgejo_client_always_asks_for_the_password(realm)
     own = copy.deepcopy(realm)
@@ -272,9 +272,17 @@ def test_1592_the_forgejo_check_can_fail():
     with pytest.raises(AssertionError):
         check_forgejo_client_always_asks_for_the_password(own_by_id)
     by_alias = copy.deepcopy(realm)  # Keycloak 26 refuses to start on this ("Unable to resolve auth flow binding override")
-    _clients(by_alias)[FORGEJO_CLIENT]["authenticationFlowBindingOverrides"]["browser"] = FORGEJO_FLOW
+    overrides = _clients(by_alias)[FORGEJO_CLIENT]["authenticationFlowBindingOverrides"]
+    overrides["browser"] = _flow_with_id(by_alias, overrides["browser"])["alias"]
     with pytest.raises(AssertionError):
         check_forgejo_client_always_asks_for_the_password(by_alias)
+    for requirement in ("ALTERNATIVE", "DISABLED"):  # the password step is not mandatory: a session could skip it
+        optional = copy.deepcopy(realm)
+        flow = _flow_with_id(optional, _clients(optional)[FORGEJO_CLIENT]["authenticationFlowBindingOverrides"]["browser"])
+        [password] = [e for e in _executions(optional, flow["alias"]) if e.get("authenticator") == "auth-username-password-form"]
+        password["requirement"] = requirement
+        with pytest.raises(AssertionError):
+            check_forgejo_client_always_asks_for_the_password(optional)
     bare = copy.deepcopy(realm)
     del _clients(bare)[FORGEJO_CLIENT]["authenticationFlowBindingOverrides"]
     with pytest.raises(KeyError):

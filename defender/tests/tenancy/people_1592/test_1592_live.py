@@ -11,6 +11,7 @@ import dataclasses
 import datetime as dt
 import inspect
 import os
+import re
 import threading
 import time
 import urllib.parse
@@ -28,7 +29,7 @@ from defender.tests.support.tenancy._active1214 import offboard_on_database
 from defender.tests.support.shared._postgres1339 import database, execute
 from defender.tests.support.frontend import _allowlist1592 as allowlist
 from defender.tests.tenancy.people_1592 import _gob1592 as oracle
-from defender.tests.tenancy.people_1592._live1592 import CALL_TIMEOUT, Live1592, NOW, new_tenant_id, raw_get, raw_request, require_environment
+from defender.tests.tenancy.people_1592._live1592 import FORM_ACTION, CALL_TIMEOUT, Live1592, NOW, new_tenant_id, raw_get, raw_request, require_environment
 from defender.tests.tenancy.people_1592._spec1592 import Clock, PeopleForge, login_of, people_config
 from defender.tests.tenancy.people_1592._world1592 import People
 
@@ -100,10 +101,11 @@ class Rig:
         self.tenants_made.append(tenant)
         return tenant
 
-    async def person(self, *tenants: str, settle: bool = True) -> Person:
+    async def person(self, *tenants: str, settle: bool = True, display_name: str = "") -> Person:
         sub, username = self.live.keycloak_person()
         self.subs.append(sub)
-        user = await seed_user(self.identity, f"{username}@live.example", created_at=NOW, status="active", signin_account_id=sub)
+        user = await seed_user(self.identity, f"{username}@live.example", created_at=NOW, status="active", signin_account_id=sub,
+                              display_name=display_name)
         for tenant in tenants:
             await seed_membership(self.identity, user.id, tenant, status="active", invited_by=None, created_at=NOW, accepted_at=NOW)
         if settle:
@@ -195,14 +197,16 @@ PUBLIC_ASSETS = ("/assets/", "/avatars/", "/favicon.ico")
 SIGN_IN_PREFIXES = ("/user/oauth2/", "/realms/")
 
 
-def no_session_answer_ok(method: str, path: str, status: int, where: str, hosts: frozenset[str]) -> bool:
+def no_session_answer_ok(method: str, path: str, status: int, where: str | None, hosts: frozenset[str]) -> bool:
     """F10's no-session set for one allowlisted path: a 4xx refusal anywhere; a redirect (to no host, or to `hosts`, the
     edge and Keycloak) only to the sign-in page or start or the realm, from a public asset to a public asset, or from a
-    POST back to the site's landing page; a 200 only for a GET of the landing page, the sign-in page or a public asset;
+    POST back to the site's landing page or with an explicitly empty Location (never a missing one); a 200 only for a GET of the landing page, the sign-in page or a public asset;
     a 500 only for the callback."""
     if 400 <= status < 500:
         return True
     if 300 <= status < 400:
+        if where is None:  # no Location header at all: a redirect that goes nowhere is not one the design names
+            return False
         target = urllib.parse.urlsplit(where)
         if target.netloc and target.netloc not in hosts:
             return False
@@ -226,7 +230,8 @@ def test_s4_15_classifier_accepts_the_ruled_answers_and_rejects_the_others():
           ("GET", "/avatars/ab", 303, "/user/login"),
           ("GET", "/favicon.ico", 301, "/assets/img/favicon.png"), ("GET", "/assets/a", 301, "/assets/b"),
           ("GET", "/assets/a", 301, "http://forge.localhost:3000/assets/b"), ("GET", "/", 200, ""),
-          ("POST", "/user/logout", 303, "/"), ("POST", "/-/fetch-redirect", 303, "")]
+          ("POST", "/user/logout", 303, "/"), ("POST", "/-/fetch-redirect", 303, ""),
+          ("POST", "/user/logout", 303, "http://forge.localhost:3000/")]
     bad = [("GET", "/x", 200, ""), ("GET", "/user/login/x", 200, ""), ("POST", "/user/logout", 200, ""),
            ("GET", "/", 302, "/elsewhere"), ("GET", "/x", 302, ""), ("POST", "/user/logout", 302, "https://evil/other"),
            ("GET", "/x", 500, ""), ("POST", CALLBACK, 200, ""), ("GET", "/x", 502, ""), ("GET", CALLBACK, 302, "/"),
@@ -234,7 +239,9 @@ def test_s4_15_classifier_accepts_the_ruled_answers_and_rejects_the_others():
            ("GET", "/x", 301, "/assets/b"), ("GET", "/", 302, "/user/login_x"), ("GET", "/", 302, "/user/login/x"),
            ("GET", "/", 302, "http://evil/realms/r/auth"), ("GET", "/", 302, "http://evil/user/login"),
            ("POST", "/user/logout", 303, "http://evil/"), ("POST", "/user/logout", 303, "/repo/x"),
-           ("GET", "/x", 303, "/"), ("POST", "/", 200, "")]
+           ("GET", "/x", 303, "/"), ("POST", "/", 200, ""),
+           ("POST", "/-/fetch-redirect", 303, None), ("POST", "/user/logout", 302, None), ("GET", "/", 303, None),
+           ("GET", "/x", 307, None), ("GET", "/assets/a", 301, None)]
     assert [c for c in ok if not no_session_answer_ok(*c, hosts)] == []
     assert [c for c in bad if no_session_answer_ok(*c, hosts)] == []
 
@@ -242,7 +249,8 @@ def test_s4_15_classifier_accepts_the_ruled_answers_and_rejects_the_others():
 async def test_s4_15_every_allowlisted_path_asked_with_no_session_never_shows_tenant_content(rig: Rig, live: Live1592):
     """S4-15 / OD-1a, F10: each allowlist entry, anonymously, answers only what the design names, with no tenant content."""
     tenant = await rig.tenant()
-    person = await rig.person(tenant)
+    name = f"Member {uuid.uuid4().hex[:10]}"
+    person = await rig.person(tenant, display_name=name)
     marker = f"TENANT-CONTENT-{uuid.uuid4().hex}"
     _seed_content(live, tenant, marker)
     member = httpx.Client(base_url=live.edge, follow_redirects=False, timeout=30, headers={"Cookie": live.sign_in(person.username).cookie_header()})
@@ -253,8 +261,12 @@ async def test_s4_15_every_allowlisted_path_asked_with_no_session_never_shows_te
     hosts = frozenset({urllib.parse.urlsplit(live.edge).netloc, urllib.parse.urlsplit(live.keycloak.base).netloc})
     for method, path in allowlist.allowed(repo(tenant)):
         response = anonymous.request(method, path)
-        status, where = response.status_code, response.headers.get("location", "")
+        status, where = response.status_code, response.headers.get("location")  # None: no Location header at all
         assert marker not in response.text, (method, path)
+        if status == 200:  # a 3xx's redirect_to echoes the path asked for, so only a 200 body must be free of the tenant's names
+            leaked = [what for what in (f"t-{tenant}", name) if what in response.text]
+            leaked += [m.group(0) for m in re.finditer(rf"(?<![\w-]){re.escape(person.login)}(?![\w-])", response.text)]
+            assert leaked == [], (method, path, leaked)
         ok = no_session_answer_ok(method, path, status, where, hosts)
         if not ok:
             wrong.append((method, path, status, where))
@@ -301,7 +313,7 @@ async def test_s4_2_the_cookie_drop_defeats_the_signed_in_link(rig: Rig, live: L
     assert alice_keys <= set(rows)
     assert live.account(alice.login)["login_name"] == login_before and live.accounts() == accounts_before
     edge_netloc = urllib.parse.urlsplit(live.edge).netloc
-    if all(urllib.parse.urlsplit(u).netloc == edge_netloc and s >= 400 for _m, u, s in attack.trail):
+    if all(urllib.parse.urlsplit(u).netloc == edge_netloc and 400 <= s < 500 for _m, u, s in attack.trail):
         # the trail never left the start (the edge or Forgejo refused the variant with some 4xx, not only 404): no new session
         assert not session_keys(rig, attack) - alice_keys, attack.trail
     elif mallory_uid is not None:  # forwarded: the attack's session is Mallory's, never Alice's
@@ -312,6 +324,19 @@ async def test_s4_2_the_cookie_drop_defeats_the_signed_in_link(rig: Rig, live: L
     fresh = live.browse("/user/oauth2/product", username=mallory_name)  # Mallory alone, later: she is not Alice
     assert not {k for k in session_keys(rig, fresh) if holds(rig.session_rows()[k][0], alice_uid)}, fresh.trail
     assert raw_get(live.edge, "/user/link_account").status == 404
+
+
+async def test_s4_2_keycloak_asks_for_the_password_again_though_it_holds_the_session(rig: Rig, live: Live1592):
+    """S4-2 / OD-4: a person signed in at Forgejo and holding a Keycloak session, starting again in the same browser, is served Keycloak's login form."""
+    tenant = await rig.tenant()
+    person = await rig.person(tenant)
+    visit = live.sign_in(person.username)
+    assert any("/realms/" in u and "/auth" in u for _m, u, _s in visit.trail), f"control: the sign-in went through Keycloak: {visit.trail}"
+    again = live.browse("/user/oauth2/product", client=visit.client)  # no username: stops wherever Keycloak stops
+    assert any("/realms/" in u for _m, u, _s in again.trail), f"the start did not reach Keycloak: {again.trail}"
+    assert again.final is not None and again.final.status_code == 200, again.trail
+    action = FORM_ACTION.search(again.final.text)
+    assert action and "login-actions" in action.group(1), f"Keycloak did not serve its login form again (the session was reused): {again.trail}"
 
 
 async def test_s4_3_an_unknown_sub_gets_no_account(rig: Rig, live: Live1592):

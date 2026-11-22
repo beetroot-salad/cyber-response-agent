@@ -105,7 +105,7 @@ def _as_a_browser_on_loopback(client: httpx.Client) -> None:
             cookie.secure = False
 
 
-_FORM_ACTION = re.compile(r'<form[^>]*id="kc-form-login"[^>]*action="([^"]+)"')
+FORM_ACTION = re.compile(r'<form[^>]*id="kc-form-login"[^>]*action="([^"]+)"')
 
 
 class Live1592:
@@ -189,7 +189,7 @@ class Live1592:
             if response.is_redirect:
                 response = client.get(urllib.parse.urljoin(str(response.url), response.headers["location"]))
                 continue
-            form = _FORM_ACTION.search(response.text) if response.status_code == 200 else None
+            form = FORM_ACTION.search(response.text) if response.status_code == 200 else None
             if form and username:
                 data = {"username": username, "password": PASSWORD}
                 response = client.post(html.unescape(form.group(1)), data=data)
