@@ -11,6 +11,8 @@ Writers (P2, DC-4):
   the tenant's jobs, in one transaction (`JobStore.offboard_tenant`), its one path.
 - Host processes: `record_publish_status(T, line, by=)`, a launch-time publish report line.
 - The worker holding a tenant's lock (management service or host actor), through `HeldTenant`.
+- The people requests (#1592) are written by the database's triggers on the columns that decide access (the memory
+  twin mirrors them); the request worker alone edits them (`edit_people_requests`), under `people_lock()`.
 
 A worker's step, the only way it writes:
 
@@ -52,11 +54,13 @@ from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
-    from defender.records.formats import AlertMapping, TenantId
-    from defender.tenancy.models import ForgeWiring, Generation, MergeEligibility, TenantRecord, TenantRecords
+    from defender.records.formats import AlertMapping, PeopleRequestId, TenantId, UserId
+    from defender.tenancy.models import ForgeWiring, Generation, PeopleRequest, TenantRecord, TenantRecords
 
 #: The first key of every tenant lock: a fixed int4 naming tenancy's advisory locks.
 LOCK_NAMESPACE = 1214
+#: The first key of the request worker's one lock (#1592 OD-12), `(PEOPLE_LOCK_NAMESPACE, 0)`.
+PEOPLE_LOCK_NAMESPACE = 1592
 SERVICE = "service"
 HOST = "host"
 
@@ -141,10 +145,6 @@ class TenantRepository(Protocol):
         """The tenant's alert mapping (#1345), None until one is saved. Read here, written only by the jobs
         store's replace."""
         ...
-    async def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
-        """Who may merge into the tenant's `main`, as the management service last read it (#1414 D13); None when no read
-        has succeeded yet (never an empty record standing for it)."""
-        ...
 
     async def current_records(self, tenant_id: TenantId) -> TenantRecords:
         """The tenant's system and case records as they stand (#1366 R10): its current non-deleted systems and its
@@ -164,9 +164,6 @@ class TenantRepository(Protocol):
         """Only `active` with nothing pending: `rotate` pending at step `names` (service)."""
         ...
     # --- host processes
-    async def record_merge_eligibility(self, tenant_id: TenantId, *, logins: frozenset[str], read_at: _dt.datetime) -> None:
-        """Replace the tenant's merge-eligibility record whole (#1414 D13); `ValueError` for an unknown tenant."""
-        ...
     async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
         """Replace the tenant's publish outcome with what the report `line` states (`fresh <commit>`,
         `stale:transient <why>`, `stale:operator <why>`, `misconfigured <why>`)."""
@@ -175,6 +172,28 @@ class TenantRepository(Protocol):
     # --- workers
     async def claimable(self, actor: str, *, now: _dt.datetime) -> list[TenantId]: ...
     def lock(self, tenant_id: TenantId) -> AbstractAsyncContextManager[HeldTenant | None]: ...
+
+    # --- people requests (#1592): recorded by the database's triggers, carried out by the request worker
+    async def open_people_requests(self) -> list[PeopleRequest]:
+        """Every recorded people request (detached copies), oldest `requested_at` first; ties, from one transaction,
+        in no stated order."""
+        ...
+    async def edit_people_requests(
+        self, *, delete: Collection[PeopleRequestId] = (),
+        add: Collection[tuple[UserId | None, TenantId | None]] = (), requested_at: _dt.datetime | None = None,
+    ) -> None:
+        """In one transaction: delete the requests `delete` names (an id no longer there is no error), and record one
+        request per `(user, tenant)` of `add`, each at `requested_at` or, when None, at the transaction's `now()` (the
+        twin's process clock). A pair naming neither is `ValueError`. The request worker's write: carried-out ids
+        deleted, a (none, T) request expanded into its people at its own time, `resync-people`'s requests."""
+        ...
+    async def people_lock(self) -> bool:
+        """Take, or confirm, the request worker's one lock (OD-12): True while this repository holds it. On PostgreSQL
+        `pg_try_advisory_lock(PEOPLE_LOCK_NAMESPACE, 0)` on a connection of its own, kept until `close()` (nothing
+        unlocks it: the hold ends with its connection). A held connection found dropped answers False at once, and the
+        next call takes a new one; a new connection the database refuses raises the driver's error. The memory twin
+        always holds it (one store is one process)."""
+        ...
 
 
 def publish_outcome(line: str) -> tuple[str | None, str | None, str | None]:

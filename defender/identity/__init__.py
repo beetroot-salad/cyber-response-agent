@@ -7,6 +7,7 @@ loads neither a web client nor a database driver."""
 
 from __future__ import annotations
 
+from ._directory import PeopleDirectory
 from .bootstrap import Bootstrap
 from .errors import (
     BootstrapRefused,
@@ -45,7 +46,7 @@ __all__ = [
     "Authenticated", "Bootstrap", "BootstrapRefused", "Conflict",
     "DataRuleViolation", "ExpiryWarning", "Forbidden", "IdentityError", "IdentityRepository", "IdentityService",
     "InMemoryIdentityRepository", "Invalid", "InvitationView", "LoginStart", "MailPort", "MemberView",
-    "Membership", "MeView", "NotAuthenticated", "NotFound", "OpenInvitation", "PersonCaller", "Program",
+    "Membership", "MeView", "NotAuthenticated", "NotFound", "OpenInvitation", "PeopleDirectory", "PersonCaller", "Program",
     "ProgramCaller", "ProgramCredential", "ProgramsPort", "Session", "TenantNotActive",
     "Refused", "SignedIn", "attempt_cookie", "SignInPort", "SignInRefused", "SignInUnavailable", "User", "VerifiedProgramToken", "VerifiedSignIn",
 ]

@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from defender.records.formats import AlertMapping, TenantId, TenantRefused
 
 if TYPE_CHECKING:
-    from defender.tenancy.models import ForgeWiring, Generation, MergeEligibility, TenantRecords
+    from defender.tenancy.models import ForgeWiring, Generation, TenantRecords
 
 _R = TypeVar("_R")
 
@@ -31,7 +31,7 @@ class RecordsUnreachable(TenantRefused):
     """The tenant records' database could not be reached: the next attempt may find it up."""
 
 
-def _connection_lost(error: BaseException) -> bool:
+def connection_lost(error: BaseException) -> bool:
     """Is `error` the driver's connection-class error (SQLAlchemy's `OperationalError` or
     `InterfaceError`)? Read off the loaded module, never imported: a process that raised one has it
     loaded, and one that has not loaded it raised none."""
@@ -39,8 +39,9 @@ def _connection_lost(error: BaseException) -> bool:
     return exc is not None and isinstance(error, (exc.OperationalError, exc.InterfaceError))
 
 
-def _why(error: BaseException) -> str:
-    """The driver's first line (it names the host and port, never the password)."""
+def why_unreachable(error: BaseException) -> str:
+    """The driver's first line (it names the host and port, never the password). With `connection_lost`, served by the
+    tenancy door for the other synchronous record readers (identity's `PeopleDirectory`)."""
     cause = getattr(error, "orig", None)
     lines = str(cause if cause is not None else error).splitlines()
     return lines[0] if lines else type(error).__name__
@@ -89,13 +90,6 @@ class TenantDirectory:
             return await repository.current_records(tenant_id)
         return self._call(read)
 
-    def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
-        """Who may merge into the tenant's `main` as of the management service's latest read (#1414 D13), None until
-        one has succeeded: what the feedback tick reads to decide whose comments count."""
-        async def read(repository: Any) -> MergeEligibility | None:
-            return await repository.merge_eligibility(tenant_id)
-        return self._call(read)
-
     def _call(self, read: Callable[[Any], Awaitable[_R]]) -> _R:
         try:
             asyncio.get_running_loop()
@@ -113,6 +107,6 @@ class TenantDirectory:
         try:
             return asyncio.run(once())
         except Exception as error:
-            if not _connection_lost(error):
+            if not connection_lost(error):
                 raise
-            raise RecordsUnreachable(f"the database could not be reached: {_why(error)}") from error
+            raise RecordsUnreachable(f"the database could not be reached: {why_unreachable(error)}") from error
