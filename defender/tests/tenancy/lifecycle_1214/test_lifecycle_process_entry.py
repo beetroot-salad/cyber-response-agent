@@ -246,6 +246,10 @@ READERS: dict[str, Callable[[dict[str, Any], str, Any], list[str]]] = {
                                        == {v.rstrip("/")}, "the OpenBao clients' base URL")),
     "openbao_login": _that(lambda s, v: s["service"]["openbao"].headers["x-vault-token"] == v,
                            "the management OpenBao client's token"),
+    # main's public forge address: the create step records `repo_url` as `<forge_page_base>/<repo>` (test_create's
+    # `test_create_records_the_repository_page_on_the_forge_address_unless_a_public_one_is_set`), a trailing slash dropped
+    "forge_public_url": _all(_in_config("service"), _that(lambda s, v: s["service"]["config"].forge_page_base
+                                                          == v.rstrip("/"), "the repository page's base address")),
     "integration_command": _in_config("service"),
     "template_dir": _ACTORS,
     "secrets_dir": _ACTORS,
@@ -294,7 +298,8 @@ def test_every_lifecycle_setting_reaches_each_of_its_readers(  # noqa: F811, C90
     base = lifecycle_config(tmp_path, data_root)
     expected = {f.name: getattr(base, f.name) for f in dataclasses.fields(LifecycleConfig)}
     expected |= {**INJECTED, "poll_interval": POLL_INTERVAL, "forge_sessions_dsn": sessions_dsn, "keycloak_source_id": 59,
-                 "forge_url": "http://forge-census.test:3999", "forge_admin_token": "census-forge-token",
+                 "forge_url": "http://forge-census.test:3999", "forge_public_url": "https://forge-public-census.test/",
+                 "forge_admin_token": "census-forge-token",
                  "openbao_login": "census-bao-login", "integration_command": "census-integration",
                  "secrets_dir": tmp_path / "census-secrets"}
     defaults = {f.name: f.default for f in dataclasses.fields(LifecycleConfig) if f.default is not dataclasses.MISSING}
@@ -306,6 +311,7 @@ def test_every_lifecycle_setting_reaches_each_of_its_readers(  # noqa: F811, C90
     for name in [k for k in os.environ if k.startswith(("DEFENDER_LIFECYCLE_", "LIFECYCLE_"))]:
         monkeypatch.delenv(name)
     for name, value in ((DSN_ENV, empty_database), (settings.FORGE_URL_ENV, expected["forge_url"]),
+                        (settings.FORGE_PUBLIC_URL_ENV, expected["forge_public_url"]),
                         (settings.FORGE_TOKEN_FILE_ENV, str(tmp_path / "forge-token")),
                         (settings.OPENBAO_LOGIN_FILE_ENV, str(tmp_path / "bao-login")),
                         (settings.INTEGRATION_ENV, expected["integration_command"]),

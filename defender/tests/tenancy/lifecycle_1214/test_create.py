@@ -19,7 +19,7 @@ pytest.importorskip('httpx')
 
 from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.api._identity1306 import NEW, AuditLog, user_id  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._fakes import FakeForge, org_of, repo_of  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, FakeForge, org_of, repo_of  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import (  # noqa: E402
     REPOS,
     as_bot,
