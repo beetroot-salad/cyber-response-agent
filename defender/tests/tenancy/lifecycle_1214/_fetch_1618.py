@@ -75,7 +75,13 @@ class FetchWorld(LifecycleWorld):
         self.fetch.origin_of = origin_of
 
     def _origin(self, tenant_id: str) -> str:
-        return f"{self._listener().url}/tenants/{tenant_id}.git"
+        """The tenant's recorded repository (its forge wiring's `repo`, as prepare reads it), served by the git listener over
+        the forge fake's bare repositories; `tenants/<id>` before any wiring is recorded."""
+        from defender.tests.support.shared._postgres1339 import execute
+
+        rows = execute(self.dsn, "SELECT repo FROM tenancy.forge_wiring WHERE tenant_id = %s", (tenant_id,))
+        repo = rows[0][0] if rows else f"tenants/{tenant_id}"
+        return f"{self._listener().url}/{repo}.git"
 
     def new_host(self, tenants: Any, **overrides: Any) -> Any:
         if not hasattr(self, "fetch"):

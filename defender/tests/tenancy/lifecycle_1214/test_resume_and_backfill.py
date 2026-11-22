@@ -445,15 +445,17 @@ def lab(world) -> Lab:
     return Lab(world)
 
 
-def test_a_working_copy_at_the_tenant_folder_itself_is_not_its_clone(world):
-    """The tenant's clone is `<T>/knowledge`, where every entry point accepts it; a working copy at `<T>` itself is
-    not kept as the clone: prepare clones the recorded origin into `knowledge` (Flow 1.9)."""
+def test_a_working_copy_at_the_tenant_folder_itself_is_never_read_and_no_clone_is_made(world):
+    """#1618 (D1, K8; was "prepare clones the recorded origin into `knowledge`", Flow 1.9): a working copy at `<T>` itself is
+    no source of knowledge; prepare fetches the recorded repository's `main` through the fetch seam, makes no clone and no
+    `knowledge/`, and the tenant goes active."""
     lab = Lab(world, clone_in=".")
     lab.resume()
     world.drive()
-    assert world.item(LAB)["state"] == "active"
-    assert [1 for args, _e in world.git.calls[lab.git_calls:] if "clone" in args], "the working copy at <T> was kept"
-    assert (lab.folder / "knowledge" / ".git").exists()
+    assert world.item(LAB)["state"] == "active", world.item(LAB)
+    assert not [1 for args, _e in world.git.calls[lab.git_calls:] if "clone" in args], "prepare cloned"
+    assert not (lab.folder / "knowledge").exists(), "prepare made a clone folder"
+    assert [(c["tenant"], c["line"].split()[0]) for c in world.fetch.calls] == [(LAB, "ok")], world.fetch.calls
 
 
 def test_a_backfilled_row_does_nothing_until_resumed(world, lab):
@@ -466,7 +468,8 @@ def test_a_backfilled_row_does_nothing_until_resumed(world, lab):
 
 def test_the_job_keeps_the_recorded_wiring_skips_repo_and_template_and_keeps_the_clone(world, lab):
     """Resumed, the actors finish the job on the existing repo `tenants/playground`: wiring kept, no repo created, no
-    template push, the clone kept and not re-cloned, no `learning/` made (RC-9, Flow 1.9, O10)."""
+    template push, an old clone left as it was and nothing cloned, no `learning/` made (RC-9, Flow 1.9, O10); prepare
+    reads the recorded repository through the fetch seam (#1618 D1)."""
     lab.resume()
     world.drive()
     assert world.item(LAB)["state"] == "active"
@@ -482,7 +485,8 @@ def test_the_job_keeps_the_recorded_wiring_skips_repo_and_template_and_keeps_the
     assert "main" in world.forge.repos[LAB_REPO]["protections"]
     [made] = [c for c in world.integration.created if c["user"] == world.live(LAB).bot_login]
     assert made["repos"] == [LAB_REPO], "the integration names the recorded repo, not one derived from the id (FR-2)"
-    assert world.publish.calls == [(LAB, world.data_root)]
+    assert [(c["tenant"], c["data_root"], c["line"].split()[0]) for c in world.fetch.calls] == [
+        (LAB, world.data_root, "ok")], world.fetch.calls
 
 
 def test_the_job_leaves_one_fresh_generation_and_only_its_bot_on_the_repo(world, lab):
