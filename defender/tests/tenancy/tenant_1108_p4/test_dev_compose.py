@@ -538,6 +538,7 @@ _SETTINGS = {
     "FORGEJO__service__ENABLE_BASIC_AUTHENTICATION": "false",
     "FORGEJO__service__DEFAULT_ALLOW_CREATE_ORGANIZATION": "false",
     "FORGEJO__service__REQUIRE_SIGNIN_VIEW": "true",
+    "FORGEJO__server__LANDING_PAGE": "login",
     "FORGEJO__service__ENABLE_NOTIFY_MAIL": "false",
     "FORGEJO__admin__EXTERNAL_USER_DISABLE_FEATURES": "manage_password",
     "FORGEJO__security__LOGIN_REMEMBER_DAYS": "0",

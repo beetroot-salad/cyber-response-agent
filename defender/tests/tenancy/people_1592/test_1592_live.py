@@ -200,8 +200,8 @@ SIGN_IN_PREFIXES = ("/user/oauth2/", "/realms/")
 def no_session_answer_ok(method: str, path: str, status: int, where: str | None, hosts: frozenset[str]) -> bool:
     """F10's no-session set for one allowlisted path: a 4xx refusal anywhere; a redirect (to no host, or to `hosts`, the
     edge and Keycloak) only to the sign-in page or start or the realm, from a public asset to a public asset, or from a
-    POST back to the site's landing page or with an explicitly empty Location (never a missing one); a 200 only for a GET of the landing page, the sign-in page or a public asset;
-    a 500 only for the callback."""
+    POST back to `/` or with an explicitly empty Location (never a missing one); a 200 only for a GET of the sign-in
+    page or a public asset (`/` itself redirects to sign-in, `LANDING_PAGE=login`); a 500 only for the callback."""
     if 400 <= status < 500:
         return True
     if 300 <= status < 400:
@@ -216,7 +216,7 @@ def no_session_answer_ok(method: str, path: str, status: int, where: str | None,
             return True
         return path.startswith(PUBLIC_ASSETS) and target.path.startswith(PUBLIC_ASSETS)
     if status == 200:
-        return method == "GET" and (path in ("/", "/user/login") or path.startswith(PUBLIC_ASSETS))
+        return method == "GET" and (path == "/user/login" or path.startswith(PUBLIC_ASSETS))
     return status == 500 and path == CALLBACK
 
 
@@ -229,7 +229,7 @@ def test_s4_15_classifier_accepts_the_ruled_answers_and_rejects_the_others():
           ("GET", "/user/login", 200, ""), ("GET", "/assets/js/index.js", 200, ""), ("GET", CALLBACK, 500, ""),
           ("GET", "/avatars/ab", 303, "/user/login"),
           ("GET", "/favicon.ico", 301, "/assets/img/favicon.png"), ("GET", "/assets/a", 301, "/assets/b"),
-          ("GET", "/assets/a", 301, "http://forge.localhost:3000/assets/b"), ("GET", "/", 200, ""),
+          ("GET", "/assets/a", 301, "http://forge.localhost:3000/assets/b"),
           ("POST", "/user/logout", 303, "/"), ("POST", "/-/fetch-redirect", 303, ""),
           ("POST", "/user/logout", 303, "http://forge.localhost:3000/")]
     bad = [("GET", "/x", 200, ""), ("GET", "/user/login/x", 200, ""), ("POST", "/user/logout", 200, ""),
@@ -239,7 +239,7 @@ def test_s4_15_classifier_accepts_the_ruled_answers_and_rejects_the_others():
            ("GET", "/x", 301, "/assets/b"), ("GET", "/", 302, "/user/login_x"), ("GET", "/", 302, "/user/login/x"),
            ("GET", "/", 302, "http://evil/realms/r/auth"), ("GET", "/", 302, "http://evil/user/login"),
            ("POST", "/user/logout", 303, "http://evil/"), ("POST", "/user/logout", 303, "/repo/x"),
-           ("GET", "/x", 303, "/"), ("POST", "/", 200, ""),
+           ("GET", "/x", 303, "/"), ("POST", "/", 200, ""), ("GET", "/", 200, ""),
            ("POST", "/-/fetch-redirect", 303, None), ("POST", "/user/logout", 302, None), ("GET", "/", 303, None),
            ("GET", "/x", 307, None), ("GET", "/assets/a", 301, None)]
     assert [c for c in ok if not no_session_answer_ok(*c, hosts)] == []
