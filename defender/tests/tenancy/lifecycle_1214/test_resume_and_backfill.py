@@ -206,7 +206,10 @@ def test_d2_prepare_stays_at_prepare_when_the_fetch_child_refuses(world, how, kl
     if klass is not None:
         assert call["line"].split()[1] == klass, call["line"]
     assert item["failure"], item
-    assert call["line"].strip() in item["failure"], f"the failure does not carry the child's line: {item['failure']!r}"
+    # the child's line as the failure carries it: a failure text is bounded (#1214 `_job._FAILURE_LIMIT`, 600 characters,
+    # cut with `...`), and a real git refusal's line is longer, so the line's head (its class and cause) is what must be there
+    carried = call["line"].strip()[:300]
+    assert carried in item["failure"], f"the failure does not carry the child's line: {item['failure']!r}"
     assert not call["dest"].exists(), "a refused prepare left its temporary copy"
     assert not (world.data_root / tenant / "knowledge").exists()
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202

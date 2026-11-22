@@ -7,7 +7,7 @@ ImportError (the expected red before implementation). Pinned shapes (amendment r
   `generations(T)`, `forge_wiring(T)`; `defender.tenancy.TenantDirectory(open_repository)`.
 - `InMemoryIdentityRepository(tenants=<twin>)`, `Bootstrap(administrators=...)`, `ApiDeps(..., tenants=)`.
 - `defender.lifecycle.ManagementService(tenants, *, identity, forge, openbao, integration, git, config, clock)`
-  and `HostActor(tenants, *, forge, openbao_login, git, publish, config, clock)`; `forge` has no credential (F-1); the host has NO management client
+  and `HostActor(tenants, *, forge, openbao_login, git, fetch, config, clock)` (#1618: `fetch=` replaced `publish=`); `forge` has no credential (F-1); the host has NO management client
   (DC-12): `openbao_login` is `openbao.client(None)` (no management token), and it gets the AppRole `role_id`
   from the generation. Each `await work() -> int` is one pass (DC-14).
 - `LifecycleConfig(...)`: NOT pinned field by field (GAP-0-2). Built in ONE place, `lifecycle_config`, with the
@@ -96,10 +96,21 @@ class LifecycleWorld(World):
     def new_host(self, tenants: Any, **overrides: Any) -> Any:
         """A host actor over `tenants`: NO management client, only the login client (DC-12), and a forge client
         with NO credential (F-1: install presents the bot's own Bearer per request)."""
+        from defender.tests.tenancy.lifecycle_1214._fetch_1618 import fetch_seam_of
+
+        # #1618 (flow 5, FORCED `HostActor(..., fetch=)` in place of `publish=`): prepare reads through the REAL fetch child
+        # over the forge fake's bare repositories (`_fetch_1618`), for every lifecycle world.
         parts: dict[str, Any] = {
-            "forge": self.forge.client(None), "openbao_login": self.openbao.client(None), "git": self.git, "publish": self.publish,
-            "config": self.config, "clock": self.clock, **overrides}
+            "forge": self.forge.client(None), "openbao_login": self.openbao.client(None), "git": self.git,
+            "fetch": fetch_seam_of(self), "config": self.config, "clock": self.clock, **overrides}
         return HostActor(tenants, **parts)
+
+    def close(self) -> None:
+        listener = getattr(self, "git_listener", None)
+        if listener is not None:
+            listener.close()
+            self.git_listener = None
+        super().close()
 
     # --- the job --------------------------------------------------------------------------
 
