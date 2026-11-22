@@ -36,6 +36,14 @@ from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING, r
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres, pytest.mark.e2e]
 
+# CENSUS(#1546), for the code stage: this file's storeless lane predates r8 and reads the run from the HOST tenant folder, which a
+# 1546 job never writes (the run lives in `.job-roots/<claim>/<T>/`, gone after the job, A-O1). Under r8 the lane is refused at
+# helper setup (no evidence store or login), so `completed` is unreachable here without Garage and OpenBao. The host-folder
+# assertions to port onto `e2e/test_1546_evidence_replay.py`'s fixtures plus a bundle reader: the session pointer
+# (`runs/<inv>.session-pointer.json`), `committed_record(runs/<inv>)`, `RunPaths(...).alert` (the held alert bytes) and the
+# storeless lane itself. The 1546 e2e does NOT cover, so the port must: the exact ledger cost (a number, not a lower limit),
+# the box token handed to `start`, and the served knowledge record.
+
 
 def _staged(dsn: str, investigation: str) -> dict:
     """The facts the helper staged under the investigation's claim (#1546: the end is read from rows, never job-end or launch
@@ -125,8 +133,6 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         closed = committed_record(runs / inv.investigation_id)
         assert closed is not None, "the replay's close left no closing record in the run's session database"
         assert closed.disposition == disposition, closed
-        for leftover in (".job-end.json", ".launch.json"):
-            assert not (runs / f"{inv.investigation_id}{leftover}").exists(), f"the retired {leftover} file was written"
         outcome = _staged(migrated_database, inv.investigation_id)["outcome"]
         assert {k: outcome[k] for k in ("setup", "box", "report_committed", "scrub", "cut_short")} == {
             "setup": "done", "box": "started", "report_committed": True, "scrub": "clean", "cut_short": None}

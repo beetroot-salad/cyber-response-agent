@@ -30,7 +30,7 @@ from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 —
 evidence_store = H.evidence_store
 checkout = ADOPT.checkout
 process_state = J.process_state
-scene = J.scene
+scene = H.fresh_scene
 
 pytestmark = [pytest.mark.postgres, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
 

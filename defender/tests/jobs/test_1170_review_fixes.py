@@ -25,7 +25,7 @@ from defender.kit.faults import AdapterFault
 
 evidence_store = H.evidence_store
 process_state = J.process_state
-scene = J.scene
+scene = H.fresh_scene
 
 RUN = "af3ba774-355d-4dbc-b8b6-3becc9d3e7a1"
 

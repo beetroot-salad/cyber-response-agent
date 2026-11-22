@@ -1,5 +1,5 @@
 """#1546 (design r8, D7) the drain tick over its input set, three items in ONE tick: the run in the set (pulled by the helper
-into the drain root's `<T>/runs/<run id>`) is served; a run that is expired or not `clean` ends `dead("artifact-missing")`; a
+into the drain root's `<T>/runs/<run id>`, seen through the `runs=` seam) is served; a run that is expired or not `clean` ends `dead("artifact-missing")`; a
 `clean` run outside the set (its request filed after the claim fixed the set) WAITS though it is absent from the root, as the
 dead ones are. Today every absent run is dead, so only the third separates design from today. Nothing is written into a
 source run. Obligations: D7, PR6, A-O6."""
@@ -55,8 +55,7 @@ def test_a_drain_tick_serves_the_run_in_its_set_kills_the_expired_and_tainted_an
     """In one tick: the in-set run (resolved from the drain root, absent from the host folder) is served (handed to the lead step); an expired and a
     tainted run are dead `artifact-missing`; a clean run outside the set waits; the tick's status is the drain's result and
     no marker file is written into the source run. (D7, PR6, A-O6)"""
-    from defender.learning.core.config import LoopPaths
-    from defender.tenancy import JobTenant  # PINNED (jobs design "JobTenant"): the drain's tenant over its root
+    from defender.tenancy import JobTenant  # PINNED (jobs design "JobTenant", `inputs` a Path): the run source over the drain root
 
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
@@ -89,14 +88,18 @@ def test_a_drain_tick_serves_the_run_in_its_set_kills_the_expired_and_tainted_an
     root = world.scratch / "drain-root"
     pulled = make_run_dir(root / tenant / "runs", name=in_set, disposition="benign")  # as the helper unpacks the pulled bundle
     assert not (host_runs / in_set).exists(), "premise: the host tenant folder does not hold the run; only the drain root does"
-    paths = JobTenant(id=tenant, data_root=root, inputs=[(in_set, BUNDLE)]).learning_paths(LoopPaths, repo_root=world.paths.repo_root)
+    inputs_dir = world.scratch / "drain-inputs"  # the claim's inputs folder (not the set); the set is what the root holds
+    inputs_dir.mkdir()
+    runs = JobTenant(id=tenant, data_root=root, inputs=inputs_dir).runs_repository()
     seen: list[str] = []
 
     def lead(_paths, _state, run, *, on_done, **_kw):
         seen.append(Path(run.run_dir).name)
         on_done(None)
 
-    rc = lead_author_drain(world.t, paths, box=BoxSpy(), run_lead_author=lead, run_pitfalls=lambda *_a, **_k: 0)
+    # SEAM (missing): `lead_author_drain(runs=)`, the only place `_run_of` resolves a run from; the host `world.paths` serves the rest.
+    # A run absent from `runs` is dead when its owner is expired or not clean, else it waits (owner state through the #1487 port).
+    rc = lead_author_drain(world.t, world.paths, runs=runs, box=BoxSpy(), run_lead_author=lead, run_pitfalls=lambda *_a, **_k: 0)
 
     assert rc == DRAIN_EXIT_STATUS
     assert seen == [in_set], "only the run in the set is served"

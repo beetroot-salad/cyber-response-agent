@@ -51,7 +51,7 @@ BOX_RUNTIMES = _BoxSpec.RUNTIMES
 
 # The shared fixtures (`_job_helper`'s docs): `process_state` is autouse, `scene` the default helper scene.
 process_state = J.process_state
-scene = J.scene
+scene = _h1546.fresh_scene
 evidence_store = _h1546.evidence_store  # #1546: the real store the investigation helper now needs
 
 pytestmark = [pytest.mark.postgres, pytest.mark.skipif(

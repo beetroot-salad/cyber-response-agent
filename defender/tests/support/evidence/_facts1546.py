@@ -14,7 +14,8 @@ PICKS (r8 wins where it speaks; otherwise the spelling most slices already used)
 - a drain's staged `result` is its tick's exit status, an int (`DRAIN_EXIT_STATUS`); a readiness job's knowledge record travels on
   the verb `knowledge` (`VERB_KNOWLEDGE`) and is staged mapped to the served shape.
 - pull refusals `out_of_claim | unavailable | store_fault`; the verdict reader is `defender.box._scrub.verdict_state(tree)`.
-- the helper's store env is `DEFENDER_EVIDENCE_{ENDPOINT,BUCKET,ACCESS_KEY,SECRET_KEY,REGION}`.
+- the helper's store env is `DEFENDER_EVIDENCE_{ENDPOINT,BUCKET,ACCESS_KEY,SECRET_KEY,REGION}`; `REGION` is optional (the
+  lifecycle requires the other four names).
 - owner rows never carry a claim column: the claim names its owner (`jobs.claims.<reference column>`).
 """
 from __future__ import annotations

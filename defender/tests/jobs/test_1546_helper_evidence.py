@@ -47,7 +47,7 @@ from defender.tests.support.shared._postgres1339 import execute
 
 evidence_store = H.evidence_store
 process_state = J.process_state
-scene = J.scene
+scene = H.fresh_scene
 
 pytestmark = [pytest.mark.postgres, pytest.mark.openbao, pytest.mark.garage,
               pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]

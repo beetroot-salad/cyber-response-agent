@@ -114,6 +114,8 @@ def _check_end(got, by, started, decided, completed, uploads, owed, *, hands_bac
     owed_up = all(uploads.get(o, {}).get("status") == UP for o in owed)
     if completed and by in OUTCOME_COUNTS and by != "not_launched":
         assert got.stage == "completed", (by, got.stage)
+    elif not completed:
+        assert got.stage != "completed", (by, got.stage)
     want = oracle_state(by, started, decided, got.stage, bundle_up, owed_up)
     assert got.evidence_state == want, (by, started, uploads, got.stage)
     uploaded = {o for o, u in uploads.items() if u["status"] == UP}

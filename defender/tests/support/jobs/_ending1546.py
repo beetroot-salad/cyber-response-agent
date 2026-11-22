@@ -177,9 +177,12 @@ async def queue_learning_job(dsn: str, tenant: str, alert_id: str, source: str, 
 # --- the exited path's one adapter ------------------------------------------------------------------------------------------
 
 
+DECIDE_KIND = {"readiness": "host_request", "adoption": "host_request", "drain": "host_request"}  # claim kind -> decide's pinned kind
+
+
 async def end_row(store: Any, dsn: str, *, kind: str, tenant: str, owner: str, token: str, by: str) -> Any:
     """The worker's end of a claimed row: read its claim's staged facts and uploads (here by SQL), `decide`, then
     `apply`. PINNED: `JobStore.apply(tenant_id, owner_id, decision)` (r8's `apply(row, Decision)`), answering the row's
     record, or `None` when the row is no longer live (the fence); who reads facts in the end transaction is open (a gap)."""
-    decision = decide(kind, facts_of(dsn, token), uploads_of(dsn, token), by)
+    decision = decide(DECIDE_KIND.get(kind, kind), facts_of(dsn, token), uploads_of(dsn, token), by)
     return decision, await store.apply(tenant, owner, decision)

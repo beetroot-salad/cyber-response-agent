@@ -209,26 +209,28 @@ def test_a6_the_host_half_and_the_run_half_each_run_once_in_a_job_and_in_the_ope
         (lane, calls.by_thread, publishes, ran)
 
 
+@pytest.fixture
+def a10_scene(tmp_path, monkeypatch, migrated_database):
+    """`scene` on a tenant of its own (the Garage bucket is shared across files; F4)."""
+    with helper_scene(tmp_path, monkeypatch, migrated_database, proxied=(), tenant_id=str(uuid.uuid4())) as s:
+        yield s
+
+
 @pytest.mark.openbao
 @pytest.mark.garage
-def test_a10_the_run_page_stored_is_the_renderers_bytes_for_the_run_the_job_pushed_not_a_file_in_its_folder(
-        scene, evidence_store, tmp_path):
-    """#1546 A-O8 (conflict updated: was the helper's page mirror): the job renders its run's page with the real renderer and
-    pushes the bytes over its socket; the stored page equals the renderer's bytes for that run (an oracle render of the same
-    golden run in a folder of its own) though the job left another `runtime.html` in its run folder, which nothing reads
-    back and nothing copies to the publish folder. (A10, A-O8)"""
+def test_a10_the_run_page_stored_is_the_bytes_the_job_pushed_not_a_file_in_its_folder(a10_scene, evidence_store, tmp_path):
+    """#1546 A-O8 (conflict updated: was the helper's page mirror): the stored page is exactly the bytes the job pushed over its
+    socket, not the `runtime.html` it left in its run folder, and nothing reached the publish folder. (A10, A-O8)"""
     import shutil
 
-    from defender.presentation import visualize_run
     from defender.tests.support.evidence._facts1546 import sent_page
     from defender.tests.support.jobs import _helper_evidence1546 as H
     from defender.tests.support.jobs._job_helper import host_path
-    from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
+    scene = a10_scene
     golden = Path(__file__).resolve().parents[1] / "fixtures" / "e2e" / "golden-v2sshd"
-    oracle = tmp_path / "oracle" / str(uuid.uuid4())
-    shutil.copytree(golden, oracle)
-    expected = visualize_run.render_page(fixture_run(oracle)).encode("utf-8")
+    pushed = b"<html>MARKER pushed over the socket " + uuid.uuid4().hex.encode() + b"</html>"
+    left = b"<html>written in the job's run folder</html>"
     publish_dir = tmp_path / "published"
     publish_dir.mkdir()
     planted = H.plant(scene, "investigation")
@@ -236,11 +238,10 @@ def test_a10_the_run_page_stored_is_the_renderers_bytes_for_the_run_the_job_push
     def job(c: Any) -> int:
         folder = host_path(c.mounts, str(H.job_root(scene) / scene.tenant)) / "runs" / planted.owner
         shutil.copytree(golden, folder)
-        page = visualize_run.render_page(fixture_run(folder)).encode("utf-8")
-        (folder / "runtime.html").write_bytes(b"<html>written in the job's run folder</html>")  # never read back
+        (folder / "runtime.html").write_bytes(left)  # never read back
         H.send(c, "outcome", record=H.inv_outcome())
         H.send(c, "page", record=sent_page())
-        H.put_object(c, H.RUN_PAGE, page)
+        H.put_object(c, H.RUN_PAGE, pushed)
         H.put_object(c, "bundle", b"bundle")
         return 0
 
@@ -250,8 +251,9 @@ def test_a10_the_run_page_stored_is_the_renderers_bytes_for_the_run_the_job_push
         H.drive(scene, planted, job, **evidence_store.seams)
     row = H.uploads(scene.dsn, scene.claim)[H.RUN_PAGE]
     assert row["status"] == "uploaded"
-    assert evidence_store.read(scene.tenant, "investigation", planted.owner, scene.claim, H.RUN_PAGE,
-                               row["wrapped_key"]) == expected
+    stored = evidence_store.read(scene.tenant, "investigation", planted.owner, scene.claim, H.RUN_PAGE, row["wrapped_key"])
+    assert stored == pushed, "the stored page is not the bytes the job pushed"
+    assert stored != left, "the stored page is the run folder's runtime.html"
     assert [p for p in publish_dir.rglob("*") if p.is_file()] == [], "the helper copied a page to the publish folder"
 
 

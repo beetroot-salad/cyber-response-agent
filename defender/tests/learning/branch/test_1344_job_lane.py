@@ -961,6 +961,10 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
     assert any(n.startswith(f"episodes/{L.JOB}/") for n in inside), sorted(inside)
     assert not [n for n in inside if n.startswith((f"runs/{L.JOB}.launch.json", "run-knowledge/", "exports/"))]
 
+    # D12 / G11 (r9, agent-settled): the PARENT (the launcher) stages `arm/<id>` after that arm's sibling exits (`FakeSibling`
+    # sends nothing, so the sender here is the launcher) and pushes the arm's page when it rendered. UNENFORCED at this level:
+    # that a page is pushed at all (no "at least one arm rendered" premise: `FakeSibling` writes no session pointer and the
+    # entry has no render seam, so no stand-in arm renders; the page equation below holds vacuously when none does).
     # D12 / G11: the arms fork into the pulled copy; the roster is staged before the first arm runs, each arm stages its
     # verdict and page after its run, a rendered arm's page rides the socket, and every arm's session database is in the bundle.
     assert order.count("spawn") >= 1, "premise: the job ran its arms"
@@ -973,7 +977,7 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
     for run_id, record in arm_facts_sent.items():
         assert set(record) == {"scrub", "page"}, record  # no roster inside an arm's fact (PR8)
         assert record["scrub"] == "clean", record  # the arms the stand-in sibling leaves walk clean
-        assert order.index(f"arm:{run_id}") > order.index("spawn")
+        assert order.index(f"arm:{run_id}") > order.index("spawn"), "an arm's fact was staged before its sibling exited"
         assert (record["page"] == "rendered") == (arm_page(run_id) in pushed), (record, sorted(pushed))
     tenant_root = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant
     arm_databases = sorted(str(p.relative_to(tenant_root)) for run_id in arm_facts_sent

@@ -522,9 +522,22 @@ def env_flag(name: str) -> bool:
 
 
 @pytest.fixture
+def fresh_scene(tmp_path, monkeypatch, migrated_database) -> Iterator[HelperScene]:
+    """The default helper scene on a tenant of its own: the Garage bucket is shared by every file of a run, and these tests
+    list a tenant's whole prefix (R13, F4)."""
+    from defender.tests.support.jobs._job_helper import helper_scene
+
+    with helper_scene(tmp_path, monkeypatch, migrated_database, tenant_id=str(uuid.uuid4())) as s:
+        yield s
+
+
+@pytest.fixture
 def evidence_store(request: pytest.FixtureRequest, scene: HelperScene) -> Iterator[Store]:
     """The missing seam first (red here without it), then Garage and OpenBao (skipped without them), the tenant's `evidence-<T>`
     key and login, and the seams `job_host.main` takes."""
+    from defender.tests.tenancy.tenant_1108_p4._support import FIXTURE_TENANT_ID
+
+    assert scene.tenant != FIXTURE_TENANT_ID, "a scene on the shared fixture tenant lists other tests' objects: use `fresh_scene`"
     evidence_module()
     openbao = request.getfixturevalue("openbao")
     garage = request.getfixturevalue("garage")

@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from defender.box import BoxSpec
+from defender.box._docker import CLAIM_LABEL
 from defender.tests.e2e._replay_harness import committed_record, golden_disposition
 from defender.tests.support.evidence._evidence1546 import evidence_keys, garage, new_sse_key  # noqa: F401 — fixtures
 from defender.tests.support.evidence._facts1546 import RUN_PAGE, evidence_env
@@ -187,8 +188,8 @@ async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_moun
             # nothing of the job is left on the host (asserted here, keyed by the claim's token)
             for base in (ROOTS, INPUTS, SPOOL, ".job-sockets", ".job-scratch"):
                 assert not (root / base / token).exists(), f"{base}/<claim> outlived the job"
-            left = subprocess.run(["docker", "ps", "-aq", "--filter", "label=defender.job"], capture_output=True,
+            left = subprocess.run(["docker", "ps", "-aq", "--filter", f"label={CLAIM_LABEL}={token}"], capture_output=True,
                                   text=True, check=True).stdout.split()
-            assert left == [], f"a job container outlived the job: {left}"
+            assert left == [], f"a container of the claim outlived the job: {left}"
     finally:
         shutil.rmtree(root, ignore_errors=True)
