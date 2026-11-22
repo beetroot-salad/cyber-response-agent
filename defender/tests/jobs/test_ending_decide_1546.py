@@ -73,10 +73,9 @@ def expected_state(by: str, started: bool, decided: bool, completed: bool, bundl
 
 
 def investigation_cases():
-    for by, started, oc, bundle, page_fact, page_up in itertools.product(
+    yield from itertools.product(
             [b for b in ENDED_BY if b != "expired_in_queue"], (True, False), INV_CLASSES, (UP, PENDING, REFUSED, None),
-            ("rendered", "render_failed", "none", None), (UP, PENDING, REFUSED, None)):
-        yield by, started, oc, bundle, page_fact, page_up
+            ("rendered", "render_failed", "none", None), (UP, PENDING, REFUSED, None))
 
 
 def _inv_input(started, oc, bundle, page_fact, page_up):
@@ -128,10 +127,9 @@ def test_the_investigation_evidence_state_follows_rules_one_to_seven_over_every_
 
 
 def learning_cases():
-    for by, started, oc, bundle, episode, arm_fact, arm_up in itertools.product(
+    yield from itertools.product(
             ENDED_BY, (True, False), LEARN_CLASSES, (UP, PENDING, None), (UP, REFUSED, None),
-            ("rendered", "render_failed", None), (UP, PENDING, None)):
-        yield by, started, oc, bundle, episode, arm_fact, arm_up
+            ("rendered", "render_failed", None), (UP, PENDING, None))
 
 
 @pytest.mark.parametrize("by", ENDED_BY)
@@ -255,7 +253,8 @@ def test_a_stop_gives_the_job_back_only_when_it_decided_nothing(kind):
     assert type(hand).__name__ == "HandBack"
     assert not hasattr(hand, "evidence_state")
     end = decide(kind, decided, {BUNDLE: up()}, "stopped")
-    assert type(end).__name__ == "End" and end.stage == "completed"
+    assert type(end).__name__ == "End"
+    assert end.stage == "completed"
 
 
 def test_a_lapsed_learning_job_that_decided_keeps_its_screened_findings_and_one_that_did_not_lapses():
@@ -342,7 +341,8 @@ def test_lesser_ends_weaken_in_turn_and_each_keeps_the_rules_consistent(oc):
     barest = chain[-1]
     assert (barest.stage, barest.failure_reason, barest.cost_usd, barest.knowledge) == ("failed", "worker_error", None, None)
     assert barest.follow_ons.auto_learning_job is False
-    assert barest.evidence_state == "partial" and set(barest.promote) == {BUNDLE, RUN_PAGE}
+    assert barest.evidence_state == "partial"
+    assert set(barest.promote) == {BUNDLE, RUN_PAGE}
     for step in chain[1:]:
         assert dataclasses.is_dataclass(step)
         assert step.evidence_state in STATES

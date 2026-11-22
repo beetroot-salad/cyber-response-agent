@@ -45,11 +45,15 @@ import uuid
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 from urllib.parse import quote, urlsplit
 
 import pytest
 
 from defender.tests.support.shared._openbao1163 import TRANSIT_MOUNT, Bao
+
+if TYPE_CHECKING:
+    import httpx
 
 ENDPOINT_ENV = "DEFENDER_TEST_GARAGE_ENDPOINT"
 ACCESS_KEY_ENV = "DEFENDER_TEST_GARAGE_ACCESS_KEY"
@@ -99,14 +103,14 @@ class Garage:
 
     def _request(self, method: str, key: str = "", *, query: dict[str, str] | None = None,
                  body: bytes = b"", headers: dict[str, str] | None = None,
-                 sse_key: bytes | None = None) -> "httpx.Response":
+                 sse_key: bytes | None = None) -> httpx.Response:
         import httpx
 
         host = urlsplit(self.endpoint).netloc
         path = f"/{self.bucket}" + (f"/{quote(key, safe='/~')}" if key else "")
         canonical_query = "&".join(f"{quote(k, safe='~')}={quote(v, safe='~')}"
                                    for k, v in sorted((query or {}).items()))
-        now = dt.datetime.now(dt.timezone.utc)
+        now = dt.datetime.now(dt.UTC)
         stamp, date = now.strftime("%Y%m%dT%H%M%SZ"), now.strftime("%Y%m%d")
         payload_hash = hashlib.sha256(body).hexdigest()
         hdrs = {"host": host, "x-amz-content-sha256": payload_hash, "x-amz-date": stamp}
@@ -145,13 +149,13 @@ class Garage:
                 return keys
             token = root.findtext(f"{_S3_NS}NextContinuationToken") or ""
 
-    def head(self, key: str, *, sse_key: bytes | None = None) -> "httpx.Response":
+    def head(self, key: str, *, sse_key: bytes | None = None) -> httpx.Response:
         return self._request("HEAD", key, sse_key=sse_key)
 
-    def get(self, key: str, *, sse_key: bytes | None = None) -> "httpx.Response":
+    def get(self, key: str, *, sse_key: bytes | None = None) -> httpx.Response:
         return self._request("GET", key, sse_key=sse_key)
 
-    def put(self, key: str, body: bytes, *, sse_key: bytes | None = None) -> "httpx.Response":
+    def put(self, key: str, body: bytes, *, sse_key: bytes | None = None) -> httpx.Response:
         reply = self._request("PUT", key, body=body, sse_key=sse_key)
         assert reply.status_code == 200, (reply.status_code, reply.text)
         return reply

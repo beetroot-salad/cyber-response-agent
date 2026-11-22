@@ -72,7 +72,8 @@ async def test_every_claim_returns_the_token_the_store_minted_in_the_claims_own_
         host = await store.claim_host_request()
         hold = await store.hold_learning_check(T1)
     tokens = {inv_token, learn.token, host.token, hold}
-    assert len(tokens) == 4 and None not in tokens
+    assert len(tokens) == 4
+    assert None not in tokens
     got = {name: _claim_row(dsn, t) for name, t in (("inv", inv_token), ("learn", learn.token), ("host", host.token),
                                                     ("hold", hold))}
     assert (got["inv"]["kind"], got["inv"]["investigation_id"], got["inv"]["tenant_id"]) == ("investigation", inv, T1)
@@ -171,7 +172,8 @@ async def test_a_write_before_the_ender_is_kept_and_counted_and_one_after_it_is_
         await _fact(store, token)
         await _fact(store, token, "outcome", inv_outcome())
         await _upload(store, token)
-        assert set(facts_of(dsn, token)) == {"started", "outcome"} and set(uploads_of(dsn, token)) == {BUNDLE}
+        assert set(facts_of(dsn, token)) == {"started", "outcome"}
+        assert set(uploads_of(dsn, token)) == {BUNDLE}
         if ender == "take_over":
             lapse_lease(dsn, inv)
             await store.take_over()
@@ -291,7 +293,8 @@ async def test_the_progress_fact_is_the_one_replaced_fact_and_every_other_is_cre
         with pytest.raises(Conflict):
             await store.stage_fact("ffffffffffffffffffffffffffffffff", "started", STARTED)  # no such claim
     got = facts_of(dsn, token)
-    assert got["progress"] == {"cost_usd": 0.2} and got["outcome"]["scrub"] == "clean"
+    assert got["progress"] == {"cost_usd": 0.2}
+    assert got["outcome"]["scrub"] == "clean"
 
 
 # --- claims lifecycle --------------------------------------------------------------------------------------------------------------

@@ -99,7 +99,8 @@ async def test_a_drain_request_finishes_from_its_staged_result_and_is_never_retr
     tenant's hold; a later pass claims nothing. (D7, A-O2, G15)"""
     rid, stored, staging = await _run(world, "drain", staged={"result": RESULTS["drain"]})
     staging.assert_ran()
-    assert stored["kind"] == "drain" and stored["stage"] == "completed", stored
+    assert stored["kind"] == "drain", stored
+    assert stored["stage"] == "completed", stored
     assert claim_row(world["dsn"], staging.token)["host_request_id"] == rid
     async with job_store(world["dsn"]) as store:
         assert await store.claim_host_request() is None

@@ -14,7 +14,6 @@ from defender.tests.support.jobs._ending1546 import (
     REFUSED,
     RUN_PAGE,
     STARTED,
-    UP,
     accepted,
     alerts_rows,
     end_row,
@@ -45,7 +44,8 @@ BOTH = {BUNDLE: up(), RUN_PAGE: up()}
 async def _running(store, dsn):
     inv = await _queued(store)
     claim = await store.claim()
-    assert claim is not None and claim.record.investigation_id == inv
+    assert claim is not None
+    assert claim.record.investigation_id == inv
     return inv, token_of(dsn, "investigation", inv)
 
 
@@ -233,7 +233,8 @@ async def test_a_handed_back_decided_learning_job_has_no_state_until_its_take_ov
         plant_facts(dsn, token2, {"started": STARTED, "progress": {"stage": "judge", "fork_message_id": "m",
                                                                     "sibling_cost_usd": 1.0}})
         decision, record = await end_row(store, dsn, kind="learning", tenant=T1, owner=job2, token=token2, by="stopped")
-        assert type(decision).__name__ == "HandBack" and record is not None
+        assert type(decision).__name__ == "HandBack"
+        assert record is not None
         assert learn_row(dsn, job2, "status", "evidence_state") == {"status": "running", "evidence_state": None}
         execute(dsn, "UPDATE jobs.learning_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = %s", (job2,))
         assert await store.take_over() == [job2]
@@ -250,7 +251,8 @@ async def test_a_handed_back_investigation_is_not_terminal_and_is_then_taken_ove
         inv, token = await _running(store, dsn)
         plant_facts(dsn, token, {"started": STARTED, "progress": {"cost_usd": 0.5}})
         decision, record = await end_row(store, dsn, kind="investigation", tenant=T1, owner=inv, token=token, by="stopped")
-        assert type(decision).__name__ == "HandBack" and record is not None
+        assert type(decision).__name__ == "HandBack"
+        assert record is not None
         assert inv_row(dsn, inv, "stage", "evidence_state", "scrub") == {"stage": "running", "evidence_state": None,
                                                                          "scrub": None}
         assert await store.take_over() == [inv]
@@ -317,7 +319,7 @@ async def test_a_refused_apply_is_retried_with_a_lesser_end_that_still_ends_the_
         plant_facts(dsn, token, DONE)
         plant_uploads(dsn, token, BOTH)
         decision = ending.decide(DONE, {BUNDLE: up(), RUN_PAGE: up()}, ending.Exited(0), kind="investigation")
-        with pytest.raises(Exception) as refused:
+        with pytest.raises(Exception) as refused:  # noqa: PT011 - narrowed by is_refusal below
             await store.apply(T1, inv, decision)
         assert is_refusal(refused.value)
         assert inv_row(dsn, inv, "stage")["stage"] == "running", "the refused end changed nothing"
@@ -325,13 +327,17 @@ async def test_a_refused_apply_is_retried_with_a_lesser_end_that_still_ends_the_
         weaker = ending.lesser(decision)
         for _ in range(3):
             try:
-                assert await store.apply(T1, inv, weaker) is not None
-                break
+                applied = await store.apply(T1, inv, weaker)
             except Exception as again:  # noqa: BLE001 - the ladder: keep weakening while the store refuses
-                assert is_refusal(again)
-                weaker = ending.lesser(weaker)
+                refused_again = again
+            else:
+                assert applied is not None
+                break
+            assert is_refusal(refused_again)
+            weaker = ending.lesser(weaker)
     got = inv_row(dsn, inv, "stage", "knowledge", "evidence_state")
-    assert got["stage"] in {"completed", "failed"} and got["knowledge"] != KNOWLEDGE
+    assert got["stage"] in {"completed", "failed"}
+    assert got["knowledge"] != KNOWLEDGE
     assert got["evidence_state"] in ({"complete", "lost"} if got["stage"] == "completed" else {"partial"})
     assert BUNDLE in accepted(dsn, token)
 

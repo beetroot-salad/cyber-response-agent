@@ -104,9 +104,9 @@ class _Census(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Constant(self, node: ast.Constant) -> None:
-        if isinstance(node.value, str) and (m := RAW.search(node.value)) and not EXPIRE_ONLY.search(node.value):
-            if any(re.search(rf"\b{c}\b", m["rest"].split("WHERE")[0], re.I) for c in TERMINAL):
-                self._flag(node, "raw UPDATE of a terminal column")
+        if (isinstance(node.value, str) and (m := RAW.search(node.value)) and not EXPIRE_ONLY.search(node.value)
+                and any(re.search(rf"\b{c}\b", m["rest"].split("WHERE")[0], re.I) for c in TERMINAL)):
+            self._flag(node, "raw UPDATE of a terminal column")
 
 
 def census(files: dict[str, str]) -> list[tuple[str, str, int, str]]:

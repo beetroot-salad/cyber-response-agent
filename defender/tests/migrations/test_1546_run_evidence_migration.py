@@ -64,7 +64,8 @@ def test_the_revision_makes_the_three_tables_with_their_keys_and_only_the_claim_
     assert {d for _, _, d in fks} == {"a"}, "no ON DELETE action exists (the delete removes its rows itself)"
     pks = dict(execute(dsn, "SELECT conrelid::regclass::text, pg_get_constraintdef(oid) FROM pg_constraint WHERE contype = 'p' "
                             "AND conrelid::regclass::text IN ('jobs.staged_facts', 'jobs.uploads')"))
-    assert "(token, name)" in pks["jobs.staged_facts"] and "(token, object)" in pks["jobs.uploads"]
+    assert "(token, name)" in pks["jobs.staged_facts"]
+    assert "(token, object)" in pks["jobs.uploads"]
     assert execute(dsn, "SELECT is_nullable FROM information_schema.columns WHERE table_schema = 'jobs' AND table_name = "
                         "'claims' AND column_name = 'inputs'") == [("NO",)]
 

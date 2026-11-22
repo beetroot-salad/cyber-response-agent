@@ -36,7 +36,8 @@ def _claim(dsn: str, scene, kind: str, ref: str) -> None:
 def _allowlisted(scene, mounts: list[dict], env: dict) -> None:
     root, inputs = scene.root / ROOTS / scene.claim, scene.root / INPUTS / scene.claim
     by_source = {m["source"]: m for m in mounts}
-    assert by_source[str(root)]["target"] == str(root) and not by_source[str(root)]["readonly"], mounts
+    assert by_source[str(root)]["target"] == str(root), mounts
+    assert not by_source[str(root)]["readonly"], mounts
     assert by_source[str(inputs)]["readonly"], mounts
     tenant_folder = scene.runs.parent
     for m in mounts:
@@ -101,7 +102,8 @@ def test_an_adoption_container_gets_allowlisted_binds_and_a_hardlink_free_clone_
     docker = ContainerStandIn(job)
     ran = J.drive_helper(scene, [*scene.argv("adoption", job_id), "--system", "identity"], docker=docker,
                          signer=make_signer(), forge=ForgeCredentialRecorder())
-    assert ran.raised is None and docker.job_error is None, (ran.raised, docker.job_error)
+    assert ran.raised is None, (ran.raised, docker.job_error)
+    assert docker.job_error is None, (ran.raised, docker.job_error)
     assert docker.boxes, "premise: the container started"
     _allowlisted(scene, docker.boxes[0].mounts, docker.boxes[0].env)
     assert seen["links"] == [], f"the helper placed files with more than one link: {seen['links']}"

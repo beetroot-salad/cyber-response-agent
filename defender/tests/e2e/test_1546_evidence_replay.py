@@ -57,7 +57,7 @@ def _bind_sources(argv: list[str]) -> list[dict]:
     return parse_mounts(argv)
 
 
-async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_mounts_and_nothing_left(
+async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_mounts_and_nothing_left(  # noqa: PLR0915 — one flow
         migrated_database, tmp_path, monkeypatch, openbao, garage, evidence_keys):  # noqa: F811
     """Queue -> worker -> real helper -> real container -> store -> `decide`/`apply`: `complete`, bundle and page promoted
     and readable from the store by their digests, the page the real renderer's, the binds the allowlist, the claim's root,
@@ -116,7 +116,8 @@ async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_moun
             assert owner(dsn, "investigations", inv_id, "stage", "disposition", "scrub", "evidence_state") == (
                 "completed", "benign", "clean", "complete")
             token = claim_of(dsn, "investigation", inv_id)
-            assert token and accepted(dsn, token) == ["bundle", "page/runtime.html"]
+            assert token
+            assert accepted(dsn, token) == ["bundle", "page/runtime.html"]
 
             # the store: encrypted by the row's wrapped key, bytes matching the row's digest, the page the renderer's
             prefix = f"t/{t.tenant_id}/investigation/{inv_id}/{token}/"
@@ -131,10 +132,12 @@ async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_moun
                 assert sha(body) == digest
                 fetched[name] = body
             assert fetched["page/runtime.html"] == expected_page
-            members = tarfile.open(fileobj=io.BytesIO(fetched["bundle"]), mode="r:gz").getnames()
+            with tarfile.open(fileobj=io.BytesIO(fetched["bundle"]), mode="r:gz") as bundle_tar:
+                members = bundle_tar.getnames()
             assert any(n.endswith("probe.json") for n in members), members
             probe_member = next(n for n in members if n.endswith("probe.json"))
-            probe = json.load(tarfile.open(fileobj=io.BytesIO(fetched["bundle"]), mode="r:gz").extractfile(probe_member))
+            with tarfile.open(fileobj=io.BytesIO(fetched["bundle"]), mode="r:gz") as bundle_tar:
+                probe = json.load(bundle_tar.extractfile(probe_member))
 
             # the daemon's view of the job container's binds: the allowlist, no tenant folder, no other claim
             runs = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
@@ -145,14 +148,16 @@ async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_moun
             tenant_folder = root / t.tenant_id
             sources = {m["source"]: m for m in mounts}
             own_root, own_inputs = str(root / ROOTS / token), str(root / INPUTS / token)
-            assert sources[own_root]["target"] == own_root and not sources[own_root]["readonly"], mounts
+            assert sources[own_root]["target"] == own_root, mounts
+            assert not sources[own_root]["readonly"], mounts
             assert sources[own_inputs]["readonly"], mounts
             for m in mounts:
                 assert not Path(m["source"]).is_relative_to(tenant_folder), f"a bind names the tenant folder: {m}"
                 rel = Path(m["source"]).relative_to(root) if Path(m["source"]).is_relative_to(root) else None
                 assert rel is None or not rel.parts[0].startswith(".job-") or token in rel.parts, f"another claim: {m}"
             assert probe["outside_tenant_folder"].startswith("<"), probe
-            assert not probe["lists_.job-roots"] and not probe["lists_.job-spool"], probe
+            assert not probe["lists_.job-roots"], probe
+            assert not probe["lists_.job-spool"], probe
 
             # nothing of the job is left on the host (asserted here, keyed by the claim's token)
             for base in (ROOTS, INPUTS, SPOOL, ".job-sockets", ".job-scratch"):
