@@ -14,6 +14,7 @@ import importlib
 import json
 import os
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
@@ -669,7 +670,7 @@ def _seed_repository(tmp_path, root, tenant_id, *, object_format, repo_name, ser
     (placed / "agent" / "lessons" / "seed.md").write_text("seed\n", encoding="utf-8")
     checkout = tmp_path / "seeds" / repo_name
     checkout.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(placed, checkout)
+    shutil.move(str(placed), str(checkout))
     tenant = tenants.accept(root, tenant_id)
     git(checkout, "init", "-b", "main", f"--object-format={object_format}")
     git(checkout, "config", "user.name", "P3")
@@ -723,9 +724,9 @@ def delivery(repo, http, **options):
     repository (#1618): close it, or use it as a context manager."""
     if http.remote is None:
         http.remote = repo[1]
-    origin = options.get("origin", origin_of(repo))
+    origin = origin_of(repo)
     if http.address is None and origin is not None:
-        http.serve(origin)
+        http.serve(origin)  # the forge fake answers at the served origin's address, whatever `origin=` a case hands the open
     options.setdefault("identity", fixture_identity(str(repo[0].id)))
     options.setdefault("origin", origin)
     return target().TenantDelivery.open(repo[0], defender_dir=DEFENDER, client=http.client, **options)
@@ -787,6 +788,21 @@ def merge_on_remote(repo, tmp_path, branch, style="merge", *, delete_branch=Fals
     head = git(writer, "rev-parse", "HEAD")
     set_pull_state(repo[1], branch, merged=True, delete_branch=delete_branch, merge_commit=head)
     return head
+
+
+def push_and_open(batch, *, title="learning", body=""):
+    """#1618: what the deleted test-only `TenantDelivery.finish` did for a case that only needs its batch on the forge:
+    the batch's tip pushed from its private repository (`GitRepository.push`, the tick's end push) and its PR opened
+    (`store_delivery.open_pr_on`, as the tick opens it). Not the tick's policy (no reconcile, no existing-PR lookup): a
+    case about `finish`'s own semantics is retired with it. Returns `Delivered(opened, url)`."""
+    from defender.learning.author.version_control.model import Delivered, DeliveryStatus
+    from defender.learning.author.version_control.store_delivery import open_pr_on
+
+    tip = batch.repository.branch_tip(batch.branch)
+    assert tip is not None, "premise: the batch has a commit to deliver"
+    batch.repository.push(tip, batch.branch)
+    _number, url = open_pr_on(batch.repository, branch=batch.branch, title=title, body=body)
+    return Delivered(DeliveryStatus.OPENED, url)
 
 
 def merged_agent_lesson(repo, tmp_path, batch_id, path, content, style="merge"):

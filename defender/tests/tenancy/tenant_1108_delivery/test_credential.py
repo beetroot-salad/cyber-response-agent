@@ -69,11 +69,13 @@ def spies(http_repo, tmp_path, monkeypatch):
 
 
 def _armed(http_repo, spies):
-    """Install the clone's own spy helper and prove every spy live; returns the spy log."""
-    tenant, _remote, _credentials, server = http_repo
+    """Install a repository-local spy helper in the test's seed checkout and prove every spy live; returns the spy log.
+    (#1618: there is no host clone whose local configuration git could read; the private repository a delivery opens is
+    made fresh with no template, so the local spy is a liveness control only.)"""
+    _tenant, _remote, _credentials, server = http_repo
     log, local = spies
-    git(tenant.knowledge, "config", "credential.helper", str(local))
-    _prove_spies_live(tenant.knowledge, server, log)
+    git(http_repo.checkout, "config", "credential.helper", str(local))
+    _prove_spies_live(http_repo.checkout, server, log)
     return log
 
 
@@ -293,14 +295,16 @@ def test_no_file_holds_the_credential_while_network_git_waits_on_the_forge(http_
 def test_a_downgrade_to_plain_http_at_the_same_host_and_port_gets_no_token(http_repo, spies):
     """An origin rewritten from HTTPS to HTTP at the same host receives no Bearer
     token and cannot trigger a helper or prompt."""
-    tenant, _remote, credentials, server = http_repo
+    _tenant, _remote, credentials, server = http_repo
     log = _armed(http_repo, spies)
     port = server.server.server_address[1]
-    git(tenant.knowledge, "remote", "set-url", "origin", f"https://127.0.0.1:{port}/tenants/blue.git")
-    git(tenant.knowledge, "config", f"url.http://127.0.0.1:{port}/.insteadOf", f"https://127.0.0.1:{port}/")
+    # #1618: the origin is the recorded one (no clone to re-point), and the rewrite is planted where a fresh private
+    # repository's git could still read one, the per-user configuration; the delivery's open is its first network git.
+    with git_config_home(http_repo.checkout.parent.parent).global_config.open("a", encoding="utf-8") as config:
+        config.write(f'[url "http://127.0.0.1:{port}/"]\n\tinsteadOf = https://127.0.0.1:{port}/\n')
     credentials.write_text(f"https://bot:{TOKEN}@127.0.0.1:{port}\n", encoding="utf-8")
-    d = delivery(http_repo, ForgeHTTP(), network_timeout=1)
-    _, error, hung = bounded(d.publish, seconds=60)
+    _, error, hung = bounded(lambda: delivery(http_repo, ForgeHTTP(), network_timeout=1,
+                                              origin=f"https://127.0.0.1:{port}/tenants/blue.git"), seconds=60)
     assert not hung, "git waited on a prompt"
     assert error is None or isinstance(error, target().DeliveryRefused), error
     assert [auth for auth in server.authorizations if auth] == [], "the token went over plain http"
@@ -577,12 +581,15 @@ def test_git_refreshes_a_vault_identity_before_a_fetch_outlives_it(http_repo):
     assert http_repo[3].authorized("git-upload-pack")
 
 
-def test_url_specific_clone_configuration_cannot_enable_redirects(http_repo):
+def test_url_specific_configuration_cannot_enable_redirects(http_repo):
+    """#1618: planted in the per-user configuration (there is no clone's local configuration any more); the delivery's
+    open is the network git that meets the redirect."""
     from ._support import Trickle
 
-    tenant, _, _, server = http_repo
+    _tenant, _, _, server = http_repo
     origin = f"{server.url}/tenants/blue.git"
-    git(tenant.knowledge, "config", f"http.{origin}.followRedirects", "true")
+    with git_config_home(http_repo.checkout.parent.parent).global_config.open("a", encoding="utf-8") as config:
+        config.write(f'[http "{origin}"]\n\tfollowRedirects = true\n')
 
     class Redirect(Trickle):
         def __init__(self):
@@ -595,7 +602,6 @@ def test_url_specific_clone_configuration_cannot_enable_redirects(http_repo):
             handler.end_headers()
 
     server.on_service = lambda service: Redirect()
-    d = delivery(http_repo, ForgeHTTP())
     with pytest.raises(target().DeliveryRefused):
-        d.publish()
+        delivery(http_repo, ForgeHTTP())
     assert len(server.authorizations) == 1, "git followed the redirect to another repository"
