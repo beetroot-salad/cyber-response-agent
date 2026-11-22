@@ -4,6 +4,7 @@ Postgres-marked."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime as dt
 import logging
 import random
@@ -14,13 +15,22 @@ from defender.tests.tenancy.people_1592._sessions1592 import MINUTE, sessions  #
 from defender.tests.tenancy.people_1592._spec1592 import (
     end_backend,
     login_of,
+    org_of,
     people_lock_held_elsewhere,
     people_lock_namespace,
     session_key,
+    sessions_port,
     signed_in_data,
 )
-from defender.tests.tenancy.people_1592._worker1592 import ScriptedLock, errors, settled, until, use
-from defender.tests.tenancy.people_1592._world1592 import T, People
+from defender.tests.tenancy.people_1592._worker1592 import (
+    CountingSessions,
+    ScriptedLock,
+    errors,
+    settled,
+    until,
+    use,
+)
+from defender.tests.tenancy.people_1592._world1592 import U2, T, People
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
@@ -97,33 +107,83 @@ async def test_the_worker_logs_one_error_per_change_the_first_poll_included_and_
         previous = held
 
 
-async def test_a_lock_lost_with_a_run_in_flight_cancels_it_and_deletes_no_ids_then_resumes(people: People, caplog):
-    """S2-27 (scripted): the lock goes; the gated run's ids survive its release; an error is logged; on regaining it the
-    request is carried out."""
+class LockUnanswered(Exception):
+    """The scripted lock's failure: the database could not be asked (not a driver error the port maps to False)."""
+
+
+#: Every way a held lock stops being held (OD-12): the port answers False, the port raises, the holder's backend ends.
+LOSSES = ("answers-false", "raises", "backend-ends")
+
+
+@pytest.fixture(params=LOSSES)
+def loss_world(request) -> tuple[str, People]:
+    """The loss, with its world: the scripted lock over the memory twins, or a real hold on PostgreSQL."""
+    return request.param, request.getfixturevalue("pg_people" if request.param == "backend-ends" else "people")
+
+
+async def test_a_lock_lost_with_a_run_and_an_expansion_in_flight_cancels_them_and_deletes_no_ids_then_resumes(
+        loss_world: tuple[str, People], caplog):
+    """S2-27 (OD-12): however the hold ends, after the losing poll every task the worker started is cancelled, no forge
+    or sessions call begins, no id is deleted and nothing starts while not held; an error names the lock; on regaining
+    it the requests are carried out. Calls in flight at the loss may still land (OD-7's residual): not asserted."""
+    loss, people = loss_world
     bob = await _bob(people)
-    script = ScriptedLock(people.tenants, held=True)
-    worker = use(people, tenants=script)
+    await people.tenant(U2)  # a (none, U2) request: an expansion to gate in its team lookup
+    script = None if loss == "backend-ends" else ScriptedLock(people.tenants, held=True)
+    counting = CountingSessions(sessions_port(people.sessions.dsn))
+    worker = use(people, tenants=script, sessions=counting)
     path = f"/api/v1/users/{login_of(str(bob.id))}"
-    first = people.forge.gate("GET", path)
+    search = f"/api/v1/orgs/{org_of(U2)}/teams/search"
+    first, lookup = people.forge.gate("GET", path), people.forge.gate("GET", search)
     await worker.poll()
-    assert await until(lambda: f"GET {path}" in people.forge.arrived)
+    assert await until(lambda: f"GET {path}" in people.forge.arrived), "control: the run is in flight"
+    assert await until(lambda: f"GET {search}" in people.forge.arrived), "control: the expansion is in flight"
     second = people.forge.gate("GET", path)
     before = len(errors(caplog))
-    script.held = False
-    try:
-        await worker.poll()
-        first.set()
-        await asyncio.sleep(0.2)
-        assert (str(bob.id), T) in await people.open_requests(), "a run that lost the lock deleted its ids"
-        assert len(errors(caplog)) > before
-        assert any("lock" in m.lower() for m in errors(caplog)[before:])
-    finally:
-        second.set()
-    script.held = True
-    await people.steps(2)
+    with contextlib.ExitStack() as held_elsewhere:
+        if loss == "backend-ends":
+            (old,) = holders(people.dsn)
+            end_backend(people.dsn, old)  # the lock is free: the losing poll must answer not held all the same
+        else:
+            assert script is not None
+            script.held = False if loss == "answers-false" else LockUnanswered("the database could not be asked")
+        try:
+            await worker.poll()  # the losing poll
+            if loss == "backend-ends":
+                held_elsewhere.enter_context(people_lock_held_elsewhere(people.dsn))  # not held at every later poll
+            arrived, sessions_calls = len(people.forge.arrived), dict(counting.calls)
+            try:
+                await asyncio.wait_for(worker.settle(), 2)  # the gates are shut: only cancelled tasks are done
+            except TimeoutError:
+                pytest.fail(f"{loss}: a task the worker started was not cancelled when the lock was lost")
+            first.set()
+            lookup.set()
+            await asyncio.sleep(0.2)
+            for _ in range(2):  # later polls while not held, the cap job due at each
+                people.clock.advance(2 * MINUTE)
+                await worker.poll()
+                await asyncio.wait_for(worker.settle(), 5)
+            assert people.forge.arrived[arrived:] == [], f"{loss}: forge calls began after the loss"
+            assert counting.calls == sessions_calls, f"{loss}: sessions calls began after the loss"
+            open_now = await people.open_requests()
+            assert (str(bob.id), T) in open_now, "a run that lost the lock deleted its ids"
+            assert (None, U2) in open_now, "an expansion that lost the lock deleted the tenant request"
+            assert not [p for p in open_now if p[0] is not None and p[1] == U2], "an expansion recorded after the loss"
+            assert len(errors(caplog)) > before
+            assert any("lock" in m.lower() for m in errors(caplog)[before:])
+        finally:
+            second.set()
+            first.set()
+            lookup.set()
+    if script is not None:
+        script.held = True
+    await people.steps(2 if script is not None else 3)
 
     assert login_of(str(bob.id)) not in people.forge.members(T)
     assert await people.open_requests() == []
+    if loss == "backend-ends":
+        assert len(holders(people.dsn)) == 1
+        assert holders(people.dsn) != [old]
 
 
 async def test_a_standby_worker_on_postgres_logs_once_and_calls_nothing(pg_people: People, caplog):
@@ -136,33 +196,6 @@ async def test_a_standby_worker_on_postgres_logs_once_and_calls_nothing(pg_peopl
     assert pg_people.forge.arrived == []
     assert (str(bob.id), T) in await pg_people.open_requests()
     assert len([m for m in errors(caplog) if "standby" in m.lower()]) == 1
-
-
-async def test_a_holder_whose_backend_ends_loses_its_run_ids_and_the_lock_is_regained(pg_people: People, caplog):
-    """S2-27: a crash of the holder's connection mid-run: ids kept, an error logged, the lock regained at a later poll."""
-    bob = await _bob(pg_people)
-    path = f"/api/v1/users/{login_of(str(bob.id))}"
-    first = pg_people.forge.gate("GET", path)
-    worker = use(pg_people)
-    await worker.poll()
-    assert await until(lambda: f"GET {path}" in pg_people.forge.arrived)
-    (old,) = holders(pg_people.dsn)
-    second = pg_people.forge.gate("GET", path)
-    before = len(errors(caplog))
-    end_backend(pg_people.dsn, old)
-    try:
-        await worker.poll()
-        first.set()
-        await asyncio.sleep(0.2)
-        assert (str(bob.id), T) in await pg_people.open_requests(), "the run deleted its ids after the loss"
-        assert len(errors(caplog)) > before
-    finally:
-        second.set()
-    await pg_people.steps(3)
-
-    assert await pg_people.open_requests() == []
-    assert len(holders(pg_people.dsn)) == 1
-    assert holders(pg_people.dsn) != [old]
 
 
 async def test_a_second_worker_takes_over_when_the_first_holders_backend_ends(pg_people: People):
