@@ -126,10 +126,14 @@ class TenantDelivery:
                 network_timeout=network_timeout,
                 data_root=None if relay is not None else data_root_for_child(accepted_tenant.data_root),
             )
-            return cls(
-                tenant=accepted_tenant, defender_dir=defender_dir, repository=repository,
-                directory=directory, relay=relay,
-            )
+            try:
+                return cls(
+                    tenant=accepted_tenant, defender_dir=defender_dir, repository=repository,
+                    directory=directory, relay=relay,
+                )
+            except BaseException:
+                repository.close()
+                raise
 
     def close(self) -> None:
         """Remove the delivery's private repository (its operation's: a tick's ends with the tick)."""
