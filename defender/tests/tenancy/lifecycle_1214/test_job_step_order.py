@@ -52,7 +52,7 @@ def test_each_action_runs_its_steps_in_the_order_the_design_lists(world):
     log.clear()
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
-    assert _runs(log) == ["offboard", "teardown", "finish"]
+    assert _runs(log) == ["offboard", "teardown", "evidence", "finish"]  # #1546 A-O5: the evidence pass between teardown and finish
     log.clear()
     world.clock.advance(REPO_WINDOW + _dt.timedelta(seconds=1))
     world.drive()

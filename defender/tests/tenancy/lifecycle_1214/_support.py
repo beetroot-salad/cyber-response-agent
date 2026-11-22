@@ -72,7 +72,9 @@ class LifecycleWorld(World):
     """#1306's world with the tenant repository wired into the API, the identity repository sharing
     its tenant store, `ops` as administrator, and both lifecycle actors over the fakes."""
 
-    def __init__(self, tmp_path: Path, data_root: Path) -> None:
+    def __init__(self, tmp_path: Path, data_root: Path, *, blob: Any = None) -> None:
+        #: #1546: the evidence store handed to the host actors (`HostActor(blob=)`); None leaves the actor's own default.
+        self.blob = blob
         self.data_root = data_root
         self.tmp_path = tmp_path
         self.fakes = Fakes(tmp_path)
@@ -98,7 +100,7 @@ class LifecycleWorld(World):
         with NO credential (F-1: install presents the bot's own Bearer per request)."""
         parts: dict[str, Any] = {
             "forge": self.forge.client(None), "openbao_login": self.openbao.client(None), "git": self.git, "publish": self.publish,
-            "config": self.config, "clock": self.clock, **overrides}
+            "config": self.config, "clock": self.clock, **({} if self.blob is None else {"blob": self.blob}), **overrides}
         return HostActor(tenants, **parts)
 
     # --- the job --------------------------------------------------------------------------

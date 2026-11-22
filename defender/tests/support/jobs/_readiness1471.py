@@ -37,7 +37,8 @@ HELPER_STEPS = ("tenant", "records", "alert_mapping", "publish", "knowledge_copy
 CONTAINER_STEPS = ("container_tenant", "systems")
 AFTER_PUBLISH = ("knowledge_copy", "run_tenant", "roster", "tenant_verdict", "signing", "first_pass", *CONTAINER_STEPS)
 WARNING_KINDS = frozenset({"case_system", "system_down", "grant_ignored", "verb_undecided", "verb_undeclared",
-                           "tacit_registry", "tacit_grant", "feedback_setting", "retired_file"})
+                           "tacit_registry", "tacit_grant", "feedback_setting", "retired_file",
+                           "retention_unset", "evidence_key_missing"})  # #1546 A-O7: the rollout's two (host-side)
 #: The tenant of a test's second scene (the first is the fixture's, registered in the same database).
 SECOND_TENANT = "7a1c5e93-4b2d-4f86-9e07-3c8d1b6a2f54"
 #: Words that name an operator command: an admin reads our sentences too (#1470 O11, C9).

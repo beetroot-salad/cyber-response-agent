@@ -32,6 +32,12 @@ def _key(tenant: str) -> str:
     return f"request-token-{tenant}"
 
 
+def _request_keys(bao) -> set[str]:
+    """The transit keys that are request-token signing keys: #1546 adds `evidence-<tenant>` keys beside them, which these
+    cases (about the signing key) do not count."""
+    return {name for name in bao.transit_keys if not name.startswith("evidence-")}
+
+
 def _key_path(tenant: str) -> str:
     return f"/v1/transit/keys/{_key(tenant)}"
 
@@ -186,7 +192,8 @@ def test_a_provider_that_died_before_committing_is_run_again_reusing_its_entitie
     assert world.item(tenant)["state"] == "active", world.item(tenant)
     gen = world.live(tenant)
     assert {a["name"] for a in bao.aliases} == {gen.role_id, gen.sign_role_id} and len(bao.aliases) == 2
-    assert (set(bao.approles), set(bao.entities)) == ({gen.approle, gen.sign_approle}, {gen.entity, gen.sign_entity})
+    assert ({a for a in bao.approles if not a.startswith("evidence-")}, set(bao.entities)) == (  # #1546: the evidence AppRole is beside them
+        {gen.approle, gen.sign_approle}, {gen.entity, gen.sign_entity})
 
 
 # --- wrap, install, sweep ----------------------------------------------------------------------------------
@@ -260,7 +267,7 @@ def test_the_key_is_the_tenants_and_survives_rotations_while_each_generation_pro
         world.drive()
         assert world.item(tenant)["state"] == "active"
     bao = world.openbao
-    assert set(bao.transit_keys) == {_key(tenant), _key(other)}
+    assert _request_keys(bao) == {_key(tenant), _key(other)}
     assert bao.made("DELETE", _key_path(tenant)) == [] and len(_writes_to(world, _key_path(tenant))) == 1
     gens = world.generations(tenant)
     assert len(gens) == 3 and {g.status for g in gens} == {"destroyed", "live"}
@@ -285,7 +292,7 @@ def test_offboarding_makes_the_key_deletable_then_deletes_it(world):
     tenant, other = world.active_tenant(), world.active_tenant()
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
-    assert set(world.openbao.transit_keys) == {_key(other)}
+    assert _request_keys(world.openbao) == {_key(other)}
     calls = [(c.method, c.path, c.body) for c in world.openbao.calls if c.path.startswith(_key_path(tenant))]
     config = next(i for i, (m, p, b) in enumerate(calls) if p.endswith("/config") and m in ("POST", "PUT") and b["deletion_allowed"] is True)
     delete = [i for i, (m, p, _b) in enumerate(calls) if m == "DELETE" and p == _key_path(tenant)]

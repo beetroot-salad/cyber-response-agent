@@ -35,7 +35,8 @@ from defender.tests.tenancy.lifecycle_1214._support import (  # noqa: E402
 )
 
 
-OFFBOARD_STEPS = [("offboard", "service"), ("teardown", "host"), ("finish", "service")]
+#: #1546 A-O5: the evidence pass is the host step between `teardown` and `finish` (its name `evidence` is a pinned pick).
+OFFBOARD_STEPS = [("offboard", "service"), ("teardown", "host"), ("evidence", "host"), ("finish", "service")]
 
 
 ROTATE_STEPS = [
@@ -95,7 +96,7 @@ def test_offboard_ends_api_access_at_once_then_destroys_everything_but_the_archi
         "offboarding", "offboard", "offboard", "service")
     assert [(e.action, e.actor, e.tenant_id) for e in audit.since(mark)] == [(OFFBOARD, user_id(world.ops), tenant)]
 
-    in_order(sample(world, tenant), [*OFFBOARD_STEPS, ("delete_repo", "service")], hosts=["teardown"])
+    in_order(sample(world, tenant), [*OFFBOARD_STEPS, ("delete_repo", "service")], hosts=["teardown", "evidence"])
     record = world.record(tenant)
     assert (record.state, record.pending_action, record.failure) == ("offboarded", "delete_repo", None)
     assert record.repo_delete_after == record.offboarded_at + REPO_WINDOW
