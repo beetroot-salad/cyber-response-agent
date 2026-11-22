@@ -414,6 +414,9 @@ class ApiDeps:
     tenants: TenantRepository
     #: The one `Origin` a state-changing request may carry (O6).
     frontend_origin: str
+    #: The Forgejo site's public hostname (#1592, `DEFENDER_FORGE_DOMAIN`): an adoption's pull request is served as
+    #: `https://<forge_domain>/<the wiring's repo>/pulls/<n>`.
+    forge_domain: str
     alerts: AlertsRepository
     investigations: InvestigationsRepository
     learning_jobs: LearningJobsRepository

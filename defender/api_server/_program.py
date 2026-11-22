@@ -201,7 +201,7 @@ def _bind(settings: Settings) -> socket.socket:
 
 
 def api_deps(*, identity: IdentityService, tenants: TenantRepository, ports: JobStorePorts, frontend_origin: str,
-             systems: SystemsRepository, secrets: SecretStore,
+             forge_domain: str, systems: SystemsRepository, secrets: SecretStore,
              learning_work: LearningWorkRepository | None = None) -> ApiDeps:
     """The app's ports as the program composes them: the job store's ports back every family the store serves, the
     tenant's records and their credentials are `systems` and `secrets` (the program's are over the record store and
@@ -210,7 +210,7 @@ def api_deps(*, identity: IdentityService, tenants: TenantRepository, ports: Job
     (the connection check, the blob store, lessons). The API test worlds compose through this too (#1496), so they
     cannot drift."""
     return ApiDeps(
-        identity=identity, tenants=tenants, frontend_origin=frontend_origin,
+        identity=identity, tenants=tenants, frontend_origin=frontend_origin, forge_domain=forge_domain,
         alerts=ports, investigations=ports, learning_jobs=ports, alert_mapping=ports, writes=ports,
         learning_work=learning_work if learning_work is not None else Refusing(_LEARNING_WORK),
         offboarding=ports, host_requests=ports, lessons=Refusing(_LESSONS), systems=systems, secrets=secrets,
@@ -314,7 +314,7 @@ async def serving(settings: Settings, *, transport: httpx.AsyncBaseTransport | N
                                            bootstrap=settings.administrators, programs=programs)
                 app = create_app(api_deps(
                     identity=identity, tenants=tenants, ports=JobStorePorts(store), frontend_origin=settings.frontend_origin,
-                    systems=ConfigRecords(records, tenants, catalog, secrets), secrets=ConfigCredentials(records, secrets),
+                    forge_domain=settings.forge_domain, systems=ConfigRecords(records, tenants, catalog, secrets), secrets=ConfigCredentials(records, secrets),
                     learning_work=StoreLearningWork(learning)))
             async with steps.step("binding the listening socket"):
                 sock = _bind(settings)

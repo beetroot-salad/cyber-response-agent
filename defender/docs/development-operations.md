@@ -160,8 +160,10 @@ enough to list, read and cancel):
    to `http://localhost:8000` (not `127.0.0.1`: it must match the realm's redirect exactly) on its own port, and start
    the repo's ingress with `python -m defender.api_server.ingress` (inputs: `DEFENDER_INGRESS_LISTEN` = `127.0.0.1:8000`,
    where it serves plain HTTP, `DEFENDER_ARTIFACT_DOMAIN`, `DEFENDER_INGRESS_API_UPSTREAM` = the API's `host:port`,
-   `DEFENDER_INGRESS_FRONTEND_DIR` = `defender/frontend/dist`; it needs Caddy on PATH; TLS, when there is any, ends in
-   front of it). Every API route is under `/api`. No docs page is served: for routes the app has no screen for, call
+   `DEFENDER_INGRESS_FRONTEND_DIR` = `defender/frontend/dist`, `DEFENDER_FORGE_DOMAIN` = `forge.localhost` and
+   `DEFENDER_INGRESS_FORGE_UPSTREAM` = `forgejo:3000`, the Forgejo site of #1592 at `http://forge.localhost:8000`,
+   whose sessions database and sign-in source `.devcontainer/forgejo/setup.sh` sets up; it needs Caddy on PATH; TLS,
+   when there is any, ends in front of it). Every API route is under `/api`. No docs page is served: for routes the app has no screen for, call
    them with the session cookie (for example with `curl`), reading `/api/openapi.json` in a viewer on another origin.
    For a hot-reload loop use `bun run dev` instead of the ingress: Vite's dev server on `http://localhost:8000` (the
    origin the realm registers), with `/api` sent to `DEFENDER_INGRESS_API_UPSTREAM`. It has no CSP; the built ingress is the
