@@ -748,3 +748,85 @@ def test_r_i3_a_drain_with_no_daemon_refuses_even_under_the_unsandboxed_opt_out(
     assert rc == 0, critical_text(caplog)
     assert ran, "the control never got past the box start"
     assert draft_entries(t) == []
+
+
+# --- #1618 D11 / K9: a refusal is `transient` or `lasting` with a reason; the drains' split behind the person ceiling ----
+
+def _fault_1618(kind):
+    """An error as the delivery's open raises it: the delivery refusal over the fault it was raised from."""
+    import httpx
+    from defender import _git
+    from defender.learning.author.version_control.auth import CredentialMisconfigured
+    from defender.learning.author.version_control.forgejo import ForgeError
+
+    request = httpx.Request("GET", "http://forge.invalid/api/v1/repos/o/r")
+
+    def status(code):
+        response = httpx.Response(code, request=request, text="refused")
+        return httpx.HTTPStatusError(f"HTTP {code}", request=request, response=response)
+
+    faults = {
+        "connect": lambda: httpx.ConnectError("down", request=request),
+        "timeout": lambda: httpx.ReadTimeout("slow", request=request),
+        "http-503": lambda: status(503),
+        "http-401": lambda: status(401),
+        "http-403": lambda: status(403),
+        "no-host-secret": lambda: CredentialMisconfigured("the generation records no host secret file"),
+        "git-unreachable": lambda: _git.GitError(["fetch"], 128, "fatal: unable to access: Could not resolve host: forge"),
+        "git-refused": lambda: _git.GitError(["fetch"], 128, "fatal: Authentication failed for 'http://forge/'"),
+    }
+    cause = faults[kind]()
+    refused = ForgeError(f"the forge refused: {cause}")
+    refused.__cause__ = cause
+    return refused
+
+
+TRANSIENT_1618 = ["connect", "timeout", "http-503", "git-unreachable"]
+LASTING_1618 = ["http-401", "http-403", "no-host-secret", "git-refused"]
+
+
+@pytest.mark.parametrize("kind", [*TRANSIENT_1618, *LASTING_1618])
+def test_d11_a_refusal_is_classified_transient_or_lasting_and_the_drains_split_follows_it(kind):
+    """`classify` answers `transient` or `lasting` (never `operator` or `misconfigured`); the drains' refusal is an outage to wait out
+    only for `transient`. A credential the host cannot log in with is `lasting`, as `misconfigured` was. (D11, K9)"""
+    from defender.learning.author.version_control.status import classify
+    from defender.learning.core.store_tick import classified_refusal
+
+    fault = _fault_1618(kind)
+    expected = "transient" if kind in TRANSIENT_1618 else "lasting"
+    got, reason = classify(fault)
+    assert (got, bool(reason)) == (expected, True)
+    assert classified_refusal("the tenant's delivery refused", fault).transient is (expected == "transient")
+
+
+def _product_files_1618():
+    root = Path(__file__).resolve().parents[3]
+    for path in root.rglob("*.py"):
+        parts = path.relative_to(root).parts
+        if parts[0] in {"tests", "migrations", ".venv", "__pycache__"} or ".venv" in parts:
+            continue
+        yield path.relative_to(root).as_posix(), path.read_text(encoding="utf-8")
+
+
+def test_d11_no_product_code_has_a_misconfigured_outcome_or_a_stale_report_class():
+    """No `MISCONFIGURED`, `is_misconfigured`, `"misconfigured"` outcome word or `stale:<kind>` report class is left in product code:
+    a refusal says `transient|lasting` and a reason. (D11, K9)"""
+    import re
+
+    pattern = re.compile(r"""\bMISCONFIGURED\b|\bis_misconfigured\b|["']misconfigured["']|\bSTALE_(?:TRANSIENT|OPERATOR)\b|stale:(?:transient|operator)""")
+    found = {name: sorted(set(pattern.findall(text))) for name, text in _product_files_1618() if pattern.search(text)}
+    assert found == {}, found
+    assert pattern.search('x = "misconfigured"'), "control: the census pattern finds the word"
+
+
+#: Where the retired causes stay as words read back from storage: the vocabularies and one reason text.
+READ_ONLY_HOMES_1618 = {"records/learning_causes.py", "records/job_lane.py", "worker/_worker.py"}
+
+
+@pytest.mark.parametrize("word", ["foreign_commits_local", "repository_busy"])
+def test_k9_foreign_commits_local_and_repository_busy_have_no_writer_only_their_read_side(word):
+    """The stored causes `foreign_commits_local` and `repository_busy` stay in the vocabularies that read them back; no drain, adoption or
+    other product code names them, so nothing writes them. (K9, D7)"""
+    named = {name for name, text in _product_files_1618() if word in text}
+    assert named & READ_ONLY_HOMES_1618, f"control: {word} stays readable where stored values are read"
+    assert named - READ_ONLY_HOMES_1618 == set(), sorted(named - READ_ONLY_HOMES_1618)

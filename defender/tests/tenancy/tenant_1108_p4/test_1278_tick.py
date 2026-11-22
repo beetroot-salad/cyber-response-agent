@@ -10,6 +10,7 @@ Reconcile and feedback are in the feedback slice's files.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import signal
 from datetime import timedelta
 from pathlib import Path
@@ -50,7 +51,9 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     lead_author_drain,
     own_store,
     remote_branches,
+    without_clone,
 )
+from defender.tests.tenancy.knowledge_1618 import _support as K
 from defender.tests.tenancy.tenant_1108_p4._support import git
 
 pytestmark = [pytest.mark.postgres, pytest.mark.usefixtures("tick_impl")]  # the tick over each store implementation (conftest)
@@ -636,3 +639,84 @@ def test_d9_a_lead_batch_closed_with_words_stays_due_and_the_author_tick_authors
     assert _work(w)[("pitfall", "p4-run:1")].status == "in_batch"
     assert w.t.forge.creates == []
     assert remote_branches(w.t.remote, prefix="") == branches, "the tick pushed a branch"
+
+
+# --- #1618 (tenant knowledge lives only in Forgejo): a tick opens by fetching, with no clone on the host ----------------
+
+
+def test_1618_f6_a_batch_starts_from_the_main_the_tick_fetched_with_no_clone_on_the_host(world, caplog):  # noqa: F811 — the imported fixture
+    """With no clone, a batch's draft and recorded base are the remote `main` the tick opened on, merged since the host last saw it. (F6, K4)"""
+    w = world
+    without_clone(w.t)
+    _seed(w, "f1")
+    opening = K.advance_main(w.t, K.MERGED_MARK)
+    seen = {}
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")},
+                          before_commit=lambda batch: seen.update(lesson=(Path(batch.draft_root) / K.LESSON).read_text(encoding="utf-8")))
+
+    _batch_id, branch, _number = _opened(w, writer, caplog)
+
+    assert seen["lesson"] == K.lesson_text(K.MERGED_MARK), "the draft is not the tick's fetched main"
+    [row] = _record(w)
+    assert row.base == opening
+    assert git(w.t.remote, "rev-parse", f"{branch}^") == opening
+
+
+def test_1618_f6_a_main_that_moves_after_the_tick_opened_is_not_the_batchs_base(world, caplog):  # noqa: F811 — the imported fixture
+    """A merge landing while the curator works leaves the batch on the tip the opening fetch saw (the control: the case above reads the tip the fetch did see). (F6, K12)"""
+    w = world
+    without_clone(w.t)
+    _seed(w, "f1")
+    opening = w.t.origin_main()
+    moved = {}
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")},
+                          before_commit=lambda _batch: moved.setdefault("tip", K.advance_main(w.t, "K1618-LATER-MARK")))
+
+    _batch_id, branch, _number = _opened(w, writer, caplog)
+
+    assert moved["tip"] != opening, "premise: main moved during the tick"
+    [row] = _record(w)
+    assert row.base == opening
+    assert git(w.t.remote, "rev-parse", f"{branch}^") == opening, "the batch was rebased on a main the tick never fetched"
+
+
+def test_1618_k4_a_tick_whose_forge_cannot_be_reached_at_its_opening_fetch_claims_nothing_and_makes_no_draft(world, caplog):  # noqa: F811 — the imported fixture
+    """Forgejo refusing the connection at the opening fetch skips the tick before any claim or draft: items waiting, no batch. (K4, F6)"""
+    w = world
+    without_clone(w.t)
+    _seed(w, "f1")
+    assert [i.status for i in _work(w).values()] == ["waiting"], "premise: the item is due"
+    K.forge_down(w.t)
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+
+    rc = _tick(w, writer)
+
+    assert rc == 0, f"an outage is a skipped tick (a transient refusal), not a fatal one: {critical_text(caplog)}"
+    assert writer.served == [], "a curator ran on knowledge the tick could not fetch"
+    assert _batches(w) == {}, "a batch was claimed before the opening fetch answered"
+    assert [(i.status, i.attempts) for i in _work(w).values()] == [("waiting", 0)]
+    assert list(drafts_dir(w.t).glob("*")) == [], "a draft was made with no fetch"
+
+
+@own_store("the tick is the post-step's, whose store is the port over a real helper")
+def test_1618_k7_a_tick_in_the_job_container_never_sweeps(world, post_step_helper, caplog):  # noqa: F811 — the imported fixture
+    """A tick run as the post-step in its job container (a pid namespace in which host owners look dead) opens its batch and runs no sweep; the counter sees a sweep when one is made. (K7, F8)"""
+    from defender.tests.learning.branch.test_1344_post_step import post_step_in_container
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    w = world
+    _seed(w, "f1")
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+    helper = post_step_helper()
+    without_clone(w.t)
+    sweep_dead_owners = importlib.import_module(K.SWEEP_MODULE).sweep_dead_owners  # FORCED: the name the shared support module (`K.sweep`) fixes
+
+    with counting_calls(sweep=sweep_dead_owners) as seen:
+        rc = post_step_in_container(None, w.t.tenant_id, forward=helper.ask,
+                                    author_tick=lambda _paths, *, store: author_drain(w.t, w.paths, trigger=writer, box=BoxSpy(), store=store))
+    assert (rc, bool(writer.served)) == (0, True), f"premise: the container's tick opened a batch ({critical_text(caplog)})"
+    assert seen.counts["sweep"] == 0, "a tick in a job container swept, and would remove a live host owner's folder"
+
+    with counting_calls(sweep=sweep_dead_owners) as control:
+        K.sweep(w.t)
+    assert control.counts["sweep"] == 1, "control: the counter does not see a sweep"

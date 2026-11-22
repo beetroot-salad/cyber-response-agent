@@ -27,7 +27,6 @@ from defender.tests.support.tenancy import _tenants1106 as tenants
 
 from ._support import (
     FIXTURE_SETTINGS,
-    current_commit,
     export_dir,
     files_under,
     git,
@@ -151,17 +150,13 @@ def _assert_siblings_pinned(launch: Launch, commit: str) -> None:
 
 
 def test_flow7_siblings_are_pinned_to_the_source_knowledge_commit_materialised_first(scene):
-    """Every sibling carries the source's `K1`, not `current`'s `K2`; the deleted `exports/K1/`
-    is materialised first, and `current` does not move."""
+    """Every sibling carries the source's `K1`, not `current`'s `K2`; no `exports/K1/` is made (#1618 K8)."""
     t = scene.t
     _stamp_source(scene, knowledge={"commit": scene.k1})
     launch = _launch(scene, live_tree=T.source_capture(knowledge={"commit": scene.k1}))
 
     _assert_siblings_pinned(launch, scene.k1)
-    rebuilt = export_dir(t.tenant, scene.k1) / QPATH
-    assert rebuilt.is_file(), "the source's knowledge export was not materialised"
-    assert rebuilt.read_text(encoding="utf-8") == _questioner_lesson(Q_EXPORT)
-    assert current_commit(t.tenant) == scene.k2, "the branch launch moved `current`"
+    assert not export_dir(t.tenant, scene.k1).exists(), "an export was made: #1618 K8 has no exports"
 
 
 def test_flow7_the_questioner_reads_its_corpus_from_the_pinned_export(scene):
@@ -229,3 +224,59 @@ def test_od9_a_source_with_no_knowledge_commit_refuses_naming_why_even_with_allo
     assert cause in launch.message, f"the refusal does not name why ({cause!r}): {launch.message!r}"
     assert not launch.spawn.launches, "a sibling started with no knowledge commit to pin"
     assert not launch.questioner.prompts, "the questioner was paid for before the refusal"
+
+
+# --- #1618: the launcher reads Forgejo's commit (F4, K4, K5) ---------------------------------------
+
+def _asking_forgejo(scene: Scene, **seams):
+    """The launch with the fetch child's credential handed in-process (`identity=`, #1618 FORCED)."""
+    return _launch(scene, identity=scene.t.vault.identity(), **seams)
+
+
+def test_1618_k5_the_questioner_corpus_is_the_pinned_commit_fetched_by_id_from_forgejo(scene):
+    """Call 1 shows the questioner lesson at the source's `K1` while the git listener served the launch (the fetch by id),
+    and no export folder, clone read or `current` stands behind it. (F4, K5)"""
+    _stamp_source(scene, knowledge={"commit": scene.k1})
+    served = len(scene.t.server.seen)
+
+    launch = _asking_forgejo(scene, live_tree=T.source_capture(knowledge={"commit": scene.k1}))
+
+    assert launch.questioner.prompts, f"the questioner was never called (rc={launch.rc!r}, refusal={launch.message!r})"
+    assert Q_EXPORT in launch.questioner.prompts[0]
+    assert not [m for m in (Q_CURRENT, Q_WORKTREE) if m in launch.questioner.prompts[0]]
+    assert len(scene.t.server.seen) > served, "the corpus was not fetched from Forgejo"
+    assert not export_dir(scene.t.tenant, scene.k1).exists(), "an export was made"
+
+
+def test_1618_k4_with_forgejo_down_the_launch_is_refused_naming_why_before_anything_is_spent(scene):
+    """Forgejo unreachable: the launcher exits non-zero with a reason, the question-writer is never paid for and no sibling
+    starts; the same launch with Forgejo up reaches both (control). (F4, K4)"""
+    from defender.tests.tenancy.knowledge_1618 import _support as K
+
+    _stamp_source(scene, knowledge={"commit": scene.k1})
+    control = _asking_forgejo(scene, live_tree=T.source_capture(knowledge={"commit": scene.k1}))
+    assert control.questioner.prompts, f"control: the launch did not reach the questioner ({control.message!r})"
+    assert control.spawn.launches
+
+    K.forge_down(scene.t)
+    launch = _asking_forgejo(scene, live_tree=T.source_capture(knowledge={"commit": scene.k1}))
+
+    assert launch.rc not in (0, None), "a launch ran with Forgejo unreachable"
+    assert launch.message.strip(), "the refusal names no reason"
+    assert "stale" not in launch.message.lower()
+    assert not launch.questioner.prompts, "the questioner was paid for with no knowledge to read"
+    assert not launch.spawn.launches, "a sibling started with no knowledge to pin"
+
+
+def test_1618_k3_the_launchers_tenant_check_reads_mains_settings_not_the_clone(scene):
+    """The tenant check judges a copy of main's tip: a merge that removes `settings/verb-grants.yaml` (the clone, `current`
+    and the kept export still hold it) refuses the launch naming that file, before anything is spent. (F4, K8)"""
+    _stamp_source(scene, knowledge={"commit": scene.k1})
+    scene.t.merge({"settings/verb-grants.yaml": None}, message="a merge that drops the grant table")
+
+    launch = _asking_forgejo(scene, live_tree=T.source_capture(knowledge={"commit": scene.k1}))
+
+    assert launch.rc not in (0, None), "the launch ran over a tenant whose main has no grant table"
+    assert "verb-grants" in launch.message, f"the refusal does not name the file: {launch.message!r}"
+    assert not launch.questioner.prompts
+    assert not launch.spawn.launches

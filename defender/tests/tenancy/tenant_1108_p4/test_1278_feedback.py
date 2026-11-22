@@ -44,7 +44,11 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     critical_text,
     lead_author_drain,
     remote_branches,
+    without_clone,
 )
+from defender.tests.tenancy.knowledge_1618 import _support as K
+from defender.tests.tenancy.tenant_1108_delivery._support import set_pull_state
+from defender.tests.tenancy.tenant_1108_p4._support import git
 
 pytestmark = [pytest.mark.postgres, pytest.mark.usefixtures("tick_impl")]  # the tick over each store implementation (conftest)
 
@@ -403,3 +407,92 @@ def test_feedback_close_then_crash_is_idempotent(world, caplog):
     assert _end(w, batch_id) == ("ended", "closed")
     assert len(_replacements(w, batch_id)) == 1
     assert len(w.t.forge.creates) == 2
+
+
+# --- #1618 K12: a reconcile reads only what the tick fetched, by branch, pull ref or id; no clone on the host ------------
+
+
+def _cut_by_a_squash_of_the_reviewers_own(w, branch):
+    """A person merges the batch's PR as a squash whose result cites f1 alone, deleting the branch: the merge commit is on
+    `main`, the branch tip (citing f1 and f2) is reachable from no branch, only from the PR's `refs/pull/<n>/head`."""
+    def edit(checkout):
+        (checkout / LESSON_PATH).write_text(lesson_citing("f1"), encoding="utf-8")
+    merge = push_to_remote(w.t.p3, w.scratch, edit, "squash of the reviewer's own")
+    set_pull_state(w.t.remote, branch, merged=True, delete_branch=True, merge_commit=merge)
+    return merge
+
+
+def _two_cited_in_review(w, caplog):
+    w.seed("f1", "f2")
+    batch_id, branch, number = opened(w, FeedbackCurator(_files("f1", "f2")), caplog)
+    assert w.statuses() == {"f1": "in_batch", "f2": "in_batch"}
+    return batch_id, branch, number
+
+
+def test_1618_k12_a_merge_whose_branch_was_deleted_is_read_through_the_prs_pull_ref_with_no_clone(world, caplog):
+    """The branch is gone after the merge: the tick fetches `refs/pull/<n>/head` and holds f2, which the tip cites and the merge dropped. (K12, F6)"""
+    w = world
+    batch_id, branch, number = _two_cited_in_review(w, caplog)
+    without_clone(w.t)
+    _cut_by_a_squash_of_the_reviewers_own(w, branch)
+    assert K.remote_ref(w.t, f"refs/heads/{branch}") is None, "premise: the branch is deleted"
+    assert K.remote_ref(w.t, f"refs/pull/{number}/head"), "premise: the pull ref stays (C-F5)"
+
+    tick(w, FeedbackCurator())
+
+    assert w.statuses() == {"f1": "published", "f2": "held"}, critical_text(caplog)
+    assert _end(w, batch_id) == ("ended", "merged")
+
+
+def test_1618_k12_a_branch_tip_no_ref_names_any_more_is_fetched_by_id_not_assumed_from_the_record(world, caplog):
+    """The pull ref is gone too: the tip the record and the PR name is fetched by id, so f2 is still held. (K12, K5)"""
+    w = world
+    batch_id, branch, number = _two_cited_in_review(w, caplog)
+    without_clone(w.t)
+    _cut_by_a_squash_of_the_reviewers_own(w, branch)
+    git(w.t.remote, "update-ref", "-d", f"refs/pull/{number}/head")
+
+    tick(w, FeedbackCurator())
+
+    assert w.statuses() == {"f1": "published", "f2": "held"}, critical_text(caplog)
+    assert _end(w, batch_id) == ("ended", "merged")
+
+
+def test_1618_k12_a_tip_forgejo_no_longer_serves_is_never_read_from_what_the_tick_did_not_fetch(world, caplog):
+    """The tip is neither on a ref nor fetchable: the merge is not settled from an object the tick never held; the batch stays in review. (K12)"""
+    w = world
+    batch_id, branch, number = _two_cited_in_review(w, caplog)
+    without_clone(w.t)
+    _cut_by_a_squash_of_the_reviewers_own(w, branch)
+    git(w.t.remote, "update-ref", "-d", f"refs/pull/{number}/head")
+    git(w.t.remote, "reflog", "expire", "--expire=now", "--all")
+    git(w.t.remote, "gc", "--prune=now", "--quiet")
+
+    tick(w, FeedbackCurator())
+
+    assert [r.url.path for r in w.t.forge.requests if r.method == "GET" and r.url.path.rstrip("/").endswith(f"/pulls/{number}")], \
+        "premise: the tick opened and read the merged PR"
+    assert _end(w, batch_id) == ("in_review", None), "the merge was settled with no tip to read"
+    assert w.statuses() == {"f1": "in_batch", "f2": "in_batch"}
+
+
+def test_1618_k12_a_merge_that_lands_after_the_tick_opened_is_found_by_one_more_fetch(world, caplog):
+    """The PR is merged while the tick is already open (its first read of the PR): the reconcile fetches again and publishes f1, holds f2. (K12, F6)"""
+    w = world
+    batch_id, branch, number = _two_cited_in_review(w, caplog)
+    without_clone(w.t)
+    merged = {}
+
+    def merge_when_the_pr_is_first_read(request):
+        if not merged and request.method == "GET" and request.url.path.rstrip("/").endswith(f"/pulls/{number}"):
+            merged["main"] = merge_on_remote(w.t.p3, w.scratch, branch,
+                                             edit=reviewer_removes_citation(LESSON_NAME, lesson_citing("f1")))
+        return None
+
+    w.t.forge.fault = merge_when_the_pr_is_first_read
+
+    tick(w, FeedbackCurator())
+
+    assert merged, "premise: the merge landed during the tick"
+    assert w.statuses() == {"f1": "published", "f2": "held"}, critical_text(caplog)
+    assert _end(w, batch_id) == ("ended", "merged")

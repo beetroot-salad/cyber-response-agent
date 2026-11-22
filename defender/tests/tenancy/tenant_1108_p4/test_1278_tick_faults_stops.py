@@ -27,7 +27,7 @@ from defender.tests.support.learning.core._tickfaults1278 import (
     hang_pushes,
     raise_in,
 )
-from defender.tests.tenancy.tenant_1108_p4._drain_support import critical_text
+from defender.tests.tenancy.tenant_1108_p4._drain_support import critical_text, without_clone
 from defender.tests.tenancy.tenant_1108_p4.test_1278_tick_faults import (
     LANES,
 )
@@ -63,7 +63,6 @@ STOP_POINTS = (
     StopPoint("second_curator_before_its_commit", 1, 2, curator=1, point=BEFORE_COMMIT),
     StopPoint("second_curator_after_its_commit", 2, 2, curator=1, point=AFTER_COMMIT),
     StopPoint("during_the_push", 2, 2, push=True),
-    StopPoint("during_the_push_which_then_fails", 2, 2, push=True, push_fails=True),
 )
 
 
@@ -79,7 +78,7 @@ def test_the_stop_points_cover_each_curator_before_and_after_its_commit_and_the_
     assert {len(c) for c in CURATORS.values()} == {2}
     assert [(p.curator, p.point) for p in STOP_POINTS if p.curator is not None] == [
         (0, BEFORE_COMMIT), (0, AFTER_COMMIT), (1, BEFORE_COMMIT), (1, AFTER_COMMIT)]
-    assert [p.name for p in STOP_POINTS if p.push] == ["during_the_push", "during_the_push_which_then_fails"]
+    assert [p.name for p in STOP_POINTS if p.push] == ["during_the_push"]
 
 
 @pytest.mark.parametrize(("lane", "stop", "how"), _stop_cases())
@@ -199,3 +198,32 @@ def test_a_stopped_claims_push_that_hangs_is_cut_off_inside_the_stop_budget(worl
     assert lease_seconds_left(w.dsn, batch.id) <= 0
     assert s.branch_tip_on_remote(batch.branch) is None, "premise: the push never finished"
     assert s.open_prs() == []
+
+
+@pytest.mark.parametrize("lane", LANES)
+def test_1618_k10_a_stop_whose_budgeted_push_is_refused_loses_the_batch_and_the_takeover_abandons_it(world, caplog, lane):  # 1618-tradeoff  # noqa: F811 — the imported fixture
+    """A deploy stop after a commit whose stop-path push is refused leaves nothing on the remote: the takeover abandons the batch (attempt counted) rather than deliver from a disk. (K10)"""
+    w = world
+    without_clone(w.t)
+    s = Scene(w, lane)
+    s.seed()
+    cast = Cast(s, hooks={(CURATORS[lane][0], AFTER_COMMIT): ask_for_stop_and_wait(w)})
+    w.t.server.fail_push("refuse", times=1)
+
+    child = s.run_in_child(cast, "stop-refused")
+    child.wait(seconds=STOP_BOUND)
+
+    [first] = s.batches().values()
+    assert w.t.server.pushes == ["refused"], "premise: the stop path pushed once and was refused"
+    assert len(cast.commits()) == 1, critical_text(caplog)
+    assert s.branch_tip_on_remote(first.branch) is None
+    w.monkeypatch.setenv(RENEW_ENV, "600")
+    again = Cast(s, tag="-again")
+
+    s.run(again)
+
+    rows = s.batches()
+    assert (rows[first.id].phase, rows[first.id].outcome) == ("ended", "abandoned"), critical_text(caplog)
+    assert s.branch_tip_on_remote(first.branch) is None
+    assert {i.attempts for i in s.items().values()} == {2}, "the stopped attempt was forgiven"
+    assert [pr["head"]["ref"] for pr in s.open_prs()] != [first.branch]

@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import shutil
+
 import pytest
 
 from defender.tests.support.learning.core._store1278 import (
@@ -25,11 +27,12 @@ from defender.tests.support.learning.core._tickfaults1278 import (
     CURATORS,
     START,
     Cast,
-    PushSpy,
     Scene,
     raise_in,
 )
-from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, critical_text
+from defender.tests.tenancy.knowledge_1618 import _support as K
+from defender.tests.tenancy.tenant_1108_p4._drain_support import BoxSpy, critical_text, drafts_dir, without_clone
+from defender.tests.tenancy.tenant_1108_p4._support import git
 
 pytestmark = [pytest.mark.postgres, pytest.mark.usefixtures("tick_impl")]  # the tick over each store implementation (conftest)
 
@@ -57,12 +60,6 @@ class RefusingBox(BoxSpy):
         if self.fail_stop:
             raise RuntimeError("injected: the box would not stop")
         super().stop(box, **kw)
-
-
-def _boom(where: str):
-    def make() -> BaseException:
-        return RuntimeError(f"injected: {where}")
-    return make
 
 
 @dataclass(frozen=True)
@@ -110,12 +107,6 @@ def _arm_stop_box_with_commits(s: Scene, mp: pytest.MonkeyPatch):
     return Cast(s), RefusingBox(stop=True)
 
 
-def _arm_push(s: Scene, mp: pytest.MonkeyPatch):
-    cast = Cast(s)
-    PushSpy(cast, mp, fail_from=1, error=_boom("the push"))
-    return cast, None
-
-
 def _arm_open_pr(s: Scene, mp: pytest.MonkeyPatch):
     from defender.learning.author.version_control import store_delivery
 
@@ -147,7 +138,6 @@ STEPS = (
     Step("stop_box_after_a_batch_with_no_commit", False, _arm_stop_box_no_commits),
     Step("curator_halts_after_its_commit", True, _arm_curator_halts_after_commit),
     Step("stop_box_after_a_batch_with_commits", True, _arm_stop_box_with_commits),
-    Step("push", True, _arm_push),
     Step("record_read_before_the_pr", True, _arm_commit_record_read),
     Step("pr_open", True, _arm_open_pr),
 )
@@ -163,7 +153,7 @@ def test_the_step_table_names_each_step_of_the_claims_life_once():
     """The fault domain is the claim's steps, each once: a step added with no entry is a failure here. (Uncontained fault)"""
     assert [s.name for s in STEPS] == [
         "start_batch", "start_box", "curator_halts_before_its_commit", "stop_box_after_a_batch_with_no_commit",
-        "curator_halts_after_its_commit", "stop_box_after_a_batch_with_commits", "push", "record_read_before_the_pr",
+        "curator_halts_after_its_commit", "stop_box_after_a_batch_with_commits", "record_read_before_the_pr",
         "pr_open"]
     assert {s.commits for s in STEPS} == {True, False}
 
@@ -214,3 +204,91 @@ def test_a_fault_the_tick_does_not_contain_leaves_the_batch_to_a_takeover_with_c
         else:
             assert {i.status for i in items.values()} == {"waiting"}
         assert s.open_prs() == []
+
+
+# =====================================================================================================================
+# #1618 K10: a batch's pushed work survives its process; unpushed work is redone (no clone on the host)
+# =====================================================================================================================
+
+
+def _author_scene(w, lane=AUTHOR_LANE):
+    """`lane` seeded for both its curators, over a host with no clone."""
+    without_clone(w.t)
+    s = Scene(w, lane)
+    s.seed()
+    return s
+
+
+def test_1618_k10_an_end_push_that_succeeds_leaves_every_commit_of_the_batch_on_the_remote_and_in_the_record(world, caplog):  # noqa: F811 — the imported fixture
+    """The end push puts the batch's every commit on the remote branch, each one in the commit record, and the PR opens. (K10)"""
+    w = world
+    s = _author_scene(w)
+    cast = Cast(s)
+
+    s.run(cast)
+
+    [batch] = s.batches().values()
+    assert len(cast.commits()) == 2, f"premise: two curators committed ({critical_text(caplog)})"
+    on_remote = git(w.t.remote, "rev-list", "--reverse", f"{batch.base}..refs/heads/{batch.branch}").split()
+    assert on_remote == cast.commits()
+    assert [r.commit for r in call(w.dsn, "commit_record", w.t.tenant_id)] == on_remote
+    assert w.t.server.pushes == ["landed"]
+    assert [pr["head"]["ref"] for pr in s.open_prs()] == [batch.branch]
+
+
+@pytest.mark.parametrize("elsewhere", [False, True], ids=["same-host", "other-host-sharing-no-disk"])
+def test_1618_k10_an_end_push_that_landed_but_lost_its_reply_is_delivered_by_a_takeover_that_reads_only_the_remote(world, caplog, elsewhere):  # noqa: F811 — the imported fixture
+    """The push lands and its reply is lost: the next tick, even on a host holding nothing of the first, opens the PR for the remote's commits and runs no curator. (K10)"""
+    w = world
+    s = _author_scene(w)
+    cast = Cast(s)
+    w.t.server.fail_push("lose_reply", times=1)
+
+    s.run(cast)
+
+    [batch] = s.batches().values()
+    assert w.t.server.pushes == ["landed-reply-lost"], "premise: the push landed and its reply was lost"
+    assert s.branch_tip_on_remote(batch.branch) == cast.commits()[-1]
+    assert (batch.phase, s.open_prs()) == ("working", []), critical_text(caplog)
+    assert lease_seconds_left(w.dsn, batch.id) <= 0
+    if elsewhere:  # a replacement host or container: nothing of the first tick's is on its disk
+        shutil.rmtree(drafts_dir(w.t), ignore_errors=True)
+        shutil.rmtree(K.tenant_root(w.t) / "run-knowledge", ignore_errors=True)
+        shutil.rmtree(K.tenant_root(w.t).parent / ".repo-scratch", ignore_errors=True)
+    again = Cast(s, tag="-again")
+
+    s.run(again)
+
+    assert again.started() == [], "the takeover ran a curator again"
+    [pr] = s.open_prs()
+    after = s.only_batch()
+    assert (after.phase, after.pr_number, pr["head"]["ref"]) == ("in_review", pr["number"], batch.branch)
+    assert s.branch_tip_on_remote(batch.branch) == cast.commits()[-1]
+    assert [r.commit for r in call(w.dsn, "commit_record", w.t.tenant_id)] == cast.commits()
+
+
+@pytest.mark.parametrize("lane", LANES)
+def test_1618_k10_an_end_push_the_remote_refused_leaves_nothing_to_deliver_and_the_takeover_abandons_the_batch(world, caplog, lane):  # 1618-tradeoff  # noqa: F811 — the imported fixture
+    """A refused end push lands nothing: the takeover abandons that batch (attempt counted, nothing opened for it) and its items are authored again. (K10)"""
+    w = world
+    s = _author_scene(w, lane)
+    cast = Cast(s)
+    w.t.server.fail_push("refuse", times=1)
+
+    s.run(cast)
+
+    [first] = s.batches().values()
+    assert w.t.server.pushes == ["refused"], "premise: the push was refused"
+    assert s.branch_tip_on_remote(first.branch) is None
+    assert len(cast.commits()) == 2, f"premise: the batch had commits ({critical_text(caplog)})"
+    again = Cast(s, tag="-again")
+
+    s.run(again)
+
+    rows = s.batches()
+    assert (rows[first.id].phase, rows[first.id].outcome) == ("ended", "abandoned"), "the takeover delivered what only the lost host held"
+    assert s.branch_tip_on_remote(first.branch) is None
+    [fresh] = [b for b in rows.values() if b.id != first.id]
+    assert again.started(), "the abandoned batch's items were not authored again"
+    assert [pr["head"]["ref"] for pr in s.open_prs()] == [fresh.branch]
+    assert {i.attempts for i in s.items().values()} == {2}, "the abandoned attempt was forgiven"

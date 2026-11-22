@@ -29,6 +29,8 @@ from ._support import (
 )
 
 
+from ._clone_free_1618 import delivery_without_clone
+
 from ._scenarios import (
     _name_status,
     _branches,
@@ -154,3 +156,24 @@ def test_no_legacy_credential_file_is_needed(repo):
     repo[2].unlink()
     result = delivery(repo, ForgeHTTP()).publish()
     assert result.commit == git(repo[1], "rev-parse", "main")
+
+
+def test_1618_d9_delivery_checks_main_protection_and_a_knowledge_copy_does_not(repo, tmp_path, data_root):
+    """An unprotected `main` refuses a delivery's open (the protection rule is read), while a knowledge copy of that forge is made and asks for no protection. (D9)"""
+    from defender.tests.tenancy.knowledge_1618 import _support as K
+
+    unprotected = ForgeHTTP()
+    unprotected.protection = {"protected": False, "user_can_push": False}
+    with pytest.raises(target().DeliveryRefused, match="protect|push|merge|main"):
+        delivery_without_clone(repo, unprotected)
+    asked = [r.url.path for r in unprotected.requests]
+    assert any(p.endswith("/branches/main") for p in asked), "control: the delivery's open reads main's protection"
+
+    with K.scene(tmp_path, data_root) as t:
+        t.forge.protection = {"protected": False, "user_can_push": False}
+        dest = K.owned_dest(tmp_path / "copy")
+        commit = K.fetch_copy(t, dest)
+        assert commit == t.origin_main()
+        assert K.half_at(t, commit, "agent") == K.tree_bytes(dest / "agent")
+        assert [r.url.path for r in t.forge.requests if r.url.path.endswith("/branches/main")] == [], \
+            "the knowledge copy asked the forge about main's protection"

@@ -785,7 +785,8 @@ def drive_helper(scene: HelperScene, argv: list[str], *, docker: ContainerStandI
         ran.publishes += 1
         return B.fresh(scene.t.commit)
 
-    seams.setdefault("publish", publish)
+    if "fetch" not in seams:  # #1618: a case that hands the helper its `fetch` seam has no launch-time publish (r5 deletes it)
+        seams.setdefault("publish", publish)
     try:
         ran.rc = job_host.main(argv, docker=docker, signer=signer, **seams)
     except SystemExit as e:

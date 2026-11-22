@@ -409,3 +409,44 @@ def test_ap4_the_ports_filter_is_a_disposition_the_no_outcome_marker_or_none_and
 
     hint = typing.get_type_hints(AlertsRepository.list_alerts)["outcome"]
     assert set(typing.get_args(hint)) == {Disposition, NoOutcome, type(None)}
+
+
+# --- #1618 K9/D7: the knowledge vocabulary after stale is retired; D10: the readiness steps -------------------------------
+
+COMMIT_1618 = "0123456789abcdef0123456789abcdef01234567"
+RETIRED_1618 = ("stale", "stale_kind", "misconfigured", "repository_busy")
+
+
+def _knowledge_1618(status, commit=COMMIT_1618, stale_kind=None):
+    return models.InvestigationKnowledge(status=status, commit=commit, stale_kind=stale_kind)
+
+
+@pytest.mark.parametrize(("status", "commit"), [("pinned", COMMIT_1618), ("unreadable", None)])
+def test_k9_the_wire_model_takes_pinned_and_unreadable_with_no_stale_kind(status, commit):
+    """`pinned` and the new `unreadable` (no commit) are knowledge statuses, and a new answer carries no stale kind. (K9, D7)"""
+    answer = _knowledge_1618(status, commit).model_dump(mode="json")
+    assert (answer["status"], answer["commit"], answer.get("stale_kind")) == (status, commit, None)
+
+
+@pytest.mark.parametrize("stale_kind", ["transient", "operator"])
+def test_k9_a_stored_stale_answer_still_reads_back_as_it_was_stored(stale_kind):
+    """A stored `{stale, commit, transient|operator}` still validates and dumps unchanged: history is read, not rewritten. (K9)"""
+    answer = _knowledge_1618("stale", COMMIT_1618, stale_kind).model_dump(mode="json")
+    assert answer == {"status": "stale", "commit": COMMIT_1618, "stale_kind": stale_kind}
+
+
+def test_k9_the_fresh_status_stays_one_of_the_wire_models_statuses():
+    """Control for the new words: the fresh status is still accepted under the wire's own word (`current` today). (K9)"""
+    assert _knowledge_1618("current").status == "current"
+
+
+def test_d10_the_readiness_steps_have_publish_and_no_knowledge_copy_in_the_api_model_and_the_records():
+    """`knowledge_copy` is merged into `publish`: neither the API's step type nor the records' step tuple lists it, and the
+    order around `publish` is kept. (D10)"""
+    from defender.records import job_lane
+
+    wire = typing.get_args(models.ReadinessStep)
+    for steps in (wire, job_lane.READINESS_STEPS):
+        assert "knowledge_copy" not in steps, steps
+        assert tuple(steps[steps.index("publish") - 1:steps.index("publish") + 2]) == ("alert_mapping", "publish", "run_tenant")
+    assert tuple(wire) == tuple(job_lane.READINESS_STEPS)

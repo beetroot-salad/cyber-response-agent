@@ -28,7 +28,9 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     author_drain,
     critical_text,
     remote_branches,
+    without_clone,
 )
+from defender.tests.tenancy.tenant_1108_p4._support import git
 
 pytestmark = pytest.mark.postgres
 
@@ -131,3 +133,19 @@ def test_reverts_a_revert_pr_closed_unmerged_ends_its_batch_and_refuses_the_next
     assert remote_branches(t.remote, prefix="") == branches
     assert [b.kind for b in batches(world.dsn, t.tenant_id) if b.kind == "revert"] == ["revert"], "a second revert batch was minted"
     assert {b.phase for b in batches(world.dsn, t.tenant_id) if b.kind == "revert"} == {"ended"}
+
+
+def test_1618_f7_a_revert_needs_no_clone_on_the_host_and_opens_its_pr_off_the_remote_main(world, caplog):  # noqa: F811 — the imported fixture
+    """With no clone, the revert CLI fetches into a private repository, pushes the revert off the remote `main` and opens its PR. (F7, F6)"""
+    t = world.t
+    _authored, _branch = authored_and_merged(world)
+    without_clone(t)
+
+    rc = _revert(t, LESSON)
+
+    assert rc == 0, critical_text(caplog)
+    [revert] = [b for b in batches(world.dsn, t.tenant_id) if b.kind == "revert"]
+    tip = git(t.remote, "rev-parse", f"refs/heads/{revert.branch}")
+    assert git(t.remote, "rev-parse", f"{tip}^") == git(t.remote, "rev-parse", "main"), "the revert is not off the remote main"
+    assert git(t.remote, "diff", "--name-status", f"{tip}^", tip).split() == ["D", LESSON_PATH]
+    assert [r["head"]["ref"] for r in t.forge.prs if r["state"] == "open"] == [revert.branch]

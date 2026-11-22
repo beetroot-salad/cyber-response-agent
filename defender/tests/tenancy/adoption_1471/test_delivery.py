@@ -16,6 +16,8 @@ from defender.tests.tenancy.tenant_1108_delivery._support import (
     git_bytes,
 )
 
+from defender.tests.tenancy.tenant_1108_delivery._clone_free_1618 import delivery_without_clone
+
 from ._forge import (
     DIGEST,
     OTHER_DIGEST,
@@ -405,3 +407,21 @@ def test_each_fetch_reads_a_ref_lock_as_repository_busy_and_any_other_fault_as_d
         assert seen, "premise: the racer pushed between the listing and our push"
     assert (record.outcome, getattr(record, "reason", None)) == ("failed", reason)
     assert forge.creates == []
+
+
+def test_1618_f7_an_offer_needs_no_clone_on_the_host_and_is_one_commit_off_the_remote_main(repo, forge, tmp_path):
+    """With the clone, `exports/` and lock deleted, the step works from a private repository: one commit off the remote `main`, one PR. (F7, A3.5)"""
+    _land(repo, tmp_path, {"agent/lessons/merged-since.md": b"landed after the host last fetched\n"})
+    before = main_tip(repo[1])
+    step = importlib.import_module("defender.learning.author.version_control.adoption")
+    repository = delivery_without_clone(repo, forge).repository
+
+    record = step.adopt(repository, system=SYSTEM, rendering=RENDERING, digest=DIGEST)
+
+    [created] = forge.creates
+    assert created["head"] == BRANCH
+    assert _outcome(record)[0] == "opened"
+    tip = git(repo[1], "rev-parse", f"refs/heads/{BRANCH}")
+    assert git(repo[1], "rev-parse", f"{tip}^") == before
+    assert blobs_at(repo[1], tip, RENDERING) == RENDERING
+    _quiet(forge, repo, before)

@@ -1017,6 +1017,10 @@ class GitHTTP:
         self.authorizations: list[str | None] = []
         self._fired: set[str] = set()
         self._lock = threading.Lock()
+        #: #1618 K10: how the next pushes (`git-receive-pack` POSTs) end, see `fail_push`.
+        self._push_faults: list[dict] = []
+        #: Per push served: `"landed"`, `"landed-reply-lost"` or `"refused"`.
+        self.pushes: list[str] = []
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -1054,7 +1058,7 @@ class GitHTTP:
                 handler.rfile.readline()
         return handler.rfile.read(int(handler.headers.get("Content-Length") or 0))
 
-    def _serve(self, handler):
+    def _serve(self, handler):  # noqa: C901 — one request path; #1618 added the scripted push faults
         parts = urlsplit(handler.path)
         service = parse_qs(parts.query).get("service", [""])[0] or parts.path.rsplit("/", 1)[-1]
         body = self._body(handler)
@@ -1076,6 +1080,10 @@ class GitHTTP:
         if fire and isinstance(answer := self.on_service(service), Trickle):
             answer.send(handler)
             return
+        fault = self._push_fault(service, handler)
+        if fault == "refuse":
+            self._refuse_push(handler)
+            return
         env = {"PATH": os.environ.get("PATH", ""), "GIT_PROJECT_ROOT": str(self.project_root),
                "GIT_HTTP_EXPORT_ALL": "1", "GIT_CONFIG_NOSYSTEM": "1",
                "HOME": str(self.project_root), "PATH_INFO": parts.path,
@@ -1091,6 +1099,8 @@ class GitHTTP:
         # lint-raw-git: test-only smart-HTTP server; the CGI is the remote, not the code under test.
         proc = subprocess.run(["git", "http-backend"], input=body, env=env, capture_output=True,
                               check=False)
+        if self._push_applied(service, handler, fault):
+            return
         head, _, payload = proc.stdout.partition(b"\r\n\r\n")
         status, headers = 200, []
         for line in head.split(b"\r\n"):
@@ -1107,6 +1117,45 @@ class GitHTTP:
         handler.send_header("Content-Length", str(len(payload)))
         handler.end_headers()
         handler.wfile.write(payload)
+
+    def fail_push(self, how, *, times=1, after=0):
+        """#1618 K10: end the next `times` pushes (after letting `after` through) as `how` says. `"lose_reply"`: the server
+        APPLIES the push (the ref moves on the remote) and drops the connection, so the client sees a failure for a
+        push that landed. `"refuse"`: the server answers 403 and applies nothing."""
+        assert how in ("lose_reply", "refuse"), how
+        with self._lock:
+            self._push_faults.append({"how": how, "left": times, "skip": after})
+
+    def _push_fault(self, service, handler):
+        """The fault to apply to this request, if it is a push's POST and one is scripted."""
+        if service != "git-receive-pack" or handler.command != "POST":
+            return None
+        with self._lock:
+            for fault in self._push_faults:
+                if fault["skip"] > 0:
+                    fault["skip"] -= 1
+                    return None
+                if fault["left"] > 0:
+                    fault["left"] -= 1
+                    return fault["how"]
+        return None
+
+    def _refuse_push(self, handler):
+        with self._lock:
+            self.pushes.append("refused")
+        handler.send_response(403)
+        handler.send_header("Content-Length", "0")
+        handler.end_headers()
+
+    def _push_applied(self, service, handler, fault):
+        """Record a push the backend applied; True when its reply must be dropped (`lose_reply`)."""
+        if service == "git-receive-pack" and handler.command == "POST":
+            with self._lock:
+                self.pushes.append("landed-reply-lost" if fault == "lose_reply" else "landed")
+        if fault == "lose_reply":
+            handler.close_connection = True
+            return True
+        return False
 
     def rearm(self):
         """Let `on_service` fire again, once per service, from the next request on."""

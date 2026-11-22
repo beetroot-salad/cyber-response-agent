@@ -180,34 +180,68 @@ def test_o6_a_post_move_run_is_judged_on_the_export_at_its_knowledge_commit(scen
     assert current_commit(scene.t.tenant) == scene.k2, "the judge moved `current`"
 
 
-def test_o6_a_missing_export_is_materialised_from_the_clone_then_read(scene):
-    """Exports are derived, so the judge materialises the missing `exports/<K1>/` from the
-    clone's objects and reads it; `current` and the clone are untouched, and nothing went to
-    the network."""
-    t = scene.t
-    shutil.rmtree(export_dir(t.tenant, scene.k1))
-    head_before = git(t.clone, "rev-parse", "HEAD")
-    calls_before = (len(t.server.seen), len(t.forge.requests), len(t.vault.calls))
-    _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1})
+def _copy_from_forgejo(scene: Scene, asked: list):
+    """The job-lane judge's `knowledge_copy` seam (#1618 FORCED): a copy of `commit` made by the fetch child through the
+    helper's `copy.make(commit=)`, here the child's work in-process into a folder this stands in for the helper making."""
+    def copy(commit: str) -> Path:
+        from defender.tests.tenancy.knowledge_1618 import _support as K
 
-    _only(_shown(scene), EXPORT)
-    rebuilt = export_dir(t.tenant, scene.k1) / TENANT_PATH
-    assert rebuilt.is_file(), "the missing export was not materialised"
-    assert rebuilt.read_text(encoding="utf-8") == _lesson(EXPORT)
-    assert current_commit(t.tenant) == scene.k2, "materialising moved `current`"
-    assert git(t.clone, "rev-parse", "HEAD") == head_before, "the clone's HEAD moved"
-    assert (t.clone / TENANT_PATH).read_text(encoding="utf-8") == _lesson(WORKTREE), (
-        "the clone's working tree was rewritten")
-    assert (len(t.server.seen), len(t.forge.requests), len(t.vault.calls)) == calls_before, (
-        "the judge's read reached the origin, the forge or the issuer (flow 2: no network)")
+        asked.append(commit)
+        dest = K.owned_dest(scene.ep.parent.parent / ".k1618-copies", "judge")
+        K.fetch_copy(scene.t, dest, commit)
+        return dest
+    return copy
+
+
+def _shown_with(scene: Scene, copy) -> str:
+    judge = J.scripted_judge()
+    J.grade(scene.ep, judge=judge, git_show=scene.product, draws=1, knowledge_copy=copy)
+    assert judge.prompts, "the judge model was never called"
+    return "\n".join(judge.prompts)
+
+
+def test_1618_k5_a_post_move_run_is_judged_on_the_body_at_its_commit_copied_from_forgejo(scene):
+    """The judge shows the lesson body at the sibling's knowledge commit as the helper's copy holds it (fetched by id);
+    no export is made and nothing else is read. (F3, K5)"""
+    _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1})
+    asked: list = []
+    shutil.rmtree(export_dir(scene.t.tenant, scene.k1))
+
+    _only(_shown_with(scene, _copy_from_forgejo(scene, asked)), EXPORT)
+
+    assert set(asked) == {scene.k1}, f"the judge asked for another commit: {asked}"
+    assert not export_dir(scene.t.tenant, scene.k1).exists(), "an export was made inside the judge's pass"
+
+
+@pytest.mark.parametrize("cause", ["unreachable", "unserved"])
+def test_1618_k4_k5_a_refused_copy_refuses_the_judge_pass_naming_why(scene, cause):
+    """When the helper refuses the copy (Forgejo down, or a commit it does not serve) the pass is `JudgeRefused` naming why,
+    the model is never called and nothing is graded; the readable case above is the control. (F3, K4, K5)"""
+    from defender.learning.judge import JudgeRefused
+
+    commit = scene.k1 if cause == "unreachable" else ABSENT_COMMIT
+    _stamp(scene, code=scene.product.post, knowledge={"commit": commit})
+    if cause == "unreachable":
+        from defender.tests.tenancy.knowledge_1618 import _support as K
+
+        K.forge_down(scene.t)
+    judge = J.scripted_judge()
+
+    with pytest.raises(JudgeRefused) as refused:
+        J.grade(scene.ep, judge=judge, git_show=scene.product, draws=1,
+                knowledge_copy=_copy_from_forgejo(scene, []))
+
+    assert judge.prompts == [], "the model was called on a pass that could not read its knowledge"
+    assert str(refused.value).strip()
+    if cause == "unserved":
+        assert commit in str(refused.value), str(refused.value)
 
 
 @pytest.mark.parametrize(("knowledge", "cause"), [
     ("unversioned", "unversioned"),
     ({"unavailable": "O6-REASON-the-knowledge-clone-could-not-be-read"},
      "O6-REASON-the-knowledge-clone-could-not-be-read"),
-    ({"commit": ABSENT_COMMIT}, ABSENT_COMMIT),
-], ids=["unversioned", "unavailable", "commit-absent-from-clone"])
+], ids=["unversioned", "unavailable"])
 def test_o6_a_post_move_run_with_no_readable_knowledge_commit_is_unreadable_naming_why(
         scene, knowledge, cause):
     """Never some other revision's body (`current`, the clone, the product tree) and the slot

@@ -96,13 +96,6 @@ def _no_adapters_tree(_scene: Any, mp: Any, tmp: Path) -> None:
     mp.setenv("DEFENDER_DIR", str(tree))
 
 
-def _damaged_export(scene: Any, _mp: Any, _tmp: Path) -> None:
-    """A link planted in the kept export the publish names, which a run's copy of it refuses whole."""
-    stray = next(p for p in (scene.root / scene.tenant / "exports" / scene.t.commit / "agent").rglob("*") if p.is_file())
-    stray.unlink()
-    stray.symlink_to("/etc/passwd")
-
-
 FAULTS: dict[str, Fault] = {
     "offboarding": Fault("tenant", "offboarding", prepare=_offboarding("offboarding")),
     "creating": Fault("tenant", "creating", prepare=_offboarding("creating")),
@@ -115,7 +108,7 @@ FAULTS: dict[str, Fault] = {
                                          files={"settings/verb-grants.yaml": grants_text(_correlation_names_two_queries)}),
     "every_query_grant_ignored": Fault("tenant_verdict", "were ignored", records=_disable_elastic,
                                        files={"settings/verb-grants.yaml": grants_text(_only_elastic_queries)}),
-    "damaged_kept_export": Fault("knowledge_copy", "could not be copied", prepare=_damaged_export),
+    # 1618 D10: the `damaged_kept_export` row (step `knowledge_copy`, a link in a kept export) is retired: no kept export, no such step.
     "unreadable_adapters_tree": Fault("roster", "cannot be read", prepare=_no_adapters_tree),
     "sealed_signer": Fault("first_pass", "could not be signed", sealed=True),
 }
@@ -249,55 +242,8 @@ def test_p3_a_database_outage_at_admission_reads_refused_at_the_tenant_step_neve
         assert ran.knowledge is None
 
 
-# --- publish: R3 refused with the kind only, R5 a new tenant -----------------------------------------------------------
-
-def _publish_says(kind: str) -> Callable[..., str]:
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-
-    return {"misconfigured": lambda *a, **k: B.misconfigured(PUBLISH_CANARY),
-            "stale:transient": lambda *a, **k: B.stale("transient", PUBLISH_CANARY),
-            "stale:operator": lambda *a, **k: B.stale("operator", PUBLISH_CANARY)}[kind]
-
-
-@pytest.mark.parametrize("kind", ["misconfigured", "stale:transient", "stale:operator"])
-def test_p2_r5_a_refused_publish_is_refused_at_the_publish_step_naming_its_kind_and_never_the_reply_or_failed(
-        tmp_path, monkeypatch, migrated_database, kind):
-    """A misconfigured publish, or a stale one for a tenant with no published copy (a new tenant), reads `refused` at
-    `publish` with the kind in its sentence and none of the reply text, and gives no knowledge record. (R3, R5, P-2)"""
-    with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
-        if kind != "misconfigured":
-            (scene.root / scene.tenant / "exports" / "current").unlink()
-        inv = investigate(scene, publish=_publish_says(kind))
-        assert inv.refused, f"premise: the investigation was not refused: {inv.end!r}\n{inv.err[-600:]}"
-        assert PUBLISH_CANARY in inv.err, "premise: the launch's own refusal carries the reply, which readiness must not"
-        ran = readiness(scene, publish=_publish_says(kind), container=lambda c: 0)
-
-        sentence = assert_refused_shape(ran.result(), "publish")
-        words = norm(sentence)
-        assert all(w in words for w in kind.split(":")), f"the sentence does not name its kind {kind!r}: {sentence!r}"
-        assert "FORGE-REPLY-CANARY" not in ran.record_path.read_text(encoding="utf-8")
-        assert "/srv/forge" not in ran.record_path.read_text(encoding="utf-8")
-        assert ran.knowledge is None, "the publish gave no source, so there is no knowledge record"
-        assert ran.docker.boxes == []
-        assert ran.ran.rc == 0
-
-
-def test_r3_a_stale_publish_over_a_published_copy_is_no_refusal_and_its_knowledge_record_says_stale(
-        tmp_path, monkeypatch, migrated_database):
-    """Control for the refusals above: with a published copy a stale publish settles on it, and the helper starts its
-    container with the knowledge record saying `stale` and its kind. (R3, R13-1.2)"""
-    from defender.tenancy import run_knowledge
-
-    with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
-        ran = readiness(scene, publish=_publish_says("stale:transient"), container=lambda c: 0)
-
-        assert ran.docker.job_ran, f"a stale publish over a published copy refused the check: {ran.said()}"
-        known = ran.knowledge
-        assert isinstance(known, dict), ran.said()
-        assert (known["kind"], known["commit"], known["stale_kind"]) == (
-            run_knowledge.STALE, scene.t.commit, run_knowledge.TRANSIENT), known
-        assert ran.record is None, "the helper writes no result record when it serves the job to its container"
-
+# --- publish: retired by #1618 D10/K9 (`misconfigured` and `stale:*` outcomes, a stale publish over a published copy); the refused
+# fetch's cases are `test_d10_a_refused_fetch_is_refused_at_publish...` at the end of this file. ---------------------------------
 
 # --- the publish trigger: the seam is told who asked, and the child's argv carries it ------------------------------------
 
@@ -756,3 +702,77 @@ def test_p2_d7_a_tenant_value_with_markup_and_quotes_reaches_the_refusal_sentenc
         record = json.loads(ran.record_path.read_text(encoding="utf-8"))
         sentence = assert_refused_shape(record, "run_tenant")
         assert MARKUP in sentence, f"the tenant's value does not reach the sentence verbatim: {sentence!r}"
+
+
+# --- #1618 D3/D5/D9/D10: the `publish` step is a fetch of main into a temporary copy (knowledge_copy merged in) -------------
+
+def _ready_fetch(scene):
+    from defender.tests.support.jobs._readiness1618 import ScriptedFetch
+
+    return ScriptedFetch(scene)
+
+
+def test_d10_readiness_fetches_main_once_into_an_empty_temporary_and_the_copy_is_gone_when_the_helper_ends(
+        tmp_path, monkeypatch, migrated_database):
+    """The check asks the fetch once, for `main`, into an empty folder it made; the later steps and the container run over that copy, the
+    knowledge record says `fresh` at the fetched commit, and the folder is gone once the helper has ended. (D10, F5, K3)"""
+    from defender.tests.support.jobs._readiness1618 import readiness_fetching
+
+    with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
+        fetch = _ready_fetch(scene)
+        ran = readiness_fetching(scene, fetch=fetch, container=lambda c: 0)
+
+        assert ran.docker.job_ran, f"a fetch that answered ok did not reach the container: {ran.said()}"
+        [call] = fetch.calls
+        assert (call["tenant"], call["was_empty_dir"], call["kw"].get("commit")) == (scene.tenant, True, None)
+        known = ran.knowledge
+        assert isinstance(known, dict), ran.said()
+        assert (known["kind"], known["commit"]) == ("fresh", scene.t.commit), known
+        assert known.get("stale_kind") is None
+        assert not call["dest"].exists(), "the temporary copy outlived the helper"
+
+
+@pytest.mark.parametrize("line", ["refused transient forge unreachable " + PUBLISH_CANARY,
+                                  "refused lasting agent/.tenant-id names another tenant " + PUBLISH_CANARY])
+def test_d10_a_refused_fetch_is_refused_at_publish_naming_its_class_never_the_reply_and_leaves_no_knowledge_record(
+        tmp_path, monkeypatch, migrated_database, line):
+    """`refused transient|lasting <reason>` reads `refused` at `publish` with the class word in the sentence, none of the reply text, no
+    knowledge record (no `stale` over the published copy this scene still holds) and no container; `ok` over the same scene reaches
+    the container (control). (D10, D2, P-2, K9)"""
+    from defender.tests.support.jobs._readiness1618 import readiness_fetching
+
+    with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
+        control = readiness_fetching(scene, fetch=_ready_fetch(scene), container=lambda c: 0)
+        assert control.docker.job_ran, f"control: an ok fetch did not reach the container: {control.said()}"
+        fetch = _ready_fetch(scene)
+        fetch.answers.append(line)
+        ran = readiness_fetching(scene, fetch=fetch, container=lambda c: 0)
+
+        sentence = assert_refused_shape(ran.result(), "publish")
+        assert line.split()[1] in norm(sentence), f"the sentence does not name its class: {sentence!r}"
+        assert "FORGE-REPLY-CANARY" not in ran.record_path.read_text(encoding="utf-8")
+        assert "/srv/forge" not in ran.record_path.read_text(encoding="utf-8")
+        assert ran.knowledge is None, "a refused fetch settled a source"
+        assert ran.docker.boxes == []
+        assert ran.ran.rc == 0
+        assert not fetch.calls[0]["dest"].exists(), "a refused fetch left its temporary copy"
+
+
+def test_d9_readiness_refuses_at_publish_when_main_is_not_protected_and_reads_the_protection_as_the_control_shows(
+        tmp_path, monkeypatch, migrated_database):
+    """With `main` unprotected on the forge (the branch read says so, no rule is there) the check is refused at `publish` naming the
+    protection; with it protected the same helper reaches the container, having asked the forge. (D9, F5)"""
+    from defender.tests.support.jobs._readiness1618 import readiness_fetching
+
+    with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
+        forge = scene.t.forge
+        control = readiness_fetching(scene, fetch=_ready_fetch(scene), client=forge.client, container=lambda c: 0)
+        assert control.docker.job_ran, f"control: a protected main refused the check: {control.said()}"
+        assert [r for r in forge.requests if "/branch" in r.url.path], "control: the check never asked the forge about main's protection"
+        forge.protection = {**forge.protection, "protected": False, "user_can_push": True}
+        forge.refuse("/branch_protections/main", 404, method="GET")
+        ran = readiness_fetching(scene, fetch=_ready_fetch(scene), client=forge.client, container=lambda c: 0)
+
+        sentence = assert_refused_shape(ran.result(), "publish")
+        assert "protect" in norm(sentence), sentence
+        assert ran.docker.boxes == []
