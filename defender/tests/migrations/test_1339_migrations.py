@@ -22,7 +22,8 @@ _SYSTEM = "nspname !~ '^pg_' AND nspname <> 'information_schema'"
 IDENTITY_TABLES = {"users", "memberships", "sessions", "programs", "program_credentials", "warning_deliveries", "signin_attempts"}  # #1161 D6: sign-in attempts in flight; #1214: `tenants` moved to `tenancy`; #1307 adds credentials and their warning deliveries; #1454 gives programs their own table
 LEARNING_TABLES = {"work_items", "batches", "commits", "commit_changes",
                    "feedback_issues", "feedback_comments", "feedback_tick"}  # #1278: learning's work tracking, A4 feedback (design: Schema)
-JOBS_TABLES = {"alerts", "investigations", "learning_jobs", "learning_checks", "host_requests"}  # #1342, #1344 (amendment 3: learning_checks), #1471 (host requests; stale, updated) (#1345 r5: the mapping table is a tenant record, in `tenancy`)
+JOBS_TABLES = {"alerts", "investigations", "learning_jobs", "learning_checks", "host_requests", "claims", "staged_facts",
+               "uploads"}  # #1342, #1344 (amendment 3: learning_checks), #1471 (host requests; stale, updated), #1546 (claims, staged facts, uploads: conflict updated) (#1345 r5: the mapping table is a tenant record, in `tenancy`)
 UNKNOWN_REVISION = "f00dfeedbeef"
 #: #1345 r5 Upgrade: the migration after `0006_job_leases`. r5 names no id: this one is DESIGN-IMPLIED for the code stage.
 ALERT_MAPPING_REVISION = "0007_alert_mapping"

@@ -1995,86 +1995,8 @@ async def test_b4_a_finish_with_an_unreadable_cost_writes_null_not_the_cost_so_f
     assert accounting_written(dsn, running) is not None
 
 
-@pytest.mark.parametrize("stage", TERMINAL)
-async def test_b4_a_final_accounting_writes_cost_knowledge_and_the_mark_and_nothing_else(dsn, stage):
-    """On an ended row with no mark: cost, knowledge and mark change; stage, times, disposition and failure detail do not. (B4, Writes table)"""
-    inv = _ended_with_cost(dsn, stage, "A")
-    before = _snap(dsn, inv)
-    async with job_store(dsn) as store:
-        got = await store.write_accounting(T1, inv, cost_usd=4.5, knowledge=KNOWLEDGE)
-    assert got is not None
-    assert (got.stage, got.cost_usd, got.knowledge) == (stage, 4.5, KNOWLEDGE)
-    assert _changed(before, _snap(dsn, inv)) == {"cost_usd", "knowledge", "accounting_written_at"}
-    assert accounting_written(dsn, inv) is not None
-
-
-async def test_b4_a_final_accounting_is_written_once(dsn):
-    """A second final accounting is refused and changes nothing, whatever it carries; so is one after a finish, which set the mark. (B4)"""
-    inv = _ended_with_cost(dsn, "failed", "A")
-    finished = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="F"), key="k", attempt=1, lapsed=False)
-    async with job_store(dsn) as store:
-        assert await store.write_accounting(T1, inv, cost_usd=4.5, knowledge=KNOWLEDGE) is not None
-        first = _snap(dsn, inv)
-        assert await store.write_accounting(T1, inv, cost_usd=99.0, knowledge=None) is None
-        await store.finish(T1, finished, stage="completed", disposition="benign", cost_usd=2.0, knowledge=KNOWLEDGE)
-        after_finish = _snap(dsn, finished)
-        assert await store.write_accounting(T1, finished, cost_usd=99.0, knowledge=None) is None
-    assert _snap(dsn, inv) == first
-    assert _snap(dsn, finished) == after_finish
-
-
-@pytest.mark.parametrize("target", ["running", "queued", "other tenant", "unknown"])
-async def test_b4_a_final_accounting_is_refused_for_a_row_that_is_not_an_ended_one_of_this_tenant(dsn, target):
-    """Only a terminal row of the caller's tenant takes it: running and queued rows, another tenant's, a deleted id are unchanged. (B4, Writes table)"""
-    inv = {"running": lambda: _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False),
-           "queued": lambda: _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn), key="k", attempt=1, stage="queued"),
-           "other tenant": lambda: _ended_with_cost(dsn, "failed", "A"),
-           "unknown": lambda: str(uuid.uuid4())}[target]()
-    ended = _ended_with_cost(dsn, "failed", "Z")  # positive control: the same call accepts this one
-    before = _snap(dsn, inv) if target != "unknown" else None
-    async with job_store(dsn) as store:
-        tenant = T2 if target == "other tenant" else T1
-        assert await store.write_accounting(tenant, inv, cost_usd=4.5, knowledge=KNOWLEDGE) is None
-        assert await store.write_accounting(T1, ended, cost_usd=4.5, knowledge=KNOWLEDGE) is not None
-    if before is not None:
-        assert _snap(dsn, inv) == before
-
-
-async def test_b4_a_final_accounting_with_an_unreadable_cost_writes_null(dsn):
-    """Null cost replaces the copied figure on the ended row; the mark is still set. (B4, r5 R2)"""
-    inv = _ended_with_cost(dsn, "failed", "A")
-    async with job_store(dsn) as store:
-        await store.write_accounting(T1, inv, cost_usd=None, knowledge=None)
-    assert row(dsn, inv)["cost_usd"] is None
-    assert accounting_written(dsn, inv) is not None
-
-
-async def test_b4_a_taken_over_row_accepts_its_holders_final_accounting(dsn):
-    """Take-over writes no accounting; the cut-off holder's later write lands on the old row, leaves its `failed`/`lease_lapsed` and its retry alone. (B-P2, B6)"""
-    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=True)
-    async with job_store(dsn) as store:
-        await store.take_over(held=frozenset())
-        assert accounting_written(dsn, lapsed) is None
-        [retry] = _retries_of(dsn, lapsed)
-        retry_before = _snap(dsn, retry)
-        got = await store.write_accounting(T1, lapsed, cost_usd=7.0, knowledge=KNOWLEDGE)
-    assert got is not None
-    stored = row(dsn, lapsed)
-    assert (stored["stage"], stored["failure_reason"], stored["cost_usd"], stored["knowledge"]) == (
-        "failed", "lease_lapsed", 7.0, KNOWLEDGE)
-    assert _snap(dsn, retry) == retry_before
-
-
-async def test_b4_a_cancelled_running_row_accepts_its_holders_final_accounting(dsn):
-    """Cancel writes no accounting either: the holder's final cost and knowledge land on the `aborted` row. (B-P2, B9)"""
-    running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
-    async with job_store(dsn) as store:
-        await store.cancel_investigation(T1, running, actor="u-1")
-        assert accounting_written(dsn, running) is None
-        await store.write_accounting(T1, running, cost_usd=2.0, knowledge=KNOWLEDGE)
-    stored = row(dsn, running)
-    assert (stored["stage"], stored["failure_reason"], stored["cost_usd"], stored["knowledge"]) == (
-        "aborted", "cancelled", 2.0, KNOWLEDGE)
+# #1546 D15 (conflict, removed): `write_accounting` and the holder's final accounting after a cancel or take-over are gone;
+# the cost after those endings is the last staged `progress`, a lower limit (tests/jobs/test_ending_apply_1546.py).
 
 
 async def test_b11_a_hand_back_lapses_the_lease_keeps_the_row_running_and_copies_cost_knowledge_and_the_mark(dsn, caplog):
