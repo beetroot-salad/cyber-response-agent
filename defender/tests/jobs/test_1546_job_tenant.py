@@ -16,7 +16,7 @@ from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 —
 
 evidence_store = H.evidence_store
 process_state = J.process_state
-scene = J.scene
+scene = H.fresh_scene
 
 ID = "7a1c5e93-4b2d-4f86-9e07-3c8d1b6a2f54"
 

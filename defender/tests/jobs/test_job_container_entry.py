@@ -38,7 +38,8 @@ PROXY = "http://proxy.invalid"
 
 @pytest.fixture
 def scene(tmp_path, monkeypatch, migrated_database):
-    with helper_scene(tmp_path, monkeypatch, migrated_database, proxied=()) as s:
+    """On a tenant of its own: the Garage bucket is shared across files (F4)."""
+    with helper_scene(tmp_path, monkeypatch, migrated_database, proxied=(), tenant_id=str(uuid.uuid4())) as s:
         yield s
 
 
@@ -209,16 +210,9 @@ def test_a6_the_host_half_and_the_run_half_each_run_once_in_a_job_and_in_the_ope
         (lane, calls.by_thread, publishes, ran)
 
 
-@pytest.fixture
-def a10_scene(tmp_path, monkeypatch, migrated_database):
-    """`scene` on a tenant of its own (the Garage bucket is shared across files; F4)."""
-    with helper_scene(tmp_path, monkeypatch, migrated_database, proxied=(), tenant_id=str(uuid.uuid4())) as s:
-        yield s
-
-
 @pytest.mark.openbao
 @pytest.mark.garage
-def test_a10_the_run_page_stored_is_the_bytes_the_job_pushed_not_a_file_in_its_folder(a10_scene, evidence_store, tmp_path):
+def test_a10_the_run_page_stored_is_the_bytes_the_job_pushed_not_a_file_in_its_folder(scene, evidence_store, tmp_path):
     """#1546 A-O8 (conflict updated: was the helper's page mirror): the stored page is exactly the bytes the job pushed over its
     socket, not the `runtime.html` it left in its run folder, and nothing reached the publish folder. (A10, A-O8)"""
     import shutil
@@ -227,7 +221,6 @@ def test_a10_the_run_page_stored_is_the_bytes_the_job_pushed_not_a_file_in_its_f
     from defender.tests.support.jobs import _helper_evidence1546 as H
     from defender.tests.support.jobs._job_helper import host_path
 
-    scene = a10_scene
     golden = Path(__file__).resolve().parents[1] / "fixtures" / "e2e" / "golden-v2sshd"
     pushed = b"<html>MARKER pushed over the socket " + uuid.uuid4().hex.encode() + b"</html>"
     left = b"<html>written in the job's run folder</html>"
