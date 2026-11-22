@@ -92,11 +92,15 @@ def test_control_a_lone_judge_finding_still_waits_for_its_threshold_D11(world): 
 # ------------------------------------------------------------------- one PR, two paths, no crossing
 
 
+#: The instruction the one-PR test files, distinctive enough that no id, sha or date a prompt carries can contain it.
+INSTRUCTION = "check the VPN log first for this user"
+
+
 def test_instruction_and_finding_share_one_pr_and_never_cross_curators_D11(world, caplog):  # noqa: F811 — the imported fixture
     """Both kinds due in one tick: one batch, one branch, one PR, one box; each curator is shown only its own kind's item. (D11)"""
     w = world
     call(w.dsn, "publish_findings", w.t.tenant_id, "run-1", [_row("f1")], kind="finding")
-    L.instruct(w.dsn, w.t.tenant_id, 101)
+    L.instruct(w.dsn, w.t.tenant_id, 101, instruction=INSTRUCTION)
     main = w.t.origin_main()
     box = BoxSpy()
     model = ScriptedModel(
@@ -107,7 +111,9 @@ def test_instruction_and_finding_share_one_pr_and_never_cross_curators_D11(world
 
     assert model.keys_shown(LESSONS) == ["f1"]
     assert model.keys_shown(FEEDBACK) == ["101"]
-    assert all("101" not in s.prompt for s in model.seen if s.curator == LESSONS)
+    # The instruction's own words, not its id: "101" turns up by chance in the hex ids and shas a prompt carries.
+    assert any(INSTRUCTION in s.prompt for s in model.seen if s.curator == FEEDBACK), "positive control: the feedback curator is shown it"
+    assert all(INSTRUCTION not in s.prompt for s in model.seen if s.curator == LESSONS)
     (branch, tip), = remote_branches(w.t.remote).items()
     assert touched(w.t.remote, main, tip) == sorted(["agent/lessons/p4-judge-lesson.md", L.LESSON_PATH])
     assert [c["head"] for c in w.t.forge.creates] == [branch]
