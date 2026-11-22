@@ -199,7 +199,8 @@ def test_o3_a_holder_whose_lease_lapsed_makes_no_commit_and_changes_no_item(worl
 
 
 def test_o3_a_holder_that_lost_its_lease_after_committing_pushes_nothing_and_opens_no_pr(world, caplog):  # noqa: F811 — the imported fixture
-    """The lease lapses past grace after the commit: no push, no PR; the next tick takes over and delivers, no rerun. (O3, P6, Renewal and stop)"""
+    """The lease lapses past grace after the commit: no push, no PR; the next tick's takeover reads only the forge, finds
+    nothing there and abandons the batch, so the unpushed work is redone. (O3, P6, Renewal and stop; #1618 D4 amended)"""
     w = world
     _seed(w, "f1")
     writer = LessonWriter({LESSON_NAME: lesson_citing("f1")}, after_commit=lambda batch: lapse_lease(w.dsn, batch.id))
@@ -213,14 +214,13 @@ def test_o3_a_holder_that_lost_its_lease_after_committing_pushes_nothing_and_ope
     assert _batches(w)[batch_id].phase == "working"
     assert [r.commit for r in _record(w)] == writer.commits, "the commit was recorded before the lease went"
 
+    # #1618 (design r5 "Retired promises": `test_1278_tick::o3` "a takeover only finishes delivery"): the lost holder's
+    # commit was never pushed, and a takeover reads only the remote branch (K10), so it cannot deliver it.
     _tick(w, writer)
 
-    assert writer.served == [batch_id], "a takeover only finishes delivery: no new authoring run"
-    [(branch, tip)] = remote_branches(w.t.remote).items()
-    assert tip == writer.commits[0]
-    [pr] = [r for r in w.t.forge.prs if r["state"] == "open"]
-    assert pr["head"]["ref"] == branch
-    assert (_batches(w)[batch_id].phase, _batches(w)[batch_id].pr_number) == ("in_review", pr["number"])
+    assert (_batches(w)[batch_id].phase, _batches(w)[batch_id].outcome) == ("ended", "abandoned"), critical_text(caplog)
+    assert writer.commits[0] not in remote_branches(w.t.remote).values(), "the takeover delivered what only the lost holder had"
+    assert not [r for r in w.t.forge.prs if r["state"] == "open" and r["head"]["ref"] == _batches(w)[batch_id].branch]
 
 
 # --- Locks: the working-batch rule replaces the author-drain lock ------------------------------------------------
@@ -724,9 +724,18 @@ def test_1618_k7_a_tick_in_the_job_container_never_sweeps(world, post_step_helpe
     without_clone(w.t)
     sweep_dead_owners = importlib.import_module(K.SWEEP_MODULE).sweep_dead_owners  # FORCED: the name the shared support module (`K.sweep`) fixes
 
+    drains = importlib.import_module("defender.learning.core.drains")
+    box = BoxSpy()
+
+    def container_tick(paths, *, store):
+        # the drain as the container runs it: no `directory=` or `identity=` of the host's, so it finds its job container by
+        # the job socket (`drains._job_container`) and relays records, credential and `batch.start` to the helper; only the
+        # forge's API client is the fake's (as `_relay_tick`)
+        return drains.author_drain(paths, store=store, client=w.t.forge.client, trigger_author=writer,
+                                   start_box=box.start, stop_box=box.stop)
+
     with counting_calls(sweep=sweep_dead_owners) as seen:
-        rc = post_step_in_container(None, w.t.tenant_id, forward=helper.ask,
-                                    author_tick=lambda _paths, *, store: author_drain(w.t, w.paths, trigger=writer, box=BoxSpy(), store=store))
+        rc = post_step_in_container(None, w.t.tenant_id, forward=helper.ask, author_tick=container_tick)
     assert (rc, bool(writer.served)) == (0, True), f"premise: the container's tick opened a batch ({critical_text(caplog)})"
     assert seen.counts["sweep"] == 0, "a tick in a job container swept, and would remove a live host owner's folder"
 

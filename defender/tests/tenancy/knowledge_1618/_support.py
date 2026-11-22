@@ -410,6 +410,9 @@ class Fetch:
         self.before = before
         self.calls: list[dict[str, Any]] = []
         self.faults: list[tuple[Callable[[], Any], Callable[[], Any]]] = []
+        import threading
+
+        self._lock = threading.Lock()  # concurrent asks (K2) each get their own call record and work folder
 
     def once(self, arm: Callable[[], Any], heal: Callable[[], Any] = lambda: None) -> None:
         self.faults.append((arm, heal))
@@ -420,13 +423,15 @@ class Fetch:
         call = {"tenant": str(tenant_id), "dest": dest, "data_root": Path(location_path(data_root)), "commit": commit,
                 "trigger": trigger,
                 "was_empty_dir": dest.is_dir() and not dest.is_symlink() and not any(dest.iterdir()), "line": None}
-        self.calls.append(call)
-        arm, heal = self.faults.pop(0) if self.faults else (lambda: None, lambda: None)
+        with self._lock:
+            self.calls.append(call)
+            number = len(self.calls)
+            arm, heal = self.faults.pop(0) if self.faults else (lambda: None, lambda: None)
         if self.before is not None:
             self.before(str(tenant_id))
         arm()
         self.work.mkdir(parents=True, exist_ok=True)
-        folder = self.work / f"call-{len(self.calls)}"
+        folder = self.work / f"call-{number}"
         folder.mkdir()
         scene = SimpleNamespace(tenant_id=str(tenant_id), origin=self.origin_of(str(tenant_id)), data_root=data_root)
         try:

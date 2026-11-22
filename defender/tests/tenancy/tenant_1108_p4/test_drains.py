@@ -431,9 +431,9 @@ def test_o_sweep_sweeps_a_draft_whose_owner_died_and_keeps_a_live_owners(p4_tena
     """The sweep removes a draft whose owner process died; this live process's draft survives (control), its owner
     record naming this pid and start time. (Was: "the next publish, under the tenant lock": #1618 K1 retires both.)"""
     t = p4_tenant
-    _owner_process(t, tmp_path, "orphan", hold=False)
     with t.open_delivery() as d:
-        mine = d.start_batch("mine", lanes=("lessons",))
+        mine = d.start_batch("mine", lanes=("lessons",))  # first: a batch start is itself a sweep trigger (flow 8)
+        _owner_process(t, tmp_path, "orphan", hold=False)
         assert draft_entries(t) == ["mine", "orphan"], "control: both drafts stand before the sweep"
 
         _swept(t)

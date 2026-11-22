@@ -247,26 +247,31 @@ def test_p3_a_database_outage_at_admission_reads_refused_at_the_tenant_step_neve
 
 # --- the publish trigger: the seam is told who asked, and the child's argv carries it ------------------------------------
 
-def _recording_publish(seen: list[dict[str, Any]], commit: str) -> Callable[..., str]:
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+def _recording_fetch(seen: list[dict[str, Any]], scene: Any) -> Callable[..., str]:
+    """The real fetch seam (`K.fetch_seam`, the child over the scene's remote), each call's keywords recorded (#1618: the
+    fetch seam replaces the launch-time publish seam; the trigger travels with it, D9)."""
+    from defender.tests.tenancy.knowledge_1618 import _support as K
 
-    def publish(*_a: Any, **k: Any) -> str:
+    real = K.fetch_seam(scene.t)
+
+    def fetch(*a: Any, **k: Any) -> str:
         seen.append(k)
-        return B.fresh(commit)
-    return publish
+        return real(*a, **k)
+    return fetch
 
 
 def test_p2_the_launch_time_publish_is_told_its_trigger_readiness_for_a_check_and_launch_time_publish_for_an_investigation(
         tmp_path, monkeypatch, migrated_database):
-    """The publish seam is called with `trigger="readiness"` by the readiness helper and `"launch-time publish"` by an
-    investigation's, so a readiness publish is recorded as one. (P-2, design §6 Publish trigger)"""
+    """The fetch seam is called with `trigger="readiness"` by the readiness helper and with no `readiness` trigger by an
+    investigation's, so only a readiness fetch also checks main's protection. (P-2, design §6 Publish trigger; #1618 D9:
+    protection is checked at onboarding, readiness and delivery, never at a run's fetch)"""
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
         inv_seen: list[dict[str, Any]] = []
-        investigate(scene, publish=_recording_publish(inv_seen, scene.t.commit))
-        assert len(inv_seen) == 1, f"premise: an investigation's launch publishes once: {inv_seen}"
-        assert [k.get("trigger") for k in inv_seen] == ["launch-time publish"], inv_seen
+        investigate(scene, fetch=_recording_fetch(inv_seen, scene))
+        assert len(inv_seen) == 1, f"premise: an investigation's launch fetches once: {inv_seen}"
+        assert [k.get("trigger") for k in inv_seen] != ["readiness"], inv_seen
         seen: list[dict[str, Any]] = []
-        ran = readiness(scene, publish=_recording_publish(seen, scene.t.commit), container=lambda c: 0)
+        ran = readiness(scene, fetch=_recording_fetch(seen, scene), container=lambda c: 0)
 
         assert ran.docker.job_ran, ran.said()
         assert [k.get("trigger") for k in seen] == ["readiness"], seen
@@ -283,7 +288,9 @@ def test_p2_the_publish_child_is_handed_the_trigger_it_was_launched_with(tmp_pat
         argvs.append(list(argv))
         raise OSError("no child in this test")
 
-    launch_publish("trigger-tenant", data_root=tmp_path, trigger=trigger, spawn=spawn)
+    dest = tmp_path / "dest"  # #1618: the launcher fills the caller's empty folder (D5)
+    dest.mkdir()
+    launch_publish("trigger-tenant", data_root=tmp_path, dest=dest, trigger=trigger, spawn=spawn)
 
     assert len(argvs) == 1, argvs
     carried = {t.split("=", 1)[-1] for t in argvs[0]}
@@ -296,8 +303,9 @@ def test_p2_the_publish_child_is_handed_the_trigger_it_was_launched_with(tmp_pat
 
 def test_r13_1_2_the_helper_writes_the_knowledge_record_for_the_source_it_settled_before_its_container_starts(
         tmp_path, monkeypatch, migrated_database):
-    """When the publish gave a source, the record `{kind, commit, stale_kind, reason}` of that source is in the lane under
-    the readiness id by the time the container runs. (R13-1.2)"""
+    """When the fetch gave a source, the record `{kind, commit, reason}` of that source is in the lane under the readiness
+    id by the time the container runs. (R13-1.2; #1618 D7: a new record says `fresh`, `pinned` or `unreadable`, so it
+    carries no `stale_kind`)"""
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
         seen: dict[str, Any] = {}
 
@@ -313,7 +321,8 @@ def test_r13_1_2_the_helper_writes_the_knowledge_record_for_the_source_it_settle
         assert seen.get("at_start") is not None, f"no knowledge record when the container started: {ran.said()}"
         known = ran.knowledge
         assert (known["kind"], known["commit"]) == ("fresh", scene.t.commit), known
-        assert set(known) >= {"kind", "commit", "stale_kind", "reason"}, known
+        assert set(known) >= {"kind", "commit", "reason"}, known
+        assert "stale_kind" not in known or known["stale_kind"] is None, known
 
 
 def test_r13_1_2_a_knowledge_record_that_cannot_be_written_is_a_crash_with_no_record_and_no_container(
@@ -609,17 +618,20 @@ def test_r13_5_a_helper_told_to_stop_before_its_container_starts_writes_no_recor
     import os
     import signal
 
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
         control = readiness(scene, container=lambda c: 0)
         assert control.docker.job_ran, f"control: the container starts: {control.said()}"
 
-        def stopped_while_publishing(*_a: Any, **_k: Any) -> str:
-            os.kill(os.getpid(), signal.SIGTERM)
-            return B.fresh(scene.t.commit)
+        from defender.tests.tenancy.knowledge_1618 import _support as K
 
-        ran = readiness(scene, publish=stopped_while_publishing, container=lambda c: 0)
+        real = K.fetch_seam(scene.t)
+
+        def stopped_while_fetching(*a: Any, **k: Any) -> str:
+            os.kill(os.getpid(), signal.SIGTERM)
+            return real(*a, **k)
+
+        ran = readiness(scene, fetch=stopped_while_fetching, container=lambda c: 0)
 
         assert ran.docker.boxes == [], f"a container was started after the stop: {ran.said()}"
         assert ran.record is None, f"a stopped helper wrote a record of its own: {ran.said()}"

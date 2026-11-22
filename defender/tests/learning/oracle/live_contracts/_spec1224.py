@@ -432,7 +432,9 @@ class Estate:
         (`_published_template`) and its tenant folder copied in; nothing in it names its root.
         `configs` (`{system: config.env text}`) is written into the published settings."""
         root = Path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])
-        if not (root / tenant_id / "knowledge").is_dir():
+        # #1618 (K8): a tenant folder holds no clone any more, so "already placed" is the folder itself (a published scene's
+        # tenant, whose knowledge is on its remote); only an absent tenant is copied in from the template.
+        if not (root / tenant_id).is_dir():
             import shutil
 
             shutil.copytree(_published_template(tenant_id, self.table(), dict(configs or {})),

@@ -96,7 +96,7 @@ def drop_tenant(dsn: str, tenant_id: str) -> None:
     """Delete `tenant_id`'s record and the tenancy rows that reference it (alert mapping, generations, publish status,
     forge wiring) and, since #1366, its records (system and case versions, the imported mark)."""
     drop_records(dsn, tenant_id)
-    for table in ("alert_mappings", "generations", "publish_status", "forge_wiring"):
+    for table in ("alert_mappings", "generations", "forge_wiring"):  # #1618: `publish_status` is dropped
         execute(dsn, f'DELETE FROM tenancy."{table}" WHERE tenant_id = %s', (tenant_id,))  # noqa: S608
     execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant_id,))
 

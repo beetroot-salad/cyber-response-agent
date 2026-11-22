@@ -144,8 +144,10 @@ STEPS = (
     Step("start_box", False, _arm_start_box),
     Step("curator_halts_before_its_commit", False, _arm_curator_halts_first),
     Step("stop_box_after_a_batch_with_no_commit", False, _arm_stop_box_no_commits),
-    Step("curator_halts_after_its_commit", True, _arm_curator_halts_after_commit),
-    Step("stop_box_after_a_batch_with_commits", True, _arm_stop_box_with_commits),
+    # 1618-tradeoff (design r5 "Retired promises": "a fault the tick does not contain leaves the batch to a takeover with
+    # commits"): a fault before the end push leaves the commits only in the lost tick's private repository, so they are redone
+    Step("curator_halts_after_its_commit", True, _arm_curator_halts_after_commit, redone=True),
+    Step("stop_box_after_a_batch_with_commits", True, _arm_stop_box_with_commits, redone=True),
     Step("push", True, _arm_push, redone=True),  # 1618-tradeoff: the unpushed work is redone, not delivered by a takeover
     Step("record_read_before_the_pr", True, _arm_commit_record_read),
     Step("pr_open", True, _arm_open_pr),
@@ -170,9 +172,11 @@ def test_the_step_table_names_each_step_of_the_claims_life_once():
 @pytest.mark.parametrize("pre_attempts", ["below_ceiling", "at_ceiling"])
 @pytest.mark.parametrize("step", STEPS, ids=lambda s: s.name)
 @pytest.mark.parametrize("lane", LANES)
-def test_a_fault_the_tick_does_not_contain_leaves_the_batch_to_a_takeover_with_commits_and_ends_it_without(
+def test_a_fault_the_tick_does_not_contain_leaves_the_batch_to_a_takeover_with_commits_and_ends_it_without(  # noqa: PLR0915 — one table, three outcomes
         world, caplog, lane, step, pre_attempts):  # noqa: F811 — the imported fixture
-    """A fault at any step: with commits the lease is expired, the batch left, no curator rerun, one PR next tick; without, the batch ends, the attempt is charged, an item at the ceiling is held, never dead. (Uncontained fault)"""
+    """A fault at any step: with pushed commits the lease is expired, the batch left, no curator rerun, one PR next tick; with
+    commits never pushed (#1618 D4 amended) the takeover abandons it and its items are authored again; without, the batch
+    ends, the attempt is charged, an item at the ceiling is held, never dead. (Uncontained fault)"""
     w = world
     s = Scene(w, lane)
     s.seed()
@@ -192,7 +196,10 @@ def test_a_fault_the_tick_does_not_contain_leaves_the_batch_to_a_takeover_with_c
     if step.redone:
         assert (batch.phase, batch.outcome) == ("working", None), critical_text(caplog)
         assert lease_seconds_left(w.dsn, batch.id) <= 0, "a holder whose push failed kept its lease"
-        assert w.t.server.pushes == ["refused"], "premise: the remote refused the push"
+        if step.name == "push":
+            assert w.t.server.pushes == ["refused"], "premise: the remote refused the push"
+        else:
+            assert w.t.server.pushes == [], "premise: the fault came before the end push"
         assert s.branch_tip_on_remote(batch.branch) is None, "premise: nothing landed"
         assert cast.commits(), "premise: the step is one after a commit"
         again = Cast(s, tag="-again")

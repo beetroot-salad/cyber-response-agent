@@ -916,7 +916,11 @@ _DRIVER = textwrap.dedent("""\
     from types import SimpleNamespace
     from defender.tests.tenancy.knowledge_1618 import _support as K
     scene = SimpleNamespace(tenant_id=cfg["tenant"], origin=cfg["origin"], data_root=cfg["data_root"])
-    sys.exit(job_host.main(cfg["argv"], signer=A.MarkedSigner(), fetch=K.fetch_seam(scene)))
+    seams = {}
+    if cfg.get("forge_token") is not None:  # the forge credential the scene's git listener accepts (#1618: a drain's pushes)
+        from defender.tests.support.jobs._job_helper import ForgeCredentialRecorder
+        seams["forge"] = ForgeCredentialRecorder(accepted=cfg["forge_token"])
+    sys.exit(job_host.main(cfg["argv"], signer=A.MarkedSigner(), fetch=K.fetch_seam(scene), **seams))
 """)
 
 
@@ -937,10 +941,12 @@ class ProcessHelper:
     `docker` executable first on PATH, whose `run` is a stand-in container: it records itself (labels, argv) under
     `state/containers/<name>`, reads its stdin until EOF and then writes `state/eof` and exits; `ps --filter label=`, `rm`,
     `stop` and `kill` act on those records. `state/started` holds the stand-in container's pid once it runs.
-    `worker=True`: the helper is started by a process of its own (the worker's stand-in: a plain parent, as the worker
+    `forge_token`: the helper's forge credential answers it (the token the scene's listener accepts), in place of a mint from
+    the generation's host secret file, which a published scene does not write. `worker=True`: the helper is started by a process of its own (the worker's stand-in: a plain parent, as the worker
     spawns the helper) and an argv value `"@worker"` is that process' pid; `worker_pid`/`helper_pid` name them."""
 
-    def __init__(self, scene: HelperScene, root: Path, argv: list[str], *, worker: bool = False) -> None:
+    def __init__(self, scene: HelperScene, root: Path, argv: list[str], *, worker: bool = False,
+                 forge_token: str | None = None) -> None:
         self.state = root / "shim-state"
         bin_dir = root / "shim-bin"
         self.state.mkdir(parents=True)
@@ -951,7 +957,7 @@ class ProcessHelper:
         env = child_env({**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"})
         cfg = json.dumps({"argv": argv, "commit": scene.t.commit, "tenant": scene.tenant, "origin": scene.t.origin,
                           "data_root": str(scene.root), "requests": str(self.state / "requests.log"),
-                          "exit": str(self.state / "helper-exit")})
+                          "exit": str(self.state / "helper-exit"), "forge_token": forge_token})
         command = [sys.executable, "-c", _PARENT, cfg, _DRIVER] if worker else [sys.executable, "-c", _DRIVER, cfg]
         self.proc = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE)

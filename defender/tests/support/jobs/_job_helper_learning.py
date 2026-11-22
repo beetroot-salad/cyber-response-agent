@@ -14,7 +14,6 @@ from defender.tests.support.jobs._job_helper import (
     HelperScene,
     drive_helper,
 )
-from defender.tests.support.shared._postgres1339 import execute
 
 KINDS = ("investigation", "learning", "post-step")
 
@@ -110,17 +109,6 @@ def learning_end(scene: HelperScene, job_id: str) -> Any:
     parsed = LearningEnd.parse(path.read_text(encoding="utf-8"))
     assert parsed is not None, f"not a learning end record: {path.read_text(encoding='utf-8')!r}"
     return parsed
-
-
-def publish_status(scene: HelperScene) -> tuple[Any, ...] | None:
-    """The tenant's `(published, refused, kind)` row in `tenancy.publish_status`, or None when it has none."""
-    rows = execute(scene.dsn, "SELECT published, refused, kind FROM tenancy.publish_status WHERE tenant_id = %s",
-                   (scene.tenant,))
-    return tuple(rows[0]) if rows else None
-
-
-def clear_publish_status(scene: HelperScene) -> None:
-    execute(scene.dsn, "DELETE FROM tenancy.publish_status WHERE tenant_id = %s", (scene.tenant,))
 
 
 def listing(folder: Path) -> list[str]:

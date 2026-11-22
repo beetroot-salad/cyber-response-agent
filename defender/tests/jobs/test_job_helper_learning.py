@@ -25,12 +25,10 @@ from defender.tests.support.jobs._job_helper import (
 from defender.tests.support.jobs import _job_helper as J
 from defender.tests.tenancy.knowledge_1618 import _support as K
 from defender.tests.support.jobs._job_helper_learning import (
-    clear_publish_status,
     learning_end,
     listing,
     plant_decoy,
     plant_siblings,
-    publish_status,
     run_kind,
 )
 
@@ -50,9 +48,10 @@ POST_STEPS = pytest.mark.parametrize("family_less", [False, True], ids=["post-st
 
 
 def _job_state(scene, signer, forge, docker):
-    """What a refused request must leave alone: passes signed, forge tokens asked, status row, copies, drafts, boxes."""
+    """What a refused request must leave alone: passes signed, forge tokens asked, copies, drafts, boxes. (#1618: the
+    publish-status row is gone with its table.)"""
     tenant = scene.root / scene.tenant
-    return (len(signer.payloads), len(forge.asked), publish_status(scene), listing(tenant / "run-knowledge"),
+    return (len(signer.payloads), len(forge.asked), listing(tenant / "run-knowledge"),
             listing(tenant / "drafts"), len(docker.creates()))
 
 
@@ -61,18 +60,14 @@ def _job_state(scene, signer, forge, docker):
 #: What each kind may ask on the very channel the refused request goes down (the positive control).
 _OWN_REQUEST = {"investigation": ("pass", {"id": "<job>"}), "learning": ("pass", {"id": "<job>"}),
                 "post-step": ("forge.token", {"min_validity": 60})}
-_RECORD = {"commit": COMMIT}
-_REFUSAL = {"kind": "transient", "reason": "the forge is unreachable"}
+# #1618 (design r5 census: "the `publish_status` table and its writers (`record.published`, `record.refusal`)" go): the
+# record.* rows of this table, and the post-step's publish-outcome cases below, are retired with those requests.
 
 
 @pytest.mark.parametrize(("kind", "request_name", "fields"), [
     ("investigation", "forge.token", {"min_validity": 60}),
-    ("investigation", "record.published", _RECORD),
-    ("investigation", "record.refusal", _REFUSAL),
     ("investigation", "batch.start", {"lanes": ["lessons"]}),
     ("learning", "forge.token", {"min_validity": 60}),
-    ("learning", "record.published", _RECORD),
-    ("learning", "record.refusal", _REFUSAL),
     ("learning", "batch.start", {"lanes": ["lessons"]}),
     ("post-step", "pass", {"id": "<job>"}),
 ])
@@ -809,58 +804,6 @@ def test_o4_a_forge_token_valid_for_more_than_150_seconds_is_refused_and_none_is
 
     assert got["control"]["token"], "control: 150 s was refused"
     assert got["after"] == got["before"], "the credential was asked for a token valid longer than 150 s"
-
-
-@POST_STEPS
-def test_o4_the_post_steps_publish_outcomes_are_written_by_the_helper_and_the_container_holds_no_database_login(
-        scene, family_less):
-    """`record.published` and `record.refusal` change the tenant's publish-status row, written by the helper; the
-    post-step's container environment names no database. (O4, O3, C6)"""
-    got: dict = {}
-
-    def job(c) -> int:
-        got["env"] = dict(c.env)
-        clear_publish_status(scene)
-        got["empty"] = publish_status(scene)
-        c.request("record.published", commit=COMMIT)
-        got["published"] = publish_status(scene)
-        c.request("record.refusal", **_REFUSAL)
-        got["refused"] = publish_status(scene)
-        return 0
-
-    run_kind(scene, "post-step", job, family_less=family_less)
-
-    assert got["empty"] is None, "premise: the row was cleared"
-    assert got["published"] is not None
-    assert got["published"][:2] == (COMMIT, None), got["published"]
-    row = got["refused"]
-    assert row is not None
-    assert row[2] == "transient", row
-    assert "forge is unreachable" in row[1], row
-    assert "DEFENDER_DATABASE_DSN" not in got["env"]
-    assert scene.dsn not in "".join(str(v) for v in got["env"].values())
-
-
-@pytest.mark.parametrize("kind", ["", "other", "TRANSIENT", "stale:operator", "transient\nforged"])
-def test_o4_a_publish_refusal_of_a_kind_outside_the_vocabulary_is_refused_and_the_row_is_unchanged(scene, kind):
-    """`record.refusal` takes `transient` or `operator`; anything else is refused and writes nothing (control: `operator`
-    is written). (O4)"""
-    got: dict = {}
-
-    def job(c) -> int:
-        clear_publish_status(scene)
-        c.request("record.refusal", kind="operator", reason="a human is needed")
-        got["control"] = publish_status(scene)
-        got["refusal"] = c.refused("record.refusal", kind=kind, reason="nothing")
-        got["after"] = publish_status(scene)
-        return 0
-
-    run_kind(scene, "post-step", job, family_less=True)
-
-    assert got["control"] is not None
-    assert got["control"][2] == "operator", got["control"]
-    assert got["refusal"] is not None
-    assert got["after"] == got["control"]
 
 
 @POST_STEPS
