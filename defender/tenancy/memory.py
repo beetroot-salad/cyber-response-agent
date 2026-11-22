@@ -17,8 +17,7 @@ from collections.abc import AsyncIterator, Collection, Mapping
 from typing import Any, Literal, TypeVar, cast, overload
 
 from defender.records.formats import AlertMapping, TenantId
-from defender.tenancy.models import (ALLOWED_ACTIONS, AlertMappingRow, ForgeWiring, Generation, MergeEligibility, PublishStatus,
-                                     TenantRecord, TenantRecords)
+from defender.tenancy.models import (ALLOWED_ACTIONS, AlertMappingRow, ForgeWiring, Generation, MergeEligibility, TenantRecord, TenantRecords)
 from defender.tenancy.record_refusals import refuse_unless_active
 from defender.tenancy.repository import (
     KEEP,
@@ -27,13 +26,12 @@ from defender.tenancy.repository import (
     FenceMissed,
     NotFound,
     claimable_now,
-    publish_outcome,
 )
 
 #: The job a seeded row in a state that requires one gets when the seeder names none.
 _SEED_JOB = {"creating": ("create", "names", SERVICE), "offboarding": ("offboard", "offboard", SERVICE)}
 
-_Row = TypeVar("_Row", TenantRecord, Generation, ForgeWiring, PublishStatus)
+_Row = TypeVar("_Row", TenantRecord, Generation, ForgeWiring)
 
 
 @overload
@@ -56,7 +54,6 @@ class InMemoryTenantRepository:
         self._tenants: dict[str, TenantRecord] = {}
         self._generations: dict[tuple[str, str], Generation] = {}
         self._wiring: dict[str, ForgeWiring] = {}
-        self._publish: dict[str, PublishStatus] = {}
         self._mappings: dict[str, AlertMappingRow] = {}
         self._records: dict[str, TenantRecords] = {}
         self._eligibility: dict[str, MergeEligibility] = {}
@@ -122,11 +119,6 @@ class InMemoryTenantRepository:
             row = self._tenants.get(tenant_id)
             return (None if row is None else row.state), _detached(self._wiring.get(tenant_id))
 
-    async def publish_status(self, tenant_id: TenantId) -> dict[str, str] | None:
-        with self._mutex:
-            row = self._publish.get(tenant_id)
-            return None if row is None else row.as_dict()
-
     async def alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
         with self._mutex:
             row = self._mappings.get(tenant_id)
@@ -185,14 +177,6 @@ class InMemoryTenantRepository:
             if tenant_id not in self._tenants:
                 raise ValueError(f"no tenant {tenant_id}")
             self._eligibility[tenant_id] = MergeEligibility(logins=frozenset(logins), read_at=read_at.astimezone(_dt.UTC))
-
-    async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
-        published, refused, kind = publish_outcome(line)
-        with self._mutex:
-            if tenant_id not in self._tenants:
-                raise ValueError(f"no tenant {tenant_id}")
-            self._publish[tenant_id] = PublishStatus(
-                tenant_id=tenant_id, recorded_by=by, published=published, refused=refused, kind=kind)
 
     # --- workers ---------------------------------------------------------------------------------
     async def claimable(self, actor: str, *, now: _dt.datetime) -> list[TenantId]:
@@ -271,7 +255,7 @@ class _Held:
         add_generation: Generation | None = None,
         update_generations: Mapping[str, Mapping[str, Any]] | None = None,
         go_live: str | None = None, destroy: Collection[str] | Literal["all"] = (),
-        wiring: ForgeWiring | None = None, drop_wiring: bool = False, drop_publish_status: bool = False,
+        wiring: ForgeWiring | None = None, drop_wiring: bool = False,
         drop_records: bool = False,
     ) -> TenantRecord:
         store = self._store
@@ -289,8 +273,6 @@ class _Held:
                 store._wiring.setdefault(self.tenant_id, dataclasses.replace(wiring, tenant_id=self.tenant_id))
             if drop_wiring:
                 store._wiring.pop(self.tenant_id, None)
-            if drop_publish_status:
-                store._publish.pop(self.tenant_id, None)
             if drop_records:
                 store._records.pop(self.tenant_id, None)
             self.record = _detached(after)

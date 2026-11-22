@@ -181,29 +181,6 @@ class Generation(Base, kw_only=True):
     sign_secret_accessor: Mapped[str | None] = mapped_column(Text, default=None)
 
 
-class PublishStatus(Base, kw_only=True):
-    """The tenant's last publish outcome (replaces `publish-status.json`): the commit published, or
-    the refusal with its kind (`transient` | `operator`). Written by host processes."""
-
-    __tablename__ = "publish_status"
-    __table_args__ = {"schema": SCHEMA}
-
-    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
-    recorded_by: Mapped[str] = mapped_column(Text)
-    published: Mapped[str | None] = mapped_column(Text, default=None)
-    refused: Mapped[str | None] = mapped_column(Text, default=None)
-    kind: Mapped[str | None] = mapped_column(Text, default=None)
-
-    def as_dict(self) -> dict[str, str]:
-        """The keys of the old file: `by`, then `published`, or `refused` with `kind`."""
-        out = {"by": self.recorded_by}
-        if self.published is not None:
-            out["published"] = self.published
-        else:
-            out.update(refused=self.refused or "", kind=self.kind or "")
-        return out
-
-
 class AlertMappingRow(Base, kw_only=True):
     """The tenant's alert mapping (#1345): at most one row, absent until the first save, replaced whole and never
     deleted. One nullable text column per entry, named as the entry (`records.formats.MAPPING_KEYS`); null is an

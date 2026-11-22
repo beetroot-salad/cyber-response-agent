@@ -179,17 +179,5 @@ class _SocketRecords:
         state = self._container.launch.get("tenant_state")
         return None if state is None else _Tenant(str(state))
 
-    async def record_publish_status(self, tenant_id: Any, line: str, *, by: str) -> None:
-        del tenant_id, by
-        from defender.tenancy import FRESH, OPERATOR, STALE_TRANSIENT, TRANSIENT
-
-        word, _, rest = str(line).partition(" ")
-        if word == FRESH:
-            self._container.ask("record.published", commit=rest.strip())
-        else:
-            # `stale:transient` may pass by itself; `stale:operator` and `misconfigured` need a human.
-            kind = TRANSIENT if word == STALE_TRANSIENT else OPERATOR
-            self._container.ask("record.refusal", kind=kind, reason=rest or word)
-
     async def close(self) -> None:
         return None

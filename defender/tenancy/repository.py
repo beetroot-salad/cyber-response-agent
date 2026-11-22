@@ -9,7 +9,6 @@ Writers (P2, DC-4):
   `Conflict` (the tenant's state refuses the request). The offboard request is not the
   repository's (#1360, #1496): the job store runs tenancy's `offboard` together with the ending of
   the tenant's jobs, in one transaction (`JobStore.offboard_tenant`), its one path.
-- Host processes: `record_publish_status(T, line, by=)`, a launch-time publish report line.
 - The worker holding a tenant's lock (management service or host actor), through `HeldTenant`.
 
 A worker's step, the only way it writes:
@@ -41,7 +40,7 @@ seconds (`LifecycleConfig.lock_keepalive`).
 `claimable(actor, now=)` lists the tenants whose current step is `actor`'s with no failure
 (`delete_repo` only once `repo_delete_after` has passed), oldest first; it does not look at locks.
 
-Reads (`tenant`, `tenants`, `generations`, `forge_wiring`, `publish_status`) return detached
+Reads (`tenant`, `tenants`, `generations`, `forge_wiring`) return detached
 copies: changing one changes nothing stored."""
 
 from __future__ import annotations
@@ -100,7 +99,7 @@ class HeldTenant(Protocol):
         add_generation: Generation | None = None,
         update_generations: Mapping[str, Mapping[str, Any]] | None = None,
         go_live: str | None = None, destroy: Collection[str] | Literal["all"] = (),
-        wiring: ForgeWiring | None = None, drop_wiring: bool = False, drop_publish_status: bool = False,
+        wiring: ForgeWiring | None = None, drop_wiring: bool = False,
         drop_records: bool = False,
     ) -> TenantRecord:
         """Record a step's outcome and the next step (`step`, `actor`; both None when nothing is
@@ -108,8 +107,8 @@ class HeldTenant(Protocol):
         other tenant columns; a new generation (names, P1); field changes per generation salt;
         `go_live` makes that generation `live` and the one live before it `retiring`; `destroy`
         marks generations (or `ALL` not yet destroyed) `destroyed`; `wiring` is recorded unless
-        the tenant already has one (the lab keeps its own); `drop_wiring`/`drop_publish_status`
-        delete those rows. Returns the row as written; `FenceMissed` when it did not land."""
+        the tenant already has one (the lab keeps its own); `drop_wiring`
+        deletes that row. Returns the row as written; `FenceMissed` when it did not land."""
         ...
 
     async def fail(self, failure: str, *, step: str, actor: str) -> TenantRecord:
@@ -132,10 +131,6 @@ class TenantRepository(Protocol):
     async def forge_wiring(self, tenant_id: TenantId) -> ForgeWiring | None: ...
     async def admission(self, tenant_id: TenantId) -> tuple[str | None, ForgeWiring | None]:
         """The tenant's state (None when unknown) and its forge wiring, in one read."""
-        ...
-    async def publish_status(self, tenant_id: TenantId) -> dict[str, str] | None:
-        """The last publish outcome, keyed as the old file: `by`, then `published` (the commit),
-        or `refused` with `kind` (`transient` | `operator`); None when none is recorded."""
         ...
     async def alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
         """The tenant's alert mapping (#1345), None until one is saved. Read here, written only by the jobs
@@ -167,29 +162,9 @@ class TenantRepository(Protocol):
     async def record_merge_eligibility(self, tenant_id: TenantId, *, logins: frozenset[str], read_at: _dt.datetime) -> None:
         """Replace the tenant's merge-eligibility record whole (#1414 D13); `ValueError` for an unknown tenant."""
         ...
-    async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
-        """Replace the tenant's publish outcome with what the report `line` states (`fresh <commit>`,
-        `stale:transient <why>`, `stale:operator <why>`, `misconfigured <why>`)."""
-        ...
-
     # --- workers
     async def claimable(self, actor: str, *, now: _dt.datetime) -> list[TenantId]: ...
     def lock(self, tenant_id: TenantId) -> AbstractAsyncContextManager[HeldTenant | None]: ...
-
-
-def publish_outcome(line: str) -> tuple[str | None, str | None, str | None]:
-    """`(published, refused, kind)` for a launch-time publish report line (`tenancy._publish_status`'s
-    vocabulary): `fresh` publishes its commit; `stale:transient` is transient; `stale:operator` and
-    `misconfigured` need an operator."""
-    from defender._text import one_line
-    from defender.tenancy._publish_status import FRESH, OPERATOR, STALE_TRANSIENT, TRANSIENT
-
-    head, _sep, rest = line.strip().partition(" ")
-    if head in (FRESH, "ok"):
-        return rest, None, None
-    if head == "refused":  # SPIKE (#1618): the retired stale classes are no longer written; kind "refused"
-        return None, one_line(rest), "refused"
-    return None, one_line(rest), TRANSIENT if head == STALE_TRANSIENT else OPERATOR
 
 
 def claimable_now(record: TenantRecord, actor: str, now: _dt.datetime) -> bool:

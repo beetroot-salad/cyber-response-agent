@@ -483,7 +483,7 @@ class ManagementService(Actor):
         await self._delete_bots(bots)
         now = self._clock()
         await held.commit(step="delete_repo", actor=SERVICE, state="offboarded", pending_action="delete_repo",
-                          offboarded_at=now, repo_delete_after=now + REPO_WINDOW, drop_publish_status=True,
+                          offboarded_at=now, repo_delete_after=now + REPO_WINDOW,
                           drop_records=True)
 
     async def _delete_repo(self, held: HeldTenant) -> None:

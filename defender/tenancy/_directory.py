@@ -5,8 +5,7 @@ actor's step bodies in a worker thread).
 Each call is one `asyncio.run`: it opens a repository, reads, and closes the repository in that same
 loop (#1339's engine rule), so no engine outlives its loop; a connection per call is fine at
 per-drain-claim rates. Called inside a running loop it refuses (RuntimeError) before opening
-anything. Its public methods only read; the one write host processes make, the publish outcome
-(P2), goes through `_call` from `tenancy._publish_status`. Imports no database code: the repository comes from the factory it is given.
+anything. Its public methods only read. Imports no database code: the repository comes from the factory it is given.
 
 A call the database cannot answer (the driver's connection-class error: refused, dropped, timed
 out, the login refused) is `RecordsUnreachable`, a `TenantRefused` every host caller may treat as

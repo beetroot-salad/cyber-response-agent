@@ -24,8 +24,10 @@ from defender._io import load_json_artifact, read_guarded
 FRESH = "fresh"
 STALE = "stale"
 PINNED = "pinned"
+UNREADABLE_KIND = "unreadable"
 TRANSIENT = "transient"
 OPERATOR = "operator"
+#: `stale` is read as history only: no writer says it any more (#1618 K9).
 KINDS = frozenset({FRESH, STALE, PINNED})
 STALE_KINDS = frozenset({TRANSIENT, OPERATOR})
 
@@ -48,11 +50,15 @@ class KnowledgeStatus:
 
     @property
     def stale(self) -> bool:
+        """A stored `stale` record (history: nothing writes one any more)."""
         return self.kind == STALE
 
+    @property
+    def unreadable(self) -> bool:
+        return self.kind == UNREADABLE_KIND
 
-UNREADABLE = KnowledgeStatus(kind=STALE, commit=None, stale_kind=OPERATOR,
-                             reason=UNREADABLE_REASON)
+
+UNREADABLE = KnowledgeStatus(kind=UNREADABLE_KIND, commit=None, reason=UNREADABLE_REASON)
 
 
 def _record_status(record_text: str) -> KnowledgeStatus | None:
@@ -109,7 +115,7 @@ _API_CURRENT = "current"
 
 def api_knowledge(status: KnowledgeStatus | None) -> dict[str, str | None] | None:
     """The one mapping from the host record's status to the API's `knowledge` shape (#1342 M6),
-    `{status, commit, stale_kind}`: `fresh` is `current`, `stale` and `pinned` keep their names,
+    `{status, commit, stale_kind}`: `fresh` is `current`, `pinned`, `unreadable` and a stored `stale` keep their names,
     the commit is carried and the publish's raw `reason` dropped (it never leaves the host).
     `None` stays `None`: no status to show."""
     if status is None:
@@ -119,7 +125,7 @@ def api_knowledge(status: KnowledgeStatus | None) -> dict[str, str | None] | Non
 
 
 __all__ = [
-    "FRESH", "OPERATOR", "PINNED", "STALE", "TRANSIENT", "UNREADABLE",
+    "FRESH", "OPERATOR", "PINNED", "STALE", "TRANSIENT", "UNREADABLE", "UNREADABLE_KIND",
     "UNREADABLE_REASON", "KnowledgeStatus", "api_knowledge", "knowledge_status",
     "read_knowledge_status",
 ]

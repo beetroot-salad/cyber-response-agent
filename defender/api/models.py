@@ -108,28 +108,27 @@ class Alert(_AlertFields):
     raw: str = Field(description="The alert's text exactly as the vendor sent it: not parsed, not re-serialized.")
 
 
-KnowledgeStatus = Literal["current", "stale", "pinned"]
+KnowledgeStatus = Literal["current", "pinned", "unreadable", "stale"]
 StaleKind = Literal["transient", "operator"]
 
 
 class InvestigationKnowledge(BaseModel):
     """Which revision of the tenant's knowledge the investigation's run read (#1108 P4, O-WARN):
-    the latest approved one (`current`), an earlier one because the newer could not be loaded
-    (`stale`, with why in two words), or one named at launch (`pinned`)."""
+    the latest approved one (`current`), one named at launch (`pinned`), or none that can be
+    named (`unreadable`: no readable record). `stale` appears only in a record stored before #1618."""
 
     status: KnowledgeStatus
     commit: str | None = Field(
         description="The knowledge commit the run read; null only when its record is unreadable.")
     stale_kind: StaleKind | None = Field(
         default=None,
-        description="Set iff `status` is `stale`: `transient` (a temporary outage) or `operator` "
-                    "(awaiting operator action).")
+        description="Set only on a `stale` record stored before #1618; never on a new answer.")
 
 
 #: A host request's stages (#1471 R2): queued, running, then completed with a result or failed with a reason.
 HostRequestStatus = Literal["queued", "running", "completed", "failed"]
 #: The step a readiness check refused at (#1471 P-1, R13-1.4): the helper's steps in their order, then the container's two.
-ReadinessStep = Literal["tenant", "records", "alert_mapping", "publish", "knowledge_copy", "run_tenant", "roster",
+ReadinessStep = Literal["tenant", "records", "alert_mapping", "publish", "run_tenant", "roster",
                         "tenant_verdict", "signing", "first_pass", "container_tenant", "systems"]
 #: What a readiness warning is about (#1471 R4).
 WarningKind = Literal["case_system", "system_down", "grant_ignored", "verb_undecided", "verb_undeclared",

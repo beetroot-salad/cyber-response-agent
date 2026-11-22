@@ -88,10 +88,10 @@ class AlertsRepository(Protocol):
 class InvestigationsRepository(Protocol):
     """An investigation's `knowledge` is stored on its row from its run's HOST-held knowledge
     record (beside the run dir, never anything the box can write), mapped `fresh` ->
-    `current`, `stale` -> `stale` with its kind, `pinned` -> `pinned`, the commit carried and the
+    `current`, `pinned` -> `pinned`, `unreadable` -> `unreadable`, a stored `stale` as it was, the commit carried and the
     publish's raw reason dropped. Null when the run never started: setup was refused before the
     run existed. A run that started but whose record is missing or does not parse is
-    `{status: stale, stale_kind: operator, commit: null}` — never claimed current (#1108 P4,
+    `{status: unreadable, commit: null}` — never claimed current (#1108 P4,
     OD22')."""
 
     async def list_investigations(
