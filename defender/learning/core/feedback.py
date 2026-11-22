@@ -1,8 +1,8 @@
 """The feedback tick (#1414 F2): a person's comment on a Forgejo issue becomes a lesson row or a
 registry entry on a PR a person merges.
 
-One tick, four steps (`run`): open issues for finished runs, read the comments of people who may
-merge, decide each once, draft approved entries onto a registry PR; then post the replies owed.
+One tick, four steps (`run`): open issues for finished runs, read the comments of the tenant's people
+(a login `p-<id>` of a user wanted in the tenant, by the tick's one membership read, #1592 OD-6), decide each once, draft approved entries onto a registry PR; then post the replies owed.
 Everything but the host's few records is derived from what Forgejo shows each tick, so a crash at
 any step boundary is a redo (P5). Steps 3 and 4 live in `feedback_decide` and `feedback_registry`.
 
@@ -30,16 +30,11 @@ from defender.learning.core.config import FEEDBACK_DRAIN_LABEL, FatalConfigError
 _logger = logging.getLogger(__name__)
 
 FEEDBACK_LABEL = "defender-feedback"
-#: How long the service's merge-eligibility record may be before the tick reads no comments (D13/D15).
-ELIGIBILITY_MAX_AGE_ENV = "LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE"
-DEFAULT_ELIGIBILITY_MAX_AGE = dt.timedelta(seconds=60)
 #: The longest issue title the forge takes; the host's own title is cut to it, so it is never refused for length.
 TITLE_LIMIT = 255
 #: How far back of the last comment read each tick asks again: a comment the forge dated just before it but
 #: listed only later is still found. A comment already judged (its id recorded) is not read twice.
 COMMENT_OVERLAP = dt.timedelta(seconds=60)
-#: How far ahead of this host's clock the service's record may be dated and still count as fresh.
-CLOCK_SKEW = dt.timedelta(seconds=5)
 
 
 def _first_line(case_id: str, run_id: str) -> str:
@@ -90,7 +85,8 @@ class Tick:
     forge: Any
     bots: frozenset[str]
     tenant_id: str
-    eligible: frozenset[str] | None = None
+    #: The logins whose comments are taken in: `p-<id>` of each user wanted in the tenant at this tick (OD-6).
+    eligible: frozenset[str] = frozenset()
     #: First line -> issue number of every feedback issue a tenant bot made: read once per tick, when needed.
     made: dict[str, int] | None = None
 
@@ -106,37 +102,18 @@ class Tick:
         return list(self.store.feedback_comments(self.tenant_id))
 
 
-def eligibility_bound(seam: dt.timedelta | None) -> dt.timedelta:
-    """The staleness bound: the seam, else the env (seconds), else 60 s (D15)."""
-    if seam is not None:
-        return seam
-    raw = os.environ.get(ELIGIBILITY_MAX_AGE_ENV)
-    try:
-        return dt.timedelta(seconds=float(raw)) if raw else DEFAULT_ELIGIBILITY_MAX_AGE
-    except ValueError:
-        _logger.error(f"feedback: {ELIGIBILITY_MAX_AGE_ENV}={raw!r} is not a number of seconds; "
-                      f"using {DEFAULT_ELIGIBILITY_MAX_AGE.total_seconds():.0f}")
-        return DEFAULT_ELIGIBILITY_MAX_AGE
+def people_logins(people: Any, tenant_id: Any, bots: frozenset[str]) -> frozenset[str]:
+    """The logins a comment is taken in from (#1592 OD-6): exactly `p-` followed by the canonical id of each user the
+    tick's one membership read finds wanted in the tenant; never a bot's."""
+    return frozenset(f"p-{user}" for user in people.wanted_users(tenant_id)) - bots
 
 
-def _eligible_logins(records: Any, tenant_id: Any, bound: dt.timedelta, bots: frozenset[str]) -> frozenset[str] | None:
-    """Who may merge as of the service's latest pass, or None when the record is absent or older than
-    `bound` (fail closed: the tick reads and decides nothing, logs why, moves no position)."""
-    record = records.merge_eligibility(tenant_id)
-    if record is None:
-        _logger.warning("feedback: no merge-eligibility record for this tenant yet (the management service "
-                        "has not written one): reading and deciding no comments this tick")
-        return None
-    age = dt.datetime.now(dt.UTC) - record.read_at
-    if age < -CLOCK_SKEW:
-        _logger.warning(f"feedback: the merge-eligibility record is dated {-age.total_seconds():.0f}s ahead of "
-                        "this host's clock: a clock is wrong; reading and deciding no comments this tick")
-        return None
-    if age > bound:
-        _logger.warning(f"feedback: the merge-eligibility record is {age.total_seconds():.0f}s old, past the "
-                        f"{bound.total_seconds():.0f}s bound: reading and deciding no comments this tick")
-        return None
-    return frozenset(record.logins) - bots
+def _default_people(dsn: str) -> Any:
+    """The membership read over the identity records at `dsn` (`DEFENDER_DATABASE_DSN`)."""
+    from defender.identity import PeopleDirectory
+    from defender.identity.postgres import PostgresIdentityRepository
+
+    return PeopleDirectory(lambda: PostgresIdentityRepository(dsn))
 
 
 # ------------------------------------------------------------------ the tick's lease (O12) and its stops (P9)
@@ -165,10 +142,11 @@ def _halts() -> tuple[type[BaseException], ...]:
 
 
 def run(paths: LoopPaths, open_delivery: Callable[[], Any], records: Any, *, decide: Callable[..., dict],
-        eligibility_max_age: dt.timedelta | None = None) -> int:
+        people: Any = None) -> int:
     """One feedback tick for the selected tenant, under its feedback tick lease, over the learning store at
     `DEFENDER_DATABASE_DSN` (opened through `defender.learning_store.blocking`). Another live holder of the lease,
-    or a tenant off active, is a clean exit 0 that does nothing."""
+    or a tenant off active, is a clean exit 0 that does nothing. `people` answers `wanted_users(tenant_id)` (the
+    identity records at the same DSN when None, `identity.PeopleDirectory`)."""
     from defender import learning_store as store_mod
     from defender.learning.core.store_tick import DSN_ENV, owner_name
 
@@ -179,6 +157,8 @@ def run(paths: LoopPaths, open_delivery: Callable[[], Any], records: Any, *, dec
     if not dsn:
         raise FatalConfigError(f"the learning store is read from {DSN_ENV}, which is not set")
     knobs = _knobs()
+    if people is None:
+        people = _default_people(dsn)
     with store_mod.blocking(dsn, **knobs) as store:
         try:
             held = store.begin_feedback_tick(str(tenant.id), owner=owner_name(str(FEEDBACK_DRAIN_LABEL)))
@@ -188,12 +168,11 @@ def run(paths: LoopPaths, open_delivery: Callable[[], Any], records: Any, *, dec
         if held is None:
             _logger.warning("feedback_drain: another feedback tick holds the lease — exiting")
             return 0
-        return _under_lease(paths, store, held, open_delivery, records, decide=decide,
-                            eligibility_max_age=eligibility_max_age)
+        return _under_lease(paths, store, held, open_delivery, records, decide=decide, people=people)
 
 
 def _under_lease(paths: LoopPaths, store: Any, held: Any, open_delivery: Callable[[], Any], records: Any, *,
-                 decide: Callable[..., dict], eligibility_max_age: dt.timedelta | None) -> int:
+                 decide: Callable[..., dict], people: Any) -> int:
     """The tick's steps under its lease, and the lease's end: released at once on any end but a lost lease (A2 D4's
     clean stop); a lost lease does nothing more."""
     from defender.learning.core.store_tick import Holding, TickStopped
@@ -202,8 +181,7 @@ def _under_lease(paths: LoopPaths, store: Any, held: Any, open_delivery: Callabl
     lost = False
     try:
         with Holding(store, held, renew=store.renew_feedback_tick) as hold:
-            _steps(paths, store, held, hold, open_delivery, records, decide=decide,
-                   eligibility_max_age=eligibility_max_age)
+            _steps(paths, store, held, hold, open_delivery, records, decide=decide, people=people)
     except TickStopped as stopped:
         lost = stopped.why == "lease"
         _logger.warning(f"feedback_drain: the tick stopped ({stopped.why}); nothing more is done")
@@ -233,7 +211,7 @@ def _release(store: Any, held: Any) -> None:
 
 
 def _steps(paths: LoopPaths, store: Any, held: Any, hold: Any, open_delivery: Callable[[], Any], records: Any, *,
-           decide: Callable[..., dict], eligibility_max_age: dt.timedelta | None) -> None:
+           decide: Callable[..., dict], people: Any) -> None:
     from defender.jobs.learning_models import BRANCH_PREFIX
     from defender.learning.core import drains, store_tick
     from defender.learning_store.tick import StoreAdapter
@@ -244,7 +222,7 @@ def _steps(paths: LoopPaths, store: Any, held: Any, hold: Any, open_delivery: Ca
     with open_delivery() as opened:
         try:
             bots = frozenset(g.bot_login for g in records.generations(tenant.id))
-            eligible = _eligible_logins(records, tenant.id, eligibility_bound(eligibility_max_age), bots)
+            eligible = people_logins(people, tenant.id, bots)
         except RecordsUnreachable as down:
             raise drains._Refused(f"the tenant {tenant.id}'s records could not be read: {down}", transient=True) from None
         delivery = dataclasses.replace(opened, branch_prefix=BRANCH_PREFIX[store_tick.FEEDBACK_LANE])
@@ -258,9 +236,8 @@ def _steps(paths: LoopPaths, store: Any, held: Any, hold: Any, open_delivery: Ca
                                stop_box=_no_box, reconcile_lanes=(store_tick.FEEDBACK_LANE,), boxed=False,
                                parent=hold)
         _isolated_step("opening issues", lambda: _open_requests(ctx))
-        if ctx.eligible is not None:
-            _isolated_step("reading comments", lambda: _read_comments(ctx))
-            _isolated_step("deciding comments", lambda: feedback_decide.decide_comments(ctx, decide))
+        _isolated_step("reading comments", lambda: _read_comments(ctx))
+        _isolated_step("deciding comments", lambda: feedback_decide.decide_comments(ctx, decide))
         _isolated_step("drafting registry entries", lambda: feedback_registry.draft(ctx, delivery, lane))
         _isolated_step("replying", lambda: feedback_registry.reply(ctx))
 
@@ -382,12 +359,13 @@ def _read_issue(ctx: Tick, run: Any, comments: list[dict], *, listed: bool = Fal
     taken: list[dict[str, Any]] = []
     skipped: set[str] = set()
     for c in _readable(issue, new):
-        if c["user"]["login"] in (ctx.eligible or ()):
+        if c["user"]["login"] in ctx.eligible:
             taken.append(_taken(issue, c))
         else:
             skipped.add(c["user"]["login"])
     if skipped:
-        _logger.info(f"feedback: issue {number}: skipped comments by accounts that may not merge: {sorted(skipped)}")
+        _logger.info(f"feedback: issue {number}: skipped comments by accounts that are not a person wanted in the "
+                     f"tenant (p-<user id>): {sorted(skipped)}")
     ctx.store.judge_comments(ctx.held, run.run_id, taken=taken, judged=[c["id"] for c in new], listed=listed)
     return True
 

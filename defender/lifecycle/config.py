@@ -24,6 +24,12 @@ INTEGRATION_ENV = "DEFENDER_LIFECYCLE_INTEGRATION_CONTAINER"
 SECRETS_DIR_ENV = "DEFENDER_LIFECYCLE_SECRETS_DIR"
 POLL_ENV = "DEFENDER_LIFECYCLE_POLL_INTERVAL"
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
+#: The people worker's two required settings (#1592): the id of Forgejo's Keycloak login source, and the DSN of a
+#: login that is a member of `fs_lifecycle` on the Forgejo sessions database (it holds a password).
+KEYCLOAK_SOURCE_ID_ENV = "DEFENDER_LIFECYCLE_KEYCLOAK_SOURCE_ID"
+FORGE_SESSIONS_DSN_ENV = "DEFENDER_LIFECYCLE_FORGE_SESSIONS_DSN"
+#: The people worker's durations (seconds), which no variable sets (#1592 Settings).
+PEOPLE_DURATIONS = ("people_poll", "people_call_timeout", "forge_session_cap", "forge_cap_every")
 
 
 class ConfigRefused(Exception):
@@ -47,7 +53,12 @@ class LifecycleConfig:
     long teardown waits for the host lock after SIGTERM before SIGKILL, and how long it then keeps removing a folder
     that late writes keep filling before it fails the step (seconds each, #1360). `oidc_key` is the
     deployment's OIDC signing key; `token_policy` and `sign_policy` are its two templated policies,
-    of each generation's delivery AppRole and of its sign-only AppRole (#1163 A24')."""
+    of each generation's delivery AppRole and of its sign-only AppRole (#1163 A24').
+
+    The people worker (#1592): `keycloak_source_id` is Forgejo's Keycloak login source, `forge_sessions_dsn` a login of
+    `fs_lifecycle` on the Forgejo sessions database; `people_poll` the wait between its polls, `people_concurrency` the
+    users it works at once, `people_call_timeout` each Forgejo call's and session statement's bound, `forge_session_cap`
+    the longest a Forgejo session lives after sign-in and `forge_cap_every` how often the cap job runs (seconds each)."""
 
     issuer_url: str = ISSUER_URL
     forge_url: str
@@ -64,10 +75,22 @@ class LifecycleConfig:
     oidc_key: str = "default"
     token_policy: str = "defender-tenant-token"
     sign_policy: str = "defender-tenant-sign"
+    keycloak_source_id: int
+    forge_sessions_dsn: str = field(repr=False)
+    people_poll: float = 2.0
+    people_concurrency: int = 4
+    people_call_timeout: float = 5.0
+    forge_session_cap: float = 3600.0
+    forge_cap_every: float = 60.0
 
     def __post_init__(self) -> None:
         for name in ("template_dir", "secrets_dir", "data_root"):
             object.__setattr__(self, name, Path(getattr(self, name)))
+        self._refuse_bad_addresses()
+        self._refuse_bad_numbers()
+        self._refuse_secrets_in_the_data_root()
+
+    def _refuse_bad_addresses(self) -> None:
         issuer = urlsplit(self.issuer_url)
         if issuer.scheme != "https" or not issuer.hostname or self.issuer_url.endswith("/"):
             raise ConfigRefused(f"the issuer URL {self.issuer_url!r} must be https, with no trailing slash")
@@ -77,8 +100,22 @@ class LifecycleConfig:
                 raise ConfigRefused(f"{name} {getattr(self, name)!r} must be an {'/'.join(schemes)} address with no credentials")
         if not self.forge_admin_token or not self.openbao_login or not self.integration_command:
             raise ConfigRefused("the forge admin token, the OpenBao login and the integration command are required")
+        if not self.forge_sessions_dsn:
+            raise ConfigRefused("the Forgejo sessions database's login (forge_sessions_dsn) is required")
+
+    def _refuse_bad_numbers(self) -> None:
         if not (self.poll_interval > 0 and self.lock_keepalive > 0 and self.teardown_wait > 0):
             raise ConfigRefused("poll_interval, lock_keepalive and teardown_wait are positive numbers of seconds")
+        if not all(getattr(self, name) > 0 for name in PEOPLE_DURATIONS):
+            raise ConfigRefused(f"{', '.join(PEOPLE_DURATIONS)} are positive numbers of seconds")
+        if isinstance(self.people_concurrency, bool) or not isinstance(self.people_concurrency, int) \
+                or self.people_concurrency < 1:
+            raise ConfigRefused("people_concurrency is a positive whole number of users")
+        if isinstance(self.keycloak_source_id, bool) or not isinstance(self.keycloak_source_id, int) \
+                or self.keycloak_source_id < 1:
+            raise ConfigRefused("keycloak_source_id is the positive id of Forgejo's Keycloak login source")
+
+    def _refuse_secrets_in_the_data_root(self) -> None:
         root = self.data_root
         if not (self.secrets_dir.is_absolute() and root.is_absolute()):
             raise ConfigRefused("the secrets directory and the data root are absolute paths")
@@ -92,7 +129,7 @@ class LifecycleConfig:
         """The config of `python -m defender.lifecycle`, from the environment (secrets from the
         files it names)."""
         missing = [n for n in (FORGE_URL_ENV, FORGE_TOKEN_FILE_ENV, OPENBAO_LOGIN_FILE_ENV, INTEGRATION_ENV,
-                               SECRETS_DIR_ENV, DATA_ROOT_ENV)
+                               SECRETS_DIR_ENV, DATA_ROOT_ENV, KEYCLOAK_SOURCE_ID_ENV, FORGE_SESSIONS_DSN_ENV)
                    if not os.environ.get(n)]
         if missing:
             raise ConfigRefused(f"set {', '.join(missing)}")
@@ -106,7 +143,17 @@ class LifecycleConfig:
             openbao_login=_secret_file(os.environ[OPENBAO_LOGIN_FILE_ENV], OPENBAO_LOGIN_FILE_ENV),
             integration_command=os.environ[INTEGRATION_ENV], template_dir=template_dir,
             secrets_dir=Path(os.environ[SECRETS_DIR_ENV]), data_root=Path(os.environ[DATA_ROOT_ENV]),
-            poll_interval=poll)
+            poll_interval=poll, keycloak_source_id=source_id_from_env(),
+            forge_sessions_dsn=os.environ[FORGE_SESSIONS_DSN_ENV])
+
+
+def source_id_from_env() -> int:
+    """`KEYCLOAK_SOURCE_ID_ENV` as the login source's id; refused naming the variable when it is not a whole number."""
+    raw = os.environ.get(KEYCLOAK_SOURCE_ID_ENV, "")
+    try:
+        return int(raw)
+    except ValueError:
+        raise ConfigRefused(f"{KEYCLOAK_SOURCE_ID_ENV} is not the id of a login source: {raw!r}") from None
 
 
 def _secret_file(path: str, variable: str) -> str:

@@ -93,6 +93,13 @@ def forge_admin(config: LifecycleConfig) -> httpx.AsyncClient:
                                  headers={"Authorization": f"token {config.forge_admin_token}"})
 
 
+def forge_people(config: LifecycleConfig) -> httpx.AsyncClient:
+    """The request worker's own forge client (#1592): the admin token on every call, each call bounded by
+    `people_call_timeout`."""
+    return internal_async_client(trust=tls_trust(), base_url=config.forge_url, timeout=config.people_call_timeout,
+                                 headers={"Authorization": f"token {config.forge_admin_token}"})
+
+
 def forge_anonymous(config: LifecycleConfig) -> httpx.AsyncClient:
     """The host actor's forge client: no credential (each call presents the bot's JWT, F-1)."""
     return internal_async_client(trust=tls_trust(), base_url=config.forge_url, timeout=CALL_TIMEOUT)
