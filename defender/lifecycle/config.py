@@ -88,7 +88,13 @@ class LifecycleConfig:
             object.__setattr__(self, name, Path(getattr(self, name)))
         self._refuse_bad_addresses()
         self._refuse_bad_numbers()
-        self._refuse_secrets_in_the_data_root()
+        root = self.data_root
+        if not (self.secrets_dir.is_absolute() and root.is_absolute()):
+            raise ConfigRefused("the secrets directory and the data root are absolute paths")
+        # Judged on resolved paths: a `..` or a link must not smuggle the secrets into a tenant's folder.
+        secrets, tenants_root = self.secrets_dir.resolve(), root.resolve()
+        if secrets == tenants_root or tenants_root in secrets.parents:
+            raise ConfigRefused(f"the secrets directory {self.secrets_dir} must lie outside the data root {root}")
 
     def _refuse_bad_addresses(self) -> None:
         issuer = urlsplit(self.issuer_url)
@@ -114,15 +120,6 @@ class LifecycleConfig:
         if isinstance(self.keycloak_source_id, bool) or not isinstance(self.keycloak_source_id, int) \
                 or self.keycloak_source_id < 1:
             raise ConfigRefused("keycloak_source_id is the positive id of Forgejo's Keycloak login source")
-
-    def _refuse_secrets_in_the_data_root(self) -> None:
-        root = self.data_root
-        if not (self.secrets_dir.is_absolute() and root.is_absolute()):
-            raise ConfigRefused("the secrets directory and the data root are absolute paths")
-        # Judged on resolved paths: a `..` or a link must not smuggle the secrets into a tenant's folder.
-        secrets, tenants_root = self.secrets_dir.resolve(), root.resolve()
-        if secrets == tenants_root or tenants_root in secrets.parents:
-            raise ConfigRefused(f"the secrets directory {self.secrets_dir} must lie outside the data root {root}")
 
     @classmethod
     def from_env(cls, *, template_dir: Path) -> LifecycleConfig:

@@ -96,7 +96,7 @@ FAILED = object()
 
 
 class PersonRun:
-    """One run of one user's requests over the worker's seams (`ports`: tenants, identity, forge, sessions, config).
+    """One run of one user's requests over the worker's seams (`ports`: tenants, identity, forge, forge_sessions, config).
     `carry_out()` is True when every step succeeded."""
 
     def __init__(self, ports: Any, user: UserId, named: Collection[TenantId]) -> None:
@@ -185,7 +185,7 @@ class PersonRun:
         await self._call("PATCH", f"/api/v1/admin/users/{self._login}", json={"prohibit_login": on})
 
     async def _end_sessions(self, wanted: Wanted, account: Account) -> None:
-        rows = await self._p.sessions.signed_in_rows()
+        rows = await self._p.forge_sessions.signed_in_rows()
         gone: list[str] = []
         unreadable: list[SessionRow] = []
         for row in rows:
@@ -197,7 +197,7 @@ class PersonRun:
             if uid == account.uid and (not wanted.tenants or (
                     wanted.signed_out_at is not None and row.signed_in_at < wanted.signed_out_at)):
                 gone.append(row.key)
-        await self._p.sessions.delete([*gone, *(r.key for r in unreadable)])
+        await self._p.forge_sessions.delete([*gone, *(r.key for r in unreadable)])
         for row in unreadable:
             _logger.warning("people request of user %s: deleted an unreadable Forgejo session signed in at %s",
                             self._user, row.signed_in_at.isoformat())

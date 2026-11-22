@@ -36,7 +36,7 @@ class PeopleWorker:
 
     def __init__(self, tenants: Any, *, identity: Any, forge: httpx.AsyncClient, sessions: Any,  # noqa: PLR0913 — the pinned seams
                  config: LifecycleConfig, clock: Callable[[], _dt.datetime]) -> None:
-        self.tenants, self.identity, self.forge, self.sessions = tenants, identity, forge, sessions
+        self.tenants, self.identity, self.forge, self.forge_sessions = tenants, identity, forge, sessions
         self.config, self._clock = config, clock
         #: None until the first poll asks: the first answer is a change either way, and is logged.
         self._holding: bool | None = None
@@ -77,7 +77,7 @@ class PeopleWorker:
     async def cap(self) -> int:
         """The cap job once: rows signed in longer than `forge_session_cap` ago, and unstamped rows holding the `uid`
         entry, deleted with no decoding. The number deleted."""
-        deleted = int(await self.sessions.cap(self.config.forge_session_cap))
+        deleted = int(await self.forge_sessions.cap(self.config.forge_session_cap))
         if deleted:
             _logger.info("people worker: the cap job ended %d Forgejo session(s)", deleted)
         return deleted
@@ -91,7 +91,7 @@ class PeopleWorker:
         self._cancel_all()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         await self.forge.aclose()
-        await self.sessions.close()
+        await self.forge_sessions.close()
 
     # --- the lock (OD-12) -----------------------------------------------------------------------------------------
     async def _confirm_lock(self) -> bool:
