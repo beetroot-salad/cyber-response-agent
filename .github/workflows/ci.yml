@@ -332,7 +332,7 @@ jobs:
           for realm in defender; do
             timeout 180 sh -c "until curl -sf -o /dev/null http://localhost:8080/realms/$realm/.well-known/openid-configuration; do sleep 2; done"
           done
-          timeout 180 sh -c 'until curl -sf -o /dev/null http://localhost:3000/api/v1/version; do sleep 2; done'
+          timeout 180 sh -c 'until curl -sf -o /dev/null http://localhost:3000/api/healthz; do sleep 2; done'
           # The lifecycle's DSN is the script's named login `fs_lifecycle_dev` (password `dev-only-change-me`).
           echo "LIFECYCLE_DSN=postgresql://fs_lifecycle_dev:dev-only-change-me@127.0.0.1:5433/forgejo_sessions" >> "$GITHUB_ENV"
 
