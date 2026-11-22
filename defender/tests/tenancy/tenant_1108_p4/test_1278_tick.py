@@ -791,7 +791,7 @@ def test_1618_b12_a_container_tick_refuses_a_base_it_cannot_fetch_by_id_and_auth
 
     assert "batch.start" in asked, "premise: the helper answered the batch start (the tick did not die earlier)"
     refusal = critical_text(caplog)
-    assert K.ABSENT_COMMIT in refusal or "fetch" in refusal.lower(), f"the tick did not refuse naming the base or the failed fetch: {refusal!r}"
+    assert K.ABSENT_COMMIT in refusal, f"the tick did not refuse naming the base it could not fetch (K5): {refusal!r}"
     assert writer.served == [], f"a curator ran on a base the container does not hold ({critical_text(caplog)})"
     assert remote_branches(w.t.remote, prefix="") == before, "a batch branch was pushed"
     assert w.t.forge.creates == []
