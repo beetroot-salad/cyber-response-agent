@@ -185,9 +185,12 @@ def _jwk(private: Any, kid: str, use: str, alg: str) -> dict[str, Any]:
             "n": _b64(numbers.n.to_bytes((numbers.n.bit_length() + 7) // 8, "big")), "e": "AQAB"}
 
 
-#: The probe's steps (FC-6; only the first step's name, "discovery", is pinned): the discovery document, the signing
-#: keys, the admin client's token request, the admin read.
+#: The probe's steps both realms have (FC-6; only the first step's name, "discovery", is pinned): the discovery
+#: document, the signing keys, the admin client's token request, the admin read.
 STEPS = ("discovery", "keys", "token", "admin")
+#: Each realm's steps: the sign-in realm's last one sends the browser's sign-in request (#1620), which the programs
+#: realm, with no browser sign-in, does not have.
+REALM_STEPS: dict[str, tuple[str, ...]] = {SIGNIN_REALM: (*STEPS, "redirect"), PROGRAMS_REALM: STEPS}
 #: The failure kinds each step can show, each one an answer the dev Keycloak was observed to give or one HTTP
 #: answers generically. `not_found` at discovery is a realm that does not exist (observed: 404 on every path of it).
 #: `unreadable` is a 200 whose body is not JSON; `enc_only` and `empty` are key sets with no key to verify with
@@ -197,13 +200,16 @@ STEP_KINDS: dict[str, tuple[str, ...]] = {
     "keys": ("not_found", "server_error", "unreadable", "enc_only", "empty"),
     "token": ("not_found", "server_error", "unreadable", "bad_secret"),
     "admin": ("not_found", "server_error", "no_role"),
+    # #1620, observed 2026-11-21 (Keycloak 26.4): `not_registered` is the 400 page for a redirect URI the client does
+    # not list. A redirect is not a failure (r3): Keycloak redirects only once it accepted the client and the URI.
+    "redirect": ("not_found", "server_error", "not_registered"),
 }
 #: Discovery that never answers: waits until the request is cancelled (the during-start signal case). Not in the
 #: table, because a start that is not signalled never ends.
 STALL = "stall"
 #: Every failure the program must refuse start for, as `(realm, step) -> kinds`.
 FAULTS: dict[tuple[str, str], tuple[str, ...]] = {
-    (realm, step): kinds for realm in REALMS for step, kinds in STEP_KINDS.items()}
+    (realm, step): STEP_KINDS[step] for realm in REALMS for step in REALM_STEPS[realm]}
 #: The wrong issuer discovery names (a realm the configured issuer is not).
 ELSEWHERE_ISSUER = f"{FRONT}/realms/elsewhere"
 
@@ -310,7 +316,8 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
                  admin_clients: Mapping[str, tuple[str, str]] = ADMIN_CLIENTS,
                  signin_client: tuple[str, str] = SIGNIN_CLIENT,
                  on_stall: Callable[[str], None] | None = None,
-                 answers: Mapping[tuple[str, str], Callable[[httpx.Request], httpx.Response]] | None = None) -> None:
+                 answers: Mapping[tuple[str, str], Callable[[httpx.Request], httpx.Response]] | None = None,
+                 redirect_uris: Iterable[str] | None = None) -> None:
         self.fails = {(f.realm, f.step): f.kind for f in fails}
         self.answers = dict(answers or {})
         self.admin_clients = dict(admin_clients)
@@ -333,6 +340,8 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
         self.credentials: dict[str, list[str]] = {}  # account id -> credential types
         self.records: dict[str, dict[str, Any]] = {}  # account id -> user record, for accounts not created here
         self.closes = 0
+        self.redirect_uris = None if redirect_uris is None else tuple(redirect_uris)
+        self.cookies_sent: list[str] = []  # each Cookie header a request carried, in order
 
     async def aclose(self) -> None:
         self.closes += 1
@@ -344,6 +353,8 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
         await request.aread()
         method, path = request.method, request.url.path
         self.seen.append((method, f"{request.url.host}:{request.url.port}{path}"))
+        if "cookie" in request.headers:
+            self.cookies_sent.append(request.headers["cookie"])
         if (request.url.host, request.url.port) == (self.back_host, self.back_port):
             for realm in REALMS:
                 if path.startswith((f"/realms/{realm}/", f"/admin/realms/{realm}/")):
@@ -360,7 +371,9 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
                 ("GET", f"/realms/{realm}/protocol/openid-connect/certs"): "keys",
                 ("POST", f"/realms/{realm}/protocol/openid-connect/token"): "token",
                 ("GET", f"/admin/realms/{realm}/users"): "admin",
-                ("GET", f"/admin/realms/{realm}/clients"): "admin"}.get(route)
+                ("GET", f"/admin/realms/{realm}/clients"): "admin",
+                **({("GET", f"/realms/{realm}/protocol/openid-connect/auth"): "redirect"}
+                   if realm == SIGNIN_REALM else {})}.get(route)
 
     async def _answer(self, realm: str, request: httpx.Request) -> httpx.Response | None:
         step = self._step(realm, request)
@@ -382,7 +395,33 @@ class FakeKeycloak(httpx.AsyncBaseTransport):
         if kind == "unreadable":
             return _unreadable()
         return {"discovery": self._discovery, "keys": self._keys, "token": self._token,
-                "admin": self._admin}[step](realm, request, kind)
+                "admin": self._admin, "redirect": self._authorize}[step](realm, request, kind)
+
+    def _authorize(self, realm: str, request: httpx.Request, kind: str | None) -> httpx.Response:
+        """The browser's sign-in request (#1620), answered as observed on Keycloak 26.4 (2026-11-21): another client is
+        a 400 page "Client not found"; a redirect URI the client does not list (`redirect_uris`, None: whichever the
+        request names) a 400 page "Invalid parameter: redirect_uri"; a request it refuses but whose redirect it trusts
+        (not S256, or a challenge outside RFC 7636's 43-128 characters of its alphabet; observed: `abc`) a 302 to the callback with `error`, `state` and `iss`; a
+        healthy one the sign-in page, 200, setting the three cookies Keycloak sets on it."""
+        params = request.url.params
+        redirect = params.get("redirect_uri", "")
+        if params.get("client_id") != self.signin_client[0]:
+            return httpx.Response(400, html="<html><title>Sign in</title><p id=\"kc-error-message\">Client not found.</p>")
+        if kind == "not_registered" or (self.redirect_uris is not None and redirect not in self.redirect_uris):
+            return httpx.Response(400, html="<html><title>Sign in</title>"
+                                            "<p id=\"kc-error-message\">Invalid parameter: redirect_uri</p>")
+        challenge = params.get("code_challenge", "")
+        if params.get("code_challenge_method") != "S256" or not re.fullmatch(r"[A-Za-z0-9._~-]{43,128}", challenge):
+            query = urllib.parse.urlencode({
+                "error": "invalid_request",
+                "error_description": "Invalid parameter: code challenge method is not matching the configured one",
+                "state": params.get("state", ""), "iss": self.issuer(realm)})
+            return httpx.Response(302, headers={"location": f"{redirect}?{query}"})
+        path = f"/realms/{realm}/"
+        return httpx.Response(200, html='<html><title>Sign in</title><form id="kc-form-login"></form></html>', headers=[
+            ("set-cookie", f"AUTH_SESSION_ID={uuid.uuid4()}; Version=1; Path={path}; HttpOnly"),
+            ("set-cookie", f"KC_AUTH_SESSION_HASH=\"{uuid.uuid4().hex}\"; Version=1; Path={path}"),
+            ("set-cookie", f"KC_RESTART={uuid.uuid4().hex}; Version=1; Path={path}; HttpOnly")])
 
     def _discovery(self, realm: str, request: httpx.Request, kind: str | None) -> httpx.Response:
         issuer = self.issuer(realm)

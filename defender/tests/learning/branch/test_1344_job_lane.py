@@ -725,12 +725,12 @@ def test_d5_dedup_is_by_the_store_on_both_kinds_and_holds_past_every_end(tmp_pat
         for kind in ("finding", "questioner_finding"):
             make = finding if kind == "finding" else world_finding
             row, fresh = make(f"{kind}-1"), make(f"{kind}-2")
-            assert tuple(store.publish_findings(S.FIXTURE_TENANT, "run-1", [row], kind=kind)) == (1, 0)
+            assert tuple(store.publish_finding_channels(S.FIXTURE_TENANT, "run-1", {kind: [row]})[kind]) == (1, 0)
             claim = store.claim(S.FIXTURE_TENANT, "author", owner="host-a", thresholds=ONE)
             store.end_no_commits(claim, {(kind, f"{kind}-1"): _skipped("duplicate")})
-            assert tuple(store.publish_findings(S.FIXTURE_TENANT, "run-2", [row], kind=kind)) == (0, 1)
+            assert tuple(store.publish_finding_channels(S.FIXTURE_TENANT, "run-2", {kind: [row]})[kind]) == (0, 1)
             assert {i.key for i in store.work(S.FIXTURE_TENANT) if i.kind == kind and i.status == "waiting"} == set()
-            assert tuple(store.publish_findings(S.FIXTURE_TENANT, "run-2", [fresh], kind=kind)) == (1, 0), \
+            assert tuple(store.publish_finding_channels(S.FIXTURE_TENANT, "run-2", {kind: [fresh]})[kind]) == (1, 0), \
                 "control: the kind still takes a new id"
 
 

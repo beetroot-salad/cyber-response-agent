@@ -34,7 +34,6 @@ from sqlalchemy import (
     tuple_,
     update,
 )
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,9 +55,14 @@ from defender.jobs.learning_models import (
     BatchRow,
     CommitChangeRow,
     CommitRow,
+    ItemCollision as ItemCollision,  # the door serves it from here
+    ItemNotHeld as ItemNotHeld,  # the door serves it from here
     ItemRefused,
+    KeyedItem,
     WorkItemRow,
     insert_findings,
+    insert_items,
+    refuse_colliding,
     refuse_unholdable,
 )
 
@@ -351,6 +355,22 @@ def _checked_since_request(last_checked: _dt.datetime | None, requested: _dt.dat
     return last_checked if last_checked >= requested else None
 
 
+async def _compared(s: AsyncSession, tenant: str, items: Sequence[KeyedItem]) -> None:
+    """`refuse_colliding` over items already held, a value the database can never hold refused as `ItemRefused`."""
+    try:
+        await refuse_colliding(s, tenant, items)
+    except DataError as refused:
+        raise ItemRefused(str(refused.orig)) from refused
+
+
+async def _inserted(s: AsyncSession, tenant: str, items: Sequence[KeyedItem]) -> dict[str, int]:
+    """`insert_items` (the one keyed insert, #1565), a value the database can never hold refused as `ItemRefused`."""
+    try:
+        return await insert_items(s, tenant, items)
+    except DataError as refused:
+        raise ItemRefused(str(refused.orig)) from refused
+
+
 def _items_with_pr() -> Any:
     """Every item column and its batch's PR (none when it has no batch)."""
     return select(_I, _B.c.pr_number).select_from(_I.outerjoin(_B, _I.c.batch_id == _B.c.id))
@@ -464,64 +484,64 @@ class LearningStore(FeedbackVerbs):
 
     # -- items arrive ------------------------------------------------------------------------------------------
 
-    async def publish_findings(self, tenant: str, run_id: str, rows: Sequence[Mapping[str, Any]], *,
-                               kind: str) -> tuple[int, int]:
-        """Queue `rows` as `kind`: `(added, duplicates)`. A finding id is unique for good (O14). The insert is the
-        worker's own (`jobs.learning_models.insert_findings`): whatever it refuses is `ItemRefused` with nothing of
-        the call stored; an outage propagates, and so does `FindingsNotStored` (an insert error neither the rows nor an
-        outage explains). The rows are screened there, once; only `run_id` is screened here."""
-        if LANE_OF.get(kind) != AUTHOR_LANE:
-            raise ValueError(f"not a findings kind: {kind}")
+    async def publish_finding_channels(self, tenant: str, run_id: str,
+                                       channels: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, tuple[int, int]]:
+        """Queue each channel's rows (`{kind: rows}`, author-lane kinds) in one call: `(added, duplicates)` per kind.
+        A finding id is unique for good (O14): a repeat with the same content is a duplicate, one with other content
+        refuses the whole call, every kind of it (#1565). The insert is the worker's own
+        (`jobs.learning_models.insert_findings`): whatever it refuses is `ItemRefused` with nothing of the call stored;
+        an outage propagates, and so does `FindingsNotStored` (an insert error neither the rows nor an outage
+        explains). The rows are screened there, once; only `run_id` is screened here."""
+        for kind in channels:
+            if LANE_OF.get(kind) != AUTHOR_LANE:
+                raise ValueError(f"not a findings kind: {kind}")
         refuse_unholdable(run_id)
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
-            inserted = await insert_findings(s, tenant, {kind: rows}, source_run=run_id)
+            inserted = await insert_findings(s, tenant, channels, source_run=run_id)
             if not inserted.stored:
                 raise ItemRefused(inserted.why or "the store refused a finding")
-        return inserted.added, len(rows) - inserted.added
+        return {kind: (inserted.added_by_kind[kind], len(rows) - inserted.added_by_kind[kind])
+                for kind, rows in channels.items()}
 
-    async def add_pitfall(self, tenant: str, row: Mapping[str, Any]) -> bool:
-        """Queue one pitfall occurrence; a repeated pitfall id is ignored, a keyless row is keyed by its digest."""
-        refuse_unholdable(row)
-        key = str(row["pitfall_id"]) if row.get("pitfall_id") else digest(dict(row))
-        mistake = mistake_key_of(row, key)
+    async def add_pitfalls(self, tenant: str, rows: Sequence[Mapping[str, Any]]) -> int:
+        """Queue a run's pitfall occurrences in one call; how many were new. A keyless row is keyed by its digest. The
+        same pitfall again is ignored; other content at a held pitfall id (earlier, or in this call) is a collision,
+        not another occurrence, since a pitfall's id is minted from its run's recorded query: it refuses the whole
+        call (`ItemRefused`, #1565), as does a row PostgreSQL could never hold, and nothing of it is stored. A held id
+        the store then shows no item for raises `ItemNotHeld`, nothing stored."""
+        refuse_unholdable(list(rows))
+        items = []
+        for row in rows:
+            key = str(row["pitfall_id"]) if row.get("pitfall_id") else digest(dict(row))
+            items.append(KeyedItem("pitfall", key, dict(row), source_run=_str_or_none(row.get("source_run")),
+                                   mistake_key=mistake_key_of(row, key)))
+        if not items:
+            return 0
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
-            return bool(await self._insert_item(s, tenant, "pitfall", key, dict(row), source_run=_str_or_none(row.get("source_run")),
-                                                mistake_key=mistake))
+            return sum((await _inserted(s, tenant, items)).values())
 
     async def enqueue_request(self, tenant: str, run_id: str, case_id: str, spec: Mapping[str, Any]) -> bool:
-        """File a curation request for `case_id`; the later run wins: an older waiting request is skipped, superseded."""
+        """File a curation request for `case_id`; the later run wins: an older waiting request is skipped, superseded.
+        A run's request filed again as it was (its spec and its case) is a no-op, whatever became of it; with another
+        spec or case it is refused (`ItemRefused`, #1565). Either way it supersedes nothing: the run's own request is
+        decided before any other is touched. A held run the store then shows no request for raises `ItemNotHeld`."""
         refuse_unholdable([run_id, case_id, spec])
+        item = KeyedItem("curation_request", run_id, dict(spec), source_run=run_id, coalesce_key=case_id)
         async with self._sessions.begin() as s:
             await self._require_active(s, tenant)
             await _settle_requests(s, tenant)
             have = (await s.execute(select(_I.c.item_key).where(
                 _I.c.tenant_id == TenantId(tenant), _I.c.kind == "curation_request", _I.c.item_key == run_id))).first()
             if have is not None:
+                await _compared(s, tenant, [item])
                 return False
             await s.execute(update(_I).where(
                 _I.c.tenant_id == TenantId(tenant), _I.c.kind == "curation_request", _I.c.coalesce_key == case_id,
                 _I.c.status == "waiting").values(status="skipped", cause="superseded",
                                                  reason=f"superseded by run {run_id}", updated_at=func.now()))
-            return bool(await self._insert_item(s, tenant, "curation_request", run_id, dict(spec), source_run=run_id,
-                                                coalesce_key=case_id))
-
-    async def _insert_item(  # noqa: PLR0913
-            self, s: AsyncSession, tenant: str, kind: str, key: str, payload: dict[str, Any], *,
-                           status: str = "waiting", source_run: str | None = None, coalesce_key: str | None = None,
-                           mistake_key: str | None = None, reason: str | None = None, attempts: int = 0,
-                           deferrals: int = 0, offers_declined: int = 0, batch_id: str | None = None) -> int:
-        stmt = pg_insert(_I).values(
-            tenant_id=TenantId(tenant), kind=kind, item_key=key, payload=payload, source_run=source_run, status=status,
-            reason=reason, fault=None, batch_id=batch_id, attempts=attempts, deferrals=deferrals,
-            offers_declined=offers_declined, coalesce_key=coalesce_key, mistake_key=mistake_key,
-            enqueued_at=func.now(), updated_at=func.now()).on_conflict_do_nothing(
-            index_elements=["tenant_id", "kind", "item_key"]).returning(_I.c.item_key)
-        try:
-            return len((await s.execute(stmt)).all())
-        except DataError as refused:
-            raise ItemRefused(str(refused.orig)) from refused
+            return bool(sum((await _inserted(s, tenant, [item])).values()))
 
     # -- views -------------------------------------------------------------------------------------------------
 
