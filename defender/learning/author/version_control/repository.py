@@ -6,7 +6,6 @@ import contextlib
 import math
 import secrets
 import tempfile
-import weakref
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -261,7 +260,7 @@ class GitRepository(LocalRepository):
         """One operation's private bare repository (a drain tick's, revert's, adoption's or feedback's), never under
         `<T>`: on the host (`data_root`) an owned 0700 folder under `<data root>/.repo-scratch/`; in a job container
         (`None`) its temporary folder, which dies with it. Opened by one clone of every branch with history, each as the
-        same local head, so its tip of a branch is the remote's. `close()` removes it (so does dropping it)."""
+        same local head, so its tip of a branch is the remote's. `close()` removes it."""
         if (
             isinstance(network_timeout, bool)
             or not isinstance(network_timeout, (int, float))
@@ -289,14 +288,14 @@ class GitRepository(LocalRepository):
             scratch.close()
             raise
         repository = cls(path, origin, forge, identity, float(network_timeout))
-        object.__setattr__(repository, "_close", weakref.finalize(repository, scratch.close))
+        object.__setattr__(repository, "_scratch", scratch)
         return repository
 
     def close(self) -> None:
-        """Remove the repository (a fetch child's has no closer: its caller owns the folder)."""
-        closer = getattr(self, "_close", None)
-        if closer is not None:
-            closer()
+        """Remove the repository `open` made (a fetch child's has no scratch of its own: its caller owns the folder)."""
+        scratch = getattr(self, "_scratch", None)
+        if scratch is not None:
+            scratch.close()
 
     @classmethod
     def open_private(
