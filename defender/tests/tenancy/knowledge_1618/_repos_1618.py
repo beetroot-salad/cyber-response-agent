@@ -44,6 +44,7 @@ class Watch:
                 "uids": {n: (root / n).lstat().st_uid for n in names},
                 "alive": {n: owner_alive(root / n) for n in names},
                 "under_tenant": A.repos_under(K.tenant_root(self.t)),
+                "in_scratch": A.repos_under(root) if root.is_dir() else [],
             })
 
         server.on_service = snap
@@ -57,15 +58,19 @@ class Watch:
 
 
 def assert_private_while_open(watch: Watch) -> None:
-    """K7 during: some snapshot saw an entry under `.repo-scratch/`, named with the tenant id and an owner (existing
-    `_owner` grammar), 0700, ours, owned by a live process; no snapshot saw a git repository under `<T>`."""
+    """K7 during: a git repository stood inside a `.repo-scratch/` entry named with the tenant id and an owner, 0700, ours, owner
+    alive; no snapshot saw one under `<T>` or outside a named entry."""
     t = watch.t
     assert watch.snapshots, "the operation never reached the git server: nothing was observed"
     seen = watch.during()
     assert seen, "no private repository was under <data root>/.repo-scratch/ while the operation fetched"
     for snap in watch.snapshots:
         assert snap["under_tenant"] == [], f"a git repository under <T> while the operation ran: {snap['under_tenant']}"
+    assert any(snap["in_scratch"] for snap in seen), \
+        "an entry was there, but no git repository stood in it: the repository is somewhere else (a plain temporary folder?)"
     for snap in seen:
+        for repo in snap["in_scratch"]:
+            assert repo.split("/")[0] in snap["names"], f"{repo}: a repository not inside a named `.repo-scratch/` entry"
         for name in snap["names"]:
             assert t.tenant_id in name, f"{name}: not named with the tenant id"
             assert A.NAMED_OWNER.search(name), f"{name}: not an owned_temporary name"

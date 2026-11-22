@@ -8,7 +8,10 @@ reject the next upload-pack; each heals after that one ask.
 """
 from __future__ import annotations
 
+import os
+import signal
 import socket
+from pathlib import Path
 from typing import Any
 
 from defender.tests.tenancy.knowledge_1618 import _support as K
@@ -24,6 +27,18 @@ def _closed_port() -> int:
         return probe.getsockname()[1]
 
 
+def _kill_the_fetch_child(_service: str) -> None:
+    """SIGKILL this process's fetch child (the wrapper `K.child_report` spawned) while it is fetching: it never reaches its report."""
+    me = os.getpid()
+    for stat in Path("/proc").glob("[0-9]*/stat"):
+        try:
+            pid, rest = stat.parent.name, stat.read_text(encoding="utf-8").rpartition(")")[2].split()
+            if int(rest[1]) == me and b"fetch_child_wrapper" in (stat.parent / "cmdline").read_bytes():
+                os.kill(int(pid), signal.SIGKILL)
+        except (OSError, ValueError, IndexError):
+            continue
+
+
 class FetchWorld(LifecycleWorld):
     """`LifecycleWorld` whose host actor has the fetch seam (`fetch=`) in place of the first-publish seam."""
 
@@ -35,9 +50,16 @@ class FetchWorld(LifecycleWorld):
         return self.git_listener
 
     def refuse_next_fetch(self, how: str) -> None:
-        """Arm one remote-state fault for the next fetch ask: `down` (the forge's git port is closed) or `auth` (the listener rejects it)."""
+        """Arm one remote-state fault for the next fetch ask: `down` (the forge's git port is closed), `auth` (the listener rejects it)
+        or `crash` (the child is killed while it fetches, so it reports nothing)."""
         server = self._listener()
-        if how == "down":
+        if how == "crash":
+            def arm() -> None:
+                server.rearm()
+                server.on_service = _kill_the_fetch_child
+
+            self.fetch.once(arm, lambda: setattr(server, "on_service", None))
+        elif how == "down":
             self.fetch.once(lambda: self._aim(lambda _t: f"http://127.0.0.1:{_closed_port()}/dead.git"),
                             lambda: self._aim(self._origin))
         else:

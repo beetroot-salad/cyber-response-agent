@@ -4,14 +4,16 @@ and the existing per-reader driver that runs it. The tests over it are `tenant_1
 A `Reader` opens a `Rig` for one scene. `rig.run(commit, expect)` drives the reader once and reports a `Result` read at the
 reader's own boundary (an exit status, a typed refusal, a log line, a skipped tick), never from the production operation.
 FORCED (the one place; production spellings are the implementer's):
-- the host judge's copy path is the `fetch=` seam of `learning.branch.cli._grade(runs, *, episode_id, judge, fetch=None)` (the
-  launcher's own seam shape, `_support`'s seam list); a refusal is logged by `_grade` and never raised;
-- a sibling's pinned copy is `copy.make(world=, commit=)`.
+- the host judge's copy path is the launcher's own `fetch=` seam (`cli.learning.branch.main(..., fetch=)`, the one the corpus and
+  tenant check use); a refusal is logged by its judge pass and never raised (the launch goes on);
+- a sibling's copy is `copy.make(world=)` alone: the pin is the family's, planted in its episode (`knowledge_pin.json`, what
+  `read_pin` reads), never chosen by the container (C20).
 """
 from __future__ import annotations
 
 import contextlib
 import importlib
+import json
 import logging
 import re
 from collections.abc import Callable, Iterator
@@ -23,8 +25,16 @@ from defender.tests.tenancy.knowledge_1618 import _readers_1618 as RD
 from defender.tests.tenancy.knowledge_1618 import _slice_a as A
 from defender.tests.tenancy.knowledge_1618 import _support as K
 
-#: How a tick that cannot reach Forgejo may word its cause (a tick runs no fetch child, so there is no line to compare with).
-TICK_CAUSE = re.compile(r"connect|refus|unreach", re.IGNORECASE)
+#: How a tick that cannot reach Forgejo may word its transport cause (a tick runs no fetch child, so there is no line to compare
+#: with). It is matched only against the text AFTER the drains wrapper's colon ("...delivery refused: <cause>", `drains.py:324`),
+#: never the wrapper's own word "refused", which every cause carries.
+TICK_CAUSE = re.compile(r"connect|unreach|could not reach|timed out|no route|resolve", re.IGNORECASE)
+
+
+def tick_cause(text: str) -> re.Match[str] | None:
+    """The transport cause a tick's skip names: searched after the last `refused:` (else after the last `: `) of `text`."""
+    tail = text.rpartition("refused:")[2] if "refused:" in text else text.rpartition(": ")[2]
+    return TICK_CAUSE.search(tail) if tail.strip() else None
 LATER = "K1618-LATER"
 
 
@@ -53,6 +63,9 @@ class Result:
     seen: str | None = None  # `pin`, `other` or None: which commit's content the reader used
     spent: bool = False  # the reader went on to use knowledge (message 0, a questioner call, a model call, a batch)
     minted: int = 0  # credentials the reader's own process minted (O8)
+    out: str = ""  # what the reader printed to stdout (the operator tools)
+    stored: int = 0  # findings the reader's pass left in the learning store (the host judge)
+    siblings: int = 0  # siblings the launch started (a launch that goes on past a refused judge pass)
 
 
 @dataclass
@@ -61,6 +74,12 @@ class Rig:
     run: Callable[..., Result]  # run(commit=None, expect="ok")
     pin: str  # an older commit than `later()` leaves main at
     later: Callable[[], Any]
+    #: Takes Forgejo down for the NEXT `run`; None means at once. A reader whose launch itself fetches (the learning helper
+    #: reads `main` at launch, r5.1-a) takes it down inside the job, after launch, before its request.
+    down: Callable[[], None] | None = None
+
+    def go_down(self) -> None:
+        (self.down or (lambda: K.forge_down(self.t)))()
 
 
 @dataclass(frozen=True)
@@ -74,6 +93,10 @@ class Reader:
     spends: bool = False
     also_main: bool = False  # the same drive also reads main (a tenant check): asks for `None` are allowed
     postgres: bool = False
+    shows: bool = False  # the reader prints what it read to stdout when served (an operator tool)
+    #: False when the launch that runs the reader refuses an unservable pin earlier than the reader (the host judge: the questioner's
+    #: corpus asks the same pin first), so the reader's own refusal of it cannot be reached through the launcher.
+    unserved_reachable: bool = True
 
 
 def _asks(calls: Any, lines: Any = None) -> list[dict[str, Any]]:
@@ -134,6 +157,7 @@ def _helper_seam(scene: Any, calls: list) -> Callable[..., str]:
 
 def _helper(env: Env, *, with_commit: bool, sibling: bool = False) -> contextlib.AbstractContextManager[Rig]:
     from defender import job_host
+    from defender.records._knowledge_pin import pin_text
     from defender.tests.support.jobs._job_helper import ForgeCredentialRecorder
     from defender.tests.support.jobs._job_helper_learning import listing, plant_siblings, run_kind
 
@@ -141,6 +165,7 @@ def _helper(env: Env, *, with_commit: bool, sibling: bool = False) -> contextlib
     def opened() -> Iterator[Rig]:
         scene = env.fixture("job_scene")
         t = scene.t
+        armed = {"down": False}
 
         def run(commit: str | None = None, expect: str = "ok") -> Result:
             seams: list = []
@@ -150,11 +175,16 @@ def _helper(env: Env, *, with_commit: bool, sibling: bool = False) -> contextlib
             kw: dict[str, Any] = {}
             if sibling:
                 planted = plant_siblings(scene)
+                if commit:  # the family's pin, in the family's episode (what `read_pin` reads): the host decides it, not the container
+                    (planted.dir / "knowledge_pin.json").write_text(pin_text(commit), encoding="utf-8")
                 fields["world"] = planted.worlds["b"]
                 kw = {"job_id": planted.job_id, "source": planted.source}
             got: dict[str, Any] = {}
 
             def job(c: Any) -> int:
+                got["mark"] = len(fetch.calls)  # the launch's own ask (`main`, r5.1-a) is before this index
+                if armed["down"]:
+                    K.forge_down(t)
                 before = _copy_dirs(scene)
                 try:
                     got["answer"] = c.request("copy.make", **fields)
@@ -169,9 +199,9 @@ def _helper(env: Env, *, with_commit: bool, sibling: bool = False) -> contextlib
             mark = None if "answer" not in got else (got["settings"].get(K.MARK_FILE.removeprefix("settings/")) or b"").decode()
             left = got.get("new", []) + [p.name for p in _copy_dirs(scene)]
             left += listing(scene.root / scene.tenant / "run-knowledge") if sibling else []
-            return Result(refused="refusal" in got, text=got.get("refusal", ""), asks=_asks(seams[0].calls), left=left,
+            return Result(refused="refusal" in got, text=got.get("refusal", ""), asks=_asks(fetch.calls[got["mark"]:]), left=left,
                           seen=_mark_seen(mark), minted=len(forge.built) + len(forge.asked))
-        yield Rig(t, run, t.commit, _later(t))
+        yield Rig(t, run, t.commit, _later(t), down=lambda: armed.update(down=True))
     return opened()
 
 
@@ -212,29 +242,56 @@ def _judge_container(env: Env) -> contextlib.AbstractContextManager[Rig]:
 
 
 def _judge_host(env: Env) -> contextlib.AbstractContextManager[Rig]:
+    """The host judge pass as the launcher runs it: the real `cli.learning.branch.main(fetch=)` over a family whose siblings ran
+    (`J.FakeSibling`, each loading the tenant's lesson), the launcher's grade reading each body at the family's pin."""
+    BR = importlib.import_module("defender.tests.tenancy.tenant_1108_p4.test_branch_replay")
     JB, J = _judge_modules()
+    from defender.tests.support.learning.branch import _triplet_947 as T
+
+    class Siblings(J.FakeSibling):
+        """The siblings loaded `JB.NAME`; Forgejo goes down once the last has run (the launch's own fetches are behind it)."""
+
+        def __init__(self, *, knowledge: Any, down: Callable[[], None] | None, fetch: Any) -> None:
+            super().__init__(knowledge=knowledge)
+            self.down, self.fetch, self.mark = down, fetch, None
+
+        def __call__(self, argv: list[str], *, env: dict[str, str] | None = None, **kw: Any) -> int:
+            rc = super().__call__(argv, env=env, **kw)
+            episode = self.episode_of(list(argv))
+            if episode is not None:
+                for path in (episode / "runs").glob("*/lessons_loaded.jsonl"):
+                    path.write_text(json.dumps({"lesson_name": JB.NAME, "ts": "2026-10-20T10:00:00Z", "kind": "read", "role": "main"})
+                                    + "\n", encoding="utf-8")
+            if self.mark is None and len(self.launches) >= len(T.WORLDS):
+                self.mark = len(self.fetch.calls)  # every ask from here on is the judge pass's
+                if self.down is not None:
+                    self.down()
+            return rc
 
     @contextlib.contextmanager
     def opened() -> Iterator[Rig]:
-        from defender.learning.branch import cli as branch_cli
-        from defender.tenancy import database_address_variable
-
-        scene = env.fixture("judge_scene")
-        env.monkeypatch.setenv(database_address_variable(), env.fixture("migrated_database"))
+        scene = env.fixture("branch_scene")
+        armed = {"down": False}
         env.caplog.set_level(logging.WARNING)
+        store = J.install_launcher_store(env.monkeypatch)
 
         def run(commit: str | None = None, expect: str = "ok") -> Result:
-            JB._stamp(scene, code=scene.product.post, knowledge={"commit": commit or scene.k1})
-            seam = K.fetch_seam(scene.t, env.tmp_path / "judge-host-fetch")
-            judge = J.scripted_judge()
+            pin = commit or scene.k1
+            BR._stamp_source(scene, knowledge={"commit": pin})
+            fetch = K.fetch_seam(scene.t, env.tmp_path / "judge-host-fetch")
+            siblings = Siblings(knowledge={"commit": pin}, fetch=fetch,
+                                down=(lambda: K.forge_down(scene.t)) if armed["down"] else None)
+            judge = J.scripted_judge(default=J.as_reply_text(J.reply_doc(systems=["idp"])))
             env.caplog.clear()
-            branch_cli._grade(J.episode_runs_for(scene.ep), episode_id=scene.ep.name, judge=judge, fetch=seam)  # never raises
+            launch = BR._launch(scene, fetch=fetch, spawn=siblings, judge=judge, live_tree=T.source_capture(knowledge={"commit": pin}))
             logged = "\n".join(r.getMessage() for r in env.caplog.records if r.levelno >= logging.WARNING)
             shown = "\n".join(judge.prompts)
-            seen = "pin" if JB.EXPORT in shown else ("other" if JB.CURRENT in shown else None)
-            return Result(refused=not judge.prompts, text=logged, rc=0, asks=_asks(seam.calls), seen=seen,
-                          spent=bool(judge.prompts))
-        yield Rig(scene.t, run, scene.k1, lambda: None)
+            seen = "other" if JB.CURRENT in shown else ("pin" if "inventory owner first" in shown else None)
+            stored = sum(len(held) for held in store.items.values())
+            # the launch itself is not refused by the judge's refusal: rc 0 and the siblings went on (grading never fails a launch)
+            return Result(refused=not judge.prompts, text=logged, rc=launch.rc, asks=_asks(fetch.calls[siblings.mark or 0:]),
+                          seen=seen, spent=bool(judge.prompts), stored=stored, siblings=len(siblings.launches))
+        yield Rig(scene.t, run, scene.k1, lambda: K.advance_main(scene.t, files={JB.TENANT_PATH: JB._lesson(JB.CURRENT)}), down=lambda: armed.update(down=True))
     return opened()
 
 
@@ -277,7 +334,7 @@ def _tool(make: Callable[[str, str, Path], tuple[Callable[..., Any], list[str]]]
                     if pinned and ran.rc == 0:
                         seen = "pin" if "- cmdb (SKILL.md)" in lines else "other"
                     return Result(refused=ran.rc != 0, text=ran.err, rc=ran.rc, asks=_asks(ran.fetches), left=ran.left,
-                                  git_requests=ran.requests, seen=seen, minted=ran.minted)
+                                  git_requests=ran.requests, seen=seen, minted=ran.minted, out=ran.out)
                 yield Rig(t, run, t.commit, (lambda: later(t)) if later else _later(t))
         return opened()
     return open_
@@ -338,7 +395,7 @@ def _tick(env: Env) -> contextlib.AbstractContextManager[Rig]:
 READERS: tuple[Reader, ...] = (
     Reader("run-start", "run.main -> run_common.materialize (fetch child)", _run_start, "exit", spends=True),
     Reader("run-start-pinned", "run.main --knowledge-commit", _run_start, "exit", pinned=True, spends=True),
-    Reader("sibling-copy", "job helper copy.make(world=, commit=)", lambda e: _helper(e, with_commit=True, sibling=True),
+    Reader("sibling-copy", "job helper copy.make(world=), pin from the family's episode", lambda e: _helper(e, with_commit=False, sibling=True),
            "raise", pinned=True, postgres=True),
     Reader("drain-tick-opening-fetch", "learning.core.drains.author_drain -> opened_delivery (private repository)",
            _tick, "skip", via="git", spends=True, postgres=True),
@@ -348,16 +405,17 @@ READERS: tuple[Reader, ...] = (
            pinned=True, postgres=True),
     Reader("judge-bodies-container", "learning.judge.grade_episode -> helper copy.make(commit=)", _judge_container, "raise",
            pinned=True, spends=True),
-    Reader("judge-host", "learning.branch.cli._grade(fetch=)", _judge_host, "log", pinned=True, spends=True, postgres=True),
+    Reader("judge-host", "branch.cli.main(fetch=) -> its judge pass", _judge_host, "log", pinned=True, spends=True,
+           unserved_reachable=False),
     Reader("questioner-corpus", "branch.cli.main (the corpus at the source's commit)", _branch, "exit", pinned=True,
            spends=True, also_main=True),
     Reader("branch-launcher", "branch.cli.main (the tenant check at main)", _branch, "exit", spends=True, also_main=True),
     Reader("workspace-map", "cli.workspace_map.main (a run's recorded commit)",
            _tool(_map, pinned=True, later=lambda t: K.advance_main(t, files={"agent/skills/cmdb/SKILL.md": None})), "exit",
-           pinned=True),
-    Reader("lessons-page", "learning.frontend.serialize.main", _tool(_page), "exit"),
-    Reader("tracer", "cli.learning.trace_lesson.main", _tool(_tracer), "exit"),
-    Reader("policy-cli", "cli.policy_cli.main", _tool(_policy), "exit"),
+           pinned=True, shows=True),
+    Reader("lessons-page", "learning.frontend.serialize.main", _tool(_page), "exit", shows=True),
+    Reader("tracer", "cli.learning.trace_lesson.main", _tool(_tracer), "exit", shows=True),
+    Reader("policy-cli", "cli.policy_cli.main", _tool(_policy), "exit", shows=True),
 )
 
 __all__ = ["LATER", "READERS", "TICK_CAUSE", "Env", "Reader", "Result", "Rig"]

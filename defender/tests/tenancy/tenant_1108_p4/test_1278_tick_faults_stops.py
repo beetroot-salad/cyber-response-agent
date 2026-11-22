@@ -83,12 +83,13 @@ def test_the_stop_points_cover_each_curator_before_and_after_its_commit_and_the_
     assert [p.name for p in STOP_POINTS if p.push] == ["during_the_push", "during_the_push_which_then_fails"]
 
 
-def _the_takeover_abandons(w, s, batch) -> None:  # 1618-tradeoff: nothing is on the remote, so the takeover abandons the batch, the attempt counted
+def _the_takeover_abandons(w, s, batch, again) -> None:  # 1618-tradeoff: nothing is on the remote, so the takeover abandons the batch, the attempt counted, the items wait again
     assert w.t.server.pushes == ["refused"], "premise: the one push the remote saw was refused"
     assert s.batches()[batch.id].outcome == "abandoned", "the takeover delivered what only the stopped holder had"
     assert s.branch_tip_on_remote(batch.branch) is None
-    assert all(i.attempts >= 1 for i in s.items().values()), "the stopped attempt was forgiven"
-    assert [pr["head"]["ref"] for pr in s.open_prs()] != [batch.branch]
+    assert again.started(), "the abandoned batch's items did not wait again: nothing was authored a second time"
+    assert {i.attempts for i in s.items().values()} == {2}, "the stopped attempt was forgiven (abandoned = 1, the second authoring = 2)"
+    assert batch.branch not in [pr["head"]["ref"] for pr in s.open_prs()]
 
 
 @pytest.mark.parametrize(("lane", "stop", "how"), _stop_cases())
@@ -123,7 +124,7 @@ def test_a_stop_anywhere_in_a_claim_runs_no_further_curator_commit_or_pr_and_lea
     finally:
         mp.undo()
 
-    [batch] = s.batches().values()
+    batch = the_batch(s, caplog)
     names = CURATORS[lane]
     assert cast.started() == list(names[:stop.started]), \
         f"curators ran past the stop: {cast.started()} ({critical_text(caplog)})"
@@ -150,7 +151,7 @@ def test_a_stop_anywhere_in_a_claim_runs_no_further_curator_commit_or_pr_and_lea
     again = Cast(s, tag='-again')
     s.run(again)
     if stop.push_fails:
-        _the_takeover_abandons(w, s, batch)
+        _the_takeover_abandons(w, s, batch, again)
         return
     assert again.started() == [], "the takeover ran a curator again"
     [pr] = s.open_prs()

@@ -186,7 +186,7 @@ def test_a_fault_the_tick_does_not_contain_leaves_the_batch_to_a_takeover_with_c
     finally:
         mp.undo()
 
-    [batch] = s.batches().values()
+    batch = the_batch(s, caplog)
     items = s.items()
     assert items, "premise: the lane has items"
     if step.redone:

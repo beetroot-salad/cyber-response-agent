@@ -239,22 +239,22 @@ def test_a_crash_after_the_draft_exists_refuses_its_id_until_a_publish_sweeps_th
 
 def test_1618_f6_a_later_fetch_in_the_same_repository_leaves_the_holders_unpushed_branch_alone(repo, tmp_path):
     """With no clone, a batch's commit on its unpushed branch survives a fetch made after a merge landed: not moved, not deleted. (F6 fetch rules)"""
-    d = delivery_without_clone(repo, ForgeHTTP())
-    batch = d.start_batch("holder", lanes=LANES)
-    _write(batch.draft_root / "agent/lessons/unpushed.md", "work that is only here\n")
-    sha = batch.commit(batch.change_set(), "unpushed work")
-    assert d.repository.branch_tip(batch.branch) == sha
-    assert branch_tip(repo[1], batch.branch) is None, "premise: nothing of the batch is on the remote"
-    merged = advance_remote(repo, tmp_path)
-    # A lapsed holder's branch is a real case: the same-named remote branch is pushed, then force-moved to a commit
-    # that is not its descendant, between the opening fetch and the later fetch.
-    first, second = _force_moved_remote_branch(repo, tmp_path, batch.branch)
+    with delivery_without_clone(repo, ForgeHTTP()) as d:  # FORCED: a delivery is a context manager owning its private repository (the repository is read only inside it)
+        batch = d.start_batch("holder", lanes=LANES)
+        _write(batch.draft_root / "agent/lessons/unpushed.md", "work that is only here\n")
+        sha = batch.commit(batch.change_set(), "unpushed work")
+        assert d.repository.branch_tip(batch.branch) == sha
+        assert branch_tip(repo[1], batch.branch) is None, "premise: nothing of the batch is on the remote"
+        merged = advance_remote(repo, tmp_path)
+        # A lapsed holder's branch is a real case: the same-named remote branch is pushed, then force-moved to a commit
+        # that is not its descendant, between the opening fetch and the later fetch.
+        first, second = _force_moved_remote_branch(repo, tmp_path, batch.branch)
 
-    d.repository.fetch()  # FORCED: the repository's fetch entry (today's name); the design's later fetches name their refs, no wildcard and no prune
+        d.repository.fetch()  # FORCED: the repository's fetch entry (today's name); the design's later fetches name their refs, no wildcard and no prune
 
-    assert branch_tip(repo[1], batch.branch) == second != first, "premise: the remote's batch branch was force-moved"
-    assert d.repository.branch_tip(batch.branch) == sha, "the holder's unpushed branch was moved or pruned by a fetch"
-    assert d.repository.holds_commit(merged), "control: the fetch did bring the merge"
+        assert branch_tip(repo[1], batch.branch) == second != first, "premise: the remote's batch branch was force-moved"
+        assert d.repository.branch_tip(batch.branch) == sha, "the holder's unpushed branch was moved or pruned by a fetch"
+        assert d.repository.holds_commit(merged), "control: the fetch did bring the merge"
 
 
 def _force_moved_remote_branch(repo, tmp_path, branch):

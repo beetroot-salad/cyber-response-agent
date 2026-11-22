@@ -121,7 +121,7 @@ class Launch:
 def _launch(scene: Scene, *, argv_extra=(), **seams) -> Launch:
     """The real launcher over the scene's tenant and source run (the `S.launch` recipe, with
     the scene's own tenant and stamp)."""
-    spawn = T.FakeSpawn()
+    spawn = seams.pop("spawn", None) or T.FakeSpawn()  # lint-default: ok — a test builder's fresh per-call double
     questioner = S.questioner_for()
     seams.setdefault("preflight", S.no_preflight)
     seams.setdefault("roster", scene.est.roster())

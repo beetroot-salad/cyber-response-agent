@@ -53,6 +53,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     remote_branches,
     without_clone,
 )
+from defender.tests.tenancy.knowledge_1618 import _repos_1618 as R
 from defender.tests.tenancy.knowledge_1618 import _support as K
 from defender.tests.tenancy.tenant_1108_p4._support import git
 
@@ -743,12 +744,14 @@ def test_1618_b12_a_container_tick_builds_its_batch_on_the_base_the_helper_answe
     _seed(w, "f1")
     helper = post_step_helper()
     asked, answered, moved = [], {}, {}
+    watch = R.Watch(w.t)
 
     def ask(name, **fields):
         answer = helper.ask(name, **fields)
         asked.append(name)
         if name == "batch.start":
             answered["base"] = answer["base"]
+            watch.arm()  # the helper's own draft repository (host side) is behind us: what follows is the container's
             moved["tip"] = K.advance_main(w.t, "K1618-AFTER-THE-HELPERS-ANSWER")  # main moves on after the helper answered
         return answer
 
@@ -761,6 +764,11 @@ def test_1618_b12_a_container_tick_builds_its_batch_on_the_base_the_helper_answe
     assert git(w.t.remote, "rev-parse", f"{branch}^") == answered["base"], "the container did not build on the helper's base"
     assert "forge.token" in asked, "the container pushed without a forge.token from the helper"
     assert w.t.server.pushes == ["landed"]
+    # K7, container side: its private repository is in its own tmpfs, never an entry of the host's `.repo-scratch/` (whose sweep a
+    # container never runs) and never under `<T>`; the fetch by id and the push both reached the listener while watched
+    assert watch.snapshots, "premise: the container's fetch and push were not observed"
+    assert all(snap["names"] == [] for snap in watch.snapshots), [snap["names"] for snap in watch.snapshots]
+    assert all(snap["under_tenant"] == [] for snap in watch.snapshots), [snap["under_tenant"] for snap in watch.snapshots]
 
 
 @own_store("the tick is the post-step's, whose store is the port over a real helper")
@@ -771,14 +779,19 @@ def test_1618_b12_a_container_tick_refuses_a_base_it_cannot_fetch_by_id_and_auth
     _seed(w, "f1")
     helper = post_step_helper()
     before = remote_branches(w.t.remote, prefix="")
+    asked = []
 
     def ask(name, **fields):
         answer = helper.ask(name, **fields)
+        asked.append(name)
         return {**answer, "base": K.ABSENT_COMMIT} if name == "batch.start" else answer
 
     writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
     _relay_tick(w, helper, ask, writer)
 
+    assert "batch.start" in asked, "premise: the helper answered the batch start (the tick did not die earlier)"
+    refusal = critical_text(caplog)
+    assert K.ABSENT_COMMIT in refusal or "fetch" in refusal.lower(), f"the tick did not refuse naming the base or the failed fetch: {refusal!r}"
     assert writer.served == [], f"a curator ran on a base the container does not hold ({critical_text(caplog)})"
     assert remote_branches(w.t.remote, prefix="") == before, "a batch branch was pushed"
     assert w.t.forge.creates == []

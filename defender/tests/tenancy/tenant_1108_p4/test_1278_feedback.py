@@ -463,6 +463,8 @@ def test_1618_k12_a_tip_forgejo_no_longer_serves_is_never_read_from_what_the_tic
     w = world
     batch_id, branch, number = _two_cited_in_review(w, caplog)
     without_clone(w.t)
+    tip = K.remote_ref(w.t, f"refs/heads/{branch}")
+    assert tip, "premise: the branch tip exists before the merge deletes the branch"
     _cut_by_a_squash_of_the_reviewers_own(w, branch)
     git(w.t.remote, "update-ref", "-d", f"refs/pull/{number}/head")
     git(w.t.remote, "reflog", "expire", "--expire=now", "--all")
@@ -474,6 +476,7 @@ def test_1618_k12_a_tip_forgejo_no_longer_serves_is_never_read_from_what_the_tic
         "premise: the tick opened and read the merged PR"
     assert _end(w, batch_id) == ("in_review", None), "the merge was settled with no tip to read"
     assert w.statuses() == {"f1": "in_batch", "f2": "in_batch"}
+    assert tip in critical_text(caplog), f"the unservable tip was not refused by name: {critical_text(caplog)!r}"
 
 
 def test_1618_k12_a_merge_that_lands_after_the_tick_opened_is_found_by_one_more_fetch(world, caplog):

@@ -50,6 +50,8 @@ def test_1618_g2_with_forgejo_up_every_reader_is_served_through_the_real_child_a
         assert res.git_requests > 0, "control: the tick never reached Forgejo"
     if reader.spends:
         assert res.spent, "control: the reader did not go on to use its knowledge"
+    if reader.shows:
+        assert res.out.strip(), "control: the tool printed nothing"
     assert res.left == [], res.left
     assert res.minted == 0, "the reader's own process minted a credential (O8)"
 
@@ -58,7 +60,7 @@ def test_1618_g2_with_forgejo_up_every_reader_is_served_through_the_real_child_a
 def test_1618_g2_with_forgejo_down_every_reader_refuses_naming_the_cause_through_the_real_child_and_leaves_no_copy(reader, env):
     """With Forgejo unreachable each reader refuses in its own way (an operator tool exits non-zero; the host judge logs and the launch goes on), naming the child's cause, using no knowledge and leaving no copy. (K4)"""
     with reader.open(env) as rig:
-        K.forge_down(rig.t)
+        rig.go_down()
         res = rig.run(rig.pin if reader.pinned else None, expect="refused")
     assert res.refused, f"{reader.id} went on with Forgejo unreachable"
     text = _words(res.text)
@@ -69,14 +71,19 @@ def test_1618_g2_with_forgejo_down_every_reader_refuses_naming_the_cause_through
     if reader.refusal in ("log", "skip"):
         assert res.rc in (0, None), f"a {reader.refusal} refusal failed the caller: {res.rc}"
     if reader.via == "child":
-        assert res.asks, f"{reader.id} never went through the real fetch child"
-        line = res.asks[-1]["line"]
+        assert len(res.asks) == 1, f"{reader.id} must ask the real fetch child exactly once, and stop: {res.asks}"
+        line = res.asks[0]["line"]
         assert line, "the child reported nothing"
         assert line.startswith("refused transient "), line
         assert _words(" ".join(line.split()[2:]))[:40] in text, f"the refusal does not carry the child's cause: {line!r} / {res.text!r}"
     else:
-        assert T.TICK_CAUSE.search(res.text), f"the refusal names no cause: {res.text!r}"
+        assert T.tick_cause(res.text), f"the refusal names no transport cause after the drains wrapper: {res.text!r}"
     assert not res.spent, f"{reader.id} used knowledge it could not fetch"
+    for stale in (K.SEEDED_MARK, K.CLONE_ONLY_MARK, K.MERGED_MARK):
+        assert stale not in res.out, f"{reader.id} printed knowledge it could not fetch: {stale}"
+    if reader.refusal == "log":  # the pass is refused and logged; the launch goes on and nothing is inserted
+        assert res.siblings > 0, "the launch did not go on past the refused pass"
+        assert res.stored == 0, "a refused judge pass inserted findings"
     assert res.left == [], f"left {res.left}"
     assert res.minted == 0, "the reader's own process minted a credential while Forgejo was down (O8)"
 
@@ -95,7 +102,7 @@ def test_1618_g2_a_pinned_reader_asks_the_commit_by_id_and_uses_that_commits_con
     assert res.seen == "pin", f"{reader.id} used {res.seen!r} content, not the pinned commit's"
 
 
-@pytest.mark.parametrize("reader", _readers(lambda r: r.pinned))
+@pytest.mark.parametrize("reader", _readers(lambda r: r.pinned and r.unserved_reachable))
 def test_1618_g2_a_pin_forgejo_does_not_serve_refuses_naming_it_and_never_falls_back_to_main(reader, env):
     """The child is asked for the absent commit and the refusal names it; no fallback to main, nothing used, nothing left. (K5)"""
     with reader.open(env) as rig:

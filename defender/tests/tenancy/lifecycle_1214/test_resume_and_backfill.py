@@ -187,7 +187,8 @@ def test_d1_prepare_makes_no_clone_and_activates_once_a_fetch_of_main_validates(
     assert world.publish.calls == [], "the first-publish seam was still called"
 
 
-@pytest.mark.parametrize(("how", "klass"), [("down", "transient"), ("auth", None)], ids=["forge-unreachable", "listener-rejects"])
+@pytest.mark.parametrize(("how", "klass"), [("down", "transient"), ("auth", None), ("crash", None)],
+                         ids=["forge-unreachable", "listener-rejects", "child-killed-prints-nothing"])
 def test_d2_prepare_stays_at_prepare_when_the_fetch_child_refuses(world, how, klass):
     """A refusal by the real fetch child (Forgejo's git port closed, or its listener rejecting the read) fails prepare, which
     records the child's line and stays at prepare, the tenant `creating` and nothing left in `<T>`; after resume the
@@ -198,7 +199,10 @@ def test_d2_prepare_stays_at_prepare_when_the_fetch_child_refuses(world, how, kl
     item = world.item(tenant)
     assert (item["state"], item["step"], item["step_actor"]) == ("creating", "prepare", "host"), item
     [call] = world.fetch.calls
-    assert call["line"].startswith("refused "), call["line"]
+    if how == "crash":  # a child that died before it reported prints nothing: the caller refuses on the empty line, never on a guess
+        assert call["line"] == "", call["line"]
+    else:
+        assert call["line"].startswith("refused "), call["line"]
     if klass is not None:
         assert call["line"].split()[1] == klass, call["line"]
     assert item["failure"], item
