@@ -41,7 +41,11 @@ def test_publication_never_follows_operator_tags(
     commit = batch.commit(batch.change_set(), "tagged lesson")
     if route == "refinish":
         http.fail_create = True
-        with pytest.raises(target().DeliveryRefused, match="503"):
+        # #1618 census (`finish` deleted): the tick's PR open surfaces a forge fault as `ForgeError`, which the tick
+        # counts among its delivery faults (`store_tick._delivery_faults`) as it did `finish`'s `DeliveryRefused`.
+        from defender.learning.author.version_control.forgejo import ForgeError
+
+        with pytest.raises(ForgeError, match="503"):
             deliver(d, batch)
         http.fail_create = False
     elif route == "revert":
@@ -49,6 +53,9 @@ def test_publication_never_follows_operator_tags(
         opened(finished)
         reviewed(store, held, finished)
         merge_on_remote(http_repo, tmp_path, batch.branch)
+        # The batch ended merged, as the author tick records a merged review (`_revert_store.wrote` does the same).
+        store.end_review(str(tenant.id), str(held.batch_id), expect_phase="in_review", outcome="merged",
+                         published=[], held=[])
 
     control = tmp_path / "control.git"
     git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, remote, control)
@@ -106,7 +113,10 @@ def test_transfer_ignores_clone_includes_system_user_and_environment_config(
     proxy = {other}
 ''')
     private = d.repository.path  # #1618 K8: the delivery's private repository (no host clone)
-    git(private, "config", "include.path", included)
+    # (#1618 census: the host clone and `transport._context`'s temporary repository are deleted; the private repository
+    # is the product's own 0700 state (K7), so no clone include is planted there. The system, user and environment
+    # config below still name the rewritten host.)
+    git(private, "config", "remote.origin.pushurl", f"{other}/tenants/blue.git")
     config = git_config_home(tmp_path)
     config.global_config.write_text(config.global_config.read_text() + f"[include]\npath = {included}\n")
     config.system_config.write_text(f"[include]\npath = {included}\n")
