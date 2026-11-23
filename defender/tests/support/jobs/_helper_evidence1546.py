@@ -136,7 +136,7 @@ def _make_investigation(scene: HelperScene, tenant: str | None = None) -> tuple[
         async with job_store(scene.dsn) as store:
             alert = await an_alert(store, tenant, ticket=f"T-{uuid.uuid4().hex[:6]}")
             inv, _ = await store.create_investigation(tenant, alert.alert_id, f"k-{uuid.uuid4().hex[:6]}", actor="u-1")
-            return inv.investigation_id, alert.alert_id
+            return str(inv.investigation_id), str(alert.alert_id)  # plain text: the ids go into YAML/JSON documents
 
     return asyncio.run(make())
 
