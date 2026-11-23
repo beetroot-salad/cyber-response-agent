@@ -36,7 +36,10 @@ from defender.tests.support.jobs._job_helper_learning import (
 process_state = J.process_state
 scene = J.scene
 
-pytestmark = [pytest.mark.postgres, pytest.mark.skipif(
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — fixtures the helper's store seams take
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
+
+pytestmark = [pytest.mark.postgres, pytest.mark.garage, pytest.mark.openbao, pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="reads /proc and uses prctl(PR_SET_PDEATHSIG), Linux only")]
 
 

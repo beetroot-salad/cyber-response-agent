@@ -153,9 +153,36 @@ def test_the_readiness_entry_runs_over_its_job_root_and_stages_its_result(scene)
 @pytest.mark.postgres
 @pytest.mark.openbao
 @pytest.mark.garage
+def test_the_helper_hands_a_learning_job_its_inputs_folder_and_its_pin_in_the_launch_facts(scene, evidence_store):
+    """The facts a learning container builds its `JobTenant` from: `inputs_dir` names, through the container's binds, the
+    claim's `.job-inputs/<claim>/` folder (the claim's alone), and `knowledge_commit` is the claim's pin. (design: JobTenant
+    "from the launch facts"; The job's folders: Inputs; The pin)"""
+    from defender.tests.support.evidence._facts1546 import LAUNCH_INPUTS
+    from defender.tests.support.jobs._job_helper import host_path
+
+    planted = H.plant(scene, "learning")
+    seen: dict = {}
+
+    def job(c) -> int:
+        launch = c.request("launch")
+        seen["launch"] = launch
+        seen["inputs"] = host_path(c.mounts, launch[LAUNCH_INPUTS]) if launch.get(LAUNCH_INPUTS) else None
+        seen["is_dir"] = bool(seen["inputs"]) and seen["inputs"].is_dir()
+        return 0
+
+    H.drive(scene, planted, job, check=False, **evidence_store.seams)
+    assert "launch" in seen, "the job container never ran"
+    assert seen["inputs"] == H.job_inputs(scene), (seen["launch"].get(LAUNCH_INPUTS), seen["inputs"])
+    assert seen["is_dir"], "the inputs folder the launch names did not exist while the job ran"
+    assert seen["launch"]["knowledge_commit"] == scene.t.commit, seen["launch"]
+
+
+@pytest.mark.postgres
+@pytest.mark.openbao
+@pytest.mark.garage
 @pytest.mark.parametrize(("damaged", "reaches"), [("clone", True), ("export", False)])
 def test_the_learning_job_entry_gets_past_its_tenant_step_without_reading_the_clones_settings(scene, evidence_store, damaged,
-                                                                                              reaches):
+                                                                                              reaches, tmp_path):
     """A link planted, once the helper admitted the job, in the host clone's settings leaves the learning entry reaching its
     launch steps; the same link in the pinned export's settings under its inputs stops it there: it reads the export's.
     (design: the learning job passes the export roots; admission of a faulted clone stays the helper's refusal, owner D4)"""
@@ -163,6 +190,8 @@ def test_the_learning_job_entry_gets_past_its_tenant_step_without_reading_the_cl
     from defender.tests.support.jobs._container_entry1170 import ThreadCalls
 
     planted = H.plant(scene, "learning")
+    # The source's accepted bundle (a real source run, packed): without it the entry stops at its pull, before any settings read.
+    evidence_store.plant_source_bundle(scene, planted.source, tmp_path)
     damage: dict = {}
 
     def job(c) -> int:
@@ -182,6 +211,12 @@ def test_the_learning_job_entry_gets_past_its_tenant_step_without_reading_the_cl
             damage["file"].unlink()
             damage["file"].write_bytes(damage["kept"])
 
-    with ThreadCalls({"source_opened": cli._open_launch_source}) as calls:
+    from defender.tenancy import JobTenant
+
+    with ThreadCalls({"source_opened": cli._open_launch_source, "tenant_step": JobTenant.__init__}) as calls:
         H.drive(scene, planted, job, **evidence_store.seams)
-    assert (calls.container("source_opened") >= 1) is reaches, (damaged, damage.get("file"))
+    # Both arms reach their tenant step (the container builds its `JobTenant`), so the export arm's stop comes after it, at the
+    # settings read, not at an earlier step.
+    assert calls.container("tenant_step") >= 1, (damaged, "the entry stopped before it built its job tenant")
+    assert (calls.container("source_opened") >= 1) is reaches, (damaged, damage.get("file"),
+                                                                 H.facts(scene.dsn, scene.claim).get("outcome"))

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import base64
-import json
 import os
 import uuid
 from pathlib import Path
@@ -51,7 +50,7 @@ def _facts(repo, forge, **over):
 
 
 def _enter(repo, forge, tmp_path, *, facts=None, silent=False, token=None):
-    """Run the entry once against a socket handing `facts` (default: the helper's own); returns the record it wrote, or None."""
+    """Run the entry once against a socket handing `facts` (default: the helper's own); returns the result it sent, or None."""
     from defender import adoption
     from defender.job_socket import SOCKET_ENV
 
@@ -64,13 +63,20 @@ def _enter(repo, forge, tmp_path, *, facts=None, silent=False, token=None):
     minted = fixture_identity(tenant).token()
     answer = token if token is not None else (lambda fields: {"token": minted})
     environ = {**os.environ, "DEFENDER_DATA_ROOT": str(tmp_path / "data")}
-    with SocketStandIn(tenant, launch=handed, answers={"forge.token": answer}) as stand_in:
+    results: list = []
+
+    def result(fields):  # #1546 (A-O2, design Readiness / adoption): the typed `result` travels on the socket, not a file
+        results.append(fields.get("record"))
+        return {}
+
+    with SocketStandIn(tenant, launch=handed, answers={"forge.token": answer, "result": result}) as stand_in:
         for gone in set(own) - set(handed):  # the stand-in fills `tenant`/`tenant_state` by default: serve the removal
             stand_in.launch.pop(gone, None)
         environ[SOCKET_ENV] = str(tmp_path / "no-such-socket") if silent else str(stand_in.path)
         adoption.main(["--job", job_id, "--tenant", tenant], environ=environ, client=forge.client)
-    path = runs / f"{job_id}.adoption.json"
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    assert not (runs / f"{job_id}.adoption.json").exists(), "the adoption record still went through the tenant folder"
+    assert len(results) <= 1, results
+    return results[0] if results else None
 
 
 def test_with_the_helpers_own_facts_the_entry_opens_the_offer_and_writes_opened(repo, forge, tmp_path):

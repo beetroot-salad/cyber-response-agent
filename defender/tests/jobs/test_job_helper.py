@@ -54,7 +54,8 @@ process_state = J.process_state
 scene = _h1546.fresh_scene
 evidence_store = _h1546.evidence_store  # #1546: the real store the investigation helper now needs
 
-pytestmark = [pytest.mark.postgres, pytest.mark.skipif(
+
+pytestmark = [pytest.mark.postgres, pytest.mark.garage, pytest.mark.openbao, pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="reads /proc and uses prctl(PR_SET_PDEATHSIG), Linux only")]
 
 #: The dev run page's publish folder: one host folder shared by every tenant (A10), so not for the job container.

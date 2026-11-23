@@ -15,6 +15,9 @@ import pytest
 from defender.tests.support.jobs import _job_helper as J
 from defender.tests.support.jobs._job_helper import ContainerStandIn, drive_helper, make_signer
 
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401, E402 — fixtures the helper's store seams take
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401, E402 — fixture
+
 process_state = J.process_state
 scene = J.scene
 
@@ -73,6 +76,8 @@ def _investigation(scene) -> tuple[str, list[str]]:
 
 
 @pytest.mark.postgres
+@pytest.mark.garage
+@pytest.mark.openbao
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the helper is Linux only")
 def test_1366_the_helper_hands_its_container_the_records_it_read_and_writes_the_runs_versions(scene):
     """The launch facts carry the tenant's current records as the database holds them, and the run's record of versions
@@ -103,6 +108,8 @@ def test_1366_the_helper_hands_its_container_the_records_it_read_and_writes_the_
 
 
 @pytest.mark.postgres
+@pytest.mark.garage
+@pytest.mark.openbao
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the helper is Linux only")
 def test_1366_a_tenant_that_is_not_active_is_refused_by_the_helper_and_no_container_starts(scene, capfd):
     """At the helper (R8's "not imported" is retired, #1470 D-F): a tenant moved to offboarding after its job was queued

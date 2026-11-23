@@ -27,11 +27,13 @@ from defender.tests.support.jobs import _box_relay as R
 from defender.tests.support.jobs import _helper_evidence1546 as H
 from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
 from defender.tests.support.jobs._job_helper import OTHER_TENANT, claims_of, helper_scene, listing, until
+from defender.tests.support.jobs._job_helper import process_state  # noqa: F401 — autouse: the helper runs here (its store seams)
 from defender.tests.support.jobs._jobs1342 import DEFENDER, WORKTREE
 
 evidence_store = H.evidence_store
 
-pytestmark = [pytest.mark.postgres, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
+
+pytestmark = [pytest.mark.postgres, pytest.mark.garage, pytest.mark.openbao, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
 
 PROXY = "http://proxy.invalid"
 
