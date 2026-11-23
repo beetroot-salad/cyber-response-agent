@@ -147,7 +147,7 @@ def test_hiding_a_path_never_rewrites_part_of_one_that_merely_shares_its_prefix(
     root = tmp_path / "tenants-bnd1256"
     S7.plant(root, marker="bnd1256")
     tenant = S7.tenant_folder_of(root)
-    settings = Path(tenant.settings)
+    settings = T6.placed_half(tenant, "settings")  # #1618 K8
     siblings: dict[str, tuple[Path, str]] = {
         "the data root's": (root, f"{suffix}/fd1256-root.conf"),
         "the tenant folder's": (root / S7.PLAYGROUND_ID, f"{suffix}/fd1256-tenant.conf"),

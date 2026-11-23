@@ -28,6 +28,7 @@ from defender.tests.support.sandbox._spec791 import (
 )
 from defender.tests.support.sandbox._curation_store1278 import reach_store
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+from defender.tests.support.tenancy._tenants1106 import placed_half
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 from defender.tests.support.storage import _feedback1414 as F
@@ -74,7 +75,7 @@ def _requests(paths) -> dict[str, dict]:
 
 
 def _set(tenant, outcomes: list[str] | None) -> None:
-    path = Path(location_path(tenant.settings)) / S.SETTING_FILE
+    path = placed_half(tenant, "settings") / S.SETTING_FILE  # #1618 K8: the placed half
     if outcomes is None:
         path.unlink(missing_ok=True)
     else:
@@ -374,7 +375,7 @@ def test_1414_a_setting_with_a_duplicate_or_unknown_key_is_refused_at_run_end(tm
     import logging
 
     text, key = _BAD_KEYS[why]
-    (Path(location_path(tenant.settings)) / S.SETTING_FILE).write_text(text, encoding="utf-8")
+    (placed_half(tenant, "settings") / S.SETTING_FILE).write_text(text, encoding="utf-8")
     with caplog.at_level(logging.INFO):
         _drive(tmp_path, state, "bad-keys", plan=F.plan_for("aborted"))
     assert _requests(state) == {}

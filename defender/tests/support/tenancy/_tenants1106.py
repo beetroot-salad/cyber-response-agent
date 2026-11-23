@@ -115,14 +115,20 @@ def run_tenant(tenant: Any, *, defender_dir: Path | None = None,
     del defender_dir
     from defender.tests.support.tenancy import _systems1366 as R
 
-    placed = Path(str(location_path(tenant.tenant_root))) / "knowledge"
-    root = Path(agent_root) if agent_root is not None else placed / "agent"
-    settings = Path(settings_root) if settings_root is not None else placed / "settings"
+    root = Path(agent_root) if agent_root is not None else placed_half(tenant, "agent")
+    settings = Path(settings_root) if settings_root is not None else placed_half(tenant, "settings")
     try:
         return R.run_tenant_for(tenant, dispatches_lead_zero=dispatches_lead_zero, agent_root=root,
                                 settings_root=settings, records=R.DERIVED if records is ... else records)
     except mod("records.formats").TenantRefused as refused:
         raise (refused.__cause__ or refused) from None
+
+
+def placed_half(tenant: Any, half: str) -> Path:
+    """`<T>/knowledge/<half>` (`agent` or `settings`): the half a test placed for `tenant` (#1618 K8: a `Tenant` names no
+    knowledge path, so a test that edits or reads what it placed names the folder itself)."""
+    assert half in ("agent", "settings"), half
+    return Path(str(location_path(tenant.tenant_root))) / "knowledge" / half
 
 
 def fixture_run_tenant(**kw: Any) -> Any:
