@@ -151,6 +151,12 @@ class ReadinessRefused(BaseModel):
         description="Which revision of the tenant's knowledge the check judged; null when the refusal came at or before "
                     "the publish step, which gave none.")
 
+    @field_validator("step", mode="before")
+    @classmethod
+    def _step_before_the_merge(cls, value: object) -> object:
+        """A row stored before #1618 may name the retired copy step; it reads as the step that replaced it."""
+        return "publish" if value == "knowledge_copy" else value
+
 
 class ReadinessReady(BaseModel):
     """Nothing refused the launch; the warnings are what a person should still look at."""

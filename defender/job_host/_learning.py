@@ -92,7 +92,7 @@ class _Learning:
     scratch: Path
     #: The tenant's current records, read once at the job's start (#1366 O6): every sibling's run reads these.
     records: Any = None
-    #: Where `copy.make` makes its copies: the claim's scratch folder (they go with the claim, F3).
+    #: Where `copy.make` makes its copies: the claim's `shared/` folder, the one folder of it the job container mounts (they go with the claim, F3).
     copies: Path | None = None
     siblings: dict[str, _Sibling] = field(default_factory=dict)  # by run id
     by_world: dict[str, str] = field(default_factory=dict)  # world id -> run id
@@ -220,7 +220,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
         cleanup.close()
         raise
     session.minted.add(job)
-    state = _Learning(accepted, source.commit, scratch, records=current, copies=scratch)
+    state = _Learning(accepted, source.commit, scratch, records=current, copies=shared)
     cleanup.callback(_remove_copies, state)
     command = session.command or ["python3", "-m", "defender.cli.learning.job", "--job", job,
                                   "--tenant", session.tenant_id, "--source", str(session.source)]
