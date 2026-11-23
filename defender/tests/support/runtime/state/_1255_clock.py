@@ -143,6 +143,15 @@ def plant_lessons(tenant_id: str, data_root: Path | None = None, *,
     return lessons
 
 
+def publish_lessons(tenant_id: str, data_root: Path) -> str:
+    """Commit `LESSONS` (as `lesson_text` writes them) on `main` of tenant `tenant_id`'s served remote under `data_root`,
+    as a tenant admin's merge lands knowledge (#1618 D2: knowledge changes only on Forgejo). Returns the new `main`."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import commit_on_main
+
+    files = {f"agent/lessons/{name}.md": lesson_text(name) for name in LESSONS}
+    return commit_on_main(data_root, tenant_id, files, "clock lessons")
+
+
 def _argv_tenant(argv: Iterable[str]) -> str | None:
     args = list(argv)
     return args[args.index("--tenant") + 1] if "--tenant" in args[:-1] else None
@@ -245,14 +254,14 @@ def drive_clocked(  # noqa: PLR0913 — one keyword per seam a clock scenario va
     """Drive a natural replay with an injected clock and the standard harness defaults. With
     no `tenant` the replay runs as the fixture tenant, into whose folder `LESSONS` are planted
     first (the harness commits the folder as it stands to the tenant's Forgejo `main` and reads that commit); a named
-    tenant gets them in its placed agent half (`<T>/knowledge/agent`: #1618 K8, a `Tenant` names no knowledge path),
-    which the harness reads as it stands."""
+    tenant's knowledge lives only on its served remote (#1618 K8, D2: an estate's `place()` seeds it there and places
+    no folder), so `LESSONS` are committed on that remote's `main`, which the run fetches."""
     if tenant is None:
         from defender.tests.support.tenancy import _tenants1106
 
         plant_lessons(str(_tenants1106.fixture_tenant().id))
     else:
-        plant_lessons(str(tenant.id), data_root=Path(location_path(tenant.data_root)))
+        publish_lessons(str(tenant.id), data_root=Path(location_path(tenant.data_root)))
     return H.drive(run_dir, run_id=run_dir.name, main=main, gather=gather, verbs=verbs,
                    limits=limits, tenant=tenant, review_stages=review_stages, clock=clock)
 
