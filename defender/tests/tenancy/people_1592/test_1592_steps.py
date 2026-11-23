@@ -54,13 +54,14 @@ def _signatures_move(people: People, login: str) -> dict[str, str]:
     return {
         "A": f"GET {API}/users/{login}", "L1": f"GET {API}/orgs/{org_of(T)}/teams/search",
         "L2": f"GET {API}/orgs/{org_of(U2)}/teams/search", "DELETE": f"DELETE {API}/teams/{t1}/members/{login}",
-        "UNSUSPEND": f"PATCH {API}/admin/users/{login}", "PUT": f"PUT {API}/teams/{t2}/members/{login}",
+        "STANDING": f"PATCH {API}/admin/users/{login}", "PUT": f"PUT {API}/teams/{t2}/members/{login}",
     }
 
 
-#: which of the four observable effects a failure of each call prevents (design: step table, Needs)
+#: which of the four observable effects a failure of each call prevents (design: step table, Needs). Step 6 needs step
+#: 5: nobody is added to a team until their account's standing (unsuspended, limited) is set in the same run.
 MOVE_PREVENTS = {"A": {"unsuspended", "added", "session"}, "L1": {"removed"}, "L2": {"added"},
-                 "DELETE": {"removed"}, "UNSUSPEND": {"unsuspended"}, "PUT": {"added"}}
+                 "DELETE": {"removed"}, "STANDING": {"unsuspended", "added"}, "PUT": {"added"}}
 MOVE_TENANT = {"L1": T, "DELETE": T, "L2": U2, "PUT": U2}
 
 
@@ -112,17 +113,18 @@ def _created(people: People, login: str) -> set[str]:
 def _signatures_create(people: People, login: str) -> dict[str, str]:
     t = people.forge._team_id(org_of(T), "members")  # noqa: SLF001
     return {"A": f"GET {API}/users/{login}", "POST": f"POST {API}/admin/users",
-            "LIMITS": f"PATCH {API}/admin/users/{login}", "L": f"GET {API}/orgs/{org_of(T)}/teams/search",
+            "STANDING": f"PATCH {API}/admin/users/{login}", "L": f"GET {API}/orgs/{org_of(T)}/teams/search",
             "PUT": f"PUT {API}/teams/{t}/members/{login}"}
 
 
-#: a half-made account (the limits PATCH failed) is a failed step 4, so steps 5 and 6 are skipped
-CREATE_PREVENTS = {"A": {"created", "added"}, "POST": {"created", "added"}, "LIMITS": {"added"}, "L": {"added"},
+#: the limits ride on step 5's PATCH, which every run with an account sends, so a failed one leaves a made account
+#: that the next run limits; step 6 waits for it
+CREATE_PREVENTS = {"A": {"created", "added"}, "POST": {"created", "added"}, "STANDING": {"added"}, "L": {"added"},
                    "PUT": {"added"}}
 
 
 async def test_a_clean_creation_makes_exactly_the_expected_calls(people: People):
-    """S2-12 control: creation, its PATCH, the team lookup and the add; nothing else."""
+    """S2-12 control: creation, step 5's PATCH, the team lookup and the add; nothing else."""
     _user, login = await _create(people)
 
     await people.step()
@@ -185,3 +187,21 @@ async def test_an_unreachable_sessions_database_still_lets_removals_and_other_ru
     pending = await people.open_requests()
     assert (str(bob.id), T) in pending
     assert str(carol.id) not in {u for u, _t in pending}
+
+
+async def test_an_account_whose_limits_were_never_set_is_limited_by_the_next_run(people: People):
+    """S2-4 (finalize, #1623 review): an account made but never limited (the PATCH after creation failed, or made before
+    this rule) is not suspended, so nothing about it reads as unfinished. Every run that finds a wanted person's account
+    sends its standing, so the next run limits it, before the team place."""
+    user, login = await _create(people)
+    people.forge.fail(_signatures_create(people, login)["STANDING"], status=500, times=1)
+    await people.step()
+    assert login in people.forge.accounts and login not in people.forge.members(T)
+    assert "max_repo_creation" not in people.forge.accounts[login], "the fake recorded a failed PATCH"
+
+    await people.step()
+
+    assert (people.forge.accounts[login].get("max_repo_creation"),
+            people.forge.accounts[login].get("allow_create_organization")) == (0, False)
+    assert login in people.forge.members(T)
+    assert (str(user.id), T) not in await people.open_requests()
