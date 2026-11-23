@@ -167,7 +167,7 @@ async def test_a_login_held_by_a_stray_account_stays_logged_and_does_not_block_t
 
 
 async def test_a_suspended_wanted_person_is_unsuspended(people: People):
-    """S2-7: step 5."""
+    """S2-7: step 5 (its PATCH also carries the account's limits)."""
     await people.tenant(T)
     alice = await people.person("alice@x.org", T)
     await settled(people)
@@ -177,7 +177,7 @@ async def test_a_suspended_wanted_person_is_unsuspended(people: People):
 
     await people.step()
 
-    assert {"prohibit_login": False} in _patches(people, login)
+    assert any(body.get("prohibit_login") is False for body in _patches(people, login))
     assert login not in people.forge.prohibit_login
 
 
