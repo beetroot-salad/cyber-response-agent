@@ -138,7 +138,7 @@ def test_1470_o12_the_mark_drop_stops_naming_the_tenants_without_a_mark_and_chan
 def test_1470_o12_the_mark_drop_runs_when_every_tenant_not_offboarded_has_its_mark_and_keeps_the_records(empty_database):
     """Marked tenants (any state but offboarded) and an offboarded one without: the upgrade reaches head, the mark table
     is gone and the tenants' version rows are as they were. (O12, O8)"""
-    from defender.migrations import upgrade
+    from defender.tests.migrations._marked1470 import upgrade_with_retention
 
     _upgrade_to(empty_database, BEFORE_DROP)
     _tenant(empty_database, MARKED, "active", mark=True)
@@ -147,7 +147,7 @@ def test_1470_o12_the_mark_drop_runs_when_every_tenant_not_offboarded_has_its_ma
                             "access, credential_generation, deleted, author, written_at) VALUES "
                             "(%s, 'ticket', 1, 'ticket', true, '{}'::jsonb, 'x', 1, false, 'seed', now())", (MARKED,))
 
-    upgrade(empty_database)
+    upgrade_with_retention(empty_database)  # #1546 r9 B: the marked tenant has its retention row (the offboarded one needs none)
 
     assert execute(empty_database, "SELECT to_regclass('tenancy.records_mark')") == [(None,)]
     assert execute(empty_database, "SELECT system_id, version FROM tenancy.system_versions WHERE tenant_id = %s",

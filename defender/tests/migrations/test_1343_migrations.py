@@ -7,7 +7,7 @@ import uuid
 import pytest
 
 from defender.tests.support.shared._postgres1339 import execute
-from defender.tests.migrations._marked1470 import upgrade_marking_tenants
+from defender.tests.migrations._marked1470 import PLANTED_RETENTION_DAYS, upgrade_marking_tenants
 
 TERMINAL = ("completed", "unparseable", "failed", "aborted")
 PRE_STATE = "0005_uuid_ids"
@@ -121,22 +121,25 @@ def test_b_a_running_row_must_have_a_lease_and_other_stages_need_none(migrated_d
 
     dsn = migrated_database
     execute(dsn, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, now(), 'active')", (TENANT,))
+    execute(dsn, "INSERT INTO tenancy.evidence_retention (tenant_id, investigation_days, learning_days) VALUES (%s, %s, %s)",
+            (TENANT, PLANTED_RETENTION_DAYS, PLANTED_RETENTION_DAYS))  # #1546 r9: an investigation at head names its tenant's retention (the foreign key)
     for ticket in ("1", "2", "3"):
         _plant(dsn, _inv(ticket), "queued", ticket, at_head=True)
     i_1 = _inv("1")
     insert = ("INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, started_at, "
-              f"cost_usd, cost_is_lower_limit, update_ticket, lease_expires_at) VALUES ('{_inv('new')}', '{TENANT}', '{_id('alert', 'new')}', 'k', 1, %s, "
-              "now(), now(), 0, false, false, {lease})")  # #1377's `cost_is_lower_limit` and #1471's `update_ticket`: required columns, at head
+              f"cost_usd, cost_is_lower_limit, update_ticket, lease_expires_at, evidence_state, scrub) VALUES ('{_inv('new')}', '{TENANT}', '{_id('alert', 'new')}', 'k', 1, %s, "
+              "now(), now(), 0, false, false, {lease}, {ended})")  # #1377's `cost_is_lower_limit` and #1471's `update_ticket`: required columns, at head; #1546 A-O4: an ended row has its evidence state
     execute(dsn, "INSERT INTO jobs.alerts (id, tenant_id, vendor, vendor_ticket_id, fired_at, changed_at, received_at, title, "
                  "description, raw) VALUES (%s, %s, 'elastic', 'new', now(), now(), now(), 't', 'd', '\\x7b7d')",
             (_id("alert", "new"), TENANT))
     with pytest.raises(psycopg.errors.CheckViolation):
-        execute(dsn, insert.format(lease="NULL"), ("running",))
+        execute(dsn, insert.format(lease="NULL", ended="NULL, NULL"), ("running",))
     with pytest.raises(psycopg.errors.CheckViolation):
         execute(dsn, "UPDATE jobs.investigations SET stage = 'running', started_at = now() WHERE id = %s", (i_1,))
     execute(dsn, "UPDATE jobs.investigations SET stage = 'running', started_at = now(), "
                  "lease_expires_at = now() + interval '30 seconds' WHERE id = %s", (i_1,))  # control: with a lease it moves
     with pytest.raises(psycopg.errors.CheckViolation):
         execute(dsn, "UPDATE jobs.investigations SET lease_expires_at = NULL WHERE id = %s", (i_1,))
-    execute(dsn, "UPDATE jobs.investigations SET stage = 'failed', finished_at = now() WHERE id = %s", (i_1,))  # a lease may stay on an ended row
-    execute(dsn, insert.format(lease="NULL"), ("failed",))  # control: other stages need no lease
+    execute(dsn, "UPDATE jobs.investigations SET stage = 'failed', finished_at = now(), evidence_state = 'none', scrub = 'not_run' "
+                 "WHERE id = %s", (i_1,))  # a lease may stay on an ended row (#1546 A-O4: which has its evidence state)
+    execute(dsn, insert.format(lease="NULL", ended="'none', 'not_run'"), ("failed",))  # control: other stages need no lease

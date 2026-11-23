@@ -58,14 +58,16 @@ def _gone_in_openbao(world, gen) -> dict[str, bool]:
             "approle": gen.approle not in world.openbao.approles,
             "entity": gen.entity not in world.openbao.entities,
             "sign approle": gen.sign_approle not in world.openbao.approles,
-            "sign entity": gen.sign_entity not in world.openbao.entities}
+            "sign entity": gen.sign_entity not in world.openbao.entities,
+            "evidence approle": gen.evidence_approle not in world.openbao.approles,
+            "evidence entity": gen.evidence_entity not in world.openbao.entities}
 
 
 def _nothing_left(world, tenant: str) -> None:
     """No bot, integration, OpenBao entry, host folder or secret file of the tenant exists."""
     assert (world.forge.users, world.forge.integrations) == (set(), {})
     assert (world.openbao.oidc_roles, world.openbao.approles, world.openbao.entities) == ({}, {}, {})
-    assert world.openbao.transit_keys == {}, "the tenant's signing key outlived it (A25)"
+    assert world.openbao.transit_keys == {}, "the tenant's signing or evidence key outlived it (A25, A-O5)"
     assert world.openbao.aliases == []
     assert not (world.data_root / tenant).exists()
     assert not [p for p in world.config.secrets_dir.rglob("*") if p.is_file()]
@@ -109,10 +111,11 @@ def test_offboard_ends_api_access_at_once_then_destroys_everything_but_the_archi
     assert deletes and not any("purge" in c.query for c in deletes)
     assert gen.bot_login not in world.forge.users and gen.bot_login not in world.forge.integrations
     assert set(_gone_in_openbao(world, gen).values()) == {True}, _gone_in_openbao(world, gen)
-    assert world.openbao.transit_keys == {}, "offboarding destroys the tenant's signing key (A25)"
+    assert world.openbao.transit_keys == {}, "offboarding destroys the tenant's signing and evidence keys (A25, A-O5)"
     assert world.forge.repos[f"{ORG}/{tenant}"]["archived"] is True
     assert not (world.data_root / tenant).exists()
     assert not gen.host_secret_file.exists() and not gen.sign_secret_file.exists() and _secret_files(world) == []
+    assert not gen.evidence_secret_file.exists()
 
 
 def test_offboarding_with_no_database_address_fails_the_teardown_and_removes_nothing_until_one_is_set(world, monkeypatch):
@@ -193,6 +196,10 @@ GONE = {
     "sign entity": lambda w, t, g: w.openbao.entities.pop(g.sign_entity),
     "sign secret file": lambda w, t, g: g.sign_secret_file.unlink(),
     "signing key": lambda w, t, g: w.openbao.transit_keys.pop(f"request-token-{t}"),
+    "evidence approle": lambda w, t, g: w.openbao.approles.pop(g.evidence_approle),
+    "evidence entity": lambda w, t, g: w.openbao.entities.pop(g.evidence_entity),
+    "evidence secret file": lambda w, t, g: g.evidence_secret_file.unlink(),
+    "evidence key": lambda w, t, g: w.openbao.transit_keys.pop(f"evidence-{t}"),
 }
 
 
@@ -278,7 +285,7 @@ def _sign(world, token: str, tenant: str):
 
 
 def test_after_a_rotation_nothing_of_the_old_generation_is_accepted_and_the_new_one_works(world, caplog):
-    """Once nothing is pending: the old JWT, OpenBao token and both AppRole secrets are refused, the old bot, role,
+    """Once nothing is pending: the old JWT, OpenBao token and all three AppRole secrets are refused, the old bot, role,
     AppRoles and entities are gone, and the new generation's credentials work end to end (O5, O10, A24', A25)."""
     tenant = world.active_tenant()
     old = world.live(tenant)
@@ -291,6 +298,8 @@ def test_after_a_rotation_nothing_of_the_old_generation_is_accepted_and_the_new_
     old_sign_secret = world.openbao.approles[old.sign_approle][old.sign_secret_accessor]
     old_sign = _login(world, old.sign_role_id, old_sign_secret)
     assert old_sign.status_code == 200 and _sign(world, old_sign.json()["auth"]["client_token"], tenant).status_code == 200  # control
+    old_evidence_secret = world.openbao.approles[old.evidence_approle][old.evidence_secret_accessor]
+    assert _login(world, old.evidence_role_id, old_evidence_secret).status_code == 200  # control
     audit = AuditLog(caplog)
     mark = audit.mark()
     asked = world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential")
@@ -311,6 +320,7 @@ def test_after_a_rotation_nothing_of_the_old_generation_is_accepted_and_the_new_
     assert _login(world, old.role_id, old_secret).status_code == 400
     assert _login(world, old.sign_role_id, old_sign_secret).status_code == 400
     assert _sign(world, old_sign.json()["auth"]["client_token"], tenant).status_code == 403
+    assert _login(world, old.evidence_role_id, old_evidence_secret).status_code == 400
     assert old.bot_login not in world.forge.users and old.bot_login not in world.forge.integrations
     assert set(_gone_in_openbao(world, old).values()) == {True}, _gone_in_openbao(world, old)
 
@@ -323,11 +333,13 @@ def test_after_a_rotation_nothing_of_the_old_generation_is_accepted_and_the_new_
     sign = _login(world, new.sign_role_id, world.openbao.approles[new.sign_approle][new.sign_secret_accessor])
     assert sign.status_code == 200
     assert _sign(world, sign.json()["auth"]["client_token"], tenant).status_code == 200
+    evidence = _login(world, new.evidence_role_id, world.openbao.approles[new.evidence_approle][new.evidence_secret_accessor])
+    assert evidence.status_code == 200, "the new generation's evidence login works"
 
 
 def test_rotation_leaves_the_new_bot_the_only_collaborator_and_only_the_new_secret_file(world):
     """After rotation the repo's only collaborator is the new bot (any other removed), each AppRole holds only its
-    new secret id, and the secrets folder holds exactly the new pair of files (O5, DC-2, A24')."""
+    new secret id, and the secrets folder holds exactly the new three files (O5, DC-2, A24')."""
     tenant = world.active_tenant()
     old = world.live(tenant)
     full = f"{ORG}/{tenant}"
@@ -338,9 +350,10 @@ def test_rotation_leaves_the_new_bot_the_only_collaborator_and_only_the_new_secr
     assert world.forge.collaborators(full) == {new.bot_login: "write"}
     assert world.openbao.secret_accessors(new.approle) == {new.secret_accessor}
     assert world.openbao.secret_accessors(new.sign_approle) == {new.sign_secret_accessor}
-    assert not old.host_secret_file.exists() and not old.sign_secret_file.exists()
-    assert new.host_secret_file.is_file() and new.sign_secret_file.is_file()
-    assert _secret_files(world) == sorted([new.host_secret_file, new.sign_secret_file])
+    assert world.openbao.secret_accessors(new.evidence_approle) == {new.evidence_secret_accessor}
+    assert not old.host_secret_file.exists() and not old.sign_secret_file.exists() and not old.evidence_secret_file.exists()
+    assert new.host_secret_file.is_file() and new.sign_secret_file.is_file() and new.evidence_secret_file.is_file()
+    assert _secret_files(world) == sorted([new.host_secret_file, new.sign_secret_file, new.evidence_secret_file])
     assert new.secret_accessor in new.host_secret_file.name
     assert (world.data_root / tenant).is_dir()
 
