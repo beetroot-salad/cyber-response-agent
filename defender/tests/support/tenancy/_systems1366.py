@@ -245,10 +245,18 @@ def _readable(path: Path, *, folder: bool) -> bool:
 
 
 def settings_of(data_root: Path | str | None, tenant: str) -> Path | None:
-    """The `settings/` a run of `tenant` would read: the placed folder (what the test seeds the tenant's Forgejo `main`
-    from; #1618: there is no `exports/current`); None when it cannot be seen."""
+    """The `settings/` a run of `tenant` would read (#1618: there is no `exports/current`; knowledge is the tenant's
+    Forgejo `main`): `main`'s on the data root's served remote when the tenant was published (a copy,
+    `_fetch_standin_1618.copy_at_main`, so a merge is seen on the next call), else the placed folder the test seeds
+    `main` from; None when neither can be seen."""
     if data_root is None:
         return None
+    from defender.tests.support.tenancy._fetch_standin_1618 import copy_at_main, served_remote
+
+    if served_remote(data_root, str(tenant)).is_symlink():
+        copy = copy_at_main(data_root, str(tenant))
+        if copy is not None and _readable(copy / "settings", folder=True):
+            return copy / "settings"
     base = Path(str(data_root)) / str(tenant)
     placed = base / "knowledge" / "settings"
     return placed if _readable(placed, folder=True) else None

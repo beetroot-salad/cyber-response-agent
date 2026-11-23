@@ -66,6 +66,10 @@ def seed_placed(data_root: Path | str, tenant_id: str) -> str | None:
     remote = served_remote(root, tenant_id)
     placed = root / tenant_id / "knowledge"
     with _lock_for(remote):
+        if remote.is_symlink():
+            # A published tenant's own remote (`publish_placed` links it here): its `main` is the test's, moved by its
+            # merges; what is at `<T>/knowledge` then is a decoy (`plant_old_clone`), never seeded.
+            return _git(remote, "rev-parse", "refs/heads/main")
         if not placed.is_dir():
             return _git(remote, "rev-parse", "refs/heads/main") if (remote / "HEAD").exists() else None
         work = served / "seeds" / tenant_id
@@ -123,6 +127,44 @@ def halves_at(remote: Path, commit: str, into: Path) -> Path:
         else:
             target.write_bytes(data)
     return into
+
+
+def link_published(data_root: Path | str, tenant_id: str, remote: Path) -> None:
+    """Name a published tenant's bare `remote` (`publish_placed`'s, outside the data root) as the data root's served
+    remote for `tenant_id`, so whatever finds a tenant's Forgejo repository from the data root alone (the default
+    `in_process_fetch()`, `copy_at_main`) finds that one. A later publish of the tenant re-links it."""
+    served = served_remote(data_root, tenant_id)
+    remote = Path(remote).resolve()
+    if served.is_symlink():
+        served.unlink()
+    elif served.exists():
+        if served.resolve() == remote:
+            return
+        shutil.rmtree(served)
+    served.parent.mkdir(parents=True, exist_ok=True)
+    served.symlink_to(remote, target_is_directory=True)
+
+
+def copy_at_main(data_root: Path | str, tenant_id: str) -> Path | None:
+    """A test-side copy (`halves_at`) of `main`'s `agent/` and `settings/` on the tenant's served remote, beside the data
+    root and one per commit (`<root>-p4-forge/copies/<T>/<commit>/`); None when the tenant has no served remote."""
+    import os
+
+    root = Path(str(location_path(data_root)))
+    remote = served_remote(root, str(tenant_id))
+    if not (remote / "HEAD").exists():
+        return None
+    commit = _git(remote, "rev-parse", "refs/heads/main")
+    copy = forge_scratch(root) / "copies" / str(tenant_id) / commit
+    if not copy.is_dir():
+        building = copy.with_name(f".{commit}.{os.getpid()}.{threading.get_ident()}")
+        shutil.rmtree(building, ignore_errors=True)
+        halves_at(remote, commit, building)
+        try:
+            building.rename(copy)
+        except OSError:  # made meanwhile: the same commit's bytes
+            shutil.rmtree(building, ignore_errors=True)
+    return copy
 
 
 def fetch_line(tenant_id: str, dest: Path, *, data_root: Any, commit: str | None = None,

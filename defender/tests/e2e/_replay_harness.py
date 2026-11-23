@@ -10,7 +10,6 @@ import functools
 import inspect
 import os
 import re
-import shutil
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -568,7 +567,7 @@ def _default_tenant(agent: Path | None = None) -> tuple[Any, Path]:
     (`_fetch_standin_1618.seed_placed`: an unchanged folder is the same commit), so an edit a test made to the tenant's
     placed folder is what the run reads. The copy sits beside the data root, one per commit."""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
-    from defender.tests.support.tenancy._fetch_standin_1618 import forge_scratch, halves_at, seed_placed, served_remote
+    from defender.tests.support.tenancy._fetch_standin_1618 import copy_at_main, seed_placed
     from defender.tests.tenancy.tenant_1108_p4._support import place_fixture
 
     root = current_data_root()
@@ -578,17 +577,9 @@ def _default_tenant(agent: Path | None = None) -> tuple[Any, Path]:
         tenant_id = fixture_uuid(f"tenant:golden-agent:{Path(agent).parent.name}")
         if not (root / tenant_id / "knowledge").is_dir():
             place_fixture(root, tenant_id, agent=Path(agent))
-    commit = seed_placed(root, tenant_id)
-    assert commit is not None, f"premise: tenant {tenant_id} is placed under {root}"
-    copy = forge_scratch(root) / "copies" / tenant_id / commit
-    if not copy.is_dir():
-        building = copy.with_name(f".{commit}.{os.getpid()}")
-        shutil.rmtree(building, ignore_errors=True)
-        halves_at(served_remote(root, tenant_id), commit, building)
-        try:
-            building.rename(copy)
-        except OSError:  # another drive made it meanwhile: the same commit's bytes
-            shutil.rmtree(building, ignore_errors=True)
+    assert seed_placed(root, tenant_id) is not None, f"premise: tenant {tenant_id} is placed under {root}"
+    copy = copy_at_main(root, tenant_id)
+    assert copy is not None, tenant_id
     return _tenants1106.accept(root, tenant_id), copy
 
 
