@@ -10,8 +10,11 @@ logged with the user, the tenant and the step, and keeps the requests.
 | 2 | suspend, when U is wanted nowhere and the account exists | R, A |
 | 3 | delete U's stamped sessions: all when wanted nowhere, else those before `signed_out_at` | R, A, sessions |
 | 4 | create the account, when U is wanted somewhere and has none | R, A |
-| 5 | unsuspend, when U is wanted somewhere and the account is suspended | R, A or 4 |
-| 6 | add `p-<U>` to each named T where U is wanted (an absent team is an error) | R, A or 4, L(T) |
+| 5 | the account's standing, when U is wanted somewhere: unsuspended and limited, sent on every run | R, A or 4 |
+| 6 | add `p-<U>` to each named T where U is wanted (an absent team is an error) | R, 5, L(T) |
+
+Step 5 is sent whatever the account reads, so an account whose limits were never set (step 4's creation ignores
+them, P20) is limited by the next run, and nobody joins a team before their account's standing is set in that run.
 """
 from __future__ import annotations
 
@@ -211,23 +214,28 @@ class PersonRun:
             return
         if account is None:
             account = await self._step("4", None, lambda: self._create(wanted))
-        elif account.prohibit_login and await self._step("5", None, lambda: self._prohibit(False)) is not FAILED:
-            account.prohibit_login = False
+        if account is FAILED:
+            self._skipped("5")
+        elif await self._step("5", None, self._standing) is FAILED:
+            account = FAILED
         for tenant in self._named:
             if tenant in wanted.tenants:
                 await self._add(tenant, account, teams[tenant])
 
     async def _create(self, wanted: Wanted) -> Account:
-        """Step 4: the person account, restricted at creation (P20), then the limits creation ignores."""
+        """Step 4: the person account, restricted at creation (P20); step 5 then sets the limits creation ignores."""
         if not wanted.sub:
             raise StepFailed("the user is wanted but has no sign-in account (sub): no Forgejo account is made")
         await self._call("POST", "/api/v1/admin/users", json={
             "username": self._login, "login_name": wanted.sub, "source_id": self._p.config.keycloak_source_id,
             "restricted": True, "must_change_password": False, "email": f"{self._login}@people.invalid",
             "full_name": wanted.display_name})
-        await self._call("PATCH", f"/api/v1/admin/users/{self._login}",
-                         json={"max_repo_creation": 0, "allow_create_organization": False})
         return Account(None, prohibit_login=False)
+
+    async def _standing(self) -> None:
+        """Step 5: a wanted person's account may sign in, and may create no repository or organisation."""
+        await self._call("PATCH", f"/api/v1/admin/users/{self._login}",
+                         json={"prohibit_login": False, "max_repo_creation": 0, "allow_create_organization": False})
 
     async def _add(self, tenant: TenantId, account: Any, team: Any) -> None:
         if account is FAILED or team is FAILED:
