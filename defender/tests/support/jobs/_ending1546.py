@@ -186,3 +186,30 @@ async def end_row(store: Any, dsn: str, *, kind: str, tenant: str, owner: str, t
     record, or `None` when the row is no longer live (the fence); who reads facts in the end transaction is open (a gap)."""
     decision = decide(DECIDE_KIND.get(kind, kind), facts_of(dsn, token), uploads_of(dsn, token), by)
     return decision, await store.apply(tenant, owner, decision)
+
+
+async def end_through_the_store(store: Any, tenant: str, investigation_id: str, *, stage: str = "completed",
+                                disposition: str | None = "malicious", cost_usd: float = 0.0) -> Any:
+    """A running investigation ended as a #1546 normal end leaves it, through the store's own session (no DSN needed): its
+    claim, the helper's facts (`started`, `knowledge`, an `outcome` with a clean scrub whose close found `disposition`, no
+    page) and an uploaded bundle, then `decide` and `apply`. A `completed` stage reads `complete`, so its follow-ons run as
+    today's finish did (the auto learning job, the alert outcome, the check clock). Returns `apply`'s record."""
+    from sqlalchemy import text
+
+    token = uuid.uuid4().hex
+    closing = closing_found(disposition) if disposition is not None else {"found": "never_closed"}
+    facts = {"started": STARTED, "knowledge": KNOWLEDGE, "page": {"page": "none"},
+             "outcome": staged_inv_outcome(closing=closing, cost_usd=cost_usd,
+                                           report_committed=stage == "completed", scrub="clean")}
+    async with store._tx() as s:
+        await s.execute(text("INSERT INTO jobs.claims (token, tenant_id, kind, investigation_id, inputs) "
+                             "VALUES (:t, :tenant, 'investigation', :inv, '[]'::jsonb)"),
+                        {"t": token, "tenant": tenant, "inv": str(investigation_id)})
+        for name, body in facts.items():
+            await s.execute(text("INSERT INTO jobs.staged_facts (token, name, body, staged_at) "
+                                 "VALUES (:t, :n, CAST(:b AS jsonb), now())"), {"t": token, "n": name, "b": json.dumps(body)})
+        await s.execute(text("INSERT INTO jobs.uploads (token, object, size, sha256, wrapped_key, status, created_at) "
+                             "VALUES (:t, 'bundle', 6, :sha, 'wrapped-for-test', 'uploaded', now())"),
+                        {"t": token, "sha": "0" * 64})
+    decision = decide("investigation", facts, {"bundle": up()}, "exited")
+    return await store.apply(tenant, str(investigation_id), decision)

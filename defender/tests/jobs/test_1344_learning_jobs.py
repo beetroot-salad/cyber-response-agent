@@ -146,7 +146,8 @@ def learning_worker(world: dict, store, *, job, post, inv=None, **kw):
 
 
 async def completed_investigation(store, *, ticket: str, key: str = "k1", tenant: str = T1) -> str:
-    """An investigation brought to `completed` by the store's own finish: its job queued, its tenant's check armed.
+    """An investigation brought to `completed` by the store's own end (#1546 `apply`, evidence `complete`): its job queued,
+    its tenant's check armed.
 
     The row is planted already `running`, never `queued`, under a lease no test outlives: a serving worker started
     before this call can neither claim it nor take it over, so this is safe to call at any point in a test (#1597).
@@ -158,7 +159,10 @@ async def completed_investigation(store, *, ticket: str, key: str = "k1", tenant
             id=investigation_id, tenant_id=tenant, alert_id=alert.alert_id, request_key=key, attempt=1,
             stage="running", created_at=NOW, started_at=NOW, lease_expires_at=func.now() + dt.timedelta(hours=1),
             cost_usd=0.0, update_ticket=False))
-    assert await store.finish(tenant, investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
+    from defender.tests.support.jobs._ending1546 import end_through_the_store
+
+    # #1546: the store's own end is `decide` + `apply` over a normal end's rows (complete evidence), not `finish`
+    assert await end_through_the_store(store, tenant, str(investigation_id), disposition="malicious")
     return str(investigation_id)
 
 
