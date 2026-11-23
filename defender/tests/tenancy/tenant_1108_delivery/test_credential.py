@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import shutil
 import time
 import uuid
 from pathlib import Path
@@ -56,7 +57,8 @@ def _global_config(http_repo):
 def _deliver_refused():
     """What a refused deliver raises: the tick's own verbs' errors (a push's `GitError`, a PR create's `ForgeError`) or
     `DeliveryRefused`. #1618: `TenantDelivery.finish`, whose `_refusals` wrapper turned the first two into the third, is
-    deleted (test-only code); the promise held here is that it fails, never that it is that one type."""
+    deleted (test-only code); the production tick catches all three as forge faults (`store_tick._forge_faults`, round
+    `repository.push` and the PR's find-or-open), so the promise held here is that it fails, never one type."""
     from defender._git import GitError
     from defender.learning.author.version_control.forgejo import ForgeError
 
@@ -335,7 +337,8 @@ def test_no_file_holds_the_credential_while_network_git_waits_on_the_forge(http_
     server.rearm()
     with delivery(http_repo, http, identity=identity) as d:
         opened(revert_with(d, http_store, "agent/lessons/during.md", "during"), None)
-    required = {("open", "git-upload-pack"), ("deliver", "git-receive-pack"), ("revert", "git-receive-pack")}
+    required = {("open", "git-upload-pack"), ("deliver", "git-receive-pack"), ("revert", "git-upload-pack"),
+                ("revert", "git-receive-pack")}
     assert required <= set(scans), sorted(required - set(scans))
     missing = sorted(moment for moment in required if not configs.get(moment))
     assert missing == [], f"premise: no private repository's configuration was there to read at {missing}: {configs}"
@@ -450,6 +453,7 @@ def test_a_url_rewritten_to_another_server_gets_neither_the_token_nor_a_prompt(
     assert not hung, "git waited on a prompt"
     assert error is None or isinstance(error, target().DeliveryRefused), error
     assert [auth for auth in rewritten.authorizations if auth] == [], "a credential went to another server"
+    assert rewritten.seen == [], "the per-user rewrite steered the delivery's git to another server"
     _silent(log)
 
 
@@ -555,10 +559,10 @@ exit 0
 
 @pytest.mark.postgres
 def test_network_git_runs_no_hook_the_configuration_names(http_repo, http_store, tmp_path):
-    """Hooks a git configuration names (`core.hooksPath` in the per-user configuration: #1618 K8, there is no clone
-    whose `.git/hooks` this guarded, and a private repository is made fresh at the open) never run under the delivery's
-    network git: its open, its deliver (refused, then retried) and the revert. Control: a plain git under the same
-    configuration runs them."""
+    """Hooks never run under the delivery's network git: its deliver (refused, then retried) and the revert's push.
+    #1618 K8: there is no clone whose `.git/hooks` this guarded; the hooks are planted in the delivery's own private
+    repository (`d.repository.path/hooks`, once it is open) and named by `core.hooksPath` in the per-user configuration.
+    Control: a plain git under the same configuration runs them."""
     _tenant, remote = http_repo[0], http_repo[1]
     log = tmp_path / "hooks.log"
     hooks = tmp_path / "configured-hooks"
@@ -577,8 +581,12 @@ def test_network_git_runs_no_hook_the_configuration_names(http_repo, http_store,
     log.unlink()
     git(http_repo.checkout, "update-ref", "-d", "refs/p3/control")
 
+    def plant(d):
+        shutil.copytree(hooks, Path(d.repository.path) / "hooks", dirs_exist_ok=True)
+
     http = ForgeHTTP()
     with delivery(http_repo, http) as d:
+        plant(d)
         batch, held = claimed_batch(http_repo, http_store, d, "hooked")
         (batch.draft_root / "agent/lessons/hooked.md").write_text("a lesson\n", encoding="utf-8")
         batch.commit(batch.change_set(), "claim")
@@ -594,6 +602,7 @@ def test_network_git_runs_no_hook_the_configuration_names(http_repo, http_store,
     merge_on_remote(http_repo, tmp_path, batch.branch)
     git(http_repo.checkout, "config", "--file", str(_global_config(http_repo)), "core.hooksPath", str(hooks))
     with delivery(http_repo, http) as d:
+        plant(d)
         revert_with(d, http_store, "agent/lessons/hooked.md", "hooked")
     assert git(remote, "rev-parse", f"refs/heads/{batch.branch}")
     seen = log.read_text(encoding="utf-8") if log.exists() else ""
