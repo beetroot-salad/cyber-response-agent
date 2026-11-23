@@ -228,7 +228,7 @@ def test_derivation_keeps_its_invariant_on_random_box_output(repo, tmp_path, see
                 assert {row.split()[1] for row in rows} <= {"100644", "000000"}, where
                 head = sha
         assert batch_base(clone, batch) == head, where
-        assert git(clone, "status", "--porcelain") == "", where
+        # (#1618 K8: the repository is the delivery's private bare one, with no checkout whose status could change.)
         assert files_under(outside) == {"secret.md": SECRET}, f"{where}: a link was followed"
 
         _, error, hung = bounded(batch.reset, fifos=box.fifos)

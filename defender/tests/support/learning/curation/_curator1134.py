@@ -471,7 +471,7 @@ class DraftLane:
 
     @property
     def base(self) -> str:
-        return str(self.batch.export.commit)
+        return str(self.batch.base_commit)  # #1618: `Batch.export` is deleted
 
     def git(self, *args: str, check: bool = True) -> Any:
         from defender.tests.support.learning.curation._drain719 import git
