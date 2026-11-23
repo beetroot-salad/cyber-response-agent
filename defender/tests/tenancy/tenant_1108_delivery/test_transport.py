@@ -6,6 +6,7 @@ import pytest
 
 from ._revert_store import claimed_batch, reviewed, revert_with
 from ._support import (
+    deliver,
     BARE_NO_UPKEEP,
     LANES,
     ForgeHTTP,
@@ -41,18 +42,19 @@ def test_publication_never_follows_operator_tags(
     if route == "refinish":
         http.fail_create = True
         with pytest.raises(target().DeliveryRefused, match="503"):
-            d.finish(batch)
+            deliver(d, batch)
         http.fail_create = False
     elif route == "revert":
-        finished = d.finish(batch)
+        finished = deliver(d, batch)
         opened(finished)
         reviewed(store, held, finished)
         merge_on_remote(http_repo, tmp_path, batch.branch)
 
     control = tmp_path / "control.git"
     git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, remote, control)
+    private = d.repository.path  # #1618 K8: the delivery's private repository, where publication starts
     git(
-        tenant.knowledge,
+        private,
         "tag",
         "-a",
         "operator-tag",
@@ -60,18 +62,18 @@ def test_publication_never_follows_operator_tags(
         "not for publication",
         commit,
     )
-    git(tenant.knowledge, "config", "push.followTags", "true")
+    git(private, "config", "push.followTags", "true")
     git_config_home(tmp_path).global_config.write_text("[push]\nfollowTags = true\n")
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "push.followTags")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
 
     # Positive control: this annotated tag is reachable and ordinary operator git follows it.
-    git(tenant.knowledge, "push", control, f"{commit}:refs/heads/control")
+    git(private, "push", control, f"{commit}:refs/heads/control")
     assert "refs/tags/operator-tag" in _refs(control)
     before = _refs(remote)
     if route in ("finish", "refinish"):
-        opened(d.finish(batch))
+        opened(deliver(d, batch))
     else:
         opened(revert_with(d, store, "agent/lessons/tagged.md", "tagged"), None)
     branch = "refs/heads/" + http.creates[-1]["head"]
@@ -103,9 +105,10 @@ def test_transfer_ignores_clone_includes_system_user_and_environment_config(
 [http]
     proxy = {other}
 ''')
-    git(tenant.knowledge, "config", "include.path", included)
+    private = d.repository.path  # #1618 K8: the delivery's private repository (no host clone)
+    git(private, "config", "include.path", included)
     config = git_config_home(tmp_path)
-    config.global_config.write_text(f"[include]\npath = {included}\n")
+    config.global_config.write_text(config.global_config.read_text() + f"[include]\npath = {included}\n")
     config.system_config.write_text(f"[include]\npath = {included}\n")
     monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
@@ -116,7 +119,7 @@ def test_transfer_ignores_clone_includes_system_user_and_environment_config(
     monkeypatch.setenv("http_proxy", other)
     monkeypatch.setenv("NO_PROXY", "")
     assert (
-        git(tenant.knowledge, "remote", "get-url", "--push", "origin")
+        git(private, "remote", "get-url", "--push", "origin")
         == f"{other}/tenants/blue.git"
     )
     batch = d.start_batch("isolated", lanes=LANES)
@@ -124,7 +127,7 @@ def test_transfer_ignores_clone_includes_system_user_and_environment_config(
         "explicit destination\n"
     )
     commit = batch.commit(batch.change_set(), "isolated lesson")
-    opened(d.finish(batch))
+    opened(deliver(d, batch))
     assert git(remote, "rev-parse", f"refs/heads/{batch.branch}") == commit
     assert server.authorized("git-upload-pack")
     assert server.authorized("git-receive-pack")
@@ -137,13 +140,12 @@ def test_transport_shares_objects_without_requiring_clone_remotes(
 ):
     with build_tenant(tmp_path, object_format=object_format) as repo:
         d = delivery(repo, ForgeHTTP())
-        git(repo[0].knowledge, "remote", "remove", "origin")
-        # Recreate the local tracking ref removed by `remote remove`; it is local state,
-        # independently of the explicit network destination accepted by the factory.
-        git(repo[0].knowledge, "update-ref", "refs/remotes/origin/main", "main")
-        d.publish()
+        # #1618 K8: the remotes are the delivery's private repository's (no host clone); `publish` (flow 1) is gone.
+        private = d.repository.path
+        if "origin" in git(private, "remote").split():
+            git(private, "remote", "remove", "origin")
         batch = d.start_batch("objects", lanes=LANES)
         (batch.draft_root / "agent/lessons/objects.md").write_text("objects only\n")
         commit = batch.commit(batch.change_set(), "objects")
-        opened(d.finish(batch))
+        opened(deliver(d, batch))
         assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == commit

@@ -847,6 +847,31 @@ def batch_base(clone, batch):
     return branch_tip(clone, batch.branch) or batch.base_commit
 
 
+def deliver(d, batch):
+    """Deliver `batch` over its delivery `d` the way the drain tick does (#1618 census: `TenantDelivery.finish` and
+    `_deliver` were test-only code and are deleted; the production path is `store_tick`'s end of a batch): the
+    branch's tip in the private repository (none: `nothing to deliver`), pushed (`GitRepository.push`, the branch
+    only), then the batch's one PR found by its branch or a commit past the base (`store_tick.find_pr`: `open`,
+    `merged` or `closed` as the forge lists it, never opened again), else opened (`store_delivery.open_pr_on`:
+    `opened`). Composes production verbs only; the store's record of the batch is not involved (its cases are the
+    tick's)."""
+    from defender.learning.author.version_control.model import Delivered, DeliveryStatus
+    from defender.learning.author.version_control.store_delivery import open_pr_on
+    from defender.learning.core.store_tick import find_pr
+
+    repository = d.repository
+    tip = repository.branch_tip(batch.branch)
+    if tip is None:
+        return Delivered(DeliveryStatus.NOTHING)
+    repository.push(tip, batch.branch)
+    found = find_pr(repository.forge, batch.branch, frozenset(repository.commits_since(batch.base_commit, tip)))
+    if found is not None:
+        return Delivered(DeliveryStatus(found.status), found.url)
+    _number, url = open_pr_on(repository, branch=batch.branch, title=f"learning: tenant knowledge batch {batch.id}",
+                              body=f"Tenant agent knowledge batch `{batch.branch}`.")
+    return Delivered(DeliveryStatus.OPENED, url)
+
+
 def opened(result, number=7):
     """`result` of finish, deliver or revert is `opened` (a PR this call created), with the URL
     of PR `number` (any number when `None`); returns the URL."""
@@ -918,7 +943,8 @@ def plant_raw_commit(clone, ref, path, content, *, amend=False, base=None):
         clone, "for-each-ref", "--format=%(refname) %(objectname)", ref).splitlines())
     existing = listed.get(ref)
     tip = existing or git(clone, "rev-parse", base)
-    index = Path(clone) / ".git" / f"p3-plant-{os.getpid()}.index"
+    # The repository's own git dir (a bare one, as a delivery's private repository is since #1618, or a checkout's `.git`).
+    index = (Path(clone) / git(clone, "rev-parse", "--git-dir")).resolve() / f"p3-plant-{os.getpid()}.index"
     env = {"GIT_INDEX_FILE": str(index)}
     git(clone, "read-tree", tip, env=env)
     blob = git_bytes(clone, "hash-object", "-w", "--stdin", data=content).decode().strip()
@@ -1320,7 +1346,7 @@ _FRESH_SCRIPT = """
 import json, sys
 from pathlib import Path
 from defender.tests.support.tenancy import _tenants1106 as tenants
-from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, LANES, ForgeHTTP, target, fixture_identity
+from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, LANES, ForgeHTTP, deliver, target, fixture_identity
 root, tenant_id, remote, batch_id, origin = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 mod = target()
 tenant = tenants.accept(root, tenant_id)
@@ -1332,7 +1358,7 @@ try:
     (batch.draft_root / "agent/lessons" / (batch_id + ".md")).write_bytes(b"a lesson\\n")
     out["commit"] = batch.commit(batch.change_set(), "claim")
     out["branch"] = batch.branch
-    result = d.finish(batch)
+    result = deliver(d, batch)
     status = result.status
     out["status"] = status if isinstance(status, str) else repr(status)
     out["url"] = getattr(result, "url", None)
@@ -1484,16 +1510,19 @@ def bounded(fn, *, seconds=30.0, fifos=()):
 
 @pytest.fixture
 def rewritten(http_repo, tmp_path):
-    """The clone's `url.<other>.insteadOf` sends origin's git traffic to another smart-HTTP
-    server (another port), so the one helper, scoped to the parsed forge address, has no
-    answer and git reaches its prompt path. Yields that other server."""
+    """A `url.<other>.insteadOf` sends origin's git traffic to another smart-HTTP server (another port), so the one
+    helper, scoped to the parsed forge address, has no answer and git reaches its prompt path. Yields that other
+    server. #1618 K8: there is no host clone to configure, and a delivery's private repository is made at its open,
+    after this fixture: the rewrite is the isolated per-user configuration's (`git_config_home`), which every git the
+    product runs could see."""
     tenant, remote, _credentials, server = http_repo
     other_root = tmp_path / "other-served"
     (other_root / "tenants").mkdir(parents=True)
     git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, remote, other_root / "tenants" / "blue.git")
     other = GitHTTP(other_root)
     try:
-        git(tenant.knowledge, "config", f"url.{other.url}/.insteadOf", f"{server.url}/")
+        git(tmp_path, "config", "--file", str(git_config_home(tmp_path).global_config),
+            f"url.{other.url}/.insteadOf", f"{server.url}/")
         yield other
     finally:
         other.close()

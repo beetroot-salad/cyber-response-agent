@@ -11,6 +11,7 @@ import pytest
 
 
 from ._support import (
+    deliver,
     DEFENDER,
     FORK,
     LANES,
@@ -56,13 +57,13 @@ def test_finish_pushes_the_commit_maker_branch_and_opens_its_pr_without_product_
     _write(batch.draft_root / "agent/lessons/new.md", "review me\n")
     sha = batch.commit(batch.change_set(), "learning")
     for rogue in ("refs/heads/lessons/rogue", "refs/heads/rogue", "refs/tags/rogue"):
-        plant_raw_commit(tenant.knowledge, rogue, "agent/lessons/rogue.md", b"never sent\n",
-                         base=batch.export.commit)
-    assert opened(d.finish(batch)) == "http://forge.invalid:3000/tenants/blue/pulls/7"
+        plant_raw_commit(d.repository.path, rogue, "agent/lessons/rogue.md", b"never sent\n",
+                         base=batch.base_commit)
+    assert opened(deliver(d, batch)) == "http://forge.invalid:3000/tenants/blue/pulls/7"
     assert git(remote, "rev-parse", f"refs/heads/{batch.branch}") == sha
     assert [line.split()[0] for line in remote_refs(remote)] == \
         sorted([f"refs/heads/{batch.branch}", "refs/heads/main"]), "finish sent more than its branch"
-    assert git(remote, "rev-parse", "main") == batch.export.commit
+    assert git(remote, "rev-parse", "main") == batch.base_commit
     assert [(c["base"], c["head"]) for c in http.creates] == [("main", batch.branch)]
     api = "/api/v1/repos/tenants/blue"
     assert all(r.url.path == api or r.url.path.startswith(api + "/") for r in http.requests)
@@ -79,11 +80,11 @@ def test_finish_refuses_a_branch_holding_a_commit_the_commit_maker_did_not_make(
         _write(batch.draft_root / "agent/lessons/made.md", "made by the commit-maker\n")
         batch.commit(batch.change_set(), "commit-maker claim")
     path = "settings/rogue.yaml" if how == "forbidden-path" else "agent/lessons/raw.md"
-    plant_raw_commit(repo[0].knowledge, f"refs/heads/{batch.branch}", path,
+    plant_raw_commit(d.repository.path, f"refs/heads/{batch.branch}", path,
                      b"raw git, not the commit-maker\n", amend=how == "amend",
-                     base=batch.export.commit)
+                     base=batch.base_commit)
     with pytest.raises(target().DeliveryRefused):
-        d.finish(batch)
+        deliver(d, batch)
     assert _branches(repo[1]) == ["refs/heads/main"]
     assert not http.creates
 
@@ -97,14 +98,14 @@ def test_a_foreign_commit_beneath_a_later_commit_maker_commit_is_refused(repo):
     _write(lane / "first.md", "first claim\n")
     batch.commit(batch.change_set(), "claim one")
     batch.reset()
-    planted = plant_raw_commit(repo[0].knowledge, f"refs/heads/{batch.branch}",
+    planted = plant_raw_commit(d.repository.path, f"refs/heads/{batch.branch}",
                                "agent/lessons/raw.md", b"raw git, not the commit-maker\n",
-                               base=batch.export.commit)
+                               base=batch.base_commit)
     _write(lane / "second.md", "second claim\n")
 
     def claim_two_then_finish():
         batch.commit(batch.change_set(), "claim two")
-        return d.finish(batch)
+        return deliver(d, batch)
     with pytest.raises(target().DeliveryRefused):
         claim_two_then_finish()
     assert _branches(repo[1]) == ["refs/heads/main"]
@@ -125,19 +126,19 @@ def test_a_second_finish_after_a_failed_pr_request_sends_only_commit_maker_commi
     sha = batch.commit(batch.change_set(), "retained")
     http.fail_create = True
     with pytest.raises(target().DeliveryRefused, match="503|forge|PR|pull"):
-        d.finish(batch)
+        deliver(d, batch)
     assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
     http.fail_create = False
     posts = len(http.creates)
     if planted is not None:
-        plant_raw_commit(repo[0].knowledge, f"refs/heads/{batch.branch}", "agent/lessons/raw.md",
+        plant_raw_commit(d.repository.path, f"refs/heads/{batch.branch}", "agent/lessons/raw.md",
                          b"raw git, not the commit-maker\n", amend=planted == "amended")
     if planted is None:
-        opened(d.finish(batch))
+        opened(deliver(d, batch))
         assert len(http.creates) == posts + 1
     else:
         with pytest.raises(target().DeliveryRefused):
-            d.finish(batch)
+            deliver(d, batch)
         assert len(http.creates) == posts
     assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
 
@@ -170,7 +171,7 @@ def test_a_forge_transport_fault_is_a_refusal_and_a_second_finish_opens_the_pr(r
     _lay_pr(repo, http, pr_row(5, batch.branch, repo=FORK, sha=sha))
     http.fault = fault
     with pytest.raises(target().DeliveryRefused):
-        d.finish(batch)
+        deliver(d, batch)
     assert any(matches(r) for r in http.requests), "the faulted request was never made"
     if where == "pr-lookup":
         assert _branches(repo[1]) == ["refs/heads/main"], "finish pushed before its lookup"
@@ -178,7 +179,7 @@ def test_a_forge_transport_fault_is_a_refusal_and_a_second_finish_opens_the_pr(r
     else:
         assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
     http.fault = None
-    opened(d.finish(batch))
+    opened(deliver(d, batch))
     assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
     assert [row["number"] for row in forge_pulls(repo[1]) if row["head"].get("repo_id") == 11] == [7]
 
@@ -190,11 +191,11 @@ def test_finish_answers_only_with_the_pr_for_its_own_head(repo, other):
     batch = d.start_batch("forked", lanes=LANES)
     _write(batch.draft_root / "agent/lessons/new.md", "ours\n")
     sha = batch.commit(batch.change_set(), "ours")
-    _lay_pr(repo, http, _NOT_OUR_PR[other](batch.branch, sha, batch.export.commit))
-    url = opened(d.finish(batch))
+    _lay_pr(repo, http, _NOT_OUR_PR[other](batch.branch, sha, batch.base_commit))
+    url = opened(deliver(d, batch))
     assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
     assert [c["head"] for c in http.creates] == [batch.branch]
-    still_open(d.finish(batch), url)
+    still_open(deliver(d, batch), url)
     assert len(http.creates) == 1
 
 
@@ -210,7 +211,7 @@ def test_the_batchs_pr_is_known_by_its_head_commit_and_repository_id(repo, row):
         batch.reset()
     make, status = _OUR_PR[row]
     _lay_pr(repo, http, make(batch.branch, shas))
-    for result in (d.finish(batch), d.finish(batch)):
+    for result in (deliver(d, batch), deliver(d, batch)):
         assert result.status == status, result
         if status == "open":
             assert result.url.endswith("/pulls/5"), result.url
@@ -224,9 +225,9 @@ def test_finishing_twice_answers_the_one_open_pr(repo):
     batch = d.start_batch("twice", lanes=LANES)
     _write(batch.draft_root / "agent/lessons/new.md", "finished twice\n")
     batch.commit(batch.change_set(), "claim")
-    url = opened(d.finish(batch))
+    url = opened(deliver(d, batch))
     refs = remote_refs(repo[1])
-    still_open(d.finish(batch), url)
+    still_open(deliver(d, batch), url)
     assert len(http.creates) == 1
     assert remote_refs(repo[1]) == refs
 
@@ -240,10 +241,10 @@ def test_a_pr_created_but_unanswered_is_found_by_the_next_finish_not_made_again(
     _write(batch.draft_root / "agent/lessons/new.md", "answered nowhere\n")
     batch.commit(batch.change_set(), "claim")
     with pytest.raises(target().DeliveryRefused):
-        d.finish(batch)
+        deliver(d, batch)
     [row] = [r for r in forge_pulls(repo[1]) if r["state"] == "open"]
     refs, posts = remote_refs(repo[1]), len(http.creates)
-    still_open(d.finish(batch), row["html_url"])
+    still_open(deliver(d, batch), row["html_url"])
     assert len(http.creates) == posts
     assert remote_refs(repo[1]) == refs
 
@@ -252,7 +253,7 @@ def test_a_batch_with_no_commit_has_nothing_to_deliver(repo):
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("idle", lanes=LANES)
-    assert d.finish(batch).status == "nothing to deliver"
+    assert deliver(d, batch).status == "nothing to deliver"
     assert _branches(repo[1]) == ["refs/heads/main"]
     assert not http.creates
 
@@ -265,11 +266,11 @@ def test_a_merged_batch_answers_merged_and_is_never_delivered_again(repo, tmp_pa
     batch = d.start_batch("merged", lanes=LANES)
     _write(batch.draft_root / "agent/lessons/new.md", "merged by a human\n")
     batch.commit(batch.change_set(), "claim")
-    opened(d.finish(batch))
+    opened(deliver(d, batch))
     merge_on_remote(repo, tmp_path, batch.branch, style, delete_branch=delete_branch)
     refs = remote_refs(repo[1])
-    assert d.finish(batch).status == "merged"
-    assert d.finish(batch).status == "merged"
+    assert deliver(d, batch).status == "merged"
+    assert deliver(d, batch).status == "merged"
     # retired here: the same answer from a later process by the on-disk record (the tick over the store's record
     # reconciles a merged PR and ends the batch, design D7: test_1278_feedback.py::test_reconcile_a_merge_publishes_the_cited_and_returns_the_never_cited_to_waiting).
     assert len(http.creates) == 1
@@ -283,11 +284,11 @@ def test_a_closed_batch_answers_closed_and_is_never_delivered_again(repo, delete
     batch = d.start_batch("closed", lanes=LANES)
     _write(batch.draft_root / "agent/lessons/new.md", "rejected by a human\n")
     batch.commit(batch.change_set(), "claim")
-    opened(d.finish(batch))
+    opened(deliver(d, batch))
     set_pull_state(repo[1], batch.branch, merged=False, delete_branch=delete_branch)
     refs = remote_refs(repo[1])
-    assert d.finish(batch).status == "closed"
-    assert d.finish(batch).status == "closed"
+    assert deliver(d, batch).status == "closed"
+    assert deliver(d, batch).status == "closed"
     # retired here: the same answer from a later process by the on-disk record (a closed PR is a rejection the store
     # keeps, design D7: test_1278_revert.py::test_reverts_a_revert_pr_closed_unmerged_ends_its_batch_and_refuses_the_next_revert_of_that_lesson).
     assert len(http.creates) == 1
@@ -297,18 +298,18 @@ def test_a_closed_batch_answers_closed_and_is_never_delivered_again(repo, delete
 def test_a_reused_batch_id_is_not_mistaken_for_its_old_pr(repo, tmp_path):
     http = ForgeHTTP()
     d = delivery(repo, http)
-    clone = repo[0].knowledge
+    clone = d.repository.path  # #1618 K8: the delivery's private repository (no host clone)
     old = d.start_batch("reused", lanes=LANES)
     _write(old.draft_root / "agent/lessons/old.md", "the first use of the id\n")
     old.commit(old.change_set(), "claim")
-    old_url = opened(d.finish(old))
+    old_url = opened(deliver(d, old))
     merge_on_remote(repo, tmp_path, old.branch)
     old.discard()
     git(clone, "update-ref", "-d", f"refs/heads/{old.branch}")
     new = d.start_batch("reused", lanes=LANES)
     _write(new.draft_root / "agent/lessons/new.md", "the second use of the id\n")
     new.commit(new.change_set(), "claim")
-    result, error, hung = bounded(lambda: d.finish(new))
+    result, error, hung = bounded(lambda: deliver(d, new))
     assert not hung
     if not isinstance(error, target().DeliveryRefused):
         assert error is None, error
@@ -331,11 +332,10 @@ def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo)
         return call()
     sys.addaudithook(audit)
     try:
-        git(repo[0].knowledge, "rev-parse", "HEAD")
+        git(repo[1], "rev-parse", "HEAD")  # the control's repository: any (#1618 K8: no host clone)
         assert [(p, sub) for p, sub, _ in events] == [("control", "rev-parse")], events
         events.clear()
         d = under("open", lambda: delivery(repo, http))
-        under("publish", d.publish)
         batch = under("start_batch", lambda: d.start_batch("census", lanes=LANES))
         under("box_request", batch.box_request)
         _write(batch.draft_root / "agent/lessons/census.md", "one claim\n")
@@ -344,14 +344,14 @@ def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo)
         under("reset", batch.reset)
         http.fail_create = True
         with pytest.raises(target().DeliveryRefused):
-            under("finish", lambda: d.finish(batch))
+            under("finish", lambda: deliver(d, batch))
         http.fail_create = False
-        under("finish-again", lambda: d.finish(batch))
+        under("finish-again", lambda: deliver(d, batch))
     finally:
         active[0] = False
     assert _census(events, _MAKES_COMMITS) == {"commit"}, events
     sent = _census(events, _SENDS_COMMITS)
     assert {"finish"} <= sent <= {"finish", "finish-again"}, events
     assert not [e for e in events if _worktree_made(e[1], e[2])], "a git worktree was made"
-    assert _checkouts(events) <= {"publish", "start_batch"}, events
+    assert _checkouts(events) <= {"start_batch"}, events  # #1618: flow-1 `publish` is gone
     # the revert's census is in test_revert.py (a revert is `revert_lesson` over the store, #1278 Reverts)
