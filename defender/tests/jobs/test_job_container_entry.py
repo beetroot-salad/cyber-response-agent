@@ -230,7 +230,7 @@ def test_a10_the_run_page_stored_is_the_bytes_the_job_pushed_not_a_file_in_its_f
 
     def job(c: Any) -> int:
         folder = host_path(c.mounts, str(H.job_root(scene) / scene.tenant)) / "runs" / planted.owner
-        shutil.copytree(golden, folder)
+        shutil.copytree(golden, folder, dirs_exist_ok=True)  # the helper made the run folder already (#1170 A6)
         (folder / "runtime.html").write_bytes(left)  # never read back
         H.send(c, "outcome", record=H.inv_outcome())
         H.send(c, "page", record=sent_page())
