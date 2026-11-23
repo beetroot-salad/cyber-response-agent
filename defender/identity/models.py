@@ -104,6 +104,9 @@ class User(Base, kw_only=True):
     created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     updated_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     activated_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
+    #: When the person last signed out of the product (#1592), the database's time; never cleared. Set only by the
+    #: repository's `sign_out`; a change records the person's (U, none) people request.
+    signed_out_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
 
     @classmethod
     def new(cls, email: str, *, created_at: _dt.datetime, status: UserStatus = "invited",

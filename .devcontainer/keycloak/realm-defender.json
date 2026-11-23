@@ -94,6 +94,27 @@
       "serviceAccountsEnabled": true,
       "redirectUris": [],
       "webOrigins": []
+    },
+    {
+      "clientId": "forgejo",
+      "name": "Forgejo (tenant people's sign-in, #1592)",
+      "description": "Forgejo's `product` login source. Bound to `forgejo browser`, a browser flow with no Cookie step: a Keycloak session never signs a person in to Forgejo without the password (OD-4). The dev secret is read by .devcontainer/forgejo/setup.sh.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dev-only-change-me",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://forge.localhost:8000/user/oauth2/product/callback"
+      ],
+      "webOrigins": [],
+      "authenticationFlowBindingOverrides": {
+        "browser": "5b1c9a2e-1592-4f3d-8c6a-0f0e1d2c3b4a"
+      }
     }
   ],
   "users": [
@@ -665,6 +686,82 @@
           "userSetupAllowed": false
         }
       ]
+    },
+    {
+      "id": "5b1c9a2e-1592-4f3d-8c6a-0f0e1d2c3b4a",
+      "alias": "forgejo browser",
+      "description": "Forgejo's sign-in (#1592 OD-4): the password every time, then the second factor a person has set up. No Cookie step, so an existing Keycloak session is not enough. The `forgejo` client's override names this flow by its id.",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "auth-username-password-form",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 20,
+          "autheticatorFlow": true,
+          "flowAlias": "forgejo browser - Conditional 2FA",
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "forgejo browser - Conditional 2FA",
+      "description": "As `Browser - Conditional 2FA`, for the `forgejo browser` flow.",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "conditional-user-configured",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticatorConfig": "forgejo-conditional-credential",
+          "authenticator": "conditional-credential",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "auth-otp-form",
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 30,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "webauthn-authenticator",
+          "authenticatorFlow": false,
+          "requirement": "DISABLED",
+          "priority": 40,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "auth-recovery-authn-code-form",
+          "authenticatorFlow": false,
+          "requirement": "DISABLED",
+          "priority": 50,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false
+        }
+      ]
     }
   ],
   "authenticatorConfig": [
@@ -704,6 +801,12 @@
       "alias": "review profile config",
       "config": {
         "update.profile.on.first.login": "missing"
+      }
+    },
+    {
+      "alias": "forgejo-conditional-credential",
+      "config": {
+        "credentials": "webauthn-passwordless"
       }
     }
   ],

@@ -1,9 +1,88 @@
 # The ingress (#1161 B9): the built frontend for every path outside /api, and the API for /api and /api/* in any
-# letter case. Started only by `python -m defender.api_server.ingress`, which checks the four inputs read here.
+# letter case. Started only by `python -m defender.api_server.ingress`, which checks the six inputs read here.
+#
+# #1592 (OD-1, OD-3, PP-3): on the Forgejo domain alone, the Forgejo site. It forwards only the allowlist below and
+# answers 404 to everything else. Forgejo routes on the raw (still percent-encoded) path, so the list is matched against
+# the raw request target, case-sensitively, and a target with a dot-segment, an encoded slash or a doubled slash is
+# refused before any matching. A path listed without a method allows GET only.
 {
 	admin off
 	# Plain HTTP only: TLS, when there is any, ends in front of the ingress (see the launcher's docstring).
 	auto_https off
+}
+
+# Forgejo on the private network; the original Host and the raw target are passed through.
+(to_forgejo) {
+	reverse_proxy {$DEFENDER_INGRESS_FORGE_UPSTREAM}
+}
+
+http://{$DEFENDER_FORGE_DOMAIN}:{$DEFENDER_INGRESS_LISTEN_PORT} {
+	bind {$DEFENDER_INGRESS_LISTEN_HOST}
+
+	# Refused before matching: in the path (never the query), a dot-segment in any spelling, an encoded slash, or two
+	# slashes in a row.
+	@refused vars_regexp {http.request.uri} `^[^?]*(?://|(?i:%2f)|/(?:\.|(?i:%2e)){1,2}(?:/|\?|$))`
+	handle @refused {
+		respond 404
+	}
+
+	# The sign-in start: forwarded without the Cookie header, so a signed-in session cannot link another account to
+	# itself (P25, P26). The one matcher both allows the path and drops the header.
+	@signin_start {
+		method GET
+		vars_regexp {http.request.uri} `^/user/oauth2/product(?:\?.*)?$`
+	}
+	handle @signin_start {
+		reverse_proxy {$DEFENDER_INGRESS_FORGE_UPSTREAM} {
+			header_up -Cookie
+		}
+	}
+
+	# Sign-in, sign-out, search and assets.
+	@site_get {
+		method GET
+		vars_regexp {http.request.uri} `^(?:/|/user/login|/user/oauth2/product/callback|/repo/search|/assets/[^?]+|/favicon\.ico|/avatars/[0-9a-f]+)(?:\?.*)?$`
+	}
+	handle @site_get {
+		import to_forgejo
+	}
+	@site_post {
+		method POST
+		vars_regexp {http.request.uri} `^(?:/user/logout|/-/fetch-redirect)(?:\?.*)?$`
+	}
+	handle @site_post {
+		import to_forgejo
+	}
+
+	# The repository `{R}`, `/t-<uuid>/knowledge`: reading it, its pull requests and its issues.
+	@repo_get {
+		method GET
+		vars_regexp {http.request.uri} `^/t-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/knowledge(?:|/(?:src|raw|blame|commits|media)/[^?]+|/commit/[0-9a-f]+|/blob_excerpt/[0-9a-f]+|/branches/list|/pulls|/pulls/[0-9]+|/pulls/[0-9]+/(?:commits|files|files/reviews/new_comment)|/issues|/issues/suggestions|/issues/[0-9]+|/issues/[0-9]+/content-history/overview)(?:\?.*)?$`
+	}
+	handle @repo_get {
+		import to_forgejo
+	}
+	# Reviewing and merging, commenting, previews.
+	@repo_post {
+		method POST
+		vars_regexp {http.request.uri} `^/t-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/knowledge(?:/pulls/[0-9]+/files/reviews/(?:comments|submit)|/pulls/[0-9]+/merge|/issues/[0-9]+/comments|/_preview/[^?]+|/markup)(?:\?.*)?$`
+	}
+	handle @repo_post {
+		import to_forgejo
+	}
+	# The web editor and the compare page, which open pull requests.
+	@repo_edit {
+		method GET POST
+		vars_regexp {http.request.uri} `^/t-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/knowledge/(?:_edit|_new|_delete|compare)/[^?]+(?:\?.*)?$`
+	}
+	handle @repo_edit {
+		import to_forgejo
+	}
+
+	# Everything else: off the list.
+	handle {
+		respond 404
+	}
 }
 
 http://:{$DEFENDER_INGRESS_LISTEN_PORT} {

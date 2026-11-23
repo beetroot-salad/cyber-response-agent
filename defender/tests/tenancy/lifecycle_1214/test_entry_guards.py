@@ -20,7 +20,7 @@ from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.tenancy import _host1214 as H  # noqa: E402
 from defender.tests.support.tenancy._active1214 import active_directory  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._atk2_fakes import DockerStub, GitStub, host_answering_accessor  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import org_of  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import REPO_ROOT, LifecycleWorld, lifecycle_config  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214.test_host_entry import (  # noqa: E402
     TENANT,
@@ -159,7 +159,7 @@ def test_the_integration_runner_runs_only_the_fixed_command_as_the_git_user(tmp_
 
     stub = DockerStub(tmp_path / "docker-stub")
     monkeypatch.setenv("PATH", stub.path())
-    args = ["--username", "bot-x", "--scope", "write:repository", "--repo", f"{ORG}/t"]
+    args = ["--username", "bot-x", "--scope", "write:repository", "--repo", f"{org_of('t')}/knowledge"]
     done = integration_runner("forge-c")(args)
     assert done.returncode == 0, done.stderr
     assert stub.calls() == [["exec", "-u", "git", "forge-c", "forgejo", "admin", "user",
@@ -308,3 +308,15 @@ def test_a_public_forge_address_that_is_not_a_plain_http_url_is_refused(tmp_path
     _refused(tmp_path, data_root, forge_public_url=public)
     assert lifecycle_config(tmp_path, data_root, forge_public_url="https://forge.example/git").forge_page_base == \
         "https://forge.example/git"
+
+
+def test_a_lifecycle_without_a_public_forge_address_is_refused_naming_it(tmp_path, monkeypatch):
+    """#1592 finalize (#1623 review): `DEFENDER_LIFECYCLE_FORGE_PUBLIC_URL` is required. Unset, the repository page
+    would be recorded on `forge_url`, which may be a service name no browser reaches, or the forge's private address."""
+    from defender._git import REPO_ROOT
+    from defender.lifecycle import ConfigRefused, LifecycleConfig
+    from defender.lifecycle import config as settings
+
+    monkeypatch.delenv(settings.FORGE_PUBLIC_URL_ENV, raising=False)
+    with pytest.raises(ConfigRefused, match=settings.FORGE_PUBLIC_URL_ENV):
+        LifecycleConfig.from_env(template_dir=REPO_ROOT)

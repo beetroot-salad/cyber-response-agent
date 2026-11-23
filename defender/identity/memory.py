@@ -109,7 +109,9 @@ def _with(row: ProgramCredential, **fields: Any) -> ProgramCredential:
 class InMemoryIdentityRepository:
     """For one event loop: an operation never yields partway, so each applies whole. Tenants are
     read from the in-memory tenant repository given as `tenants` (its store, shared, never copied),
-    or from one of its own; this repository writes none."""
+    or from one of its own; this repository writes none. The people requests (#1592) live in that store too: its
+    membership and user write helpers record them, mirroring the database's triggers, so every writer records,
+    the seeders included."""
 
     def __init__(self, tenants: InMemoryTenantRepository | None = None) -> None:
         self._tenants = tenants if tenants is not None else InMemoryTenantRepository()
@@ -177,7 +179,10 @@ class InMemoryIdentityRepository:
         return [_copy(u) for u in self._users.values() if u.is_platform_admin]
 
     def _update_user(self, user_id: UserId, **changes: Any) -> None:
-        self._users[user_id] = dataclasses.replace(self._users[user_id], **changes)
+        before = self._users[user_id]
+        self._users[user_id] = dataclasses.replace(before, **changes)
+        if self._users[user_id].signed_out_at != before.signed_out_at:  # the users trigger
+            self._tenants.record_people_request(user_id, None)
 
     async def record_signin_account(self, user_id: UserId, account_id: str) -> bool:
         user = self._users.get(user_id)
@@ -223,6 +228,7 @@ class InMemoryIdentityRepository:
     def _insert_membership(self, **fields: object) -> Membership:
         row = Membership(**fields)  # type: ignore[arg-type]
         self._memberships[row.id] = row
+        self._tenants.record_people_request(row.user_id, row.tenant_id)  # the memberships trigger, on insert
         return row
 
     async def ensure_invitation(
@@ -241,7 +247,10 @@ class InMemoryIdentityRepository:
             created_at=now, expires_at=expires_at, accepted_at=None, ended_at=None, ended_by=None))
 
     def _update_membership(self, membership_id: MembershipId, **changes: Any) -> None:
-        self._memberships[membership_id] = dataclasses.replace(self._memberships[membership_id], **changes)
+        before = self._memberships[membership_id]
+        after = self._memberships[membership_id] = dataclasses.replace(before, **changes)
+        if after.status != before.status:  # the memberships trigger, on a changed status
+            self._tenants.record_people_request(after.user_id, after.tenant_id)
 
     async def accept_invitation(self, membership_id: MembershipId, *, now: _dt.datetime) -> bool:
         row = self._memberships.get(membership_id)
@@ -285,6 +294,16 @@ class InMemoryIdentityRepository:
     async def active_membership(self, user_id: UserId, tenant_id: TenantId) -> Membership | None:
         row = self._live_row(user_id, tenant_id)
         return _copy(row) if row is not None and row.status == "active" else None
+
+    def _wanted(self) -> list[Membership]:
+        """The one wanted rule (#1592): an `active` membership of an `active` tenant."""
+        return [m for m in self._memberships.values() if m.status == "active" and self._active(m.tenant_id)]
+
+    async def wanted_tenants(self, user_id: UserId) -> set[TenantId]:
+        return {m.tenant_id for m in self._wanted() if m.user_id == user_id}
+
+    async def wanted_users(self, tenant_id: TenantId) -> set[UserId]:
+        return {m.user_id for m in self._wanted() if m.tenant_id == tenant_id}
 
     # --- programs and their credentials ---------------------------------------------------------
     def _in_standing(self, program_id: ProgramId) -> bool:
@@ -566,8 +585,20 @@ class InMemoryIdentityRepository:
     async def session_by_value(self, value: str) -> Session | None:
         return _copy(self._sessions.get(secret_hash(value)))
 
-    async def delete_session(self, value: str) -> bool:
-        return self._sessions.pop(secret_hash(value), None) is not None
+    async def sign_out(self, user_id: UserId, value: str) -> None:
+        key = secret_hash(value)
+        row = self._sessions.get(key)
+        if row is not None and row.user_id == user_id:
+            del self._sessions[key]
+        if user_id in self._users:
+            self._update_user(user_id, signed_out_at=self._stamp(self._users[user_id].signed_out_at))
+
+    @staticmethod
+    def _stamp(previous: _dt.datetime | None) -> _dt.datetime:
+        """The process clock, standing in for the database's `now()`: strictly after the previous stamp, as two
+        transactions' `now()` are, so every sign-out is a changed value and records."""
+        now = _dt.datetime.now(_dt.UTC)
+        return now if previous is None or now > previous else previous + _dt.timedelta(microseconds=1)
 
     async def touch_session(self, value: str, *, now: _dt.datetime) -> bool:
         key = secret_hash(value)

@@ -121,3 +121,34 @@ def test_a_well_formed_id_that_names_nothing_keeps_its_404(world):
     assert member.get(f"{API}/tenants/{UNKNOWN}/alerts").status_code == 404
     assert member.get(f"{API}/tenants/{T1}/alerts/{GOOD}").status_code == 404
     assert admin.get(f"{API}/admin/tenants/{TenantId(UNKNOWN)}").status_code == 404
+
+
+def test_the_people_request_family_is_a_record_id_in_both_lists_of_formats() -> None:
+    """S1-18 (#1592 r15.1, #1382): `PeopleRequestId` is a `UuidId` family of domain `people request`, served by the
+    door (`_HOMES`) and named in its type-checking import list, and refuses what is not canonical uuid text."""
+    import inspect
+
+    from defender.records import formats
+    from defender.records._record_ids import IdRefused, UuidId
+
+    family = formats.PeopleRequestId
+    assert issubclass(family, UuidId)
+    assert family.domain == "people request"
+    assert "PeopleRequestId" in formats._HOMES  # noqa: SLF001 — the door's own table
+    assert "PeopleRequestId as PeopleRequestId" in inspect.getsource(formats), "missing from the type-checking list"
+    assert family(GOOD) == GOOD
+    for bad in MALFORMED.values():
+        with pytest.raises(IdRefused):
+            family(bad)
+
+
+@pytest.mark.postgres
+def test_the_people_request_family_parses_the_ids_the_trigger_generates(migrated_database) -> None:
+    """S1-18 (r15.1): a request id generated in SQL is canonical lowercase uuid text, round-tripping through the family."""
+    from defender.records.formats import PeopleRequestId
+    from defender.tests.support.shared._postgres1339 import execute
+
+    tenant = fixture_uuid("tenant:1592-id-family")
+    execute(migrated_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES (%s, now(), 'active')", (tenant,))
+    [(raw,)] = execute(migrated_database, "SELECT id::text FROM tenancy.forge_people_requests")
+    assert PeopleRequestId(raw) == raw == PeopleRequestId.stored(raw)

@@ -20,6 +20,7 @@ pytestmark = [
 ]
 
 from defender.tests.support.api._mount1161 import API  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import org_of  # noqa: E402
 from defender.tenancy import InMemoryTenantRepository  # noqa: E402
 from defender.tests.support.api._identity1306 import (  # noqa: E402
     ANN,
@@ -466,12 +467,17 @@ def jobs(tmp_path: Any, data_root: Any, monkeypatch: Any) -> Any:
         world.close()
 
 
-REPOS = "/api/v1/orgs/tenants/repos"
+def repos_of(tenant: str) -> str:
+    """The repository-create call of `repo`: it posts to T's own organisation `t-<T>`, so the path depends on the
+    tenant (#1592 r15.2, "Forgejo organisation and team": `repo` creates only the organisation and the repository;
+    the shared organisation `tenants` and `ORG` go). A tenant's id is minted by `create()`, so a fault or a gate on
+    this call is installed after it: `create()` only answers 202, and the job runs at `drive()`."""
+    return f"/api/v1/orgs/{org_of(tenant)}/repos"
 
 
 def _failed_create(jobs: Any) -> str:
-    jobs.forge.fail_next[("POST", REPOS)] = 500
     tenant = jobs.create()
+    jobs.forge.fail_next[("POST", repos_of(tenant))] = 500
     jobs.drive()
     return str(tenant)
 
@@ -540,7 +546,7 @@ def test_requests_return_while_a_step_is_running_and_the_late_commit_does_not_un
     def block() -> None:
         inside.set()
         assert release.wait(WAIT)
-    jobs.forge.during[("POST", REPOS)] = block
+    jobs.forge.during[("POST", repos_of(tenant))] = block
     service = jobs.new_service(jobs.tenants, identity=jobs.service)
     worker = threading.Thread(target=lambda: asyncio.run(service.work()), daemon=True)
     worker.start()

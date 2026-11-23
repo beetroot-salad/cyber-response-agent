@@ -493,8 +493,4 @@ From the checkout root, inspect which tenant runs had a lesson in context:
 python defender/cli/learning/trace_lesson.py --tenant <tenant-id> <lesson-name>
 ```
 
-Open a revert PR for a merged lesson (uses the selected tenant’s learning state and author lock):
-
-```bash
-python defender/cli/learning/revert_lesson.py --tenant <tenant-id> <lesson-name>
-```
+To revert a merged lesson, a member deletes its file in Forgejo's web editor, which opens a pull request they merge (#1592).

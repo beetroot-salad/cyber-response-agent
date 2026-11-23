@@ -14,7 +14,7 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
 from defender.tests.support.api._mount1161 import API  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._fakes import ORG, SIGN_POLICY, TOKEN_POLICY  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import SIGN_POLICY, TOKEN_POLICY, repo_of  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import as_bot, jwts, openbao_failing  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld, lifecycle_config  # noqa: E402
 
@@ -71,6 +71,8 @@ def test_the_sign_names_are_recorded_before_anything_is_made(world):
     tenant = world.create()
     world.drive()
     assert flaky.hit, "control: the injected failure happened"
+    wiring = world.call(world.tenants.forge_wiring, tenant)
+    assert wiring.repo == repo_of(tenant), "`names` records `t-<T>/knowledge` before anything is made (#1592 OD-5, S3-21)"
     [gen] = world.generations(tenant)
     assert (gen.sign_approle, gen.sign_entity) == (f"sign-{tenant}-{gen.salt}", f"tenant-{tenant}-{gen.salt}-sign")
     assert (gen.approle, gen.entity) == (f"delivery-{tenant}-{gen.salt}", f"tenant-{tenant}-{gen.salt}")
@@ -345,7 +347,7 @@ def test_a_rotation_gives_a_tenant_recorded_before_r8_its_sign_login_key_and_rul
     a missing record, and the new generation holds the sign login, the key and the merge whitelist (r8.3 heals all three)."""
     tenant = world.active_tenant()
     old = _as_recorded_before_r8(world, tenant)
-    full = f"{ORG}/{tenant}"
+    full = repo_of(tenant)
     world.forge.put_rule(full, rule_name="main", branch_name="main", enable_push=True, enable_push_whitelist=False,
                          enable_merge_whitelist=False)
     mark = len(world.openbao.calls)
@@ -359,7 +361,8 @@ def test_a_rotation_gives_a_tenant_recorded_before_r8_its_sign_login_key_and_rul
     assert bao.approle_policies[new.sign_approle] == [SIGN_POLICY] and bao.transit_keys[_key(tenant)]["type"] == "ed25519"
     assert new.sign_secret_file.is_file() and not old.host_secret_file.exists()
     rule = world.forge.rule(full)
-    assert (rule["enable_push"], rule["enable_merge_whitelist"], rule["merge_whitelist_teams"]) == (False, True, ["Owners"])
+    # Amends #1163 A23 (#1592 r15.2, "Forgejo organisation and team"): the whitelist is exactly team `members`.
+    assert (rule["enable_push"], rule["enable_merge_whitelist"], rule["merge_whitelist_teams"]) == (False, True, ["members"])
     assert [c.path for c in bao.calls[mark:] if "None" in c.path] == []
 
 
@@ -398,7 +401,7 @@ def _seed_pending_before_r8(world, kind: str, past: tuple[str, ...] = ()) -> tup
                 await world.service_actor.steps()[step](held)
     world.call(run, ("names", *past))
     if kind == "rotate" or "template" in past:  # r8.6 A23: main's pre-r8 rule, which a pre-r8 job past `template` left
-        world.forge.put_rule(f"{ORG}/{tenant}", rule_name="main", branch_name="main", enable_push=False,
+        world.forge.put_rule(repo_of(tenant), rule_name="main", branch_name="main", enable_push=False,
                              enable_push_whitelist=False, enable_merge_whitelist=False, enable_force_push=False)
     pending = _row(world, tenant, "pending")
     bao = world.openbao
@@ -484,10 +487,11 @@ def test_a_pending_generation_recorded_before_r8_completes_with_its_sign_login(w
     assert gen.sign_secret_file.read_text(encoding="utf-8") == bao.approles[gen.sign_approle][gen.sign_secret_accessor] + "\n"
     _delivery, sign = _pair(world, gen)
     assert _sign(world, sign, tenant) == 200
-    rule = world.forge.rule(f"{ORG}/{tenant}")
+    rule = world.forge.rule(repo_of(tenant))
     assert (rule["enable_push"], rule["enable_merge_whitelist"]) == (False, True), "the pre-r8 rule was healed before install"
-    assert "Owners" in rule["merge_whitelist_teams"] and not rule["merge_whitelist_usernames"]
-    view = as_bot(world, jwts(world, gen)[-1], f"repos/{ORG}/{tenant}/branches/main").json()
+    assert rule["merge_whitelist_teams"] == ["members"]  # Amends #1163 A23 (#1592 r15.2): exactly team `members`
+    assert not rule["merge_whitelist_usernames"]
+    view = as_bot(world, jwts(world, gen)[-1], f"repos/{repo_of(tenant)}/branches/main").json()
     assert (view["user_can_push"], view["user_can_merge"]) == (False, False)
 
 

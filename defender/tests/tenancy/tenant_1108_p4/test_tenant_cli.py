@@ -246,3 +246,27 @@ def test_1470_o11_the_scan_skips_historical_docs_and_reads_the_rest_of_docs():
     assert not [rel for rel in files if rel.startswith("docs/archive/")]
     assert any(rel.startswith("docs/") for rel in files)
 
+
+
+# --- #1592 F9 / S3-16: the operator's revert machinery is removed whole -------------------------------------------------
+
+def test_1592_f9_the_revert_machinery_is_gone():
+    """S3-16: `cli/learning/revert_lesson.py`, `store_delivery.revert_lesson`, `drains.revert_delivery` and `reverts_of`
+    are not in the product, and no shipped text still says `revert_lesson.py` stays."""
+    import importlib
+    import importlib.util
+
+    from defender._git import REPO_ROOT
+
+    assert not (REPO_ROOT / "defender" / "cli" / "learning" / "revert_lesson.py").exists()
+    assert importlib.util.find_spec("defender.cli.learning.revert_lesson") is None
+    store_delivery = importlib.import_module("defender.learning.author.version_control.store_delivery")
+    drains = importlib.import_module("defender.learning.core.drains")
+    assert not hasattr(store_delivery, "revert_lesson")
+    assert not hasattr(drains, "revert_delivery")
+    sources = [p for p in (REPO_ROOT / "defender").rglob("*.py")
+               if "tests" not in p.relative_to(REPO_ROOT / "defender").parts[:1] and ".venv" not in p.parts]
+    holders = sorted(str(p.relative_to(REPO_ROOT)) for p in sources if "reverts_of" in p.read_text(encoding="utf-8"))
+    assert holders == [], f"`reverts_of` is still named: {holders}"
+    notes = (REPO_ROOT / "defender" / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "revert_lesson.py` stays" not in notes

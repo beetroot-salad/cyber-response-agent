@@ -414,7 +414,7 @@ for name in filter(None, seeded):
     with twin._mutex:
         twin._tenants[name] = TenantRecord(id=name, created_at=datetime.datetime(2026, 10, 26, 9, tzinfo=datetime.timezone.utc),
                                            state="active")
-        twin._wiring[name] = ForgeWiring(tenant_id=name, repo="tenants/" + name,
+        twin._wiring[name] = ForgeWiring(tenant_id=name, repo=f"t-{name}/knowledge",
                                          origin="http://forge.test/tenants/" + name + ".git")
         twin._mappings[name] = AlertMappingRow.of(name, mapping)
     held = records.get(name)

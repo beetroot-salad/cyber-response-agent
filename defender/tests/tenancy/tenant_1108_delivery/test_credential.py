@@ -19,19 +19,17 @@ import pytest
 
 from ._identity import VaultHTTP, token as identity_token
 
-from ._revert_store import claimed_batch, reviewed, revert_with
+from ._revert_store import claimed_batch, reviewed
 from ._support import (
     LANES,
     TOKEN,
     ForgeHTTP,
     bounded,
     delivery,
-    forge_pulls,
     fresh_process_env,
     git,
     git_config_home,
     in_a_fresh_process_finishing,
-    merge_on_remote,
     opened,
     target,
 )
@@ -162,9 +160,9 @@ def test_git_ignores_changes_to_a_legacy_credential_file(http_repo, spies, chang
 
 
 @pytest.mark.postgres
-def test_a_second_finish_and_a_revert_never_store_erase_prompt_for_or_share_the_credential(
+def test_a_second_finish_never_store_erase_prompt_for_or_share_the_credential(
         http_repo, http_store, spies, tmp_path):
-    """The retried finish and the revert authenticate without helpers or prompts, leaving
+    """The retried finish authenticates without helpers or prompts, leaving
     the ignored legacy credential sentinel untouched."""
     tenant, remote, credentials, server = http_repo
     log = _armed(http_repo, spies)
@@ -181,10 +179,7 @@ def test_a_second_finish_and_a_revert_never_store_erase_prompt_for_or_share_the_
     again = d.finish(batch)
     opened(again)
     reviewed(http_store, held, again)
-    merge_on_remote(http_repo, tmp_path, batch.branch)
-    server.seen.clear()
-    assert opened(revert_with(d, http_store, "agent/lessons/routes.md", "routes"), None) == forge_pulls(remote)[-1]["html_url"]
-    assert server.authorized("git-receive-pack"), "the revert pushed with the helper's token"
+    assert server.authorized("git-receive-pack"), "the finish pushed with the helper's token"
     assert _state(credentials) == before
     assert sorted(p.name for p in credentials.parent.iterdir()) == ["git-credentials"]
     _silent(log)
@@ -214,7 +209,7 @@ def _holding(roots, secret: bytes, since: float):
 @pytest.mark.postgres
 def test_no_second_copy_of_the_credential_is_written_anywhere(http_repo, http_store, tmp_path):
     """A fresh JWT never appears in a disk file after publish, commit, refused finish,
-    retained delivery and revert."""
+    retained delivery."""
     tenant, _remote, credentials, server = http_repo
     token = identity_token(signature=uuid.uuid4().hex)
     server.token = token
@@ -233,8 +228,6 @@ def test_no_second_copy_of_the_credential_is_written_anywhere(http_repo, http_st
     again = d.finish(batch)
     opened(again)
     reviewed(http_store, held, again)
-    merge_on_remote(http_repo, tmp_path, batch.branch)
-    assert opened(revert_with(d, http_store, "agent/lessons/no-copy.md", "no-copy"), None) == forge_pulls(http_repo[1])[-1]["html_url"]
     assert server.authorized("git-receive-pack")
     new_in_tmp = [os.path.join(tmp, name) for name in sorted(set(os.listdir(tmp)) - existing)]
     copies = _holding([*new_in_tmp, location_path(tenant.tenant_root), git_config_home(tmp_path).home], token.encode(), started)
@@ -252,7 +245,7 @@ def _new_entries(folder, existing):
 @pytest.mark.postgres
 def test_no_file_holds_the_credential_while_network_git_waits_on_the_forge(http_repo, http_store, tmp_path):
     """A fresh JWT never appears on disk during authenticated fetch or push, including
-    publish, batch start, finish and revert."""
+    publish, batch start and finish."""
     tenant, _remote, credentials, server = http_repo
     token = identity_token(signature=uuid.uuid4().hex)
     server.token = token
@@ -279,12 +272,8 @@ def test_no_file_holds_the_credential_while_network_git_waits_on_the_forge(http_
     finished = d.finish(batch)
     opened(finished)
     reviewed(http_store, held, finished)
-    merge_on_remote(http_repo, tmp_path, batch.branch)
-    phase[0] = "revert"
-    server.rearm()
-    opened(revert_with(d, http_store, "agent/lessons/during.md", "during"), None)
     required = {("publish", "git-upload-pack"), ("start_batch", "git-upload-pack"),
-                ("finish", "git-receive-pack"), ("revert", "git-receive-pack")}
+                ("finish", "git-receive-pack")}
     assert required <= set(scans), sorted(required - set(scans))
     assert {moment: found for moment, found in scans.items() if found} == {}, \
         "the token sat in a file while git waited on the forge"
@@ -376,9 +365,6 @@ def test_the_credential_never_rides_in_a_process_argument_or_environment(http_re
         again = d.finish(batch)
         opened(again)
         reviewed(http_store, held, again)
-    merge_on_remote(http_repo, tmp_path, batch.branch)
-    with spawns:
-        assert opened(revert_with(d, http_store, "agent/lessons/argv.md", "argv"), None) == forge_pulls(http_repo[1])[-1]["html_url"]
     assert spawns.seen
     assert spawns.carrying(_secrets(TOKEN)) == []
 
@@ -527,8 +513,6 @@ def test_network_git_runs_no_hook_of_the_clones(repo, store, tmp_path):
     again = d.finish(batch)
     opened(again)
     reviewed(store, held, again)
-    merge_on_remote(repo, tmp_path, batch.branch)
-    revert_with(d, store, "agent/lessons/hooked.md", "hooked")
     assert git(remote, "rev-parse", f"refs/heads/{batch.branch}")
     seen = log.read_text(encoding="utf-8") if log.exists() else ""
     assert seen == "", f"a clone hook ran under network git: {seen}"

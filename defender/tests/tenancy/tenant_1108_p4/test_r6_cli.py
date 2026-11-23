@@ -3,10 +3,8 @@ reads the host secret file its tenant's live generation records (no flag, no def
 that show a tenant's knowledge read an export (the run's, or `current`), never the clone."""
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
-import pytest
 
 from defender.tests.support.learning.core._store1278 import (
     migrated_database,  # noqa: F401 — fixture the world needs
@@ -71,21 +69,6 @@ def _bind_missing_secret(t, tmp_path) -> Path:
     missing = _missing(tmp_path)
     bind_forge(t, generations=[{**generation_fields(t.tenant_id, tmp_path / "secrets"), "host_secret_file": missing}])
     return missing
-
-
-@pytest.mark.postgres
-def test_r6_revert_lesson_logs_in_from_the_secret_file_the_generation_records(
-        world, tmp_path, caplog):  # noqa: F811 — the imported fixture
-    """The revert reaches its login only past its store (#1278 Reverts: the revert claims a batch there), so the tenant
-    is the world's: active in the database the CLI's store reads."""
-    from defender.cli.learning import revert_lesson
-
-    t = world.t
-    missing = _bind_missing_secret(t, tmp_path)
-    with caplog.at_level(logging.CRITICAL):
-        rc = revert_lesson.main(["--tenant", t.tenant_id, "some-lesson"], directory=t.directory)
-    assert rc == 2
-    assert str(missing) in "\n".join(r.getMessage() for r in caplog.records), caplog.text
 
 
 def test_r6_the_publish_child_logs_in_from_the_secret_file_the_generation_records(p4_tenant, tmp_path,

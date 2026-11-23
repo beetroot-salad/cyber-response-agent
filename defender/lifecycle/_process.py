@@ -87,10 +87,20 @@ def integration_runner(container: str) -> Callable[[Sequence[str]], subprocess.C
     return run
 
 
+def forge_client(forge_url: str, admin_token: str, *, timeout: float = CALL_TIMEOUT) -> httpx.AsyncClient:
+    """A forge client with the admin token on every call."""
+    return internal_async_client(trust=tls_trust(), base_url=forge_url, timeout=timeout,
+                                 headers={"Authorization": f"token {admin_token}"})
+
+
 def forge_admin(config: LifecycleConfig) -> httpx.AsyncClient:
-    """The management service's forge client: the admin token on every call."""
-    return internal_async_client(trust=tls_trust(), base_url=config.forge_url, timeout=CALL_TIMEOUT,
-                                 headers={"Authorization": f"token {config.forge_admin_token}"})
+    """The management service's forge client."""
+    return forge_client(config.forge_url, config.forge_admin_token)
+
+
+def forge_people(config: LifecycleConfig) -> httpx.AsyncClient:
+    """The request worker's own forge client (#1592), each call bounded by `people_call_timeout`."""
+    return forge_client(config.forge_url, config.forge_admin_token, timeout=config.people_call_timeout)
 
 
 def forge_anonymous(config: LifecycleConfig) -> httpx.AsyncClient:

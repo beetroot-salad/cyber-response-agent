@@ -6,7 +6,8 @@ imports this module.
 Each operation is one transaction on a pooled async connection. Concurrency-sensitive writes are
 explicit statements (a tenant share lock, a program-row lock, `FOR UPDATE SKIP LOCKED` claims, conditional updates that
 report whether they applied); the rest are ORM queries. A returned model is a detached copy with
-every field loaded. The tables come from `defender.migrations`, never from this module."""
+every field loaded. The tables come from `defender.migrations`, never from this module. The people requests (#1592)
+are recorded by the database's triggers on the columns written here; nothing in this module writes them."""
 
 from __future__ import annotations
 
@@ -42,6 +43,11 @@ _LIVE = ("invited", "active")
 def _active_tenant(tenant_id: Any) -> Any:
     """`tenant_id` names an `active` tenant: a condition to put inside the statement that needs it."""
     return (TenantRecord.id == tenant_id) & (TenantRecord.state == "active")
+
+
+def _wanted() -> Any:
+    """The one wanted rule (#1592) as a condition on `Membership`: an `active` membership of an `active` tenant."""
+    return (Membership.status == "active") & exists().where(_active_tenant(Membership.tenant_id))
 
 
 def _in_standing() -> Any:
@@ -241,6 +247,12 @@ class PostgresIdentityRepository:
         return await self._one(select(Membership).where(
             Membership.user_id == user_id, Membership.tenant_id == tenant_id,
             Membership.status == "active"))
+
+    async def wanted_tenants(self, user_id: UserId) -> set[TenantId]:
+        return set(await self._all(select(Membership.tenant_id).where(Membership.user_id == user_id, _wanted())))
+
+    async def wanted_users(self, tenant_id: TenantId) -> set[UserId]:
+        return set(await self._all(select(Membership.user_id).where(Membership.tenant_id == tenant_id, _wanted())))
 
     # --- programs and their credentials -------------------------------------------------------
     @staticmethod
@@ -550,9 +562,11 @@ class PostgresIdentityRepository:
     async def session_by_value(self, value: str) -> Session | None:
         return await self._one(select(Session).where(Session.token_hash == secret_hash(value)))
 
-    async def delete_session(self, value: str) -> bool:
-        return await self._applied(
-            delete(Session).where(Session.token_hash == secret_hash(value)).returning(Session.token_hash))
+    async def sign_out(self, user_id: UserId, value: str) -> None:
+        async with self._tx() as s:
+            await s.execute(delete(Session).where(Session.token_hash == secret_hash(value), Session.user_id == user_id))
+            await s.execute(update(User).where(User.id == user_id).values(signed_out_at=func.now())
+                            .execution_options(synchronize_session=False))
 
     async def touch_session(self, value: str, *, now: _dt.datetime) -> bool:
         return await self._applied(
