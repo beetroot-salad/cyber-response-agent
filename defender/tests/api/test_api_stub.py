@@ -51,7 +51,6 @@ from defender.tenancy import InMemoryTenantRepository  # noqa: E402
 from defender.records._tenant_id import TenantId  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 from defender.tests.support.tenancy._mapping1345 import ALERT_MAPPING_ROUTE, alert_mapping_url  # noqa: E402
-from defender.tests.support.api._server1083 import FORGE_DOMAIN  # noqa: E402
 from defender.tests.support.api._programs1307 import NoProgramsRealm  # noqa: E402
 from defender.tests.support.tenancy._twin1496 import seed_tenant  # noqa: E402
 from defender.tests.support.identity._seed1496 import seed_membership, seed_user  # noqa: E402
@@ -336,7 +335,7 @@ def _identity() -> tuple[IdentityService, dict[str, str], InMemoryTenantReposito
 def _deps(ports: Any) -> tuple[ApiDeps, dict[str, str]]:
     identity, users, tenants = _identity()
     return ApiDeps(
-        identity=identity, tenants=tenants, frontend_origin=ORIGIN, forge_domain=FORGE_DOMAIN,  # #1592 r15.2: required, as `frontend_origin`
+        identity=identity, tenants=tenants, frontend_origin=ORIGIN,
         alerts=ports, investigations=ports, learning_jobs=ports, learning_work=ports, lessons=ports,
         systems=ports, writes=ports, secrets=ports, checker=ports, artifact_links=ports, offboarding=ports,
         alert_mapping=ports, audit=ports,  # FC-11 and the audit-only port (Am-5: every construction site)

@@ -72,7 +72,6 @@ from defender.identity import (  # noqa: F401  (re-exported for the cases)
     VerifiedSignIn,
 )
 from defender.tenancy import InMemoryTenantRepository
-from defender.tests.support.api._server1083 import FORGE_DOMAIN  # #1592 r15.2: `ApiDeps.forge_domain` is required
 from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING, add_to_twin, mapping_value
 from defender.tests.support.shared import _worlds
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -874,7 +873,7 @@ class World:
                 self._learning_store = LearningStore(self.dsn)
             learning = StoreLearningWork(self._learning_store)
         return api_deps(identity=self.service, tenants=self.tenants, ports=self.offboarding,
-                        frontend_origin=FRONTEND_ORIGIN, forge_domain=FORGE_DOMAIN, systems=no_records, secrets=no_records,
+                        frontend_origin=FRONTEND_ORIGIN, systems=no_records, secrets=no_records,
                         learning_work=learning)
 
     def restart(self, *, administrators: Sequence[str] = (),

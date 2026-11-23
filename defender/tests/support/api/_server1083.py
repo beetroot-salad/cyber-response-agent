@@ -63,9 +63,6 @@ ANN, BOB, OPS = "ann@a.example", "bob@b.example", "ops@platform.example"
 SESSION_COOKIE = "__Host-defender_session"
 #: The walk-through's origin: the API's own (design, Dev walk-through 1).
 ORIGIN = "http://localhost:8000"
-#: #1592: the Forgejo site's public hostname, the API's `DEFENDER_FORGE_DOMAIN` (a bare lowercase hostname, as the
-#: artifact domain is); the address an adoption's pull request is served under.
-FORGE_DOMAIN = "forge.defender.test"
 #: As observed: discovery names the front-channel host; the API reaches Keycloak on the back channel.
 FRONT, BACK = "http://localhost:8080", "http://keycloak:8080"
 SIGNIN_REALM, PROGRAMS_REALM = "defender", "defender-programs"
@@ -90,7 +87,6 @@ SETTING_NAMES = (
     "DEFENDER_API_HOST",
     "DEFENDER_API_PORT",
     "DEFENDER_API_FRONTEND_ORIGIN",
-    "DEFENDER_FORGE_DOMAIN",
     "DEFENDER_API_ADMINISTRATORS_FILE",
     "DEFENDER_KEYCLOAK_SERVER_URL",
     "DEFENDER_KEYCLOAK_ISSUER",
@@ -146,7 +142,6 @@ def environment(  # noqa: PLR0913 — each keyword is one setting a test varies;
         "DEFENDER_API_HOST": "127.0.0.1",
         "DEFENDER_API_PORT": str(port if port is not None else free_port()),
         "DEFENDER_API_FRONTEND_ORIGIN": origin,
-        "DEFENDER_FORGE_DOMAIN": FORGE_DOMAIN,
         "DEFENDER_API_ADMINISTRATORS_FILE": str(admins),
         "DEFENDER_KEYCLOAK_SERVER_URL": keycloak,
         "DEFENDER_KEYCLOAK_ISSUER": f"{front}/realms/{SIGNIN_REALM}",
