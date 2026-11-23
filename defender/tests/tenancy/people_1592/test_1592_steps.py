@@ -196,7 +196,8 @@ async def test_an_account_whose_limits_were_never_set_is_limited_by_the_next_run
     user, login = await _create(people)
     people.forge.fail(_signatures_create(people, login)["STANDING"], status=500, times=1)
     await people.step()
-    assert login in people.forge.accounts and login not in people.forge.members(T)
+    assert login in people.forge.accounts
+    assert login not in people.forge.members(T)
     assert "max_repo_creation" not in people.forge.accounts[login], "the fake recorded a failed PATCH"
 
     await people.step()

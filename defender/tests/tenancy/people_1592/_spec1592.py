@@ -205,7 +205,15 @@ class PeopleForge(FakeForge):
             if fault.error is not None:
                 raise fault.error(f"injected {fault.error.__name__}", request=request)
             return httpx.Response(fault.status or 500, json={"message": f"injected {fault.status}"})
+        self._note_limits(request)
         return self.handle(request)
+
+    def _note_limits(self, request: httpx.Request) -> None:
+        """An account PATCH's limits, kept on the account (the base fake keeps only `prohibit_login`)."""
+        login = request.url.path.removeprefix("/api/v1/admin/users/")
+        if request.method == "PATCH" and login in self.accounts:
+            body = json.loads(request.content or b"{}")
+            self.accounts[login].update({k: body[k] for k in LIMITS if k in body})
 
     def _account(self, login: str) -> dict[str, Any]:
         return dict(self.accounts[login], prohibit_login=login in self.prohibit_login)
@@ -240,9 +248,6 @@ class PeopleForge(FakeForge):
                 self.accounts[login].update(restricted=bool(body.get("restricted")), email=body.get("email"),
                                             full_name=body.get("full_name"))
                 return httpx.Response(201, json=self._account(login))
-            case ("PATCH", ["admin", "users", login]) if login in self.accounts:
-                body = json.loads(request.content or b"{}")
-                self.accounts[login].update({k: body[k] for k in LIMITS if k in body})
             case ("GET", ["orgs", org]):
                 self._record(request)
                 return httpx.Response(200, json={"username": org}) if org in self.orgs \
