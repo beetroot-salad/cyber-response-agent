@@ -109,3 +109,18 @@ class LocalTenant:
         delivery = TenantDelivery(tenant=self.tenant, defender_dir=process_defender_dir(),
                                   repository=repository)
         return dataclasses.replace(delivery, branch_prefix=branch_prefix)
+
+
+def deliver(batch) -> str:  # noqa: ANN001 — a `Batch`
+    """The eval's delivery of `batch` to its fake forge: what the drain's tick does, without a store. The branch's last
+    commit pushed and its PR opened; `nothing to deliver` when the batch made no commit."""
+    from defender.learning.author.version_control.store_delivery import open_pr_on
+
+    repository = batch.repository
+    tip = repository.branch_tip(batch.branch)
+    if tip is None:
+        return "nothing to deliver"
+    repository.push(tip, batch.branch)
+    open_pr_on(repository, branch=batch.branch, title=f"learning: tenant knowledge batch {batch.id}",
+               body=f"Eval batch `{batch.id}` on `{batch.branch}`.")
+    return "opened"

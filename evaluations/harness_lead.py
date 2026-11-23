@@ -14,7 +14,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from evaluations._harness_util import LocalTenant
+from evaluations._harness_util import LocalTenant, deliver
 
 from defender import _git
 from defender.knowledge._knowledge import KnowledgePaths
@@ -111,12 +111,12 @@ def run_lead_author(tmp: Path, run_dir: Path) -> LeadRun:
                          batch=batch)
             shutil.copytree(Path(batch.draft_root) / "agent", tmp / "after" / "agent")
             tip = _git.git(["rev-parse", "--verify", "-q", f"refs/heads/{batch.branch}"],
-                           cwd=tenant.clone, check=False)
+                           cwd=batch.repository.path, check=False)
             if tip:
-                listed = _git.git(["rev-list", "--reverse", f"{batch.export.commit}..{tip}"],
-                                  cwd=tenant.clone, check=False)
+                listed = _git.git(["rev-list", "--reverse", f"{batch.base_commit}..{tip}"],
+                                  cwd=batch.repository.path, check=False)
                 commits = tuple(listed.split())
-            out.write(f"\ndelivery: {delivery.finish(batch).status}\n")
+            out.write(f"\ndelivery: {deliver(batch)}\n")
         finally:
             batch.discard()
     except Exception as e:  # noqa: BLE001 — an eval harness reports the fault, never re-raises
