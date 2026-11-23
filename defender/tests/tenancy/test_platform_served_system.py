@@ -98,7 +98,7 @@ def test_1390_the_workspace_map_command_lists_the_registry(tmp_path, data_root, 
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     with B.run_tenant(tmp_path, data_root) as t:
-        out = B.launch(t, tmp_path, publish=lambda *a, **k: B.fresh(t.commit))
+        out = B.launch(t, tmp_path, fetch=B.fetching(t))  # #1618 flow 2: the run's one fetch, of `main`
         assert out.rc == 0, out.text()
         capsys.readouterr()
         rc = workspace_map.main(["workspace_map.py", "--tenant", t.tenant_id, out.run_dir.name], directory=t.directory, fetch=in_process_fetch())
@@ -112,22 +112,27 @@ def test_1390_the_workspace_map_command_lists_the_registry(tmp_path, data_root, 
 
 def test_1390_the_workspace_map_command_lists_the_registry_whatever_today_grants(tmp_path, data_root, capsys):
     """The operator's map of a past run lists the registry with all of it withheld today: no record says what that run was granted, so today's table must not hide it. Amendment 6."""
-    from defender import _yaml, tenancy
+    import subprocess
+    from pathlib import Path
+
+    from defender import _yaml
     from defender.cli import workspace_map
-    from defender.systems.run_tenant import host_tenant
     from defender.systems.verb_dispositions import dispositions_path
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     with B.run_tenant(tmp_path, data_root) as t:
-        out = B.launch(t, tmp_path, publish=lambda *a, **k: B.fresh(t.commit))
+        out = B.launch(t, tmp_path, fetch=B.fetching(t))  # #1618 flow 2: the run's one fetch, of `main`
         assert out.rc == 0, out.text()
-        with host_tenant(tenancy.resolve_data_root(), t.tenant_id, directory=t.directory) as admitted:
-            table = dispositions_path(admitted.tenant.settings)
-            doc = _yaml.safe_load(table.read_text(encoding="utf-8"))
-            assert doc["dispositions"][SYSTEM]["lookup"]["roles"], "premise: the fixture grants it"
-            for verb in doc["dispositions"][SYSTEM]:
-                doc["dispositions"][SYSTEM][verb] = {"roles": [], "reason": "withheld today"}
-            table.write_text(_yaml.safe_dump(doc), encoding="utf-8")
+        # Today's table is `main`'s on the tenant's Forgejo repository (#1618 D2, K8: no host copy): the withheld rows are
+        # committed there, after the run.
+        table = dispositions_path(Path(t.checkout) / "settings")
+        doc = _yaml.safe_load(table.read_text(encoding="utf-8"))
+        assert doc["dispositions"][SYSTEM]["lookup"]["roles"], "premise: the fixture grants it"
+        for verb in doc["dispositions"][SYSTEM]:
+            doc["dispositions"][SYSTEM][verb] = {"roles": [], "reason": "withheld today"}
+        table.write_text(_yaml.safe_dump(doc), encoding="utf-8")
+        for step in (("commit", "-q", "-am", "withheld today"), ("push", "-q", str(t.remote), "HEAD:main")):
+            subprocess.run(["git", *step], cwd=t.checkout, check=True, capture_output=True)  # noqa: S603, S607
         capsys.readouterr()
         rc = workspace_map.main(["workspace_map.py", "--tenant", t.tenant_id, out.run_dir.name], directory=t.directory, fetch=in_process_fetch())
         captured = capsys.readouterr()

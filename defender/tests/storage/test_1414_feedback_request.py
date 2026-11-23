@@ -404,7 +404,7 @@ def test_1414_the_setting_is_read_from_the_runs_copy_not_the_working_tree(
     tail = _drive(tmp_path, state, "edited", plan=F.plan_for("aborted"), mid_run=lambda: _set(tenant, edit))
 
     assert tail.copy_text == S.setting_text(before), "premise: the run's copy holds the pre-launch setting"
-    assert (Path(location_path(tenant.settings)) / S.SETTING_FILE).read_text(encoding="utf-8") == S.setting_text(edit)
+    assert (placed_half(tenant, "settings") / S.SETTING_FILE).read_text(encoding="utf-8") == S.setting_text(edit)
     assert _outcomes(state) == (["aborted"] if opens else [])
 
 
@@ -601,7 +601,7 @@ def _enqueue(tmp_path, tenant, run_dir: Path, **kw) -> bool:
                                      defender_dir=_paths.process_defender_dir())
     copy = tmp_path / "settings-copy"
     shutil.rmtree(copy, ignore_errors=True)
-    shutil.copytree(location_path(tenant.settings), copy)
+    shutil.copytree(placed_half(tenant, "settings"), copy)  # #1618 K8: the placed half
     return S.enqueue_feedback_issue(run, RunPaths(run_dir).alert,
                                     tenant=T1106.run_tenant(accepted, settings_root=copy), **kw)
 
@@ -636,7 +636,7 @@ def test_1414_a_request_for_another_tenant_than_the_runs_or_for_a_handle_with_no
     other = set_up_tenant(current_data_root(), fixture_uuid("feedback-other-tenant"))
     reach_store(os.environ["DEFENDER_DATABASE_DSN"], monkeypatch, other)
     copy = tmp_path / "settings-copy"
-    shutil.copytree(location_path(tenant.settings), copy)
+    shutil.copytree(placed_half(tenant, "settings"), copy)  # #1618 K8: the placed half
 
     def ask(run, accepted) -> bool:
         return S.enqueue_feedback_issue(run, RunPaths(run.run_dir).alert,

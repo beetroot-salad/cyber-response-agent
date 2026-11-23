@@ -268,7 +268,9 @@ def test_a6_a_sibling_in_the_container_takes_no_lock_runs_no_admission_and_signs
     assert got["signed_before"] >= 1, "premise: the helper signed the learning job's first pass at claim"
     assert len(signer.payloads) == got["signed_before"] + 1, "the sibling's run had more than the helper's one pass signed"
     assert _container_side(calls, _watched()) == {k: 0 for k in _watched()}
-    assert calls.helper("copy") == 1, "control: the helper made the sibling's run copy once"
+    # #1618 flow 3 ("`copy.make` ..., the grant read and the judge's lesson bodies all ask the helper"): the helper adopts
+    # two copies, the grant read's (`main`, at claim) and the sibling's (its pin), and the container none.
+    assert calls.helper("copy") == 2, "control: the helper made the grant read's copy and the sibling's run copy, once each"
     _no_database_login(seen, scene)
 
 

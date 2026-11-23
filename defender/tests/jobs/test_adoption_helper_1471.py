@@ -245,7 +245,7 @@ def test_a_runs_folder_holding_the_helpers_failure_record_still_lists(scene, che
     job_id = str(uuid.uuid4())
     _run(scene, job_id, "ghost-system")
     assert _record(scene, job_id) == {"outcome": "failed", "reason": "system_gone"}, "premise: the helper wrote its record"
-    accepted = tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=process_defender_dir(), clone_tree=False)
+    accepted = tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=process_defender_dir())  # #1618 K8: no clone tree to judge
     assert [str(r) for r in accepted.runs_repository().list()] == []
 
     from defender.tests.support.shared._locations_1210 import location_path

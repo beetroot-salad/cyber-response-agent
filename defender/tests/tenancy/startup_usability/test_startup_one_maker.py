@@ -187,8 +187,9 @@ def test_an_escaped_fault_naming_a_data_root_path_reaches_the_model_with_no_host
     tenant = S7.tenant_folder_of(root)
     folder = root / S7.PLAYGROUND_ID
     host_only = folder / "agent" / "fd1256-host-only.conf"
-    assert Path(tenant.settings) not in (host_only, *host_only.parents), (
-        f"premise: {host_only} is under the tenant's settings folder {tenant.settings}")
+    settings = T6.placed_half(tenant, "settings")  # #1618 K8: the placed half
+    assert settings not in (host_only, *host_only.parents), (
+        f"premise: {host_only} is under the tenant's settings folder {settings}")
 
     def get_host(ctx: Any, *, host: str = "web-1") -> dict:
         raise S7.config_fault()(

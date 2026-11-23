@@ -36,7 +36,7 @@ def test_the_playground_resolves_through_the_real_resolver():
     assert not hasattr(td, "settings") and not hasattr(td, "agent"), td
     assert (T.placed_half(td, "settings") / "verb-grants.yaml").read_bytes() == \
         (T.FIXTURE_SETTINGS / "verb-grants.yaml").read_bytes()
-    assert td.agent.is_dir()
+    assert T.placed_half(td, "agent").is_dir()
 
 
 def test_every_template_row_grants_nobody_and_says_why():

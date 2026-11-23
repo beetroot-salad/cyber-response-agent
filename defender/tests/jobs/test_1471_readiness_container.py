@@ -444,7 +444,12 @@ def test_r13_1_4_launch_facts_saying_active_over_a_tenant_folder_the_container_r
     def entering(scene: Any, rid: str, damage: bool) -> Any:
         def container(c: Any) -> int:
             if damage:
-                (scene.root / scene.tenant / "knowledge" / "stray-1471.txt").write_text("not a tenant file", encoding="utf-8")
+                # #1618 K8: acceptance judges `<T>` alone (a tenant holds no knowledge folder to plant a stray file in),
+                # so the damage the container's own read refuses is at `<T>`: a link in place of the real folder.
+                folder = scene.root / scene.tenant
+                real = folder.with_name(f"{folder.name}.real-1471")
+                folder.rename(real)
+                folder.symlink_to(real, target_is_directory=True)
             return int(run_py.readiness_main(["--readiness", rid, "--tenant", scene.tenant], environ=c.env))
         return container
 
@@ -460,7 +465,7 @@ def test_r13_1_4_launch_facts_saying_active_over_a_tenant_folder_the_container_r
         from defender.records.formats import TenantRefused
 
         with pytest.raises(TenantRefused):  # repair 5: the refusal's home is `records.formats`, not `tenancy`
-            tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=run_py.DEFENDER_DIR, clone_tree=False)
+            tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=run_py.DEFENDER_DIR)
         assert_refused_shape(ran.result(), "container_tenant")
         assert isinstance(ran.knowledge, dict), "a refusal at a container step carries the helper's knowledge record"
 

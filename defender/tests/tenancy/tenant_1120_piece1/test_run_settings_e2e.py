@@ -142,7 +142,7 @@ def test_1120_a_replay_without_a_named_tenant_runs_as_the_fixture_tenant_under_t
     # filters it.
     from defender.tests.support.tenancy import _tenants1106
 
-    agent = Path(_tenants1106.fixture_tenant().agent)
+    agent = _tenants1106.placed_half(_tenants1106.fixture_tenant(), "agent")  # #1618 K8: the placed half
     for system in sorted({s for s, _ in D995.GATHER_CENSUS}):
         skill = agent / "skills" / system / "SKILL.md"
         if not skill.exists():
