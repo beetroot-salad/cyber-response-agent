@@ -569,9 +569,9 @@ def test_the_forgejo_service_takes_its_settings_from_the_shipped_file_S3_14():
     assert [n for n in names if not re.fullmatch(r"FORGEJO__[a-z_0-9]+__[A-Z_0-9]+", n)] == []
 
 
-def test_the_settings_file_names_the_sites_domain_and_the_api_is_given_the_same_one_S3_14():
+def test_the_settings_file_names_the_sites_domain_and_the_ingress_is_given_the_same_one_S3_14():
     """S3-14 / OD-3: `DOMAIN` equals the dev compose file's `DEFENDER_FORGE_DOMAIN` and `ROOT_URL` is that host's
-    origin, so the site, Forgejo's links and the adoption address agree."""
+    origin, so the site the ingress answers and Forgejo's links agree."""
     domains = _forge_domains()
     assert len(domains) == 1, f"dev compose must give DEFENDER_FORGE_DOMAIN exactly one value: {domains}"
     [domain] = domains
