@@ -566,7 +566,9 @@ def _knowledge(status: str, commit: str | None, stale_kind: str | None = None) -
     return {"status": status, "commit": commit, "stale_kind": stale_kind}
 
 
-STALE_OPERATOR = _knowledge("stale", None, "operator")
+#: #1618 K9 (stale retired): a missing or garbled knowledge record reads `unreadable`, no commit, no stale kind (was:
+#: `{stale, operator, null}`). A stored `stale` record still reads back as stored (the `stale-*` rows below).
+UNREADABLE = _knowledge("unreadable", None)
 
 
 KNOWLEDGE = {
@@ -576,14 +578,14 @@ KNOWLEDGE = {
     "stale-operator": (knowledge_record_of("stale", OTHER_COMMIT, stale_kind="operator", reason=MARKER),
                        _knowledge("stale", OTHER_COMMIT, "operator")),
     "pinned": (knowledge_record_of("pinned", OTHER_COMMIT), _knowledge("pinned", OTHER_COMMIT)),
-    "unreadable-record": ("{not json", STALE_OPERATOR),
-    "record-of-another-shape": (json.dumps(["fresh", COMMIT]), STALE_OPERATOR),
+    "unreadable-record": ("{not json", UNREADABLE),
+    "record-of-another-shape": (json.dumps(["fresh", COMMIT]), UNREADABLE),
 }
 
 
 @pytest.mark.parametrize("name", list(KNOWLEDGE))
 async def test_o8_knowledge_is_the_host_record_mapped_to_the_api_shape(world, name):
-    """A started run's knowledge record maps to `{status, commit, stale_kind}`; an unreadable one to `{stale, operator, null}`; record text never reaches the row. (O8 knowledge, M6)"""
+    """A started run's knowledge record maps to `{status, commit, stale_kind}`; an unreadable one to `{unreadable, null, null}` (#1618 K9); record text never reaches the row. (O8 knowledge, M6)"""
     record, expected = KNOWLEDGE[name]
     child = _child(world, files=_committed(**{"{id}.knowledge-source.json": record}))
     _, stored = await _run_one(world, child)
@@ -592,12 +594,12 @@ async def test_o8_knowledge_is_the_host_record_mapped_to_the_api_shape(world, na
     _no_run_text(stored)
 
 
-async def test_o8_a_started_run_with_no_record_is_stale_operator(world):
-    """The run folder exists but the record is missing → `{stale, operator, null}`, even on a failed row. (O8 knowledge, M6)"""
+async def test_o8_a_started_run_with_no_record_is_unreadable(world):
+    """The run folder exists but the record is missing → `{unreadable, null, null}` (#1618 K9; was `{stale, operator, null}`), even on a failed row. (O8 knowledge, M6)"""
     child = _child(world, dirs=["{id}"], exit=0)  # the helper served it (#1170): a failed run, not a failed helper
     _, stored = await _run_one(world, child)
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
-    assert stored["knowledge"] == STALE_OPERATOR
+    assert stored["knowledge"] == UNREADABLE
 
 
 async def test_o8_a_failed_run_that_started_still_shows_the_knowledge_it_read(world):
@@ -1177,7 +1179,7 @@ async def test_1396_an_unexpected_fault_after_the_ending_is_decided_keeps_that_e
         ("unparseable", None, None) if seam == "closing-disposition" else ("completed", "inconclusive", None))
     assert stored["cost_usd"] == (None if seam == "lane-cost" else 0)
     assert lower_limit(world["dsn"], bad) is False, "an unknown cost was marked as a lower limit"
-    assert stored["knowledge"] == (STALE_OPERATOR if seam == "lane-knowledge" else _knowledge("current", COMMIT))
+    assert stored["knowledge"] == (UNREADABLE if seam == "lane-knowledge" else _knowledge("current", COMMIT))
     assert any(bad in r.getMessage() and r.levelno >= logging.ERROR for r in caplog.records
                if r.name.startswith(WORKER_LOGGER)), "a fault nobody planned for was not logged as an error"
     assert row(world["dsn"], good)["stage"] == "completed", "one row's fault stopped the others"
@@ -1412,7 +1414,7 @@ async def test_m1_a_symlinked_or_oversize_host_record_is_unreadable_not_followed
     else:
         assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
     if which == "knowledge":
-        assert stored["knowledge"] == STALE_OPERATOR
+        assert stored["knowledge"] == UNREADABLE
     if which == "pointer":
         assert stored["cost_usd"] is None
         assert _warned(caplog, inv)
