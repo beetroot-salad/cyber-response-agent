@@ -4,6 +4,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -80,7 +81,7 @@ def test_1618_k7_the_run_copy_holds_its_owner_record_at_the_instant_it_is_rename
         if os.path.dirname(dst_path) == os.fspath(A.run_copies(t)) and A.UUID.fullmatch(os.path.basename(dst_path)):
             owner = os.path.join(os.fspath(src), "owner")
             renames.append({"dst": os.path.basename(dst_path),
-                            "owner": json.loads(open(owner, encoding="utf-8").read()) if os.path.isfile(owner) else None})
+                            "owner": json.loads(Path(owner).read_text(encoding="utf-8")) if os.path.isfile(owner) else None})
         return real_rename(src, dst, *args, **kwargs)
 
     monkeypatch.setattr(os, "rename", spy)

@@ -113,7 +113,7 @@ def test_1618_k7_concurrent_sweeps_of_the_same_dead_entries_all_succeed_and_keep
         dead = [_deep_entry(roots[root], stems[root](), A.dead_mark()) for root in roots]
         barrier = threading.Barrier(sweepers)
 
-        def sweeper() -> None:
+        def sweeper(barrier: threading.Barrier = barrier) -> None:
             barrier.wait()
             try:
                 K.sweep(t)
