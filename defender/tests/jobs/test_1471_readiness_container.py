@@ -360,8 +360,10 @@ def _set(key: str, value: Any) -> Any:
     return lambda facts: facts.__setitem__(key, value)
 
 
+# Retired param `silent-helper` (#1546 A-O2): a record reaches the store only through the helper, so a container with no helper
+# to answer stages nothing; the worker's end over a missing `result` is pinned by
+# `test_1546_host_request_rows.py::test_a_result_the_helper_refused_reads_bad_record_and_a_missing_one_no_record`.
 HANDOVER = {
-    "silent-helper": "silent",
     "other-kind": _set("kind", "investigation"),
     "other-tenant": _set("tenant", str(uuid.UUID(int=1471))),
     "other-job": _set("job", str(uuid.UUID(int=1472))),
@@ -379,12 +381,7 @@ def test_r13_1_4_an_exit_that_judges_whether_the_helper_and_container_agree_is_f
     with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL) as scene:
         rid = str(uuid.uuid4())
         ran = readiness(scene, rid=rid, container=_hand(scene, rid, HANDOVER[name]))
-        if name == "silent-helper":
-            # #1546 A-O2: a record reaches the store only through the helper (the `result` verb); a container with no helper
-            # to answer stages nothing, and the worker's end reads none.
-            assert ran.record is None, ran.said()
-        else:
-            assert ran.result() == {"outcome": "failed", "reason": "handover"}, ran.said()
+        assert ran.result() == {"outcome": "failed", "reason": "handover"}, ran.said()
     with readiness_scene(tmp_path / "ctl", monkeypatch, migrated_database, proxied=ALL, tenant_id=SECOND_TENANT) as scene:
         rid = str(uuid.uuid4())
         ran = readiness(scene, rid=rid, container=_hand(scene, rid, None))
@@ -447,7 +444,9 @@ def test_r13_1_4_launch_facts_saying_the_tenant_is_not_active_are_refused_at_the
 # Retired (#1546 D4/A-O9): `test_r13_1_4_launch_facts_saying_active_over_a_tenant_folder_the_container_refuses_are_refused_at_
 # container_tenant`. The container no longer reads the host's tenant folder: it builds a `JobTenant` over its job root and
 # inputs, and "`accept_tenant` stays the host's ... the knowledge-clone, `.tenant-id` and settings-vs-mount checks have no
-# job-side counterpart" (design, JobTenant). The host-side refusal survives in the helper's admission (`test_1546_job_tenant`).
+# job-side counterpart" (design, JobTenant). That no in-box entry reaches `accept_tenant` is pinned by
+# `tenancy/lifecycle_1214/test_entry_boundaries.py` (`IN_BOX_ENTRIES`); the host's own refusals by this file's and
+# `test_1471_readiness_helper.py`'s tenant-step cases.
 
 
 @pytest.mark.parametrize("blind", [True, False], ids=["blind-adapter", "readable-tree"])

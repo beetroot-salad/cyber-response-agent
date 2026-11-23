@@ -95,11 +95,23 @@ class Lane:
             packed.extractall(dest, filter="data")
         found = [p for p in dest.rglob(investigation) if p.is_dir() and p.parent.name == "runs"]
         assert len(found) == 1, f"the bundle holds {len(found)} runs named {investigation}: {sorted(str(p) for p in dest.rglob('*'))[:40]}"
+        _relocate_pointers(found[0].parent, found[0].parent.parent)
         return found[0]
 
     def uploads(self, investigation: str) -> list[tuple]:
         token = claim_of(self.dsn, "investigation", investigation)
         return execute(self.dsn, "SELECT object, status FROM jobs.uploads WHERE token = %s", (token,))
+
+
+def _relocate_pointers(runs: Path, tenant_root: Path) -> None:
+    """The bundle is the job's tenant folder from its root (design: Uploads, `bundle`), and a run's session pointer names its
+    session database by the path it had there, under `.job-roots/<claim>/<tenant>/` (gone with the job). In the extracted
+    copy each pointer is made to name the same database under the copy's tenant folder."""
+    import re
+
+    pattern = re.compile(r"[^\"]*/\.job-roots/[0-9a-f]+/" + re.escape(tenant_root.name) + r"(?=/)")
+    for pointer in runs.glob("*.session-pointer.json"):
+        pointer.write_text(pattern.sub(lambda _m: str(tenant_root), pointer.read_text(encoding="utf-8")), encoding="utf-8")
 
 
 def _lane(monkeypatch, dsn: str, tenant: str, openbao, garage, evidence_keys) -> Lane:  # noqa: F811 — the fixtures
