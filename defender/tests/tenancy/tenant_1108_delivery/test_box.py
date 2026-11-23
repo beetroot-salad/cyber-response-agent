@@ -167,7 +167,11 @@ def test_drain_request_mounts_the_code_the_draft_root_staged_and_only_its_lanes(
     assert owner.is_file(), "the draft has no owner record"
     assert any(draft.is_relative_to(Path(m.source)) for m in request.mounts), "control: containment"
     assert not any(owner.is_relative_to(Path(m.source)) for m in request.mounts), request.mounts
-    host_only = (tenant.knowledge, location_path(tenant.worktrees), location_path(tenant.tenant_root) / "exports", location_path(tenant.tenant_root) / "forge")
+    # #1618 K8: no clone; the old clone's and exports' places stay host-only, and so does the delivery's private
+    # repository (`d.repository.path`, under `<data root>/.repo-scratch/`), which holds the tenant's history.
+    tenant_folder = location_path(tenant.tenant_root)
+    host_only = (tenant_folder / "knowledge", location_path(tenant.worktrees), tenant_folder / "exports",
+                 tenant_folder / "forge", Path(d.repository.path))
     for mount in request.mounts:
         source = Path(mount.source)
         assert not any(source.is_relative_to(h) or h.is_relative_to(source) for h in host_only), source
@@ -863,7 +867,8 @@ def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_
     daemon = FakeDaemon(tmp_path)
     reads = []
     agent_before = files_under(root / "agent")
-    status_before = git(repo[0].knowledge, "status", "--porcelain")
+    # #1618 K8: the clone whose status this compared is gone; the delivery's private repository is its successor.
+    refs_before = git(d.repository.path, "for-each-ref")
     drafts_before = _snapshot(root.parent.parent)  # root is <T>/drafts/<id>/stage
 
     def boundary(argv, **kwargs):
@@ -887,7 +892,7 @@ def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_
     if wrong != "settings-at-root":
         assert [r for r in reads if _at_root(r, Path("/draft"))], "the draft's token was never read back"
     assert not any(r.endswith("/.tenant-id") or r.endswith("/SKILL.md") for r in reads)
-    assert git(repo[0].knowledge, "status", "--porcelain") == status_before
+    assert git(d.repository.path, "for-each-ref") == refs_before
 
 
 def _with_code_at(request, source: Path):
