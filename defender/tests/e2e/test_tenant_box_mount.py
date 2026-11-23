@@ -42,7 +42,7 @@ def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
         tmp_path, two_tenants, own, other):
     """A box started by `run.main` through production's `start_box` (recording Docker double) binds
     `/agent` read-only from THIS run's copy of its own tenant's export; no mount exposes the
-    copy's `settings/`, the tenant's clone, or anything of the other tenant."""
+    copy's `settings/`, the tenant's seed checkout (#1618: no host clone), or anything of the other tenant."""
     from defender._model_view import MODEL_AGENT
     from defender.tests.e2e._box665 import RecordingDocker
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
@@ -51,7 +51,9 @@ def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
     root, acme, bravo = two_tenants
     mine = {ACME: acme, BRAVO: bravo}[own]
     docker, investigation = RecordingDocker(), _Investigation()
-    out = B.launch(mine, tmp_path / own, publish=lambda *a, **k: B.fresh(mine.commit),
+    from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
+
+    out = B.launch(mine, tmp_path / own, publish=None, fetch=in_process_fetch(mine.remote),
                    lifecycle=_boxed_lifecycle(docker, investigation))
     assert out.reached, out.text()
     assert investigation.calls == 1, out.text()
@@ -65,7 +67,7 @@ def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
     assert all(m["readonly"] for m in docker.mounts()
                if Path(m["source"]).resolve().is_relative_to(copy_root.resolve())), docker.mounts()
     sources = [Path(m["source"]) for m in docker.mounts()]
-    for forbidden in (copy_root / "settings", copy_root / "owner", B.clone_dir(mine),
+    for forbidden in (copy_root / "settings", copy_root / "owner", mine.checkout,
                       root / other):
         assert not T.exposes(sources, forbidden), (
             f"a box mount exposes {forbidden}: {docker.mounts()}")

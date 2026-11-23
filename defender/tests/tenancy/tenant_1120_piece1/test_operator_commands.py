@@ -218,11 +218,11 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
         start_box=start_box, stop_box=lambda *a, **k: None, scrub=lambda tree, **kw: None)
     rec = H.RunRecorder(tmp_path / "run")
     try:
-        from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+        from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
-        # Plus the in-process launch-time publish.
+        # Plus the in-process launch-time fetch.
         argv = [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"]
-        rc = run_py.main(argv, **with_publish({**rec.seams(), "lifecycle": lifecycle}, argv))
+        rc = run_py.main(argv, **with_fetch({**rec.seams(), "lifecycle": lifecycle}, argv))
     except SystemExit as refused:
         pytest.fail(f"run.main refused a finished tenant: {H.exit_text(refused)}")
     assert rc == 0
@@ -423,11 +423,11 @@ def test_1484_an_operator_run_whose_box_start_is_refused_exits_1_in_one_line_and
         investigate=lambda **kw: investigated.append(kw) or {"output": "", "requests": 0, "truncated_by": None},
         start_box=start_box, stop_box=lambda *a, **k: None, scrub=lambda tree, **kw: None)
     rec = H.RunRecorder(tmp_path / "run")
-    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
     argv = [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"]
     capsys.readouterr()
-    assert run_py.main(argv, **with_publish({**rec.seams(), "lifecycle": lifecycle}, argv)) == 1
+    assert run_py.main(argv, **with_fetch({**rec.seams(), "lifecycle": lifecycle}, argv)) == 1
     assert not investigated
     err = capsys.readouterr().err
     assert " CRITICAL " not in err, err
@@ -469,11 +469,11 @@ def test_1469_an_operator_run_whose_box_check_does_not_pass_leaves_the_did_not_r
             raise
 
     rec = H.RunRecorder(tmp_path / "run")
-    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
     argv = [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"]
     capsys.readouterr()
-    assert run_py.main(argv, **with_publish({**rec.seams(), "lifecycle": lifecycle}, argv)) == 1
+    assert run_py.main(argv, **with_fetch({**rec.seams(), "lifecycle": lifecycle}, argv)) == 1
     assert docker.checks.runs, "premise: the refusal is the check's, which ran"
     for check in docker.checks.runs:
         assert check.folder.resolve().is_relative_to((data_root / ".box-checks").resolve()), (check.folder, data_root)

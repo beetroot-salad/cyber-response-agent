@@ -55,8 +55,8 @@ def flow(tmp_path, monkeypatch, migrated_database):  # noqa: F811
                 worker = make_worker(
                     store, scene.root, lambda _launch: ["/bin/false"],
                     containers=StandInContainers(tmp_path / "containers"), slots=3, learning_slots=1,
-                    learning_argv=R.real_child(scene.t.commit, "learning"),
-                    post_step_argv=R.real_child(scene.t.commit, "post-step"))
+                    learning_argv=R.real_child(scene.t.commit, "learning", remote=scene.t.remote),
+                    post_step_argv=R.real_child(scene.t.commit, "post-step", remote=scene.t.remote))
                 await worker.drain()
 
         anyio.run(go)

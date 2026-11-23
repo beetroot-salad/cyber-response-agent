@@ -693,7 +693,7 @@ def _world_access(ep: Path, records: Any, signer) -> Any:
     """The read access a sibling world's run start hands its lifecycle, through `run.main --episode`."""
     from defender import run as run_mod
     from defender.tests.runtime.providers import _spec1243 as P
-    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_fetch
 
     held: list[Any] = []
 
@@ -703,7 +703,7 @@ def _world_access(ep: Path, records: Any, signer) -> Any:
 
     rc = run_mod.main(["--episode", ep.name, "--world", P.SIBLING_WORLD, "--tenant", P.SIBLING_TENANT, "--no-learn"],
                       directory=records.directory, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
-                      preflight=lambda *_a, **_k: 0, publish=in_process_publish(),
+                      preflight=lambda *_a, **_k: 0, fetch=in_process_fetch(),
                       signer=signer, proxy_url="http://proxy.invalid")
     assert rc == 0, rc
     (access,) = held

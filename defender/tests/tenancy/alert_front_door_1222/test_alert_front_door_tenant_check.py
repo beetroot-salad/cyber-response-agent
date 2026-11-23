@@ -249,7 +249,7 @@ def at_sibling_resume(w: World) -> Verdict:
         lifecycles.append(kw)
         return {"output": "", "requests": 0, "truncated_by": None}
 
-    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_fetch
 
     text = ""
     try:
@@ -258,7 +258,7 @@ def at_sibling_resume(w: World) -> Verdict:
             ["--episode", w.episode.name, "--world", "b",
              "--tenant", w.planted.tenant_id],
             directory=w.planted.directory, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
-            preflight=preflight, publish=in_process_publish())
+            preflight=preflight, fetch=in_process_fetch())
     except SystemExit as stop:
         text = _exit_text(stop)
     passed = bool(preflight.calls)

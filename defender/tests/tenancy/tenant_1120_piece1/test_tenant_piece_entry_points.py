@@ -348,11 +348,11 @@ def test_1120_tenant_sessions_is_the_session_stores_folder_for_a_fresh_run(
     rec = H.RunRecorder(tmp_path / "unused")
     seams = rec.seams()
     seams.pop("materialize")
-    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
-    # Plus the in-process launch-time publish.
+    # Plus the in-process launch-time fetch.
     argv = [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID]
-    rc = run_py.main(argv, **with_publish(dict(seams), argv))
+    rc = run_py.main(argv, **with_fetch(dict(seams), argv))
     assert rc == 0
     assert len(rec.lifecycle_calls) == 1
     run_dir = Path(rec.lifecycle_calls[0]["run_dir"])

@@ -19,7 +19,7 @@ from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.records import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.tenancy._launch_publish_p4 import RunWithPublish
+from defender.tests.support.tenancy._launch_publish_p4 import RunWithFetch
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S1224
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
@@ -34,8 +34,8 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 
 def _run():
-    # `run.main` handed the in-process launch-time publish.
-    return RunWithPublish(T.mod("run"))
+    # `run.main` handed the in-process launch-time fetch.
+    return RunWithFetch(T.mod("run"))
 
 
 def _no_preflight(*_args, **_kw) -> int:

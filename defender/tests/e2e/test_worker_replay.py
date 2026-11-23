@@ -88,7 +88,7 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)  # R1: a set-up tenant has runs/
 
         def child(launch) -> list[str]:
-            return helper_child("replay", t.commit, tmp_path / "marks", launch)
+            return helper_child("replay", t.commit, tmp_path / "marks", launch, remote=t.remote)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=golden_bytes)
@@ -140,7 +140,7 @@ async def test_o8_a_raise_after_the_real_drivers_close_still_records_the_report_
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
-            return helper_child("replay-fault-after-close", t.commit, tmp_path / "marks", launch)
+            return helper_child("replay-fault-after-close", t.commit, tmp_path / "marks", launch, remote=t.remote)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -176,7 +176,7 @@ async def test_1345_o4_a_queued_job_whose_tenant_has_no_mapping_ends_failed_setu
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
-            return helper_child("replay", t.commit, tmp_path / "marks", launch, stderr_to=err_file)
+            return helper_child("replay", t.commit, tmp_path / "marks", launch, remote=t.remote, stderr_to=err_file)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -215,7 +215,7 @@ async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_alert_and_the_
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
-            return helper_child("replay", t.commit, tmp_path / "marks", launch)
+            return helper_child("replay", t.commit, tmp_path / "marks", launch, remote=t.remote)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -294,7 +294,7 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(migrated
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
-            return helper_child("replay-priced", t.commit, tmp_path / "marks", launch)
+            return helper_child("replay-priced", t.commit, tmp_path / "marks", launch, remote=t.remote)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -355,7 +355,7 @@ async def test_s2a_s5_r7_a_request_the_run_never_saw_the_end_of_marks_the_job_th
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
 
         def child(launch) -> list[str]:
-            return helper_child("replay-priced-unseen", t.commit, tmp_path / "marks", launch)
+            return helper_child("replay-priced-unseen", t.commit, tmp_path / "marks", launch, remote=t.remote)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -397,7 +397,7 @@ async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_rep
 
         def child(launch) -> list[str]:
             mode = modes[launch.investigation_id]
-            return helper_child(mode, t.commit, tmp_path / mode, launch,
+            return helper_child(mode, t.commit, tmp_path / mode, launch, remote=t.remote,
                                 stderr_to=err_file if mode.endswith("fault") else tmp_path / "control.stderr")
 
         async with job_store(migrated_database) as store:

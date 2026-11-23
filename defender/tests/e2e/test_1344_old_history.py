@@ -237,7 +237,7 @@ def _family_child(tmp_path: Path) -> tuple[Old, dict | None, subprocess.Complete
         job = "9f1c2d3e-0000-4000-8000-000000001344"
         marks = tmp_path / "marks"
         done = subprocess.run(
-            [sys.executable, str(entry), "family", tenant.commit, str(marks / "family"), "--job", job, "--tenant",
+            [sys.executable, str(entry), "family", tenant.commit, str(marks / "family"), str(tenant.remote), "--job", job, "--tenant",
              tenant.tenant_id, "--source", old.name, "--parent-pid", str(os.getpid())],
             env={**os.environ, "DEFENDER_DATA_ROOT": str(root), "PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, text=True, timeout=600, check=False)
         record = runs / f"{job}.learning-end.json"

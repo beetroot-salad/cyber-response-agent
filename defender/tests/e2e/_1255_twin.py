@@ -439,16 +439,16 @@ def run_main(argv: list[str], recording: Recording, *, main_turns: list[Any],
     `proxy_seams` (`signer=`, `proxy_url=`) are `run.main`'s own, for a tenant whose systems are declared on the
     credential proxy: with nothing able to sign, the run's first read token fails and the run ends `proxy-access`."""
     import defender.run as run_mod
-    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_fetch
 
     try:
-        # The in-process launch-time publish: publishes the tenant for real when run.main
-        # launches it.
+        # The launch's one knowledge fetch (#1618), the product's own in-process: what is placed for the tenant is
+        # committed to its served Forgejo remote at the call and fetched from there.
         recording.exit_code = run_mod.main(
             argv, directory=directory_for_argv(argv), lifecycle=lifecycle(recording, main_turns=main_turns, clock=clock,
                                       registry_cls=registry_cls, scrub=scrub),
             preflight=_no_preflight, visualize=_no_page, enqueue=_no_queue,
-            publish=in_process_publish(), **proxy_seams)
+            fetch=in_process_fetch(), **proxy_seams)
     except SystemExit as refused:
         recording.exit_code = "SystemExit"
         recording.refusal = str(refused.code)

@@ -646,10 +646,10 @@ def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | No
     in-process stand-in, which publishes the tenant's folder for real, so the run reads an
     export. No request signer is injected: a run that must reach a system passes one (or
     `ProxyStandIn.seams()`), so the tests of the production signing path stay on it."""
-    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
     try:
-        return run_py().main(argv, **with_publish(
+        return run_py().main(argv, **with_fetch(
             {**rec.seams(), **seams}, argv)), None
     except SystemExit as refused:
         return None, refused

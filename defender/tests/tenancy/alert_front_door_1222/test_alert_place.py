@@ -201,13 +201,13 @@ def _main_boxed(tmp_path: Path, planted: S.Planted, alert: bytes, *,  # noqa: PL
     argv = [str(src / "alert.json"), "--tenant", planted.tenant_id]
     if enqueue is None:
         argv.append("--no-learn")
-    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_fetch
 
-    # The in-process launch-time publish: publishes the planted tenant for real.
+    # The in-process launch-time fetch: the planted tenant, seeded to its forge and fetched for real.
     return S.sym("run", "main")(
         argv, directory=planted.directory, lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
         visualize=lambda *_a, **_k: None, enqueue=enqueue if enqueue is not None else (lambda *_a, **_k: False),
-        publish=in_process_publish())
+        fetch=in_process_fetch())
 
 
 def _scripted_daemon() -> Any:
@@ -795,13 +795,13 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
     sib_daemon, sib = _scripted_daemon(), dict[str, Any]()
     lifecycle = functools.partial(_lifecycle(), start_box=_start_with(sib_daemon),
                                   investigate=_capture_inputs(sib))
-    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_fetch
 
-    # Plus the in-process launch-time publish.
+    # Plus the in-process launch-time fetch.
     rc = S.sym("run", "main")(
         ["--episode", ep.name, "--world", "b", "--tenant", planted.tenant_id],
         directory=planted.directory, lifecycle=lifecycle, preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
-        publish=in_process_publish())
+        fetch=in_process_fetch())
     assert rc == 0, f"the sibling run failed (rc={rc})"
     assert "run_dir" in sib, "the sibling never started its box"
     sib_binds = _readonly_binds_inside(sib_daemon.mounts())

@@ -298,13 +298,13 @@ def drive_run_py(argv: list[str], rec: SiblingRecorder, **override: Any) -> tupl
     """Drive the REAL `run.main` over `argv` with `rec`'s seams. Returns `(exit status, the
     SystemExit it refused with or None, everything it printed to stderr)`."""
     from defender import run as run_py
-    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
     err = io.StringIO()
     try:
         with redirect_stderr(err):
-            # Plus the in-process launch-time publish.
-            rc = run_py.main(list(argv), **with_publish({**rec.seams(), **override}, argv))
+            # Plus the in-process launch-time fetch.
+            rc = run_py.main(list(argv), **with_fetch({**rec.seams(), **override}, argv))
     except SystemExit as refused:
         return None, refused, err.getvalue()
     return rc, None, err.getvalue()

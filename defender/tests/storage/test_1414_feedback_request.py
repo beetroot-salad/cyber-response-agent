@@ -264,7 +264,7 @@ def _drive_sibling(tmp_path, tenant, tail: F.FeedbackTail) -> None:
     """The sibling's door (`--episode <id> --world b`) over a held episode of the run's own tenant."""
     from defender.records._episode_handle import Episode
     from defender.tests.support.learning.branch import _triplet_947 as T
-    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_fetch
     from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as P
 
     source = P.source_run(Path(location_path(tenant.runs)))
@@ -272,7 +272,7 @@ def _drive_sibling(tmp_path, tenant, tail: F.FeedbackTail) -> None:
     with Episode.open(manifest.parent) as held:
         T.episode_view(held, tenant=tenant).close()
     argv = ["--tenant", str(tenant.id), "--episode", manifest.parent.name, "--world", "b"]
-    run_py.main(argv, lifecycle=tail.lifecycle, visualize=tail.visualize, preflight=lambda *a, **k: 0, publish=in_process_publish(), directory=directory_for_argv(argv))
+    run_py.main(argv, lifecycle=tail.lifecycle, visualize=tail.visualize, preflight=lambda *a, **k: 0, fetch=in_process_fetch(), directory=directory_for_argv(argv))
 
 
 _REFUSED_ENDS = ["sibling world", "--no-learn", "held-out by path", "held-out by digest", "unverified tree"]

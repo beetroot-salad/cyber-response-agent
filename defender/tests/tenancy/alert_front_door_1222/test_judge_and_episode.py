@@ -274,14 +274,14 @@ def _resume_sibling(ep: Path, *, records: Any = None, **directory: Any) -> Path:
     episode is found under `--tenant`'s own `<T>/episodes/`. `directory` are the tenant records' own
     keywords (`alert_mapping=`: the mapping they hold, default today's; #1345); `records` instead hands the directory of a
     `test_facts._Records` (its `alert_mapping` read counts)."""
-    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_fetch
 
     life = _Lifecycle()
-    # Plus the in-process launch-time publish.
+    # Plus the in-process launch-time fetch.
     argv = ["--episode", ep.name, "--world", "b", "--tenant", TENANT, "--no-learn"]
     rc = S.sym(RUN, "main")(
         argv, directory=records.directory() if records is not None else directory_for_argv(argv, **directory), lifecycle=life, visualize=lambda *_a, **_k: None, preflight=lambda *_a, **_k: 0,
-        publish=in_process_publish())
+        fetch=in_process_fetch())
     assert life.run_dir is not None, f"the sibling never reached its run (rc={rc!r})"
     return life.run_dir
 

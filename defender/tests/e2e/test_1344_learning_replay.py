@@ -114,7 +114,7 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, request, *, invest
             return ["--job", source, "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
 
         def investigation(launch) -> list[str]:
-            return [sys.executable, str(entry), investigate_mode, t.commit, str(marks / "investigate"),
+            return [sys.executable, str(entry), investigate_mode, t.commit, str(marks / "investigate"), str(t.remote),
                     *tail(launch, launch.investigation_id), "--alert-digest", launch.alert_digest]  # C-1: the digest the worker hands the helper
 
         async with job_store(migrated_database) as store:
@@ -123,11 +123,11 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, request, *, invest
             flow["investigation"] = inv.investigation_id
 
             def learning(launch) -> list[str]:
-                return [sys.executable, str(entry), "family", t.commit, str(marks / "family"), "--job", launch.job_id,
+                return [sys.executable, str(entry), "family", t.commit, str(marks / "family"), str(t.remote), "--job", launch.job_id,
                         "--tenant", launch.tenant_id, "--source", inv.investigation_id, "--parent-pid", str(launch.parent_pid)]
 
             def post_step(launch) -> list[str]:
-                return [sys.executable, str(entry), "post-step", t.commit, str(marks / "post-step"), "--job", launch.job_id,
+                return [sys.executable, str(entry), "post-step", t.commit, str(marks / "post-step"), str(t.remote), "--job", launch.job_id,
                         "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid)]
 
             worker = make_worker(store, root, investigation, containers=StandInContainers(tmp_path / "containers"),
