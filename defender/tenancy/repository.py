@@ -190,7 +190,7 @@ class TenantRepository(Protocol):
     async def people_lock(self) -> bool:
         """Take, or confirm, the request worker's one lock (OD-12): True while this repository holds it. On PostgreSQL
         `pg_try_advisory_lock(PEOPLE_LOCK_NAMESPACE, 0)` on a connection of its own, kept until `close()` (nothing
-        unlocks it: the hold ends with its connection). A held connection found dropped answers False at once, and the
+        unlocks it: the hold ends with its connection). Any failure of a held connection drops it and answers False, and the
         next call takes a new one; a new connection the database refuses raises the driver's error. The memory twin
         always holds it (one store is one process)."""
         ...

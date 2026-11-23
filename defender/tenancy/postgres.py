@@ -262,18 +262,20 @@ class PostgresTenantRepository:
             raise ValueError(f"a people request names a user, a tenant or both ({str(e.orig).splitlines()[0]})") from e
 
     async def people_lock(self) -> bool:
-        if self._people is not None:
-            try:
-                return await self._take_people_lock(self._people)
-            except DBAPIError as e:
-                if not (e.connection_invalidated or isinstance(e, (OperationalError, InterfaceError))):
-                    raise
-                why = str(e.orig).splitlines()[0] if e.orig is not None else type(e).__name__
-                _logger.warning("the people lock's connection failed (%s); its hold, if any, is gone", why)
-                await self._drop_people_connection()
-                return False
-        self._people = await self._lock_engine.connect()
-        return await self._take_people_lock(self._people)
+        """The lock's connection runs only this statement, so any failure of it ends the connection, and its hold: a
+        held one answers False (the next call takes a new one), a new one raises."""
+        held = self._people is not None
+        conn = self._people or await self._lock_engine.connect()
+        self._people = conn
+        try:
+            return await self._take_people_lock(conn)
+        except Exception as e:
+            await self._drop_people_connection()
+            if not held:
+                raise
+            why = str(e.orig).splitlines()[0] if isinstance(e, DBAPIError) and e.orig is not None else type(e).__name__
+            _logger.warning("the people lock's connection failed (%s); its hold, if any, is gone", why)
+            return False
 
     @staticmethod
     async def _take_people_lock(conn: AsyncConnection) -> bool:
