@@ -18,6 +18,7 @@ the investigation driver directly (it reads a folder, not a fetch): a test-side 
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import threading
@@ -249,6 +250,9 @@ def fetch_line(tenant_id: str, dest: Path, *, data_root: Any, commit: str | None
         server.close()
 
 
+_FIXTURE_PIN = re.compile(r"1204([0-9a-f])\1{35}")
+
+
 def fetched_copy(tenant_id: str, data_root: Path | str | None = None) -> Callable[[str], Any]:
     """A judge pass's `copy=` seam (`grade_episode(copy=)`, #1618 K5), shaped as the launcher's own (`branch/cli.py`
     `_judge_copy`): the product's fetch (`fetch_line`) of one commit by id into a fresh folder beside the data root,
@@ -267,7 +271,11 @@ def fetched_copy(tenant_id: str, data_root: Path | str | None = None) -> Callabl
         with tempfile.TemporaryDirectory(dir=scratch) as held:
             dest = Path(held) / "copy"
             dest.mkdir()
-            line = fetch_line(str(tenant_id), dest, data_root=root, commit=commit)
+            # A fixture's stamped pin (`_triplet_947.KNOWLEDGE_SHA` and its kin, "1204" + one letter x 36) names no
+            # commit any remote holds; its bodies are what the fixture placed, now `main` (module doc). Every other pin
+            # is fetched by id, and a refusal stays a refusal (K5).
+            pinned = None if _FIXTURE_PIN.fullmatch(str(commit)) else commit
+            line = fetch_line(str(tenant_id), dest, data_root=root, commit=pinned)
             if not line.startswith("ok "):
                 raise KnowledgeRefused(f"knowledge commit {commit} could not be copied: {line}")
             yield dest

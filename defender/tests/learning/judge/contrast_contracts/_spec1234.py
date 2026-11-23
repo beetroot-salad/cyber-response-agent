@@ -1419,7 +1419,8 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000) -> Any:
         return rnd.render(ep, label, git_show=FakeGitShow(),
                           payload_cap=payload_cap, facts=facts, lessons_commit=None,
                           manifest=manifest, samples=samples,
-                          family_text=rnd.render_family_text(pre, failed), bound=bound, episode_runs=view)
+                          family_text=rnd.render_family_text(pre, failed), bound=bound, episode_runs=view,
+                          knowledge=J.pass_knowledge(ep, bound))
 
 
 # --------------------------------------------------------------------------------------

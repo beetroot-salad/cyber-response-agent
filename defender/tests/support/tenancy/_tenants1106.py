@@ -108,15 +108,15 @@ def run_tenant(tenant: Any, *, defender_dir: Path | None = None,
     planted no systems; `_systems1366.derive`). A refusal surfaces as the readiness function's own error, as before.
     A scenario that wants other grants plants a tenant whose `verb-grants.yaml` says so.
 
-    `agent_root`/`settings_root` default to the halves the test placed for the tenant (`<T>/knowledge/agent/` and
+    `agent_root`/`settings_root` default to `knowledge_half`: the halves the test placed for the tenant (`<T>/knowledge/agent/` and
     `settings/`: #1618 K8, a `Tenant` has no knowledge path, so a driver-level test names the folders it hands the
     driver, here the test's own placed copy); the replay harness hands one commit's copied halves. `defender_dir` is
     ignored (kept for callers' call shape): the catalog never comes from the checkout."""
     del defender_dir
     from defender.tests.support.tenancy import _systems1366 as R
 
-    root = Path(agent_root) if agent_root is not None else placed_half(tenant, "agent")
-    settings = Path(settings_root) if settings_root is not None else placed_half(tenant, "settings")
+    root = Path(agent_root) if agent_root is not None else knowledge_half(tenant, "agent")
+    settings = Path(settings_root) if settings_root is not None else knowledge_half(tenant, "settings")
     try:
         return R.run_tenant_for(tenant, dispatches_lead_zero=dispatches_lead_zero, agent_root=root,
                                 settings_root=settings, records=R.DERIVED if records is ... else records)
@@ -129,6 +129,19 @@ def placed_half(tenant: Any, half: str) -> Path:
     knowledge path, so a test that edits or reads what it placed names the folder itself)."""
     assert half in ("agent", "settings"), half
     return Path(str(location_path(tenant.tenant_root))) / "knowledge" / half
+
+
+def knowledge_half(tenant: Any, half: str) -> Path:
+    """The tenant's `half` as a test hands it to the driver: what the test placed (`placed_half`) when it placed a
+    folder, else that half of `main` on the tenant's served remote (`_fetch_standin_1618.copy_at_main`: an estate seeded
+    on its remote places no folder, #1618 D2). Neither: the placed path, so the driver's own refusal names it."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import copy_at_main
+
+    placed = placed_half(tenant, half)
+    if placed.parent.is_dir():
+        return placed
+    copy = copy_at_main(Path(str(location_path(tenant.tenant_root))).parent, str(tenant.id))
+    return placed if copy is None else copy / half
 
 
 def fixture_run_tenant(**kw: Any) -> Any:

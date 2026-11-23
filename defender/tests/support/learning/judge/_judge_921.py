@@ -661,8 +661,21 @@ def render_at(episode_dir: Path, label: str, **kw: Any) -> Any:
     with repository.episode_files(episode_dir.name) as episode:
         # The episode's run view is a required argument of the render (#1534); its name is the contract's proposal.
         view = repository.episode(episode_dir.name, held=episode)
+        bound = episode.view()
+        kw.setdefault("knowledge", pass_knowledge(episode_dir, bound))
         return mod("learning.judge.render").render(
-            episode_dir, label, bound=episode.view(), episode_runs=view, **kw)
+            episode_dir, label, bound=bound, episode_runs=view, **kw)
+
+
+def pass_knowledge(episode_dir: Path, bound: Any) -> Any:
+    """The judge's `KnowledgeBodies` for a render-level call, as `grade_episode` builds it (#1618 K5): at the family's
+    pin (`_pass_knowledge`), its copy the product's fetch from the tenant's served remote (`fetched_copy`), as the
+    launcher's `_judge_copy` hands it; outside a job container there is no helper to ask."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import fetched_copy
+
+    judge = mod("learning.judge")
+    return mod("learning.judge.knowledge").KnowledgeBodies(
+        knowledge=judge._pass_knowledge(bound, []), copy=fetched_copy(Path(episode_dir).parent.parent.name))
 
 
 def read_manifest_at(episode_dir: Path) -> dict:

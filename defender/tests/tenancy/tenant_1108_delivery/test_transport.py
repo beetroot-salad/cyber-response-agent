@@ -56,6 +56,9 @@ def test_publication_never_follows_operator_tags(
         # The batch ended merged, as the author tick records a merged review (`_revert_store.wrote` does the same).
         store.end_review(str(tenant.id), str(held.batch_id), expect_phase="in_review", outcome="merged",
                          published=[], held=[])
+        # The revert is its own operation, over its own delivery: its one fetch (`GitRepository.open`) reads the merged
+        # `main` (`store_delivery.revert_lesson`), as the operator's revert command opens one.
+        d = delivery(http_repo, http)
 
     control = tmp_path / "control.git"
     git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, remote, control)
