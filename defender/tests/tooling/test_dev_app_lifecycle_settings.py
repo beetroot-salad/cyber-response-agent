@@ -67,7 +67,7 @@ def test_the_launcher_refuses_a_lifecycle_start_without_a_request_worker_setting
     from defender.lifecycle import config as settings
 
     given = {name: f"value-of-{name.lower()}" for name in sorted(lifecycle_required(monkeypatch))}
-    for name in (settings.KEYCLOAK_SOURCE_ID_ENV, settings.FORGE_SESSIONS_DSN_ENV):
+    for name in (settings.KEYCLOAK_SOURCE_ID_ENV, settings.FORGE_SESSIONS_DSN_ENV, settings.FORGE_PUBLIC_URL_ENV):
         done = _lifecycle(SCRIPT, tmp_path / name, {k: v for k, v in given.items() if k != name})
         assert done.returncode != 0, (name, done.stdout, done.stderr)
         assert "launched" not in done.stdout, (name, done.stdout)
