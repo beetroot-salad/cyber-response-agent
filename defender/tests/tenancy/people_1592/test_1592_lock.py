@@ -249,3 +249,25 @@ async def test_the_memory_twin_always_holds_its_lock():
     twin = InMemoryTenantRepository()
     assert await twin.people_lock() is True
     assert await twin.people_lock() is True
+
+
+async def test_a_held_lock_connection_left_unusable_by_a_refused_statement_is_dropped_not_kept(pg_people: People):
+    """S2-29 (finalize, #1623 review): a held connection whose transaction the database has aborted (a refused statement,
+    not a lost connection) answers False once and is dropped, so its hold ends and the next call takes a new one. Kept,
+    every later poll would fail the same way while the lock stayed held, and no standby could take over."""
+    from sqlalchemy import text
+
+    from defender.tenancy.postgres import PostgresTenantRepository
+
+    store = PostgresTenantRepository(pg_people.dsn)
+    try:
+        assert await store.people_lock() is True
+        (before,) = holders(pg_people.dsn)
+        with contextlib.suppress(Exception):
+            await store._people.execute(text("SELECT 1 / 0"))  # the transaction is now aborted, the connection alive
+        assert await store.people_lock() is False
+        assert holders(pg_people.dsn) == [], "the unusable connection kept the lock"
+        assert await store.people_lock() is True
+        assert holders(pg_people.dsn) not in ([], [before])
+    finally:
+        await store.close()
