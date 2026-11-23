@@ -99,7 +99,7 @@ from defender.learning.branch.endings import (
     ending,
 )
 from defender._parent_tie import tied_argv
-from defender import tenancy
+from defender import job_socket, tenancy
 from defender._git import REPO_ROOT
 from defender.investigation import branch
 from defender.records import session_store
@@ -386,7 +386,6 @@ def _copy_of(tenant_id: TenantId, commit: str | None, *, container: JobContainer
     Forgejo by id (#1618 F4, K5): by the fetch child (`fetch`, the launcher's one seam) into this process's temporary folder,
     removed on exit, for an operator's launch; inside a job container by its host helper (`copy.make`), which owns the copy.
     `KnowledgeRefused` when the fetch is refused, naming why (no fallback to another commit, D3)."""
-    from defender import job_socket
     from defender.investigation.publish_launch import default_fetch
     from defender.tenancy import run_knowledge
     from defender.tenancy.run_knowledge import KnowledgeRefused
@@ -1079,7 +1078,8 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
             _grade(runs, episode_id=episode_id, judge=judge, copy=_judge_copy(
                 tenant.tenant_id, fetch=fetch, data_root=tenancy.resolve_data_root()))
         else:
-            _grade_job(runs, episode_id=episode_id, judge=judge, lane=lane)
+            _grade_job(runs, episode_id=episode_id, judge=judge, lane=lane, copy=None if job_socket.SOCKET_ENV in os.environ
+                       else _judge_copy(tenant.tenant_id, fetch=fetch, data_root=tenancy.resolve_data_root()))
     # Rendered after the JUDGE frame closes so the page sees the judge's timing row;
     # non-fatal.
     if render_page is not None:
@@ -1168,7 +1168,8 @@ def _grade(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any, copy: A
                         "episode itself is otherwise unaffected", exc_info=True)
 
 
-def _grade_job(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any, lane: JobLaneHooks) -> None:
+def _grade_job(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any, lane: JobLaneHooks,
+               copy: Callable[[str], Any] | None = None) -> None:
     """A learning job's grade (#1344, "Judge modes"): the judge's job lane, whose findings wait
     in the episode and whose pass touches no queue. A pass that fails is the job's
     `judge_failed`, never swallowed; its message names only the failure's type. Its return is
@@ -1177,7 +1178,8 @@ def _grade_job(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any, lan
 
     grade = grade_episode if lane.grade is None else lane.grade
     try:
-        graded = grade(runs, episode_id, judge=judge, job_lane=True)
+        # Inside a job container the judge's default copy is the job helper's; a host launch brings its own (#1618 K5).
+        graded = grade(runs, episode_id, judge=judge, job_lane=True, **({} if copy is None else {"copy": copy}))
     except Exception as judge_failed:  # noqa: BLE001 — every failure of the pass is the job's judge_failed
         raise ending(f"[branch] episode {episode_id}: the judge pass failed ({judge_failed!r})",
                      reason=JUDGE_FAILED,
