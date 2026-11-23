@@ -11,7 +11,6 @@ import dataclasses
 import logging
 import os
 import re
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -134,10 +133,12 @@ def test_a_id_o8_the_drain_pushes_with_its_token_and_hands_no_host_secret_to_the
 
 #: Each refusal P3's `TenantDelivery.open` (or the login before it) makes on a tenant that cannot
 #: be delivered to, and what its one critical line must name (regex, lower-cased).
+#: #1618 K8: the `unversioned` cell (the host clone's `.git` removed) is retired with the clone: a drain tick opens a fresh
+#: private bare repository of its own and fetches into it (design "Private repository", Flow 6), so there is no tenant
+#: folder whose versioning a tick could find missing.
 O9_REFUSALS = {
     "host-secret-file": r"secret|credential",
     "forge-wiring": r"forge",
-    "unversioned": r"version|git",
     "local-origin": r"network|origin",
     "unprotected-main": r"protect",
 }
@@ -163,16 +164,13 @@ def _break_tenant(t: Any, config: Path, fault: str) -> None:
         unbind_forge(t)
         return
     if fault == "local-origin":
-        # Whichever of the binding and the clone's configured origin the drain reads, it is a
-        # filesystem path, not a network origin.
+        # The binding's origin is a filesystem path, not a network origin. #1618 K8: there is no clone whose
+        # configured origin a drain could read instead; the binding is the only origin.
         bind_forge(t, origin="/tmp/p4-local-origin.git", generations=t.__dict__["_bound"]["generations"])
-        git(t.clone, "remote", "set-url", "origin", "/tmp/p4-local-origin.git")
         return
     # No rebind: `config` is the file the live generation records, so the fault is the one it names.
     if fault == "host-secret-file":
         config.unlink()
-    elif fault == "unversioned":
-        shutil.rmtree(t.clone / ".git")
     elif fault == "unprotected-main":
         t.forge.protection = {"name": "main", "protected": False, "user_can_push": True}
 

@@ -152,7 +152,9 @@ def test_the_census_lists_every_credential_caller_and_every_admission_site():
     """RC-9: the modules that mint or open a delivery, and the modules that admit a tenant, are named (which private
     function does it is the implementer's); the by-hand revert admits; a new admitting module fails here."""
     credential = {"learning/author/version_control/delivery.py": "forge_credential",
-                  "learning/author/version_control/publish.py": "forge_credential",
+                  # #1618 KD: the publish child is deleted; the fetch child, the one knowledge entry point, mints
+                  # (design Flow 1 "it mints the credential").
+                  "learning/author/version_control/fetch.py": "forge_credential",
                   "learning/core/drains.py": "opened_delivery"}
     for rel, call in credential.items():
         assert _calling(rel, call), f"{rel} no longer reaches the credential through {call}"
