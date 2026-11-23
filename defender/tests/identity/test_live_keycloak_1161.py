@@ -248,6 +248,32 @@ def test_1161_b8_an_otp_sign_in_lists_pwd_and_otp_in_amr_and_a_password_one_only
         live.delete_user(without)
 
 
+def _sign_in_page_says(page: Any) -> dict[str, Any]:
+    """What the product's sign-in form shows: the title, the header, the invite-only line, the username field's label,
+    and whether Keycloak's re-authenticate banner is on the page."""
+    return {"title": page.title(), "header": page.inner_text("#kc-header-wrapper").strip().casefold(),
+            "invite-only": page.locator("#kc-invite-only").count() == 1,
+            "label": page.inner_text("label[for=username]").strip() if page.locator("label[for=username]").count() else None,
+            "banner": "re-authenticate" in page.inner_text("body").casefold()}
+
+
+def test_the_sign_in_form_names_the_product_says_invite_only_and_never_asks_to_re_authenticate(live, person, browser):
+    """The realm's display name and the theme's `login.ftl` and messages: the form is titled for Sluice, asks for an
+    email, says Sluice is invite-only, and a second sign-in of one browser (Keycloak's own session from the first one
+    still open, the API's `prompt=login`) shows no "Please re-authenticate" banner. The stock theme shows it there."""
+    _, name = person
+    page, _, _ = browser.open("first")
+    first = _sign_in_page_says(page)
+    assert first == {"title": "Sign in to Sluice", "header": "sluice", "invite-only": True, "label": "Email",
+                     "banner": False}, first
+    browser.submit(page, name)
+    again, _, _ = browser.open("second")
+    second = _sign_in_page_says(again)
+    assert again.locator("#kc-attempted-username").count() == 1, "the second sign-in did not find the first's session"
+    assert {k: second[k] for k in ("title", "invite-only", "banner")} == {
+        "title": "Sign in to Sluice", "invite-only": True, "banner": False}, second
+
+
 def test_1161_the_credential_list_and_user_record_have_the_shapes_the_fake_models(live, person):
     """What `has_otp` and `require_otp_setup` rely on, and what `FakeKeycloak` answers: the credential list is a list of
     `{id, type, createdDate}`; the user record has `requiredActions`; a `PUT` of it back with one more action is a 204 and reads back. (R11)"""
@@ -289,3 +315,53 @@ def test_1540_f5_the_dev_login_page_links_the_theme_stylesheet_and_serves_it_and
     assert refs, "the theme's stylesheet references its illustration and tokens"
     answers = {ref: httpx.get(urllib.parse.urljoin(sheet_url, ref)).status_code for ref in refs}
     assert set(answers.values()) == {200}, answers
+
+
+def _signin_adapter(live: Live, redirect_uri: str) -> Any:
+    """The API's sign-in adapter as start builds it against this Keycloak (#1620)."""
+    from defender.identity.keycloak import KeycloakSignIn
+
+    issuer = httpx.get(f"{live.realm_url}/.well-known/openid-configuration").json()["issuer"]
+    admin = _client(_realm_export(), "defender-api-admin")
+    return KeycloakSignIn(issuer=issuer, client_id=live.client[0], client_secret=live.client[1],
+                          redirect_uri=redirect_uri, admin_client_id=admin["clientId"],
+                          admin_client_secret=admin["secret"], server_url=live.base)
+
+
+def _probe(adapter: Any) -> str | None:
+    """None if the probe holds, else its refusal."""
+    import anyio
+
+    from defender.identity import SignInUnavailable
+
+    async def run() -> str | None:
+        try:
+            await adapter.probe()
+        except SignInUnavailable as refused:
+            return str(refused)
+        finally:
+            await adapter.close()
+        return None
+
+    return anyio.run(run)
+
+
+def test_1620_the_probe_holds_for_the_registered_callback_and_refuses_another_naming_the_redirect_step(live):
+    """Keycloak answers the browser's sign-in request as the stand-in models it: the realm's registered callback holds;
+    a callback it does not list is refused at the redirect step, naming the client and that callback."""
+    assert _probe(_signin_adapter(live, live.callback)) is None
+    unlisted = "http://localhost:9999/api/auth/callback"
+    message = _probe(_signin_adapter(live, unlisted))
+    assert message is not None, "an unlisted callback passed"
+    assert "redirect step" in message, message
+    assert unlisted in message, message
+    assert live.client[0] in message, message
+
+
+def test_1620_a_request_it_refuses_but_whose_callback_it_trusts_is_sent_back_there_with_an_error(live):
+    """The third answer the stand-in models (#1620 C3): a malformed challenge is sent to the callback with `error`."""
+    answer = httpx.get(live.authorize_url("s", "n", "abc"))
+    assert answer.status_code == 302, answer.status_code
+    location = urllib.parse.urlsplit(answer.headers["location"])
+    assert f"{location.scheme}://{location.netloc}{location.path}" == live.callback, answer.headers["location"]
+    assert urllib.parse.parse_qs(location.query)["error"] == ["invalid_request"], answer.headers["location"]

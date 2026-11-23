@@ -9,6 +9,7 @@ export function Root() {
       <img src={illustration} alt="" width="160" height="160" />
       <h1>Sluice</h1>
       <p>An agent that investigates what your systems raise, so people see the answer first.</p>
+      <p data-note="invite-only">Sluice is invite-only: an administrator invites you by email.</p>
       <a href={literalAddress("home")} data-action="sign-in">
         Sign in
       </a>

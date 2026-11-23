@@ -566,6 +566,15 @@ class TenantRef(BaseModel):
     tenant_id: TenantId
 
 
+class Repository(BaseModel):
+    """Where a browser opens the tenant's knowledge repository on the forge."""
+
+    repo_url: str | None = Field(
+        description="The repository's page the lifecycle recorded on the tenant (`<forge public url>/<repo>`), when "
+                    "it is an http or https address with a host and no user part, query or fragment, on another origin "
+                    "than the app's. Null when none is recorded or it is not such an address.")
+
+
 class TenantItem(BaseModel):
     """A tenant and its one job, as an administrator sees it (#1214): the state, the pending action,
     the current step and whose it is, and the last failure (which names the step and the external

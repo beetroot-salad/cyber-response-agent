@@ -74,6 +74,11 @@ export interface Load {
   readonly client: Client;
   /** Sign in again from the failed screen: records an attempt when storage allows, then leaves for the sign-in. */
   readonly signIn: (returns: readonly string[]) => void;
+  /** A way out of the app to `address`: a function that leaves for it by replace (nothing once the load is already
+   * leaving), when it is an http or https address with no user part on another origin than the page's, so never one
+   * of the app's own addresses; otherwise null. Pure: it only leaves when the function is called. The API serves an
+   * outside address only after its own, fuller check; this is the shell's guard on what a screen hands it. */
+  readonly outbound: (address: string) => (() => void) | null;
   readonly supersede: Exit["supersede"];
   readonly mayShow: Exit["mayShow"];
 }
@@ -286,6 +291,24 @@ export function makeLoad(options: LoadOptions): Load {
     }
   }
 
+  const appOrigin = new URL(origin).origin;
+  function outbound(address: string): (() => void) | null {
+    let url: URL;
+    try {
+      url = new URL(address);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.username !== "" || url.password !== "" || url.origin === appOrigin) return null;
+    const page = url.href;
+    return () => {
+      exit.leave(() => {
+        effects.replace(page);
+      });
+    };
+  }
+
   const wiring: Wiring = { origin, effects, exit, unauthorized };
   const clientWith = (on401: On401): Api => clientFor(on401, wiring);
   return {
@@ -295,6 +318,7 @@ export function makeLoad(options: LoadOptions): Load {
       exit,
       effects,
     ),
+    outbound,
     signIn: (returns) => {
       // The values are handed to the sign-in route unjudged: the API judges them.
       exit.leave(() => {

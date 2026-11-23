@@ -80,8 +80,8 @@ _log = logging.getLogger(__name__)
 _OWN_MESSAGE = (RevisionMismatch, DatabaseUnreachable, SignInUnavailable, BootstrapRefused)
 
 
-#: How long any start step may take before it refuses naming itself: well past a healthy step (a probe's four
-#: requests time out at 10 s each), so a dependency that accepts and then never answers ends the start in words.
+#: How long any start step may take before it refuses naming itself: well past a healthy step (the sign-in probe's
+#: five requests, the programs probe's four, each with a 10 s timeout per phase), so a dependency that accepts and then never answers ends the start in words.
 STEP_SECONDS = 60.0
 
 

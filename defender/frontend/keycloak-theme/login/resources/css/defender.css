@@ -30,3 +30,8 @@ body,
 .pf-v5-c-form-control {
   border-color: var(--app-line);
 }
+#kc-invite-only {
+  margin: 0;
+  text-align: center;
+  color: var(--app-muted);
+}

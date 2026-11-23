@@ -41,6 +41,7 @@ from defender.tests.support.api._server1083 import A, ANN, B, BOB
 from defender.tests.support.api._signin1161 import link_account
 from defender.tests.support.frontend._browser1161 import abort_login_navigation, path_is, run_async
 from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, PADDED_ALERT_BYTES, TITLE
+from defender.tests.support.tenancy._active1214 import record_repo_page
 
 ZONE = "Europe/Paris"
 NEW_YORK = "America/New_York"
@@ -876,25 +877,32 @@ def test_alert_list_o4_signed_out_the_alerts_address_returns_to_its_path_without
 # --- O8, O9: Home ----------------------------------------------------------------------------------------------------
 
 def test_alert_list_o8_home_links_a_persons_one_tenant_as_alerts_and_it_opens_the_screen(world, context):
-    """Ann (tenant A only): one link labelled "Alerts" to A's alerts address, which opens the alerts screen; no
-    invite-only text, no invitation line, no Defender. (O8, O9)"""
+    """Ann (tenant A only): Home's tenant links are the cards' "Open alerts" to A's alerts address, which opens the
+    alerts screen, and "Open repo" to A's repository address; no tenant heading, no invite-only text, no invitation line, no Defender. (O8, O9; home redesign:
+    the link is a card's, and the top bar holds its own)"""
     sign_in(world, context)
     page = _home(world, context)
-    links = page.locator('a[href^="/t/"]')
-    assert [(link.get_attribute("href"), _plain(link.inner_text())) for link in links.all()] == [(ALERTS, "Alerts")]
+    links = page.locator('main a[href^="/t/"]')
+    assert [(link.get_attribute("href"), _plain(link.inner_text())) for link in links.all()] == [
+        (ALERTS, "Open alerts"), (f"/t/{A}/repo", "Open repo")]
+    assert page.locator("main h2").all_inner_texts() == ["Alerts", "Knowledge repo"]  # no tenant heading
     text = _plain(page.locator("body").inner_text())
     assert "invite-only" not in text and "invited to a team" not in text
     _no_defender(page)
-    links.click()
+    page.locator('main [data-action="open-alerts"]').click()
     screen(page, "alerts")
 
 
 def test_alert_list_o8_home_labels_each_of_several_tenants_alerts_with_the_tenant_id(world, browser):
-    """Ann in A and B: one link each, "Alerts — <tenant id>". (O8)"""
+    """Ann in A and B: each tenant's cards under a heading of its id, each with its own "Open alerts". (O8; home
+    redesign)"""
     run_async(_person, world.dsn, ANN, (B,))
     page = _home(world, _signed_in(browser, world))
-    found = {link.get_attribute("href"): _plain(link.inner_text()) for link in page.locator('a[href^="/t/"]').all()}
-    assert found == {ALERTS: f"Alerts — {A}", ALERTS_OF_B: f"Alerts — {B}"}
+    found = {}
+    for tenant in page.locator("main li[data-tenant]").all():
+        link = tenant.locator('[data-action="open-alerts"]')
+        found[_plain(tenant.locator("h2").inner_text())] = (link.get_attribute("href"), _plain(link.inner_text()))
+    assert found == {A: (ALERTS, "Open alerts"), B: (ALERTS_OF_B, "Open alerts")}
 
 
 def test_alert_list_o8_home_lists_each_open_invitation_with_an_accept_button_and_no_invite_only_text(world, browser):
@@ -915,8 +923,8 @@ def test_alert_list_o8_home_shows_the_tenants_alerts_link_then_the_invitation_li
     run_async(_person, world.dsn, ANN, (), (B,))
     page = _home(world, _signed_in(browser, world))
     page.get_by_role("button", name="Accept", exact=True).wait_for()
-    text = _plain(page.locator("body").inner_text())
-    assert text.index("Alerts") < text.index("You've been invited to a team") and "invite-only" not in text
+    text = _plain(page.locator("main").inner_text())
+    assert text.index("Open alerts") < text.index("You've been invited to a team") and "invite-only" not in text
 
 
 def test_alert_list_o8_o9_home_with_no_tenant_and_no_invitation_says_sluice_is_invite_only(world, browser):
@@ -930,6 +938,67 @@ def test_alert_list_o8_o9_home_with_no_tenant_and_no_invitation_says_sluice_is_i
     assert page.locator('a[href^="/t/"]').count() == 0
     assert page.get_by_role("button", name="Accept", exact=True).count() == 0
     _no_defender(page)
+
+
+# --- Home redesign: the top bar's links and the repository address -----------------------------------------------------
+
+FORGE_PAGE = "http://forge.test/tenants/a"
+
+
+def _nav(page: Any) -> list[tuple[str, str | None, str | None]]:
+    """The top bar's links, in order: (text, href, aria-current)."""
+    links = page.locator('header[data-bar="top"] nav a').all()
+    return [(_plain(link.inner_text()), link.get_attribute("href"), link.get_attribute("aria-current"))
+            for link in links]
+
+
+def test_home_the_top_bar_links_home_the_tenants_alerts_and_its_repository_address_and_marks_home(world, context):
+    """Ann (A only), on Home: Home (current), A's Alerts and A's repository address, all the app's own; the repo
+    card's "Open repo" is the same address."""
+    sign_in(world, context)
+    page = _home(world, context)
+    repo = f"/t/{A}/repo"
+    assert _nav(page) == [("Home", "/home", "page"), ("Alerts", ALERTS, None), ("Knowledge repo", repo, None)]
+    assert page.locator('main [data-action="open-repo"]').get_attribute("href") == repo
+
+
+def test_home_the_top_bar_on_the_alerts_screen_marks_alerts_and_names_the_tenant_in_the_address(world, browser):
+    """Ann in A and B: on Home the bar has only Home (no tenant in view); on B's alerts its links are B's, Alerts
+    marked current."""
+    run_async(_person, world.dsn, ANN, (B,))
+    page = _home(world, _signed_in(browser, world))
+    assert _nav(page) == [("Home", "/home", "page")]
+    page.goto(f"{world.origin}{ALERTS_OF_B}")
+    screen(page, "alerts")
+    assert _nav(page) == [("Home", "/home", None), ("Alerts", ALERTS_OF_B, "page"),
+                          ("Knowledge repo", f"/t/{B}/repo", None)]
+
+
+def test_home_open_repo_sends_the_person_to_the_recorded_page_and_back_returns_home(world, context):
+    """With A's page recorded, "Open repo" lands on the forge's page, which replaced the repository address: Back
+    returns to Home."""
+    record_repo_page(world.dsn, A, FORGE_PAGE)
+    context.route("http://forge.test/**", lambda route: route.fulfill(status=200, body="the forge", content_type="text/plain"))
+    sign_in(world, context)
+    page = _home(world, context)
+    page.locator('main [data-action="open-repo"]').click()
+    page.wait_for_url(FORGE_PAGE)
+    page.go_back()
+    screen(page, "home")
+    assert where(page) == ("/home", {})
+
+
+@pytest.mark.parametrize("recorded", [None, "ssh://git@forge.test/tenants/a"], ids=["none-recorded", "not-a-web-page"])
+def test_home_the_repository_address_with_nothing_to_open_says_so_and_stays(world, context, recorded):
+    """Nothing recorded, or a value the API will not serve as a page: the address says there is no repository to
+    link to, and the browser goes nowhere."""
+    record_repo_page(world.dsn, A, recorded)
+    sign_in(world, context)
+    page = context.new_page()
+    page.goto(f"{world.origin}/t/{A}/repo")
+    screen(page, "repo")
+    page.get_by_text("This tenant has no repository Sluice can link to.").wait_for()
+    assert where(page) == (f"/t/{A}/repo", {})
 
 
 # --- O11: accept an invitation ---------------------------------------------------------------------------------------

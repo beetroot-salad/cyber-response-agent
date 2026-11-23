@@ -1,40 +1,68 @@
-// The signed-in home (F4; alert list design O8, O11): who is signed in, a link to each of their tenants' alerts, each
-// open invitation with Accept, and with neither, that Sluice is invite-only. A sign-out.
+// The signed-in home (F4; alert list design O8, O11, amended by the home redesign): for each of the person's tenants,
+// a card that opens its alerts and a card that opens its knowledge repository (through the app's `/t/<tenant>/repo`,
+// which sends the person on to the forge); each open invitation with Accept; and with neither, that Sluice is
+// invite-only. With several tenants, each tenant's cards sit under its id. Who is signed in, and sign-out, are in the
+// top bar.
 import { useState } from "react";
 import { addressOf } from "../addresses";
 import { useActions, useMe, type AcceptResult, type Person } from "../shell/provider";
+import { TopBar } from "./TopBar";
 
 export function Home() {
   const me = useMe();
-  const actions = useActions();
   const lone = me.tenants.length === 1;
   return (
-    <main data-screen="home">
-      <h1>Home</h1>
-      <p>
-        Signed in as <span data-field="email">{me.user.email}</span>
-      </p>
-      {me.tenants.length > 0 ? (
-        <ul data-list="tenants">
-          {me.tenants.map(({ tenant_id }) => (
-            <li key={tenant_id}>
-              <a href={addressOf("alerts", [tenant_id])}>{lone ? "Alerts" : `Alerts — ${tenant_id}`}</a>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {me.invitations.length > 0 ? (
-        <ul data-list="invitations">
-          {me.invitations.map((invitation) => (
-            <Invitation key={invitation.id} id={invitation.id} />
-          ))}
-        </ul>
-      ) : null}
-      {me.tenants.length === 0 && me.invitations.length === 0 ? <InviteOnly me={me} /> : null}
-      <button type="button" data-action="sign-out" onClick={() => actions.signOut()}>
-        Sign out
-      </button>
-    </main>
+    <>
+      <TopBar current="home" />
+      <main data-screen="home">
+        <h1>Home</h1>
+        {me.tenants.length > 0 ? (
+          <ul data-list="tenants">
+            {me.tenants.map(({ tenant_id }) => (
+              <Tenant key={tenant_id} tenant={tenant_id} lone={lone} />
+            ))}
+          </ul>
+        ) : null}
+        {me.invitations.length > 0 ? (
+          <ul data-list="invitations">
+            {me.invitations.map((invitation) => (
+              <Invitation key={invitation.id} id={invitation.id} />
+            ))}
+          </ul>
+        ) : null}
+        {me.tenants.length === 0 && me.invitations.length === 0 ? <InviteOnly me={me} /> : null}
+      </main>
+    </>
+  );
+}
+
+/** One tenant's cards: its alerts, and its knowledge repository. Under the tenant's id when the person has several. */
+function Tenant({ tenant, lone }: { readonly tenant: string; readonly lone: boolean }) {
+  // Under the page's h1, or under the tenant's h2 when there are several: no heading level skipped.
+  const Title = lone ? "h2" : "h3";
+  return (
+    <li data-tenant={tenant}>
+      {lone ? null : <h2 data-field="tenant">{tenant}</h2>}
+      <div data-cards="tenant">
+        <section data-card="alerts">
+          <Title data-field="card-title">Alerts</Title>
+          <p>Every alert pulled from your ticket system, with what Sluice concluded.</p>
+          <a href={addressOf("alerts", [tenant])} data-action="open-alerts">
+            Open alerts
+          </a>
+        </section>
+        <section data-card="repo">
+          <Title data-field="card-title">Knowledge repo</Title>
+          <p>
+            What Sluice has learned about your environment, kept as files. A change takes effect once someone on your
+            team merges it, and Sluice asks for feedback there as issues you answer in a comment.
+          </p>
+          <a href={addressOf("repo", [tenant])} data-action="open-repo">
+            Open repo
+          </a>
+        </section>
+      </div>
+    </li>
   );
 }
 

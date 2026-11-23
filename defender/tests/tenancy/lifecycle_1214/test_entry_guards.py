@@ -297,3 +297,14 @@ def test_each_integration_is_created_with_exactly_the_write_repository_and_write
     [made] = [c for c in world.integration.created if c["user"] == gen.bot_login]
     scopes = [part for value in made["scopes"] for part in value.split(",")]  # repeated flags or one comma list
     assert sorted(scopes) == ["write:issue", "write:repository"]
+
+
+@pytest.mark.parametrize("public", ["forge.example", "ftp://forge.example", "https://bot:secret@forge.example",
+                                    "https://forge.example?x=1", "https://forge.example#x", "https:///x",
+                                    "https://forge.example/a b"])
+def test_a_public_forge_address_that_is_not_a_plain_http_url_is_refused(tmp_path, data_root, public):
+    """`forge_public_url` is the one rule for an absolute http(s) URL: a host, no credentials, query, fragment or
+    whitespace (home redesign); a path is allowed (a forge served under one)."""
+    _refused(tmp_path, data_root, forge_public_url=public)
+    assert lifecycle_config(tmp_path, data_root, forge_public_url="https://forge.example/git").forge_page_base == \
+        "https://forge.example/git"

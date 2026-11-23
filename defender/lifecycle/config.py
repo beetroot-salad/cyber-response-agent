@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from defender import _io
+from defender._url import split_http_url
 from defender.configuration.issuer import ISSUER_URL, OPENBAO_URL
 
 #: The environment `from_env` reads (the dev container and the hosted units set them). The issuer
@@ -18,6 +19,7 @@ from defender.configuration.issuer import ISSUER_URL, OPENBAO_URL
 #: read from the environment; OpenBao's certificate is trusted where the TLS client looks by
 #: default, as for every other host process (no setting of the lifecycle's own).
 FORGE_URL_ENV = "DEFENDER_LIFECYCLE_FORGE_URL"
+FORGE_PUBLIC_URL_ENV = "DEFENDER_LIFECYCLE_FORGE_PUBLIC_URL"
 FORGE_TOKEN_FILE_ENV = "DEFENDER_LIFECYCLE_FORGE_ADMIN_TOKEN_FILE"
 OPENBAO_LOGIN_FILE_ENV = "DEFENDER_LIFECYCLE_OPENBAO_LOGIN_FILE"
 INTEGRATION_ENV = "DEFENDER_LIFECYCLE_INTEGRATION_CONTAINER"
@@ -47,7 +49,11 @@ class LifecycleConfig:
     long teardown waits for the host lock after SIGTERM before SIGKILL, and how long it then keeps removing a folder
     that late writes keep filling before it fails the step (seconds each, #1360). `oidc_key` is the
     deployment's OIDC signing key; `token_policy` and `sign_policy` are its two templated policies,
-    of each generation's delivery AppRole and of its sign-only AppRole (#1163 A24')."""
+    of each generation's delivery AppRole and of its sign-only AppRole (#1163 A24').
+    `forge_public_url` is the forge's address as a browser reaches it, when it is not `forge_url` (which the
+    lifecycle's own calls and the clone's origin use, and may be an internal service name): a tenant's recorded
+    repository page, `repo_url`, is `<forge_public_url>/<repo>`, which the app's Knowledge repo link opens (home
+    redesign). Unset, it is `forge_url`."""
 
     issuer_url: str = ISSUER_URL
     forge_url: str
@@ -64,6 +70,7 @@ class LifecycleConfig:
     oidc_key: str = "default"
     token_policy: str = "defender-tenant-token"
     sign_policy: str = "defender-tenant-sign"
+    forge_public_url: str | None = None
 
     def __post_init__(self) -> None:
         for name in ("template_dir", "secrets_dir", "data_root"):
@@ -75,6 +82,7 @@ class LifecycleConfig:
             parsed = urlsplit(getattr(self, name))
             if parsed.scheme not in schemes or not parsed.hostname or parsed.username or parsed.password:
                 raise ConfigRefused(f"{name} {getattr(self, name)!r} must be an {'/'.join(schemes)} address with no credentials")
+        _check_public_url(self.forge_public_url)
         if not self.forge_admin_token or not self.openbao_login or not self.integration_command:
             raise ConfigRefused("the forge admin token, the OpenBao login and the integration command are required")
         if not (self.poll_interval > 0 and self.lock_keepalive > 0 and self.teardown_wait > 0):
@@ -106,7 +114,23 @@ class LifecycleConfig:
             openbao_login=_secret_file(os.environ[OPENBAO_LOGIN_FILE_ENV], OPENBAO_LOGIN_FILE_ENV),
             integration_command=os.environ[INTEGRATION_ENV], template_dir=template_dir,
             secrets_dir=Path(os.environ[SECRETS_DIR_ENV]), data_root=Path(os.environ[DATA_ROOT_ENV]),
-            poll_interval=poll)
+            poll_interval=poll, forge_public_url=os.environ.get(FORGE_PUBLIC_URL_ENV) or None)
+
+    @property
+    def forge_page_base(self) -> str:
+        """Where a browser reaches the forge: `forge_public_url`, else `forge_url`, without a trailing slash."""
+        return (self.forge_public_url or self.forge_url).rstrip("/")
+
+
+def _check_public_url(value: str | None) -> None:
+    """`forge_public_url`, when set, is an absolute http(s) URL with a host and no credentials, query, fragment or
+    whitespace (a path is allowed): the one rule for such a URL."""
+    if value is None:
+        return
+    try:
+        split_http_url(value)
+    except ValueError as refused:
+        raise ConfigRefused(f"{FORGE_PUBLIC_URL_ENV} {value!r} {refused}") from None
 
 
 def _secret_file(path: str, variable: str) -> str:
