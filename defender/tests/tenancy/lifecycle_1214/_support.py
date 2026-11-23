@@ -56,13 +56,16 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 KEYCLOAK_SOURCE_ID = 7
 FORGE_SESSIONS_DSN = "postgresql://fs_lifecycle_login@sessions.test:5432/forgejo_sessions"
+#: The forge as a browser reaches it (required since the #1592 finalize): the fakes' forge, as the tests' browser has it.
+FORGE_PUBLIC_URL = FORGE_URL
 
 
 def people_settings(settings: Any, sessions_dsn: str = FORGE_SESSIONS_DSN) -> list[tuple[str, str]]:
-    """The two settings #1592 makes required (r15 Settings: `keycloak_source_id`, `forge_sessions_dsn`), as the
-    environment variables a process-entry case sets (`KEYCLOAK_SOURCE_ID_ENV`, `FORGE_SESSIONS_DSN_ENV`). The default
-    DSN is unreachable: a case that starts the real `_serve` and never reaches the sessions database needs no more."""
-    return [(settings.KEYCLOAK_SOURCE_ID_ENV, str(KEYCLOAK_SOURCE_ID)), (settings.FORGE_SESSIONS_DSN_ENV, sessions_dsn)]
+    """The settings #1592 makes required (r15 Settings: `keycloak_source_id`, `forge_sessions_dsn`; finalize:
+    `forge_public_url`), as the environment variables a process-entry case sets. The default DSN is unreachable: a case
+    that starts the real `_serve` and never reaches the sessions database needs no more."""
+    return [(settings.KEYCLOAK_SOURCE_ID_ENV, str(KEYCLOAK_SOURCE_ID)), (settings.FORGE_SESSIONS_DSN_ENV, sessions_dsn),
+            (settings.FORGE_PUBLIC_URL_ENV, FORGE_PUBLIC_URL)]
 
 
 def lifecycle_config(tmp_path: Path, data_root: Path, **overrides: Any) -> Any:
@@ -78,6 +81,7 @@ def lifecycle_config(tmp_path: Path, data_root: Path, **overrides: Any) -> Any:
         # #1592: the two required fields of the people worker (OD-4, OD-12): the Keycloak login source's id and the
         # login of a member of `fs_lifecycle` on the sessions database (no test reaches it unless it says so).
         "keycloak_source_id": KEYCLOAK_SOURCE_ID, "forge_sessions_dsn": FORGE_SESSIONS_DSN,
+        "forge_public_url": FORGE_PUBLIC_URL,
     }
     return LifecycleConfig(**{**fields, **overrides})
 

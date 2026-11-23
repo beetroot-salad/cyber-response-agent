@@ -8,8 +8,8 @@ reads them from the environment, the listen address split into its host and port
 The ingress always serves plain HTTP on `DEFENDER_INGRESS_LISTEN`: TLS, when there is any, ends in front of it. It never
 learns the public origin, so Caddy's automatic HTTPS has nothing to act on (and is off besides).
 
-Two of the inputs are the Forgejo site's (#1592 OD-1, OD-3): `DEFENDER_FORGE_DOMAIN`, the host it answers on (the API's
-own setting, parsed by the same function), and `DEFENDER_INGRESS_FORGE_UPSTREAM`, Forgejo's private `host:port`. On that
+Two of the inputs are the Forgejo site's (#1592 OD-1, OD-3): `DEFENDER_FORGE_DOMAIN`, the host it answers on (parsed as the
+artifact domain is), and `DEFENDER_INGRESS_FORGE_UPSTREAM`, Forgejo's private `host:port`. On that
 host the Caddyfile forwards only its allowlist; on any other host the app is served as before."""
 
 from __future__ import annotations

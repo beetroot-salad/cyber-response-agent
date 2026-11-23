@@ -109,7 +109,7 @@ def _config(tmp_path, **fields):
 
     base = {"issuer_url": ISSUER_URL, "forge_url": FORGE_URL, "forge_admin_token": "t", "openbao_url": OPENBAO_URL,
             "openbao_login": "l", "integration_command": "x", "template_dir": template_dir(REPO_ROOT),
-            "secrets_dir": tmp_path / "secrets", "data_root": tmp_path / "data"}
+            "secrets_dir": tmp_path / "secrets", "data_root": tmp_path / "data", "forge_public_url": FORGE_URL}
     return LifecycleConfig(**{**base, **fields})
 
 

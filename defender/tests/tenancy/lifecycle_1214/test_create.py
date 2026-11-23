@@ -402,12 +402,9 @@ def test_a_failure_text_carries_no_minted_token_a_git_server_repeats(world):
 
 # --- Home redesign: the repository page a browser opens -----------------------------------------------------------
 
-def test_create_records_the_repository_page_on_the_forge_address_unless_a_public_one_is_set(world):
-    """Unset, `repo_url` is `<forge_url>/<repo>`; with `forge_public_url` (the forge as a browser reaches it) it is
-    `<forge_public_url>/<repo>`, a trailing slash dropped, while the clone's origin stays on `forge_url`."""
-    first = world.active_tenant()
-    repo = world.call(world.tenants.forge_wiring, first).repo
-    assert world.record(first).repo_url == f"{FORGE_URL}/{repo}"
+def test_create_records_the_repository_page_on_the_public_forge_address(world):
+    """`repo_url` is `<forge_public_url>/<repo>` (the forge as a browser reaches it, required since the #1592 finalize),
+    a trailing slash dropped, while the clone's origin stays on `forge_url`."""
     public = lifecycle_config(world.tmp_path, world.data_root, forge_public_url="https://forge.example/")
     world.service_actor = world.new_service(world.tenants, identity=world.service, config=public)
     second = world.active_tenant()

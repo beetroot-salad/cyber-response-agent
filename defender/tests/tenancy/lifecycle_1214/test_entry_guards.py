@@ -308,3 +308,15 @@ def test_a_public_forge_address_that_is_not_a_plain_http_url_is_refused(tmp_path
     _refused(tmp_path, data_root, forge_public_url=public)
     assert lifecycle_config(tmp_path, data_root, forge_public_url="https://forge.example/git").forge_page_base == \
         "https://forge.example/git"
+
+
+def test_a_lifecycle_without_a_public_forge_address_is_refused_naming_it(tmp_path, monkeypatch):
+    """#1592 finalize (#1623 review): `DEFENDER_LIFECYCLE_FORGE_PUBLIC_URL` is required. Unset, the repository page
+    would be recorded on `forge_url`, which may be a service name no browser reaches, or the forge's private address."""
+    from defender._git import REPO_ROOT
+    from defender.lifecycle import ConfigRefused, LifecycleConfig
+    from defender.lifecycle import config as settings
+
+    monkeypatch.delenv(settings.FORGE_PUBLIC_URL_ENV, raising=False)
+    with pytest.raises(ConfigRefused, match=settings.FORGE_PUBLIC_URL_ENV):
+        LifecycleConfig.from_env(template_dir=REPO_ROOT)

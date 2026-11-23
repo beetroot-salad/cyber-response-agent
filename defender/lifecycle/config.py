@@ -57,10 +57,10 @@ class LifecycleConfig:
     deployment's OIDC signing key; `token_policy` and `sign_policy` are its two templated policies,
     of each generation's delivery AppRole and of its sign-only AppRole (#1163 A24').
 
-    `forge_public_url` is the forge's address as a browser reaches it, when it is not `forge_url` (which the
-    lifecycle's own calls and the clone's origin use, and may be an internal service name): a tenant's recorded
-    repository page, `repo_url`, is `<forge_public_url>/<repo>`, which the app's Knowledge repo link opens (home
-    redesign). Unset, it is `forge_url`.
+    `forge_public_url` is the forge's address as a browser reaches it (since #1592 the edge's Forgejo site), required
+    because `forge_url` (which the lifecycle's own calls and the clone's origin use) may be an internal service name a
+    browser cannot reach: a tenant's recorded repository page, `repo_url`, is `<forge_public_url>/<repo>`, which the
+    app's Knowledge repo link opens (home redesign) and an adoption's pull-request link extends.
 
     The people worker (#1592): `keycloak_source_id` is Forgejo's sign-in login source, `forge_sessions_dsn` a login of
     `fs_lifecycle` on the Forgejo sessions database; `people_poll` the wait between its polls, `people_concurrency` the
@@ -82,7 +82,7 @@ class LifecycleConfig:
     oidc_key: str = "default"
     token_policy: str = "defender-tenant-token"
     sign_policy: str = "defender-tenant-sign"
-    forge_public_url: str | None = None
+    forge_public_url: str
     keycloak_source_id: int
     forge_sessions_dsn: str = field(repr=False)
     people_poll: float = 2.0
@@ -135,7 +135,8 @@ class LifecycleConfig:
         """The config of `python -m defender.lifecycle`, from the environment (secrets from the
         files it names)."""
         missing = [n for n in (FORGE_URL_ENV, FORGE_TOKEN_FILE_ENV, OPENBAO_LOGIN_FILE_ENV, INTEGRATION_ENV,
-                               SECRETS_DIR_ENV, DATA_ROOT_ENV, KEYCLOAK_SOURCE_ID_ENV, FORGE_SESSIONS_DSN_ENV)
+                               SECRETS_DIR_ENV, DATA_ROOT_ENV, KEYCLOAK_SOURCE_ID_ENV, FORGE_SESSIONS_DSN_ENV,
+                               FORGE_PUBLIC_URL_ENV)
                    if not os.environ.get(n)]
         if missing:
             raise ConfigRefused(f"set {', '.join(missing)}")
@@ -149,20 +150,18 @@ class LifecycleConfig:
             openbao_login=_secret_file(os.environ[OPENBAO_LOGIN_FILE_ENV], OPENBAO_LOGIN_FILE_ENV),
             integration_command=os.environ[INTEGRATION_ENV], template_dir=template_dir,
             secrets_dir=Path(os.environ[SECRETS_DIR_ENV]), data_root=Path(os.environ[DATA_ROOT_ENV]),
-            poll_interval=poll, forge_public_url=os.environ.get(FORGE_PUBLIC_URL_ENV) or None,
+            poll_interval=poll, forge_public_url=os.environ[FORGE_PUBLIC_URL_ENV],
             keycloak_source_id=source_id_from_env(), forge_sessions_dsn=os.environ[FORGE_SESSIONS_DSN_ENV])
 
     @property
     def forge_page_base(self) -> str:
-        """Where a browser reaches the forge: `forge_public_url`, else `forge_url`, without a trailing slash."""
-        return (self.forge_public_url or self.forge_url).rstrip("/")
+        """Where a browser reaches the forge: `forge_public_url` without a trailing slash."""
+        return self.forge_public_url.rstrip("/")
 
 
-def _check_public_url(value: str | None) -> None:
-    """`forge_public_url`, when set, is an absolute http(s) URL with a host and no credentials, query, fragment or
-    whitespace (a path is allowed): the one rule for such a URL."""
-    if value is None:
-        return
+def _check_public_url(value: str) -> None:
+    """`forge_public_url` is an absolute http(s) URL with a host and no credentials, query, fragment or whitespace (a
+    path is allowed): the one rule for such a URL."""
     try:
         split_http_url(value)
     except ValueError as refused:

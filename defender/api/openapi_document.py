@@ -22,7 +22,6 @@ def produce() -> dict[str, Any]:
     """The document `create_app` produces over a placeholder for every dependency."""
     deps: dict[str, Any] = {field.name: object() for field in dataclasses.fields(ApiDeps)}
     deps["frontend_origin"] = "http://localhost:1"
-    deps["forge_domain"] = "forge.localhost"
     return create_app(ApiDeps(**deps)).openapi()
 
 

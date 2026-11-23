@@ -43,8 +43,6 @@ class Settings:
     host: str
     port: int
     frontend_origin: str
-    #: The Forgejo site's public hostname (#1592): adoption's pull-request links are served under it.
-    forge_domain: str
     administrators: Bootstrap
     keycloak_server_url: str
     signin_issuer: str
@@ -82,7 +80,6 @@ class Settings:
             host=text("DEFENDER_API_HOST"),
             port=parsed("DEFENDER_API_PORT", _port),
             frontend_origin=parsed("DEFENDER_API_FRONTEND_ORIGIN", origin),
-            forge_domain=parsed("DEFENDER_FORGE_DOMAIN", artifact_domain),
             administrators=_administrators("DEFENDER_API_ADMINISTRATORS_FILE", text("DEFENDER_API_ADMINISTRATORS_FILE")),
             keycloak_server_url=parsed("DEFENDER_KEYCLOAK_SERVER_URL", check_server_url),
             signin_issuer=parsed("DEFENDER_KEYCLOAK_ISSUER", check_issuer),
@@ -131,7 +128,7 @@ def _port(value: str) -> int:
 def artifact_domain(value: str) -> str:
     """A bare lowercase hostname (dot-separated labels of ASCII letters, digits and hyphens): no scheme, port, path,
     wildcard or surrounding text. The one owner of a public hostname setting's shape: the artifact domain (S5) and the
-    Forgejo site's domain, `DEFENDER_FORGE_DOMAIN` (#1592), which the API and the ingress both parse with it."""
+    Forgejo site's domain, the ingress's `DEFENDER_FORGE_DOMAIN` (#1592)."""
     if not is_hostname(value):
         raise ValueError("must be a bare lowercase hostname: no scheme, port, path, wildcard or empty label")
     return value
