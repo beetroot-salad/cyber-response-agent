@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from defender.tests.support.api._config1470 import TICKET, TOKEN, ScriptedOpenBao, problem_text, served_config
-from defender.tests.support.api._server1083 import FORGE_DOMAIN, ORIGIN, A, B, person
+from defender.tests.support.api._server1083 import ORIGIN, A, B, person
 from defender.tests.support.jobs._host_requests1471 import (
     ADOPTION,
     FRESH,
@@ -39,7 +39,17 @@ async def scripted(request, migrated_database: str, tmp_path):
     """The real server started over a planted checkout (`$DEFENDER_DIR`), so which adapter ships base files is the test's."""
     request.getfixturevalue("planted_checkout")  # before the server builds its catalog
     async with served_config(migrated_database, tmp_path, scripted=ScriptedOpenBao()) as configured:
+        record_repo_page(configured.dsn, A, REPO_PAGE_A)
         yield configured
+
+
+#: Tenant A's repository page as the lifecycle records it (`tenancy.tenants.repo_url`, `<forge public URL>/<repo>`): a
+#: dev-shaped one, plain http with a port, so a link built from a hostname alone would miss it.
+REPO_PAGE_A = f"http://forge.defender.test:8000/t-{A}/knowledge"
+
+
+def record_repo_page(dsn: str, tenant: str, page: str | None) -> None:
+    execute(dsn, "UPDATE tenancy.tenants SET repo_url = %s WHERE id = %s", (page, tenant))
 
 
 C = fixture_uuid("1471:tenant-c")
@@ -91,9 +101,10 @@ def forge_origin(dsn: str, tenant: str) -> str:
 
 
 def pr_page(tenant: str, number: int) -> str:
-    """#1592 (amends #1471 A3): the pull request's page on the public Forgejo site, in the tenant's repository
-    `t-<T>/knowledge` (the wiring's CHECK), never on the wiring's private origin."""
-    return f"https://{FORGE_DOMAIN}/t-{tenant}/knowledge/pulls/{number}"
+    """#1592 (amends #1471 A3; finalize, #1623 review): the pull request's page is the tenant's recorded repository page
+    (the one the Knowledge repo link opens) plus `/pulls/<n>`, never the wiring's private origin."""
+    assert tenant == A, "only tenant A has a recorded repository page"
+    return f"{REPO_PAGE_A}/pulls/{number}"
 
 
 # --- R1: start ------------------------------------------------------------------------------------------------------
@@ -366,7 +377,7 @@ async def test_r13_2_once_the_tenant_is_not_active_a_completed_poll_serves_the_k
 
 
 async def test_a2_an_adoption_poll_never_asks_the_secret_store_and_builds_pr_url_from_the_wiring_and_the_number(scripted):
-    """`pr_url` is `https://<DEFENDER_FORGE_DOMAIN>/t-<T>/knowledge/pulls/<n>` for an outcome with a number, null for
+    """`pr_url` is the tenant's recorded repository page plus `/pulls/<n>` for an outcome with a number, null for
     `nothing_to_adopt`; the sealed store changes nothing. (A2, A3, R13-2, #1592)"""
     origin = forge_origin(scripted.dsn, A).removesuffix(".git")
     opened = plant(scripted.dsn, A, "adoption", system=TICKET, stage="completed", result={"outcome": "opened", "pr_number": 17})
@@ -388,7 +399,7 @@ async def test_a2_an_adoption_poll_never_asks_the_secret_store_and_builds_pr_url
 
 
 async def test_r13_2_an_adoption_poll_for_a_tenant_with_no_forge_wiring_serves_pr_url_null_and_never_fails(scripted):
-    """No wiring recorded: the read is 200 with `pr_url` null, number or not. (R13-2)"""
+    """No wiring, and so no repository page, recorded: the read is 200 with `pr_url` null, number or not. (R13-2)"""
     register_tenant(scripted.dsn, C, records=None, wiring=False)
     rid = plant(scripted.dsn, C, "adoption", system=TICKET, stage="completed", result={"outcome": "opened", "pr_number": 9})
     served = await poll(scripted, "adoption", rid, tenant=C, admin=True)
@@ -442,3 +453,14 @@ async def test_b1_the_admin_reads_the_rows_an_offboard_ended_and_a_tenant_member
     assert ended["systems_without_credentials"] is None
     assert (await poll(scripted, "readiness", rid)).status_code == 404
     assert len(host_rows(scripted.dsn)) == 1
+
+
+@pytest.mark.parametrize("page", [None, f"{ORIGIN}/t/x/knowledge", "javascript:alert(1)", "forgejo:3000/t/knowledge"])
+async def test_a_recorded_repository_page_a_browser_may_not_open_serves_pr_url_null(scripted, page):
+    """finalize (#1623 review): the link follows the Knowledge repo link's rule for the recorded page: none, one on the
+    app's own origin, or one that is not an absolute http(s) URL gives `pr_url` null, and the read still succeeds."""
+    record_repo_page(scripted.dsn, A, page)
+    rid = plant(scripted.dsn, A, "adoption", system=TICKET, stage="completed", result={"outcome": "opened", "pr_number": 9})
+    served = await poll(scripted, "adoption", rid)
+    assert served.status_code == 200, served.text
+    assert (served.json()["pr_url"], served.json()["result"]["pr_number"]) == (None, 9)
