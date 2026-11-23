@@ -70,18 +70,22 @@ def _kill_all(pids: list[int]) -> None:
 #: A process that runs the production launcher once (`argv`: a JSON list of the child's command, the budget, the folder),
 #: printing the line it returned: the case bounds it from outside.
 _LAUNCH = '''
-import json, sys
+import json, sys, time
 from pathlib import Path
 from defender.investigation.publish_launch import launch_publish
 command, budget, folder = json.loads(sys.argv[1]), float(sys.argv[2]), Path(sys.argv[3])
 dest = folder / "dest"
 dest.mkdir(exist_ok=True)
-print("LINE " + launch_publish("r6-tenant", data_root=folder, dest=dest, budget=budget, command=command), flush=True)
+started = time.monotonic()
+line = launch_publish("r6-tenant", data_root=folder, dest=dest, budget=budget, command=command)
+print(f"TOOK {time.monotonic() - started}", flush=True)
+print("LINE " + line, flush=True)
 '''
 
 
 def _launch_bounded(tmp_path: Path, code: str, *args: str, budget: float) -> tuple[str | None, float]:
-    """The launch's line (None if the driver did not return within `OUTSIDE_BOUND`) and how long it took."""
+    """The launch's line (None if the driver did not return within `OUTSIDE_BOUND`) and how long the launch itself took
+    (measured in the driver around `launch_publish`; the driver's whole run when it did not return)."""
     started = time.monotonic()
     driver = subprocess.Popen(  # noqa: S603 — the test's own driver
         [sys.executable, "-c", _LAUNCH, json.dumps([sys.executable, "-c", code, *args]), str(budget), str(tmp_path)],
@@ -93,7 +97,8 @@ def _launch_bounded(tmp_path: Path, code: str, *args: str, budget: float) -> tup
         driver.communicate()
         return None, time.monotonic() - started
     lines = [line[len("LINE "):] for line in out.splitlines() if line.startswith("LINE ")]
-    return (lines[-1] if lines else ""), time.monotonic() - started
+    took = [float(line[len("TOOK "):]) for line in out.splitlines() if line.startswith("TOOK ")]
+    return (lines[-1] if lines else ""), (took[-1] if took else time.monotonic() - started)
 
 
 # --- the child is asked to end, and given time to unwind, before it is killed -------------------
@@ -138,7 +143,7 @@ def test_r6_a_child_that_will_not_end_is_killed_after_the_grace_with_its_grandch
         line, took = _launch_bounded(tmp_path, _STUBBORN, str(pidfile), budget=1.0)
         assert line is not None, f"the launch never killed a child that ignores its stop (still waiting after {took:.0f}s)"
         assert line.startswith("refused transient "), line
-        assert took < 20, f"the launch waited {took:.1f}s on a child that ignores its stop"
+        assert took < 15, f"the launch waited {took:.1f}s on a child (and a grandchild holding its pipes) that ignore its stop"
         assert not _outlives(int(pidfile.read_text())), "the child's grandchild outlived the kill"
     finally:
         if pidfile.exists():
