@@ -195,10 +195,10 @@ def test_1025_an_episode_whose_judge_failed_at_the_enqueue_still_renders_its_sta
     """The learning store refuses the insert, so the append fails after `judge.yaml` records b as `queueing`."""
     from defender.tests.support.learning.judge._memory_store import MemoryStore
 
-    def refuse(self, tenant, run_id, rows, *, kind):
+    def refuse(self, tenant, run_id, channels):
         raise OSError("the learning store refused the insert")
 
-    monkeypatch.setattr(MemoryStore, "publish_findings", refuse)  # lint-monkeypatch: ok — the sink's failure is the test's subject; the launch frame's own store is the stand-in
+    monkeypatch.setattr(MemoryStore, "publish_finding_channels", refuse)  # lint-monkeypatch: ok — the sink's failure is the test's subject; the launch frame's own store is the stand-in
     # One investigator finding per world draw; the family scope refuses a world-scope reply,
     # so the family call completes no draw.
     class JudgeWithCurrentPointers(J.FakeJudge):

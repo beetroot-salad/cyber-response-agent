@@ -31,6 +31,8 @@ if TYPE_CHECKING:
         BatchCause as BatchCause,
         Held as Held,
         ItemCause as ItemCause,
+        ItemCollision as ItemCollision,
+        ItemNotHeld as ItemNotHeld,
         ItemRefused as ItemRefused,
         LaneBusy as LaneBusy,
         LaneWork as LaneWork,
@@ -53,7 +55,7 @@ if TYPE_CHECKING:
 _HOMES: dict[str, str] = {
     **dict.fromkeys(("BlockingStore", "blocking",), "_blocking"),
     **dict.fromkeys(("FeedbackComment", "FeedbackHeld", "FeedbackIssue",), "_feedback"),
-    **dict.fromkeys(("DEFAULT_GRACE_SECONDS", "DEFAULT_LEASE_SECONDS", "DEFAULT_RENEW_SECONDS", "AbandonAsked", "Acted", "BatchCause", "BatchView", "CommitRecord", "Held", "ItemCause", "ItemRefused", "LaneBusy", "LaneWork", "LearningStore", "LeaseLost", "NotLapsed", "Outcome", "ParkedBatchView", "Stop", "TenantInactive", "Why", "WorkItem",), "_store"),
+    **dict.fromkeys(("DEFAULT_GRACE_SECONDS", "DEFAULT_LEASE_SECONDS", "DEFAULT_RENEW_SECONDS", "AbandonAsked", "Acted", "BatchCause", "BatchView", "CommitRecord", "Held", "ItemCause", "ItemCollision", "ItemNotHeld", "ItemRefused", "LaneBusy", "LaneWork", "LearningStore", "LeaseLost", "NotLapsed", "Outcome", "ParkedBatchView", "Stop", "TenantInactive", "Why", "WorkItem",), "_store"),
     **dict.fromkeys(("is_reducer_row", "pitfall_key",), "_keys"),
 }
 

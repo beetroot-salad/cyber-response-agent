@@ -255,7 +255,7 @@ def test_921_a_store_already_holding_a_finding_does_not_change_what_a_pass_queue
     """Surviving obligation of the torn-tail test: rows already queued stay, and the pass queues exactly its own, counted
     on the record (a torn queue tail is file mechanics, retired with the file queue: the store has no malformed lines)."""
     store = MemoryStore()
-    store.publish_findings("tenant", "ep-0", [_family_row("ep-0/b/0/0")], kind="finding")
+    store.publish_finding_channels("tenant", "ep-0", {"finding": [_family_row("ep-0/b/0/0")]})["finding"]
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})

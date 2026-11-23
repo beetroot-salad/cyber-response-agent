@@ -626,9 +626,9 @@ async def test_d9_a_lead_batchs_curation_requests_keep_their_own_fate_until_the_
     async with learning_store(dsn, **KNOBS) as store:
         await store.enqueue_request(BLUE, "run-1", "case-A", {"n": 1})
         await store.enqueue_request(BLUE, "run-2", "case-B", {"n": 2})
-        await store.add_pitfall(BLUE, {"schema_version": 1, "pitfall_id": "p1", "source_run": "r", "system": "elastic",
+        bool(await store.add_pitfalls(BLUE, [{"schema_version": 1, "pitfall_id": "p1", "source_run": "r", "system": "elastic",
                                        "query_id": "elastic.esql", "goal": "g", "executed_query": "x",
-                                       "stderr_digest": "exit=1; digest", "error_class": "agent-fixable"})
+                                       "stderr_digest": "exit=1; digest", "error_class": "agent-fixable"}]))
         held = await store.claim(BLUE, LEAD_LANE, owner="host-a", thresholds=ONE)
         assert len(held.items) == 3
         await store.in_review(held, pr_number=9, outcomes={("curation_request", "run-1"): outcome_skipped("curator_skipped", "names no system")})

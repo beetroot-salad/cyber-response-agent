@@ -57,9 +57,9 @@ async def claim_author(store, owner="host-a", tenant=BLUE):
 async def test_kinds_a_kind_has_its_lane_and_a_claim_takes_only_its_lanes_kinds(dsn):
     """Findings and questioner findings are the author lane's; pitfalls and requests the lead lane's. (work_items kinds)"""
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
-        await store.publish_findings(BLUE, "run-1", [world_finding("q1")], kind="questioner_finding")
-        await store.add_pitfall(BLUE, pitfall("p1"))
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
+        (await store.publish_finding_channels(BLUE, "run-1", {"questioner_finding": [world_finding("q1")]}))["questioner_finding"]
+        bool(await store.add_pitfalls(BLUE, [pitfall("p1")]))
         await store.enqueue_request(BLUE, "run-9", "case-9", {"case": "case-9"})
         assert sorted(items_ := await items(store)) == [
             ("curation_request", "run-9"), ("finding", "f1"), ("pitfall", "p1"), ("questioner_finding", "q1")], items_
@@ -73,8 +73,8 @@ async def test_kinds_a_kind_has_its_lane_and_a_claim_takes_only_its_lanes_kinds(
 async def test_kinds_one_id_in_two_kinds_is_two_rows(dsn):
     """The item key is unique within its kind, not across kinds. (work_items primary key)"""
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("same")], kind="finding")
-        counts = await store.publish_findings(BLUE, "run-1", [world_finding("same")], kind="questioner_finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("same")]}))["finding"]
+        counts = (await store.publish_finding_channels(BLUE, "run-1", {"questioner_finding": [world_finding("same")]}))["questioner_finding"]
         assert tuple(counts) == (1, 0), "a questioner finding is not a duplicate of the defender finding with its id"
         assert sorted(await items(store)) == [("finding", "same"), ("questioner_finding", "same")]
 
@@ -82,8 +82,8 @@ async def test_kinds_one_id_in_two_kinds_is_two_rows(dsn):
 async def test_items_tenants_keep_their_own_rows_for_one_key(dsn):
     """The same finding id in two tenants is two rows; neither sees the other's. (work_items primary key, O6)"""
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
-        assert tuple(await store.publish_findings(GREEN, "run-2", [finding("f1")], kind="finding")) == (1, 0)
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
+        assert tuple((await store.publish_finding_channels(GREEN, "run-2", {"finding": [finding("f1")]}))["finding"]) == (1, 0)
         assert [i.key for i in await store.work(BLUE)] == [i.key for i in await store.work(GREEN)] == ["f1"]
 
 
@@ -95,13 +95,13 @@ async def test_a_finding_id_is_unique_for_good_past_published_skipped_and_dead(d
     """Past any end it can reach, a republished finding id adds nothing and changes no row. (work_items, O14)"""
     reason = {"published": (), "skipped": ("curator_skipped", "duplicate"), "dead": ("malformed_row", "unkeyable")}[how]
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
         claim = await claim_author(store)
         await store.end_no_commits(claim, {("finding", "f1"): outcome(how, *reason)})
         before = (await items(store))[("finding", "f1")]
         assert before.status == how, "premise: the item reached its end"
 
-        counts = await store.publish_findings(BLUE, "run-2", [finding("f1"), finding("f2")], kind="finding")
+        counts = (await store.publish_finding_channels(BLUE, "run-2", {"finding": [finding("f1"), finding("f2")]}))["finding"]
 
         assert tuple(counts) == (1, 1)
         after = await items(store)
@@ -112,27 +112,213 @@ async def test_a_finding_id_is_unique_for_good_past_published_skipped_and_dead(d
 async def test_a_finding_published_by_a_merged_batch_stays_unique(dsn):
     """A finding published by a merge is not queued again by a republish. (work_items, O14)"""
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
         claim = await claim_author(store)
         await store.in_review(claim, 7, {})
         await store.end_review(BLUE, claim.batch_id, expect_phase="in_review", outcome="merged",
                                published=[("finding", "f1")], held=[])
-        assert tuple(await store.publish_findings(BLUE, "run-2", [finding("f1")], kind="finding")) == (0, 1)
+        assert tuple((await store.publish_finding_channels(BLUE, "run-2", {"finding": [finding("f1")]}))["finding"]) == (0, 1)
         assert (await items(store))[("finding", "f1")].status == "published"
+
+
+async def test_1565_a_different_finding_at_a_held_id_refuses_the_whole_publish_and_stores_none_of_it(dsn):
+    """The same id with different content is a collision, not a retry: the whole call is refused, the held row keeps
+    its content, and a new id beside it is not stored either. (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
+        other = dict(finding("f1"), finding="a different narrative")
+
+        with pytest.raises(store_mod().ItemRefused, match="f1"):
+            (await store.publish_finding_channels(BLUE, "run-2", {"finding": [other, finding("f2")]}))["finding"]
+
+        after = await items(store)
+        assert set(after) == {("finding", "f1")}, "a refused publish stored a row"
+        assert after[("finding", "f1")].payload == finding("f1"), "the held row's content changed"
+
+
+async def test_1565_one_publish_carrying_two_contents_for_one_id_is_refused(dsn):
+    """Two rows of one call at one id with different content are the same collision. (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        other = dict(finding("f1"), finding="a different narrative")
+        with pytest.raises(store_mod().ItemRefused, match="f1"):
+            (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1"), other]}))["finding"]
+        assert await items(store) == {}
+
+
+async def test_1565_the_same_finding_again_is_still_a_no_op_beside_a_new_one(dsn):
+    """Control: an identical repeat, held or within the call, adds nothing and refuses nothing. (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
+        counts = (await store.publish_finding_channels(BLUE, "run-2", {"finding": [finding("f1"), finding("f2"), finding("f2")]}))["finding"]
+        assert tuple(counts) == (1, 2)
+        assert set(await items(store)) == {("finding", "f1"), ("finding", "f2")}
+
+
+async def test_1565_a_repeat_compares_as_stored_so_a_tuple_is_its_list(dsn):
+    """Content is compared as the store holds it (JSON): a repeat carrying a tuple where the held row has its list is
+    the same finding, not a collision. (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
+        again = dict(finding("f1"), contrast_evidence=tuple(finding("f1")["contrast_evidence"]))
+        assert tuple((await store.publish_finding_channels(BLUE, "run-2", {"finding": [again]}))["finding"]) == (0, 1)
+
+
+async def test_1565_a_repeat_with_a_number_jsonb_rewrites_is_still_the_same_finding(dsn):
+    """jsonb holds `1e23` as the numeric it is and reads it back as an integer: an identical repeat is still a no-op.
+    (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [dict(finding("f1"), score=1e23)]}))["finding"]
+        assert tuple((await store.publish_finding_channels(BLUE, "run-2", {"finding": [dict(finding("f1"), score=1e23)]}))["finding"]) == (0, 1)
+
+
+@pytest.mark.parametrize("held_first", [True, False], ids=["held", "in-one-call"])
+async def test_1565_false_and_zero_are_different_content(dsn, held_first):
+    """`false` and `0` are different JSON, though Python finds them equal: the second is a collision. (#1565 item 1)"""
+    first, second = finding("f1"), dict(finding("f1"), world_label_doubted=0)
+    assert first["world_label_doubted"] is False, "premise"
+    async with learning_store(dsn) as store:
+        if held_first:
+            (await store.publish_finding_channels(BLUE, "run-1", {"finding": [first]}))["finding"]
+        with pytest.raises(store_mod().ItemRefused, match="f1"):
+            (await store.publish_finding_channels(BLUE, "run-2", {"finding": [second] if held_first else [first, second]}))["finding"]
+        after = await items(store)
+    assert {k: i.payload for k, i in after.items()} == ({("finding", "f1"): first} if held_first else {})
+
+
+async def test_1565_a_collision_names_the_first_colliding_row_of_the_call(dsn):
+    """Several collisions in one call: the refusal names the first in the call's order. (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding(f"f{n}") for n in range(1, 6)]}))["finding"]
+        others = [dict(finding(f"f{n}"), finding="other") for n in (4, 2, 5, 1)]
+        with pytest.raises(store_mod().ItemRefused, match="'f4'") as refused:
+            (await store.publish_finding_channels(BLUE, "run-2", {"finding": others}))["finding"]
+    assert "'f1'" not in str(refused.value)
+    assert "'f2'" not in str(refused.value)
+
+
+async def test_1565_an_id_the_insert_skipped_but_the_store_does_not_hold_is_retried_not_refused(dsn):
+    """A key the insert did not add and the store shows no item for says nothing about the content: it is not a
+    collision (refused for good) but `ItemNotHeld`, which the findings insert turns into its retried
+    `FindingsNotStored`. One check covers the whole call, every kind: a collision anywhere in it outranks a missing key
+    before it. (#1565)"""
+    from defender.jobs.errors import FindingsNotStored
+    from defender.jobs.learning_models import KeyedItem, _refusal_of, refuse_colliding
+
+    def item(kind, key, payload):
+        return KeyedItem(kind, key, payload)
+
+    async with learning_store(dsn) as store:
+        (await store.publish_finding_channels(BLUE, "run-1", {"questioner_finding": [world_finding("q1")]}))["questioner_finding"]
+        async with store._sessions.begin() as s:
+            await refuse_colliding(s, BLUE, [item("questioner_finding", "q1", world_finding("q1"))])  # a repeat
+            with pytest.raises(store_mod().ItemNotHeld, match="ghost"):
+                await refuse_colliding(s, BLUE, [item("questioner_finding", "q1", world_finding("q1")),
+                                                 item("finding", "ghost", finding("ghost"))])
+            with pytest.raises(store_mod().ItemCollision, match="questioner_finding with id 'q1'"):
+                await refuse_colliding(s, BLUE, [item("finding", "ghost", finding("ghost")),
+                                                 item("questioner_finding", "q1", world_finding("q2"))])
+    with pytest.raises(FindingsNotStored):
+        _refusal_of(store_mod().ItemNotHeld("a finding with id 'ghost' was not added"))
+
+
+async def test_1565_one_call_of_two_kinds_is_one_decision(dsn):
+    """A call carrying both findings kinds is decided whole: a clash in one kind stores nothing of the other. (#1565)"""
+    async with learning_store(dsn) as store:
+        (await store.publish_finding_channels(BLUE, "run-1", {"questioner_finding": [world_finding("q1")]}))["questioner_finding"]
+        with pytest.raises(store_mod().ItemRefused, match="'q1'"):
+            await store.publish_finding_channels(BLUE, "run-2", {
+                "finding": [finding("f1")], "questioner_finding": [dict(world_finding("q1"), finding="other")]})
+        assert set(await items(store)) == {("questioner_finding", "q1")}
+        assert await store.publish_finding_channels(BLUE, "run-2", {
+            "finding": [finding("f1")], "questioner_finding": [world_finding("q1"), world_finding("q2")]}) == {
+            "finding": (1, 0), "questioner_finding": (1, 1)}
+
+
+async def test_1565_the_same_id_in_another_kind_or_tenant_is_no_collision(dsn):
+    """Control: a collision is within one tenant's one kind, the key the store holds. (#1565 item 1)"""
+    async with learning_store(dsn) as store:
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
+        other = dict(finding("f1"), finding="a different narrative")
+        assert tuple((await store.publish_finding_channels(GREEN, "run-1", {"finding": [other]}))["finding"]) == (1, 0)
+        assert tuple((await store.publish_finding_channels(BLUE, "run-1", {"questioner_finding": [dict(world_finding("f1"), finding="x")]}))["questioner_finding"]) == (1, 0)
 
 
 # --- pitfalls and the digest key -------------------------------------------------------------------------------
 
 
 async def test_a_repeated_pitfall_id_is_ignored_but_one_mistake_is_a_row_per_occurrence(dsn):
-    """The same pitfall id adds nothing; two ids for one mistake are two rows. (work_items pitfalls)"""
+    """The same pitfall again adds nothing; two ids for one mistake are two rows. (work_items pitfalls; #1565: a repeat
+    with other content is refused, below)"""
     async with learning_store(dsn) as store:
-        await store.add_pitfall(BLUE, pitfall("p1"))
-        await store.add_pitfall(BLUE, pitfall("p1", goal="changed"))
-        await store.add_pitfall(BLUE, pitfall("p2"))  # the same system and error digest: the same mistake
+        assert bool(await store.add_pitfalls(BLUE, [pitfall("p1")])) is True
+        assert bool(await store.add_pitfalls(BLUE, [pitfall("p1")])) is False
+        bool(await store.add_pitfalls(BLUE, [pitfall("p2")]))  # the same system and error digest: the same mistake
         pits = {k: i for k, i in (await items(store)).items() if k[0] == "pitfall"}
         assert sorted(pits) == [("pitfall", "p1"), ("pitfall", "p2")]
         assert {i.status for i in pits.values()} == {"waiting"}
+
+
+async def test_1565_a_pitfall_with_other_content_at_a_held_id_is_refused_and_the_held_one_stays(dsn):
+    """A pitfall id is minted from its run's recorded query, so other content at a held id is a collision, not an
+    occurrence: refused, the held row unchanged. Re-filing a run's pitfalls as they were is a no-op. (#1565, amending
+    #1278's "a repeated pitfall id is ignored")"""
+    rows = [pitfall("p1"), pitfall("p2", goal="another goal")]
+    async with learning_store(dsn) as store:
+        assert [bool(await store.add_pitfalls(BLUE, [r])) for r in rows] == [True, True]
+        assert [bool(await store.add_pitfalls(BLUE, [dict(r)])) for r in rows] == [False, False]
+        with pytest.raises(store_mod().ItemRefused, match="'p1'"):
+            bool(await store.add_pitfalls(BLUE, [pitfall("p1", goal="changed")]))
+        with pytest.raises(store_mod().ItemRefused, match="'p1'"):
+            bool(await store.add_pitfalls(BLUE, [pitfall("p1", stderr_digest=0)]))
+        after = {k: i.payload for k, i in (await items(store)).items()}
+    assert after == {("pitfall", "p1"): rows[0], ("pitfall", "p2"): rows[1]}
+
+
+async def test_1565_a_runs_pitfalls_are_one_call_and_a_clash_stores_none_of_them(dsn):
+    """A run's pitfalls are filed in one call: a clash anywhere in it, held or within it, stores none of its rows, the
+    new ones beside it included. (#1565)"""
+    async with learning_store(dsn) as store:
+        assert await store.add_pitfalls(BLUE, [pitfall("p2")]) == 1
+        with pytest.raises(store_mod().ItemRefused, match="'p2'"):
+            await store.add_pitfalls(BLUE, [pitfall("p1"), pitfall("p2", goal="changed"), pitfall("p3")])
+        with pytest.raises(store_mod().ItemRefused, match="'p4'"):
+            await store.add_pitfalls(BLUE, [pitfall("p1"), pitfall("p4"), pitfall("p4", goal="changed")])
+        assert set(await items(store)) == {("pitfall", "p2")}
+        assert await store.add_pitfalls(BLUE, [pitfall("p1"), pitfall("p2"), pitfall("p3"), pitfall("p1")]) == 2
+        assert set(await items(store)) == {("pitfall", "p1"), ("pitfall", "p2"), ("pitfall", "p3")}
+
+
+async def test_1565_a_curation_request_with_other_content_for_a_filed_run_is_refused(dsn):
+    """A run files one request; filing it again as it was is a no-op, with other content a collision: refused, the
+    filed one unchanged, and no other request of the case is superseded by it. (#1565)"""
+    spec = {"case_id": "case-9", "tenant_id": str(BLUE), "run_id": "run-9"}
+    async with learning_store(dsn) as store:
+        assert await store.enqueue_request(BLUE, "run-8", "case-10", {**spec, "run_id": "run-8"}) is True
+        assert await store.enqueue_request(BLUE, "run-9", "case-9", spec) is True
+        assert await store.enqueue_request(BLUE, "run-9", "case-9", dict(spec)) is False
+        with pytest.raises(store_mod().ItemRefused, match="'run-9'"):
+            await store.enqueue_request(BLUE, "run-9", "case-9", {**spec, "case_id": "case-10"})
+        with pytest.raises(store_mod().ItemRefused):  # a re-filed spec the database cannot hold: refused, not raw
+            await store.enqueue_request(BLUE, "run-9", "case-9", {**spec, "weight": float("nan")})
+        with pytest.raises(store_mod().ItemRefused, match="'run-9'"):  # the same spec filed under another case
+            await store.enqueue_request(BLUE, "run-9", "case-10", spec)
+        after = await items(store)
+    assert {k: (i.payload, i.status) for k, i in after.items()} == {
+        ("curation_request", "run-9"): (spec, "waiting"),
+        ("curation_request", "run-8"): ({**spec, "run_id": "run-8"}, "waiting")}
+
+
+async def test_1565_refiling_a_superseded_run_changes_nothing(dsn):
+    """A run's request filed again after a later run superseded it is a repeat: the later one stays waiting. (#1565)"""
+    spec = {"case_id": "case-9", "tenant_id": str(BLUE), "run_id": "run-1"}
+    later = {**spec, "run_id": "run-2"}
+    async with learning_store(dsn) as store:
+        assert await store.enqueue_request(BLUE, "run-1", "case-9", spec) is True
+        assert await store.enqueue_request(BLUE, "run-2", "case-9", later) is True
+        assert await store.enqueue_request(BLUE, "run-1", "case-9", dict(spec)) is False
+        after = await items(store)
+    assert {k: i.status for k, i in after.items()} == {
+        ("curation_request", "run-1"): "skipped", ("curation_request", "run-2"): "waiting"}
 
 
 async def test_a_row_with_no_key_takes_a_key_from_its_digest(dsn):
@@ -140,10 +326,10 @@ async def test_a_row_with_no_key_takes_a_key_from_its_digest(dsn):
     keyless = {k: v for k, v in pitfall("x").items() if k != "pitfall_id"}
     other = {**keyless, "goal": "another goal"}
     async with learning_store(dsn) as store:
-        await store.add_pitfall(BLUE, keyless)
-        await store.add_pitfall(BLUE, dict(keyless))
+        bool(await store.add_pitfalls(BLUE, [keyless]))
+        bool(await store.add_pitfalls(BLUE, [dict(keyless)]))
         assert len(await store.work(BLUE)) == 1
-        await store.add_pitfall(BLUE, other)
+        bool(await store.add_pitfalls(BLUE, [other]))
         rows = await store.work(BLUE)
         assert len(rows) == 2
         assert all(isinstance(r.key, str) and r.key for r in rows)
@@ -156,12 +342,12 @@ async def test_a_row_with_no_key_takes_a_key_from_its_digest(dsn):
 async def test_columns_a_pitfall_keeps_its_source_run_and_its_repeats_share_a_mistake_key(dsn):
     """Same system and error digest -> equal mistake keys; another digest or system -> another; source runs are stored. (input 23, 24)"""
     async with learning_store(dsn) as store:
-        await store.add_pitfall(BLUE, pitfall("p1", source_run="run-a"))
-        await store.add_pitfall(BLUE, pitfall("p2", source_run="run-b", goal="another goal"))
-        await store.add_pitfall(BLUE, pitfall("p3", stderr_digest="exit=1; unexpected token"))
-        await store.add_pitfall(BLUE, pitfall("p4", system="wazuh", query_id="wazuh.q"))
-        await store.publish_findings(BLUE, "run-7", [finding("f1")], kind="finding")
-        await store.publish_findings(BLUE, "run-8", [world_finding("q1")], kind="questioner_finding")
+        bool(await store.add_pitfalls(BLUE, [pitfall("p1", source_run="run-a")]))
+        bool(await store.add_pitfalls(BLUE, [pitfall("p2", source_run="run-b", goal="another goal")]))
+        bool(await store.add_pitfalls(BLUE, [pitfall("p3", stderr_digest="exit=1; unexpected token")]))
+        bool(await store.add_pitfalls(BLUE, [pitfall("p4", system="wazuh", query_id="wazuh.q")]))
+        (await store.publish_finding_channels(BLUE, "run-7", {"finding": [finding("f1")]}))["finding"]
+        (await store.publish_finding_channels(BLUE, "run-8", {"questioner_finding": [world_finding("q1")]}))["questioner_finding"]
         await store.enqueue_request(BLUE, "run-9", "case-9", {"case": "case-9"})
         got = await items(store)
 
@@ -200,7 +386,7 @@ async def test_columns_the_pitfall_threshold_counts_mistakes_not_rows(dsn, rows,
     """A threshold-3 lead lane opens on three distinct mistakes and on nothing less, however many rows repeat them. (input 56, ruling)"""
     async with learning_store(dsn) as store:
         for row in rows:
-            await store.add_pitfall(BLUE, row)
+            bool(await store.add_pitfalls(BLUE, [row]))
 
         claim = await store.claim(BLUE, LEAD_LANE, owner="host-a", thresholds=LEAD_THRESHOLD)
 
@@ -228,9 +414,9 @@ async def test_a_finding_with_no_string_id_is_refused_before_anything_is_inserte
         row["finding_id"] = bad
     async with learning_store(dsn) as store:
         with pytest.raises(store_mod().ItemRefused):
-            await store.publish_findings(BLUE, "run-1", [make("good"), row], kind=kind)
+            (await store.publish_finding_channels(BLUE, "run-1", {kind: [make("good"), row]}))[kind]
         assert await store.work(BLUE) == [], "nothing of the refused job was inserted"
-        assert tuple(await store.publish_findings(BLUE, "run-1", [make("good")], kind=kind)) == (1, 0), "control: a keyed row is queued"
+        assert tuple((await store.publish_finding_channels(BLUE, "run-1", {kind: [make("good")]}))[kind]) == (1, 0), "control: a keyed row is queued"
 
 
 # --- a NUL is refused for the whole job, wherever it hides ------------------------------------------------------
@@ -252,10 +438,10 @@ async def test_a_nul_anywhere_refuses_the_whole_job_and_queues_nothing(dsn, verb
         if verb in ("finding", "questioner_finding"):
             make = finding if verb == "finding" else world_finding
             with pytest.raises(refused):
-                await store.publish_findings(BLUE, "run-1", [make("good"), {**make("bad"), **_nul_in(where)}], kind=verb)
+                (await store.publish_finding_channels(BLUE, "run-1", {verb: [make("good"), {**make("bad"), **_nul_in(where)}]}))[verb]
         elif verb == "pitfall":
             with pytest.raises(refused):
-                await store.add_pitfall(BLUE, pitfall("bad", **_nul_in(where)))
+                bool(await store.add_pitfalls(BLUE, [pitfall("bad", **_nul_in(where))]))
         else:
             with pytest.raises(refused):
                 await store.enqueue_request(BLUE, "run-1", "case-1", _nul_in(where))
@@ -277,15 +463,14 @@ async def test_a_lone_surrogate_in_any_text_a_verb_is_given_is_refused_before_an
             if where == "payload":
                 row["goal"] = lone
             with pytest.raises(refused):
-                await store.publish_findings(BLUE, lone if where == "run" else "run-1", [finding("good"), row],
-                                             kind="finding")
+                (await store.publish_finding_channels(BLUE, lone if where == "run" else "run-1", {"finding": [finding("good"), row]}))["finding"]
         elif verb == "pitfall":
             if where == "case":
                 pytest.skip("a pitfall has no case")
             row = pitfall("bad", **({"pitfall_id": lone} if where == "key" else {}),
                           **({"source_run": lone} if where == "run" else {}), **({"goal": lone} if where == "payload" else {}))
             with pytest.raises(refused):
-                await store.add_pitfall(BLUE, row)
+                bool(await store.add_pitfalls(BLUE, [row]))
         else:
             with pytest.raises(refused):
                 await store.enqueue_request(BLUE, lone if where in ("key", "run") else "run-1",
@@ -377,7 +562,7 @@ async def test_a_request_returning_to_waiting_beside_a_fresher_one_is_superseded
 async def test_an_attempt_is_stamped_at_claim_and_forgiven_only_by_a_clean_stop(dsn):
     """The claim counts an attempt; a clean-stop abandon forgives it, a recovery abandon does not. (attempts, D8)"""
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
         claim = await claim_author(store)
         assert (await items(store))[("finding", "f1")].attempts == 1
         await store.abandon_clean(claim)
@@ -394,7 +579,7 @@ async def test_an_attempt_is_stamped_at_claim_and_forgiven_only_by_a_clean_stop(
 async def test_crashes_to_the_ceiling_hold_the_item_for_a_person(dsn):
     """After `max_attempts` crashed claims the item is held, claimable by no one; clean stops never reach it. (attempts, O7)"""
     async with learning_store(dsn, max_attempts=3) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("clean"), finding("crashing")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("clean"), finding("crashing")]}))["finding"]
         for _ in range(5):  # clean stops: bounded by nothing
             await store.abandon_clean(await claim_author(store))
         assert {i.status for i in (await store.work(BLUE))} == {"waiting"}
@@ -419,7 +604,7 @@ async def test_crashes_to_the_ceiling_hold_the_item_for_a_person(dsn):
 async def test_a_deferred_item_waits_with_a_deferral_counted_and_dies_at_the_ceiling(dsn):
     """`deferred` returns the item to waiting, +1 deferral; at `max_attempts` deferrals it is dead. (D1, deferrals)"""
     async with learning_store(dsn, max_attempts=3) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
         for n in (1, 2):
             claim = await claim_author(store)
             await store.end_no_commits(claim, {("finding", "f1"): outcome("deferred")})
@@ -435,7 +620,7 @@ async def test_a_deferred_item_waits_with_a_deferral_counted_and_dies_at_the_cei
 async def test_deferrals_and_attempts_are_separate_counters_with_the_deferral_ceiling_of_its_own(dsn):
     """A crashed attempt between two deferrals counts toward neither ceiling's other: only the third deferral kills the item. (G-T5, schema counters)"""
     async with learning_store(dsn, max_attempts=3) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
         await store.end_no_commits(await claim_author(store), {("finding", "f1"): outcome("deferred")})
         crashed = await claim_author(store)
         lapse_lease(dsn, crashed.batch_id)
@@ -459,7 +644,7 @@ async def test_deferrals_and_attempts_are_separate_counters_with_the_deferral_ce
 async def test_each_outcome_a_holder_reports_becomes_its_status_and_reason(dsn, name, reason, status):
     """Every outcome value lands as the status of the same name, a reason where it carries one. (D1)"""
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
         claim = await claim_author(store)
         await store.end_no_commits(claim, {("finding", "f1"): outcome(name, *reason)})
         got = (await items(store))[("finding", "f1")]
@@ -472,7 +657,7 @@ async def test_each_outcome_a_holder_reports_becomes_its_status_and_reason(dsn, 
 async def test_an_item_the_holder_names_no_outcome_for_returns_to_waiting(dsn):
     """An item in the claim that the holder reports nothing for goes back to waiting when the batch ends. (D8 invariant)"""
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1"), finding("f2")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1"), finding("f2")]}))["finding"]
         claim = await claim_author(store)
         await store.end_no_commits(claim, {("finding", "f1"): outcome("skipped", "curator_skipped", "duplicate")})
         got = await items(store)
@@ -486,7 +671,7 @@ async def test_an_item_the_holder_names_no_outcome_for_returns_to_waiting(dsn):
 async def test_o7_a_person_releases_a_held_item_and_the_next_claim_takes_it(dsn):
     """`release_held` returns a held item to waiting, claimable and not held again by what held it. (O7)"""
     async with learning_store(dsn, max_attempts=2) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1")]}))["finding"]
         for _ in range(2):
             claim = await claim_author(store)
             lapse_lease(dsn, claim.batch_id)
@@ -508,7 +693,7 @@ async def test_o7_releasing_an_item_that_is_not_held_is_a_refusal_and_changes_no
     from defender.jobs.errors import Conflict, NotFound
 
     async with learning_store(dsn) as store:
-        await store.publish_findings(BLUE, "run-1", [finding("f1"), finding("f2")], kind="finding")
+        (await store.publish_finding_channels(BLUE, "run-1", {"finding": [finding("f1"), finding("f2")]}))["finding"]
         claim = await store.claim(BLUE, AUTHOR_LANE, owner="host-a", thresholds={**ONE, "finding": 2})
         assert keys(claim) == [("finding", "f1"), ("finding", "f2")]
         before = {k: (i.status, i.batch_id, i.attempts) for k, i in (await items(store)).items()}

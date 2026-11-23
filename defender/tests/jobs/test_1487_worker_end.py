@@ -134,6 +134,50 @@ async def test_o1_a_stored_finding_id_is_not_stored_again_nor_revived(world):  #
     assert execute(dsn, "SELECT status FROM learning.work_items") == [("published",)]
 
 
+async def test_1565_a_different_finding_at_a_held_id_refuses_the_jobs_findings_and_the_ending_stands(world):  # noqa: F811
+    """A held id arriving with different content is a collision: the job's findings are refused whole (none stored, the
+    held row unchanged), the job still `completed`. (#1565 item 1)"""
+    dsn = world["dsn"]
+    child = F.child_class()(world["tmp"] / "job", world["runs"])
+    child.records = {}
+    async with job_store(dsn) as store:
+        job = await queued_job(world, store, ticket="J-1")
+        held = F.defender_row(job)
+        call(dsn, "publish_findings", T1, "earlier-try", [held], kind="finding")
+        child.records[job] = F.record(findings=F.ok([dict(held, finding="a different narrative"),
+                                                     F.defender_row(job, 1)]))
+        await learning_worker(world, store, job=child, post=F.quiet_post_class()(world["tmp"] / "post", world["runs"]),
+                              slots=2, learning_slots=1).drain()
+    row = job_row(dsn, job)
+    assert (row["status"], row["publish_state"]) == ("completed", "refused"), row
+    assert F.all_items(dsn) == [(T1, "finding", held["finding_id"])], "a refused job's findings were stored"
+    assert execute(dsn, "SELECT payload->>'finding' FROM learning.work_items") == [(held["finding"],)]
+
+
+@pytest.mark.parametrize("second", ["same", "other"])
+async def test_1565_the_episodes_repeats_are_decided_at_the_jobs_end(world, second):  # noqa: F811
+    """The episode holds every row as given; the job's end decides: an identical repeat is stored once, two contents at
+    one id refuse the job's findings whole, the job still `completed`. (#1565)"""
+    dsn = world["dsn"]
+    child = F.child_class()(world["tmp"] / "job", world["runs"])
+    child.records = {}
+    async with job_store(dsn) as store:
+        job = await queued_job(world, store, ticket="J-1")
+        first = F.defender_row(job)
+        again = dict(first) if second == "same" else dict(first, finding="a different narrative")
+        child.records[job] = F.record(findings=F.ok([first, again, F.defender_row(job, 1)]))
+        await learning_worker(world, store, job=child, post=F.quiet_post_class()(world["tmp"] / "post", world["runs"]),
+                              slots=2, learning_slots=1).drain()
+    row = job_row(dsn, job)
+    if second == "same":
+        assert (row["status"], row["publish_state"]) == ("completed", "done"), row
+        assert sorted(F.all_items(dsn)) == sorted(
+            [(T1, "finding", first["finding_id"]), (T1, "finding", F.defender_row(job, 1)["finding_id"])])
+    else:
+        assert (row["status"], row["publish_state"]) == ("completed", "refused"), row
+        assert F.all_items(dsn) == [], "a refused job's findings were stored"
+
+
 @pytest.mark.parametrize(("table", "when"), [(ITEMS, "TRUE"), ("jobs.learning_jobs", "NEW.status = 'completed'")],
                          ids=["fails-at-the-insert", "fails-at-the-completed-update"])
 async def test_p3_the_ending_and_its_findings_become_visible_together_across_an_outage(world, table, when):  # noqa: F811

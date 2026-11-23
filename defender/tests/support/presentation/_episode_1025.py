@@ -517,7 +517,7 @@ SIBLING_BUCKETS = {
     PASSTHROUGH_WORLD: ("lead-set", "lead-quality", "lead-set", "lead-quality"),
     GRADED_WORLD: ("lead-set", "lead-quality", "decision-discipline", "analyze-discipline"),
 }
-#: Each sibling's world-level bucket (the reply's own, `run._world_verdict`).
+#: Each sibling's world-level bucket (the reply's own, `run.validate_reply`).
 SIBLING_BUCKET = {PASSTHROUGH_WORLD: "lead-set", GRADED_WORLD: "decision-discipline"}
 #: The bucket of each sibling's one world finding: `mislabelled` marks the world's label doubted
 #: and leaves it measured (an `unreachable`/`incoherent` one would take it out of measurement
