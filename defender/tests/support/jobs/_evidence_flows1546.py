@@ -257,3 +257,12 @@ def pack(files: dict[str, bytes]) -> bytes:
 def members(bundle: bytes) -> dict[str, bytes]:
     with tarfile.open(fileobj=io.BytesIO(bundle), mode="r:gz") as tar:
         return {m.name.removeprefix("./"): tar.extractfile(m).read() for m in tar.getmembers() if m.isfile()}  # type: ignore[union-attr]
+
+
+# --- appended for the #1546 stale sweep of the #1342/#1343 worker tests (slice `worker`) -----------------------------------
+
+def stage_progress(dsn: str, token: str, body: Any) -> None:
+    """The one replaced fact: the helper's latest `progress` for the claim (create, else replace in place)."""
+    execute(dsn, "INSERT INTO jobs.staged_facts (token, name, body, staged_at) VALUES (%s, 'progress', %s::jsonb, now()) "
+                 "ON CONFLICT (token, name) DO UPDATE SET body = EXCLUDED.body, staged_at = EXCLUDED.staged_at",
+            (token, json.dumps(body)))

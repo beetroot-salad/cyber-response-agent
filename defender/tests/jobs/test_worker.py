@@ -49,17 +49,13 @@ from defender.tests.support.jobs._jobs1342 import (
     job_end,
     job_store,
     knowledge_record,
-    knowledge_record_of,
     lower_limit,
     move_tenant,
-    plant_fork,
     plant_queued_investigation,
     plant_sessions,
-    plant_spend,
     restate_tenant,
     row,
     seed_alert_mapping,
-    session_db,
     session_pointer,
     tree,
 )
@@ -68,32 +64,26 @@ from defender.tests.support.tenancy._mapping1345 import mapping_value
 from defender.tests.support.jobs._jobs1342 import (  # noqa: E402
     accounting_written,
 )
-from defender.tests.support.jobs._jobs1342 import CLOSING_KEY
 from defender.tests.support.jobs._worker1342 import (
     CASE,
     COMMIT,
     EXIT,
-    HAIKU_IN,
     MARKER,
     OTHER_COMMIT,
-    SONNET_IN,
     SONNET_OUT,
     _FAST,
     _LINUX_ONLY,
     _NobodyPlannedThis,
     _StoreWhoseAlertReadFails,
     _StoreWhoseFinishFails,
-    _child,
+    _helper_child as _child,
     _committed,
     closing,
     _gone,
     _handed_back,
-    _job_end_with,
     _kill_whatever_remains,
-    _lanes_failing,
     _no_run_text,
     _queued,
-    _refused,
     _run_one,
     _until,
     _warned,
@@ -346,221 +336,82 @@ async def test_o6_a_child_that_cannot_be_spawned_is_a_worker_error_and_the_worke
 
 
 # --- cost -------------------------------------------------------------------------------------------
+# #1546 (A-O2, PR2, D15): the worker reads no session database. A run's final cost is its staged `outcome`'s figure and
+# mark; with no outcome it is the last staged `progress`, marked a lower limit (`decide`'s cost rule,
+# test_ending_decide_1546.py::test_a_cost_reads_exact_only_after_an_exit_whose_outcome_gave_a_final_cost). Retired with the
+# ledger read: test_s1_o8_cost_is_the_ledger_sum_priced_from_the_pricing_table_and_not_the_conversations,
+# test_s1_a_branch_arm_sharing_the_database_counts_only_its_own_run, test_o8_a_cost_read_fault_keeps_the_stage_and_leaves_cost_unknown[*],
+# test_o8_a_conversation_payload_the_reader_cannot_parse_does_not_make_the_cost_unknown,
+# test_o8_a_session_pointer_of_the_wrong_shape_keeps_the_stage_and_leaves_cost_unknown[*] (pricing and the ledger's seal are
+# the job's and the helper's now); the flag table keeps its rows that do not name the ledger.
 
-#: #1377: the run's two ledger rows, 3.0 + 5.0 USD.
-_LEDGER = [("claude-sonnet-4-6", {"input_tokens": 1_000_000}), ("claude-haiku-4-5", {"output_tokens": 1_000_000})]
-
-
-SONNET_CACHE_R, SONNET_CACHE_W = 0.3, 3.75
-
-
-def _pointer_files(case_id: str, **extra) -> dict[str, str]:
-    return _committed(**{"{id}.session-pointer.json": session_pointer(case_id), **extra})
-
-
-async def _run_spent(world: dict, child: ScriptedChild, spend=None, *, then: str | None = None, sealed: bool = True) -> tuple[str, dict]:
-    """One queued row run to its end, its ledger rows (when `spend`) planted in `CASE`'s database under its run id first (sealed, as a run that ended without a failed write leaves them, unless `sealed=False`), then the SQL `then` run on that database."""
-    async with job_store(world["dsn"]) as store:
-        inv = await _queued(store)
-        if spend is not None:
-            plant_spend(world["runs"], CASE, inv, spend, sealed=sealed)
-        if then is not None:
-            _sqlite(world["runs"], then)
-        await _worker(world, store, child).drain()
-    return inv, row(world["dsn"], inv)
-
-
-async def test_s1_o8_cost_is_the_ledger_sum_priced_from_the_pricing_table_and_not_the_conversations(world):
-    """Every ledger row of the run, cache counts included, priced from the table; the conversations, `store_path` and `tool_trace.jsonl` are not read. (S1, O8 cost)"""
-    plant_sessions(world["runs"], CASE, [("main", "claude-haiku-4-5", {"input_tokens": 1_000_000})])  # a conversation worth 1.0
-    rows = [("claude-sonnet-4-6", {"input_tokens": 1_000_000}), ("claude-sonnet-4-6", {"output_tokens": 1_000_000}),
-            ("claude-haiku-4-5", {"input_tokens": 2_000_000}), ("claude-haiku-4-5", {"input_tokens": 1_000_000}),
-            ("claude-sonnet-4-6", {"cache_read_input_tokens": 1_000_000, "cache_creation_input_tokens": 1_000_000})]
-    trace = json.dumps({"type": "result", "cost_usd": 999.0})
-    child = _child(world, files=_pointer_files(CASE, **{"{id}/tool_trace.jsonl": trace + "\n"}))
-    _, stored = await _run_spent(world, child, rows)
-
-    assert stored["stage"] == "completed"
-    assert stored["cost_usd"] == pytest.approx(SONNET_IN + SONNET_OUT + 2 * HAIKU_IN + HAIKU_IN + SONNET_CACHE_R + SONNET_CACHE_W)
-
-
-async def test_s1_a_branch_arm_sharing_the_database_counts_only_its_own_run(world):
-    """The arm's main is a fork of the source's; the source's and a sibling's ledger rows sit in the same database: the job's cost is its own rows only, exact. (S1, Design "Model", r4 cost reader)"""
-    made = plant_sessions(world["runs"], CASE, [("main", "claude-sonnet-4-6", {"input_tokens": 1_000_000})])
-    arm_main = plant_fork(world["runs"], CASE, made["main"], agent_id="main", model="claude-sonnet-4-6",
-                          usage={"output_tokens": 10})
-    plant_spend(world["runs"], CASE, "a3000000-0000-4000-8000-000000000003",
-                [("claude-sonnet-4-6", {"output_tokens": 1_000_000})])  # the source run's 15.0
-    plant_spend(world["runs"], CASE, "a4000000-0000-4000-8000-000000000004",
-                [("claude-sonnet-4-6", {"output_tokens": 2_000_000})])  # a sibling arm's 30.0
-    files = _committed(**{"{id}.session-pointer.json": session_pointer(CASE, session_id=arm_main)})
-    inv, stored = await _run_spent(world, _child(world, files=files), _LEDGER)
-
-    assert (stored["stage"], stored["cost_usd"], lower_limit(world["dsn"], inv)) == ("completed", pytest.approx(8.0), False)
+#: #1377's two ledger rows, 3.0 + 5.0 USD: the figure the helper staged for a run.
+_SPENT = 8.0
 
 
 async def test_o8_a_run_that_crashed_still_has_its_spend_recorded(world):
-    """A failed row (no job-end) carries the ledger's sum for its run. (O8 cost, S1)"""
+    """A failed row (no outcome staged) carries the last staged `progress`, marked a lower limit. (O8 cost, D15)"""
     # The run's container crashed; its helper served the job to that end, so it exits 0 (#1170).
-    child = _child(world, files={"{id}.session-pointer.json": session_pointer(CASE)}, exit=0)
-    _, stored = await _run_spent(world, child, [("claude-sonnet-4-6", {"output_tokens": 1_000_000})])
-
+    child = _child(world, staged={"progress": {"cost_usd": SONNET_OUT}}, exit=0)
+    inv, stored = await _run_one(world, child)
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
-    assert stored["cost_usd"] == pytest.approx(SONNET_OUT)
+    assert (stored["cost_usd"], lower_limit(world["dsn"], inv)) == (pytest.approx(SONNET_OUT), True)
 
 
 async def test_o8_no_session_pointer_costs_nothing(world, caplog):
-    """No pointer (the store was never opened) → cost 0 and exact, not unknown. (O8 cost, S4)"""
+    """An outcome whose cost is 0 (the run made no request) → cost 0 and exact, not unknown, and no cost fault logged.
+    (O8 cost, S4)"""
     caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
     files = {"{id}.job-end.json": job_end(setup="crashed", box="not_started", report_committed=False, scrub_verified=False)}
-    inv, stored = await _run_one(world, _child(world, files=files))  # CONFLICT-UPDATED (#1534): a committed run always has a pointer
+    inv, stored = await _run_one(world, _child(world, files=files))
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
     assert (stored["cost_usd"], lower_limit(world["dsn"], inv)) == (0, False)
-    assert not _warned(caplog, inv), "a run with no pointer logged a cost fault"
+    assert not _warned(caplog, inv), "a run with no spend logged a cost fault"
 
 
-def _break_database(runs: Path, case_id: str) -> None:
-    db = session_db(runs, case_id)
-    db.parent.mkdir(parents=True, exist_ok=True)
-    db.write_bytes(b"this is not a sqlite database" * 64)
+_DONE, _NO_REPORT = ("completed", None), ("failed", "no_report")
 
 
-def _sqlite(runs: Path, sql: str) -> None:
-    import sqlite3
-
-    conn = sqlite3.connect(session_db(runs, CASE))
-    try:
-        conn.execute(sql)
-        conn.commit()
-    finally:
-        conn.close()
-
-
-@pytest.mark.parametrize("fault", ["pointer-not-json", "case-id-escapes", "no-database",
-                                   "database-will-not-open", "stale-schema-version", "no-ledger-table",
-                                   "no-main-session", "pointed-session-not-in-database"])
-async def test_o8_a_cost_read_fault_keeps_the_stage_and_leaves_cost_unknown(world, caplog, fault):
-    """Pointer present but unusable → stage and disposition kept, `cost_usd` null and never marked, the fault logged. (O8 cost, R3, S4, r4 cost reader)"""
-    caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
-    pointer, spend, then = session_pointer(CASE), None, None
-    if fault == "pointer-not-json":
-        pointer = "{not json"
-    elif fault == "case-id-escapes":
-        pointer = session_pointer("../../../outside")
-    elif fault == "database-will-not-open":
-        _break_database(world["runs"], CASE)
-    elif fault == "no-database":
-        pass  # the pointer names a case with no database at all (r4 cost reader: a run that opened its store left one)
-    else:  # a database with a ledger worth 8.0, so a reader that skipped its check would answer a number
-        plant_sessions(world["runs"], CASE, [("l-001" if fault == "no-main-session" else "main",
-                                              "claude-sonnet-4-6", {"input_tokens": 1_000_000})])
-        spend = _LEDGER
-        if fault == "pointed-session-not-in-database":
-            pointer = session_pointer(CASE, session_id="no-such-session")
-        then = {"stale-schema-version": "PRAGMA user_version = 4242", "no-ledger-table": "DROP TABLE spend_ledger"}.get(fault)
-    # The spec says there is no database: the child plants none. `then` runs after the child planted the record: its writer
-    # open would recreate a dropped table (B2).
-    plan = closing(fault="database-missing") if fault == "no-database" else closing(then=then)
-    child = _child(world, files=_committed(**{"{id}.session-pointer.json": pointer, CLOSING_KEY: plan}))
-    inv, stored = await _run_spent(world, child, spend)
-
-    # CONFLICT-UPDATED (#1534): the disposition is read through the same pointer and database, so a fault there costs it too.
-    if fault in ("no-ledger-table", "no-main-session", "pointed-session-not-in-database"):
-        assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
-    else:
-        assert (stored["stage"], stored["disposition"]) == ("unparseable", None)
-    assert (stored["cost_usd"], lower_limit(world["dsn"], inv)) == (None, False)
-    assert _warned(caplog, inv), "the cost fault was not logged"
-    kind = {"pointer-not-json": "pointer-unreadable", "no-database": "database-missing",
-            "database-will-not-open": "store-unreadable", "stale-schema-version": "schema-version"}.get(fault)
-    if kind:
-        from defender.records import closing as C
-
-        assert C.FAULT_WORDING[kind] in (stored["failure_message"] or ""), stored["failure_message"]
-
-
-async def test_o8_a_conversation_payload_the_reader_cannot_parse_does_not_make_the_cost_unknown(world):
-    """Spend reads no message payloads: a corrupt one leaves the ledger's sum readable and exact. (r4 cost reader, S1, S4)"""
-    plant_sessions(world["runs"], CASE, [("main", "claude-sonnet-4-6", {"input_tokens": 1_000_000})])
-    inv, stored = await _run_spent(world, _child(world, files=_pointer_files(CASE)), _LEDGER,
-                                   then="UPDATE message_payload SET payload = '{\"parts\": ['")
-
-    assert (stored["stage"], stored["cost_usd"], lower_limit(world["dsn"], inv)) == ("completed", pytest.approx(8.0), False)
-
-
-@pytest.mark.parametrize("shape", ["an array", "an empty object", "a case id that is a number"])
-async def test_o8_a_session_pointer_of_the_wrong_shape_keeps_the_stage_and_leaves_cost_unknown(
-        world, caplog, shape):
-    """A pointer that is an array, lacks `case_id` or has a numeric one: stage and disposition kept, `cost_usd` null and never marked, the fault logged, no crash. (O8 cost, R3, S4)"""
-    caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
-    if shape == "a case id that is a number":  # a database exists under the number's spelling
-        plant_sessions(world["runs"], "5", [("main", "claude-sonnet-4-6", {"input_tokens": 1_000_000})])
-    pointer = {"an array": "[]", "an empty object": "{}",
-               "a case id that is a number": json.dumps({"case_id": 5, "store_path": "/nonexistent/elsewhere.db"})}[shape]
-    inv, stored = await _run_one(world, _child(world, files=_committed(**{"{id}.session-pointer.json": pointer})))
-
-    assert (stored["stage"], stored["disposition"]) == ("unparseable", None)  # CONFLICT-UPDATED (#1534): pointer-unreadable
-    assert (stored["cost_usd"], lower_limit(world["dsn"], inv)) == (None, False)
-    assert _warned(caplog, inv), "the cost fault was not logged"
-
-
-_DONE, _NO_REPORT, _UNREADABLE = ("completed", None), ("failed", "no_report"), ("unparseable", None)
-
-
-@pytest.mark.parametrize(("ending", "ledger", "expect"), [
-    # A sealed ledger is exact whatever the ending; an unsealed one is "at least" (r7.3 T2: the worker reads only the ledger).
-    ("clean", "sealed rows", (*_DONE, 8.0, False)),
-    ("clean", "unsealed rows", (*_DONE, 8.0, True)),  # a failed write (or a kill) left the run unsealed, however cleanly it ended
-    ("no job-end, exit 77", "sealed rows", (*_NO_REPORT, 8.0, False)),  # killed after sealing, before its job-end: every request was recorded
-    ("no job-end, exit 77", "unsealed rows", (*_NO_REPORT, 8.0, True)),
-    # A run killed with exit 0 is no more exact than one that exited 77: the mark is not read from the exit code.
-    ("no job-end, exit 0", "sealed rows", (*_NO_REPORT, 8.0, False)),
-    ("no job-end, exit 0", "unsealed rows", (*_NO_REPORT, 8.0, True)),
-    ("job-end unreadable, exit 77", "sealed rows", (*_NO_REPORT, 8.0, False)),
-    ("job-end unreadable, exit 77", "unsealed rows", (*_NO_REPORT, 8.0, True)),
-    ("job-end of valid JSON with an extra key, exit 77", "sealed rows", (*_NO_REPORT, 8.0, False)),
-    ("job-end of valid JSON with an extra key, exit 77", "unsealed rows", (*_NO_REPORT, 8.0, True)),
-    ("no job-end, exit 77", "sealed, no rows", (*_NO_REPORT, 0.0, False)),  # a run that made no request and sealed: exactly 0
-    ("no job-end, exit 77", "unsealed, no rows", (*_NO_REPORT, 0.0, True)),  # opened its store, never sealed
-    ("clean", "sealed, no rows", (*_DONE, 0.0, False)),
-    # #1534: the closing record is read from the same database, so a clean run's unreadable one is `unparseable` (V-READERS).
-    ("clean", "unreadable database", (*_UNREADABLE, None, False)),
-    ("no job-end, exit 77", "unreadable database", (*_NO_REPORT, None, False)),
-    ("clean", "no ledger table", (*_DONE, None, False)),
-    ("no job-end, exit 77", "no pointer", (*_NO_REPORT, 0.0, False)),  # the store was never opened: no ledger, exactly 0 (a different case from an unsealed one)
-    ("clean", "no pointer", (*_DONE, 0.0, False)),
+@pytest.mark.parametrize(("ending", "spent", "expect"), [
+    # The outcome's figure and its own mark, whatever the ending (#1546: the job seals and prices, the helper stages).
+    ("clean", "exact", (*_DONE, _SPENT, False)),
+    ("clean", "at least", (*_DONE, _SPENT, True)),
+    ("not committed", "exact", (*_NO_REPORT, _SPENT, False)),
+    ("not committed", "at least", (*_NO_REPORT, _SPENT, True)),
+    ("clean", "nothing", (*_DONE, 0.0, False)),
+    # No outcome: the last staged progress, a lower limit, never beside no figure (r9: no progress, NULL and unmarked).
+    ("no outcome", "progress", (*_NO_REPORT, _SPENT, True)),
+    ("no outcome", "no progress", (*_NO_REPORT, None, False)),
 ])
-async def test_s2_s4_the_final_cost_and_its_lower_limit_mark_follow_the_flag_table(world, ending, ledger, expect):
-    """Each row of the final-read flag table: the ledger's sum for this run, "at least" exactly when its ledger is not complete (unsealed, or an unseen or unpriced row), never beside null, and exactly 0 for a run with no store; the ending the job-end decides stands beside it (never replaced by `worker_error`). (r7.3 T2; S2, S4, r4)"""
-    job_end_text = {"clean": job_end(), "job-end unreadable, exit 77": "{not json",
-                    "job-end of valid JSON with an extra key, exit 77": _job_end_with(extra="x")}.get(ending)
-    files = _committed(**{"{id}.job-end.json": job_end_text}) if job_end_text is not None else {}
-    if ledger != "no pointer":
-        files["{id}.session-pointer.json"] = session_pointer(CASE)
-    # The `exit N` of a case is its container's; its helper served the job either way and exits 0 (#1170), so the
-    # worker sees 0 for every case, as the flag table's own rule says: the mark is not read from an exit code.
-    if ledger == "no ledger table":  # dropped after the child planted the record: its writer open would recreate it (B2)
-        files[CLOSING_KEY] = closing(then="DROP TABLE spend_ledger")
-    child = _child(world, files=files, exit=0)
-    if ledger == "unreadable database":
-        _break_database(world["runs"], CASE)
-    spend = {"sealed rows": _LEDGER, "unsealed rows": _LEDGER, "sealed, no rows": [], "unsealed, no rows": [], "no ledger table": _LEDGER}.get(ledger)
-    inv, _ = await _run_spent(world, child, spend, sealed=not ledger.startswith("unsealed"))
-    stored = row(world["dsn"], inv)
+async def test_s2_s4_the_final_cost_and_its_lower_limit_mark_follow_the_flag_table(world, ending, spent, expect):
+    """Each row of the final-cost table: the staged outcome's cost and mark; with no outcome, the last `progress` marked
+    "at least", and with neither, unknown and unmarked. A staged `progress` beside an outcome never replaces its figure.
+    (S2, S4, D15)"""
+    staged: dict = {"progress": {"cost_usd": 0.5}}
+    if ending != "no outcome":
+        from defender.tests.support.jobs._jobs1342 import staged_outcome_of
 
+        cost = {"exact": _SPENT, "at least": _SPENT, "nothing": 0.0}[spent]
+        staged["outcome"] = staged_outcome_of(job_end(report_committed=ending == "clean"), closing(),
+                                              cost_usd=cost, cost_is_lower_limit=spent == "at least")
+        staged["page"] = {"page": "none"}
+    else:
+        staged["progress"] = {"cost_usd": _SPENT} if spent == "progress" else None
+    inv, stored = await _run_one(world, _child(world, staged=staged, exit=0))
     assert (stored["stage"], stored["failure_reason"], stored["cost_usd"], lower_limit(world["dsn"], inv)) == (
         expect[0], expect[1], None if expect[2] is None else pytest.approx(expect[2]), expect[3])
-    if expect[:2] == _UNREADABLE:
-        from defender.records import closing as C
-
-        assert C.FAULT_WORDING["store-unreadable"] in (stored["failure_message"] or ""), stored["failure_message"]
-    elif expect[1] is None:
+    if expect[1] is None:
         assert stored["failure_message"] is None, stored["failure_message"]
     else:
         assert stored["failure_message"], "a failed row carries our own message"
 
 
 # --- knowledge --------------------------------------------------------------------------------------
+# #1546 PR2: the helper maps the knowledge record once and stages the served shape; the worker copies the staged
+# `knowledge` fact. Retired with the worker's read and mapping (the mapping is the helper's,
+# test_1546_helper_records.py::test_the_helper_stages_started_and_the_served_knowledge_itself):
+# test_o8_knowledge_is_the_host_record_mapped_to_the_api_shape[*], test_o8_a_started_run_with_no_record_is_stale_operator,
+# test_o8_knowledge_is_null_when_there_is_no_run_folder[*] ("run started = run folder exists" became the `started` fact).
 
 def _knowledge(status: str, commit: str | None, stale_kind: str | None = None) -> dict:
     return {"status": status, "commit": commit, "stale_kind": stale_kind}
@@ -569,54 +420,24 @@ def _knowledge(status: str, commit: str | None, stale_kind: str | None = None) -
 STALE_OPERATOR = _knowledge("stale", None, "operator")
 
 
-KNOWLEDGE = {
-    "fresh": (knowledge_record(COMMIT), _knowledge("current", COMMIT)),
-    "stale-transient": (knowledge_record_of("stale", OTHER_COMMIT, stale_kind="transient", reason=MARKER),
-                        _knowledge("stale", OTHER_COMMIT, "transient")),
-    "stale-operator": (knowledge_record_of("stale", OTHER_COMMIT, stale_kind="operator", reason=MARKER),
-                       _knowledge("stale", OTHER_COMMIT, "operator")),
-    "pinned": (knowledge_record_of("pinned", OTHER_COMMIT), _knowledge("pinned", OTHER_COMMIT)),
-    "unreadable-record": ("{not json", STALE_OPERATOR),
-    "record-of-another-shape": (json.dumps(["fresh", COMMIT]), STALE_OPERATOR),
-}
-
-
-@pytest.mark.parametrize("name", list(KNOWLEDGE))
-async def test_o8_knowledge_is_the_host_record_mapped_to_the_api_shape(world, name):
-    """A started run's knowledge record maps to `{status, commit, stale_kind}`; an unreadable one to `{stale, operator, null}`; record text never reaches the row. (O8 knowledge, M6)"""
-    record, expected = KNOWLEDGE[name]
-    child = _child(world, files=_committed(**{"{id}.knowledge-source.json": record}))
+@pytest.mark.parametrize("served", [_knowledge("current", COMMIT), _knowledge("stale", OTHER_COMMIT, "transient"),
+                                    _knowledge("pinned", OTHER_COMMIT)], ids=["current", "stale-transient", "pinned"])
+async def test_o8_knowledge_is_the_staged_served_shape(world, served):
+    """The row's knowledge is the staged `knowledge` fact, never the record file the child leaves beside it. (O8
+    knowledge, A-O2)"""
+    decoy = knowledge_record("e" * 40)  # a record file that contradicts the staged fact
+    child = _child(world, files=_committed(**{"{id}.knowledge-source.json": decoy}), staged={"knowledge": served})
     _, stored = await _run_one(world, child)
-
-    assert stored["knowledge"] == expected
+    assert stored["knowledge"] == served
     _no_run_text(stored)
 
 
-async def test_o8_a_started_run_with_no_record_is_stale_operator(world):
-    """The run folder exists but the record is missing → `{stale, operator, null}`, even on a failed row. (O8 knowledge, M6)"""
-    child = _child(world, dirs=["{id}"], exit=0)  # the helper served it (#1170): a failed run, not a failed helper
-    _, stored = await _run_one(world, child)
-    assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
-    assert stored["knowledge"] == STALE_OPERATOR
-
-
 async def test_o8_a_failed_run_that_started_still_shows_the_knowledge_it_read(world):
-    """Rule 1 failure with a run folder and a fresh record → `{current, commit}`. (O8 knowledge)"""
+    """Rule 1 failure (no outcome) with a staged `knowledge` → `{current, commit}`. (O8 knowledge)"""
     child = _child(world, dirs=["{id}"], files={"{id}.knowledge-source.json": knowledge_record(COMMIT)})
     _, stored = await _run_one(world, child)
     assert stored["stage"] == "failed"
     assert stored["knowledge"] == _knowledge("current", COMMIT)
-
-
-@pytest.mark.parametrize("stray_record", [False, True])
-async def test_o8_knowledge_is_null_when_there_is_no_run_folder(world, stray_record):
-    """No run folder (setup refused before the run existed) → null, whether or not a record sits beside it. (O8 knowledge, M6)"""
-    files = _refused()
-    if stray_record:
-        files["{id}.knowledge-source.json"] = knowledge_record(COMMIT)
-    _, stored = await _run_one(world, _child(world, files=files, exit=1))
-    assert (stored["stage"], stored["failure_reason"]) == ("failed", "setup_refused")
-    assert stored["knowledge"] is None
 
 
 # --- O7: the containers a child leaves, in-process (#1446 review: the claim sweep is the one remover) ----
@@ -1121,7 +942,7 @@ async def test_o4_serve_also_holds_three_children_and_never_a_fourth(world):
 
 @pytest.mark.parametrize("fault_type", [RuntimeError, KeyError, TypeError, AssertionError, AttributeError,
                                         IndexError, _NobodyPlannedThis])
-@pytest.mark.parametrize("seam", ["child-argv", "store-read", "job-end-read"])
+@pytest.mark.parametrize("seam", ["child-argv", "store-read"])  # #1546 A-O2: the `job-end-read` seam retired with the read
 async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and_the_worker_goes_on(
         world, seam, fault_type):
     """A fault of any kind nobody planned for (not an OS error) in one row's task: that row `failed`/`worker_error`, another row still completes. (O6, design flows)"""
@@ -1132,17 +953,14 @@ async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and
         good = await _queued(store, ticket="T-2", key="k2")
         used = store
         argv = child
-        lanes = None
         if seam == "child-argv":
             def argv(launch):  # noqa: F811
                 if launch.investigation_id == bad:
                     raise fault
                 return child(launch)
-        elif seam == "store-read":
-            used = _StoreWhoseAlertReadFails(store, (await store.get_investigation(T1, bad)).alert_id, fault)
         else:
-            lanes = _lanes_failing(bad, "read_job_end", fault)
-        await _worker(world, used, argv, open_lane=lanes).drain()
+            used = _StoreWhoseAlertReadFails(store, (await store.get_investigation(T1, bad)).alert_id, fault)
+        await _worker(world, used, argv).drain()
 
     stored = row(world["dsn"], bad)
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
@@ -1151,46 +969,20 @@ async def test_o6_an_unexpected_fault_at_any_seam_ends_that_row_worker_error_and
     assert row(world["dsn"], good)["stage"] == "completed", "one row's fault stopped the others"
 
 
-@pytest.mark.parametrize("fault_type", [RuntimeError, KeyError, TypeError, AssertionError, AttributeError,
-                                        IndexError, _NobodyPlannedThis])
-@pytest.mark.parametrize("seam", ["closing-disposition", "lane-cost", "lane-knowledge", "lane-close"])
-async def test_1396_an_unexpected_fault_after_the_ending_is_decided_keeps_that_ending(
-        world, caplog, seam, fault_type):
-    """A fault nobody planned for once the host committed a report and the scrub walked the tree:
-    reading the closing record's disposition ends the row `unparseable`, as an unreadable disposition
-    does; reading cost or knowledge, or closing the lane, keeps the decided stage and disposition,
-    and the value that could not be read is unknown (cost null; knowledge the unreadable shape,
-    never "no run"). Never `worker_error`; the fault is logged as an error, and another row still
-    completes. (#1396)"""
-    caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
-    fault = fault_type("a seam fell over")
-    child = _child(world, files=_committed())
-    async with job_store(world["dsn"]) as store:
-        bad = await _queued(store, ticket="T-1", key="k1")
-        good = await _queued(store, ticket="T-2", key="k2")
-        method = {"closing-disposition": "closing_disposition", "lane-cost": "cost",
-                  "lane-knowledge": "knowledge", "lane-close": "close"}[seam]
-        await _worker(world, store, child, open_lane=_lanes_failing(bad, method, fault)).drain()
-
-    stored = row(world["dsn"], bad)
-    assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == (
-        ("unparseable", None, None) if seam == "closing-disposition" else ("completed", "inconclusive", None))
-    assert stored["cost_usd"] == (None if seam == "lane-cost" else 0)
-    assert lower_limit(world["dsn"], bad) is False, "an unknown cost was marked as a lower limit"
-    assert stored["knowledge"] == (STALE_OPERATOR if seam == "lane-knowledge" else _knowledge("current", COMMIT))
-    assert any(bad in r.getMessage() and r.levelno >= logging.ERROR for r in caplog.records
-               if r.name.startswith(WORKER_LOGGER)), "a fault nobody planned for was not logged as an error"
-    assert row(world["dsn"], good)["stage"] == "completed", "one row's fault stopped the others"
+# #1546 A-O2 retired `test_1396_an_unexpected_fault_after_the_ending_is_decided_keeps_that_ending[*]`: its seams were the
+# worker's reads of the job's files through the job lane (closing record, cost, knowledge, the lane's close), none of which
+# the worker makes; it decides from rows (`decide`), and a fault in its own end write is the cases below.
 
 
 async def _run_with_failing_finish(world, fault, *, marked: bool = False, **kw) -> tuple[str, str, _StoreWhoseFinishFails]:
-    """`marked`: the failing row's run left a ledger worth 8.0 that was never sealed (a failed write: a figure with its lower-limit mark)."""
-    child = _child(world, files=_committed(**({"{id}.session-pointer.json": session_pointer(CASE)} if marked else {})))
+    """`marked`: the run's staged outcome costs 8.0, marked a lower limit (a failed spend write: a figure with its mark)."""
+    from defender.tests.support.jobs._jobs1342 import staged_outcome_of
+
+    outcome = staged_outcome_of(job_end(), closing(), cost_usd=8.0, cost_is_lower_limit=True) if marked else None
+    child = _child(world, files=_committed(), staged={"outcome": outcome} if marked else None)
     async with job_store(world["dsn"]) as store:
         bad = await _queued(store, ticket="T-1", key="k1")
         good = await _queued(store, ticket="T-2", key="k2")
-        if marked:
-            plant_spend(world["runs"], CASE, bad, _LEDGER, sealed=False)
         used = _StoreWhoseFinishFails(store, bad, fault, **kw)
         await _worker(world, used, child).drain()
     assert row(world["dsn"], good)["stage"] == "completed", "one row's failed finish stopped the others"
@@ -1251,20 +1043,18 @@ _REFUSALS = ["data", "integrity"]
 @pytest.mark.parametrize("kind", _REFUSALS)
 async def test_o6_a_decided_ending_whose_write_is_refused_is_written_again_with_the_unreadable_knowledge_marker_and_stands(
         world, caplog, kind):
-    """CONFLICT-UPDATED (#1343 review; was: dropped into a retry): a refusal that is not an outage never drops the decided ending: the next try carries the unreadable-knowledge marker in place of the knowledge, lands, and nothing is retried. (B4, B5)"""
-    from defender.records import job_lane
-
+    """CONFLICT-UPDATED (#1343 review; was: dropped into a retry): a refusal that is not an outage never drops the decided ending: the next try (#1546: `lesser(decision)`) carries the unreadable-knowledge marker in place of the knowledge, lands, and nothing is retried. (B4, B5, PR9)"""
     bad, _, used = await _run_with_failing_finish(world, _data_fault(kind), fails=1, marked=True)
 
     tries = [kw for i, kw in used.finishes if i == bad]
     assert (tries[0]["cost_usd"], tries[0]["cost_is_lower_limit"]) == (pytest.approx(8.0), True), "premise: a marked figure"
     assert tries[1]["cost_is_lower_limit"] is True, "the second try kept the cost and dropped its mark"
     assert [(t["stage"], t["failure_reason"]) for t in tries] == [("completed", None)] * 2, "the decided ending was replaced"
-    assert tries[0]["knowledge"] != job_lane.JobLane.unreadable_knowledge(), "premise: the first try carried the run's knowledge"
-    assert tries[1]["knowledge"] == job_lane.JobLane.unreadable_knowledge()
+    assert tries[0]["knowledge"] != STALE_OPERATOR, "premise: the first try carried the run's knowledge"
+    assert tries[1]["knowledge"] == STALE_OPERATOR  # the unreadable marker: stale, operator, no commit
     assert tries[1]["cost_usd"] == tries[0]["cost_usd"], "the second try lost the cost"
     final = row(world["dsn"], bad)
-    assert (final["stage"], final["knowledge"]) == ("completed", job_lane.JobLane.unreadable_knowledge())
+    assert (final["stage"], final["knowledge"]) == ("completed", STALE_OPERATOR)
     assert execute(world["dsn"], "SELECT count(*) FROM jobs.investigations WHERE request_key = 'k1'") == [(1,)], \
         "a refused write re-ran the job"
     assert any(r.levelno >= logging.ERROR and bad in r.getMessage() for r in caplog.records

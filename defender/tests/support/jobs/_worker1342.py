@@ -99,10 +99,24 @@ async def _run_one(world: dict, child: ScriptedChild, *, then_state: str | None 
         if then_state:
             move_tenant(world["dsn"], T1, state=then_state)
         await _worker(world, store, child, **kw).drain()
+    if getattr(child, "dsn", None) and getattr(child, "seen", lambda: None)() is not None:  # a staging child that ran
+        from defender.tests.support.jobs._evidence_flows1546 import claim_of, facts
+
+        token = claim_of(world["dsn"], "investigation", inv)
+        assert token, "premise: the worker's claim wrote no claim row"
+        assert "started" in facts(world["dsn"], token), (
+            "premise: the stand-in helper staged nothing under the worker's claim (a vacuous no_report)")
     return inv, row(world["dsn"], inv)
 
 
 def _child(world: dict, **kw) -> ScriptedChild:
+    return ScriptedChild(world["tmp"] / "child", world["runs"], **kw)
+
+
+def _helper_child(world: dict, **kw) -> ScriptedChild:
+    """A scripted investigation child that also plays the helper (#1546 PR2): as it leaves its records it stages, under the
+    worker's claim, `started` and the facts its host records stand for (`ScriptedChild.dsn`); its files are decoys."""
+    kw.setdefault("dsn", world["dsn"])
     return ScriptedChild(world["tmp"] / "child", world["runs"], **kw)
 
 
@@ -173,89 +187,10 @@ CASES = {
                           expect=("failed", "no_report", None)),
     "1-no-job-end-helper-failed": _spec(files={"{id}/report.md": MARKED_REPORT}, exit=EXIT,
                                         expect=("failed", "worker_error", None), says=("helper",), code=EXIT),
-    "1-job-end-unreadable": _spec(files={"{id}.job-end.json": "{not json", "{id}/report.md": GOOD},
-                                  exit=0, expect=("failed", "no_report", None)),
-    "1-job-end-empty-object": _spec(files=_committed(**{"{id}.job-end.json": "{}"}), exit=0,
-                                    expect=("failed", "no_report", None)),
-    "1-job-end-an-array": _spec(files=_committed(**{"{id}.job-end.json": "[]"}), exit=0,
-                                expect=("failed", "no_report", None)),
-    "1-job-end-a-string": _spec(files=_committed(**{"{id}.job-end.json": '"done"'}), exit=0,
-                                expect=("failed", "no_report", None)),
-    "1-job-end-committed-as-a-string": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed="false")}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-verified-as-a-number": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=0)}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-unknown-setup-word": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(setup="skipped")}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-unknown-box-word": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(box="paused")}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-committed-as-json-null": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed=JSON_NULL)}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-verified-as-json-null": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=JSON_NULL)}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-committed-as-the-number-one": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed=1)}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-committed-as-the-number-zero": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(report_committed=0)}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-verified-as-the-number-one": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=1)}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-setup-word-capitalised": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(setup="Done")}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-setup-word-spaced": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(setup=" done")}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-setup-word-upper-case": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(setup="DONE")}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-box-word-upper-case": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(box="STARTED")}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-box-word-capitalised": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(box="Started")}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-box-word-spaced": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(box=" started")}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-box-word-shouted": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(box="BOX")}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-an-extra-key": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(extra="x")}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-a-missing-key": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(scrub_verified=None)}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-without-the-cut-short-fact": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=None)}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-cut-short-as-a-number": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=5)}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-cut-short-as-a-list": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short=["box-lost"])}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-cut-short-the-empty-word": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(cut_short="")}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-setup-as-a-list": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(setup=["done"])}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-box-as-an-object": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(box={})}), exit=0,
-        expect=("failed", "no_report", None)),
-    "1-job-end-setup-a-list-and-box-an-object": _spec(
-        files=_committed(**{"{id}.job-end.json": _job_end_with(setup=["done"], box={})}), exit=0,
-        expect=("failed", "no_report", None)),
+    # #1546 (A-O2, PR2): the worker parses no job-end record, so the malformed-record cases (`1-job-end-*`: unreadable,
+    # empty, an array, a string, words of the wrong type, case or spacing, extra or missing keys, out-of-vocabulary
+    # `cut_short`) retired with that parse; the helper stages such a record `refused/outcome`, which ends `bad_record`
+    # (test_1546_helper_records.py::test_a_malformed_record_of_any_kind_and_name_is_staged_refused_and_a_refused_outcome_or_result_reads_bad_record).
     # rule 2
     "2-setup-refused": _spec(files=_refused(), exit=1, expect=("failed", "setup_refused", None)),
     "2-refused-before-a-planted-report": _spec(
@@ -319,52 +254,21 @@ class _StoreWhoseAlertReadFails:
         return await self._store.get_alert(tenant_id, alert_id)
 
 
-class _LaneFailing:
-    """The real job lane, except that `method` raises `fault` for run `inv`; with `method="close"`,
-    closing the lane that read that run's ending raises, after it really closed."""
-
-    def __init__(self, lane, inv: str, method: str, fault: Exception) -> None:
-        self._lane, self._inv, self._method, self._fault = lane, inv, method, fault
-        self._read_inv = False
-
-    def __getattr__(self, name):
-        real = getattr(self._lane, name)
-        if not callable(real) or name == "close":
-            return real
-
-        def call(*args, **kwargs):
-            if args and str(args[0]) == self._inv:
-                self._read_inv = self._read_inv or name == "read_job_end"
-                if name == self._method:
-                    raise self._fault
-            return real(*args, **kwargs)
-        return call
-
-    def close(self) -> None:
-        self._lane.close()
-        if self._method == "close" and self._read_inv:
-            raise self._fault
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_exc) -> None:
-        self.close()
-
-
-def _lanes_failing(inv: str, method: str, fault: Exception):
-    """A job-lane door whose lanes fault as `_LaneFailing` says."""
-    from defender.records import job_lane
-
-    return lambda root, tenant: _LaneFailing(job_lane.JobLane.open(root, tenant), inv, method, fault)
-
-
 class _NobodyPlannedThis(Exception):  # noqa: N818 — derives directly from Exception, in no list of expected faults
     """A fault type no handler in the worker can know by name."""
 
 
+def _decided(decision) -> dict:
+    """An `apply` decision's terminal values as a dict (a `HandBack` has no stage)."""
+    names = ("stage", "failure_reason", "disposition", "cost_usd", "cost_is_lower_limit", "knowledge", "evidence_state")
+    return {name: getattr(decision, name, None) for name in names} | {"kind": type(decision).__name__}
+
+
 class _StoreWhoseFinishFails:
-    """The real store, except that one row's first `fails` finishes raise, and every finish is noted. With `commit`, each failing finish first writes, then loses its answer; with `alert_missing`, that row's alert reads as absent."""
+    """The real store, except that one row's first `fails` end writes raise, and every end write is noted. #1546 PR9: the
+    end write is `apply(tenant, owner, decision)` (the only writer of terminal columns), so that is the seam; `finishes`
+    holds each decision's values. With `commit`, each failing write first writes, then loses its answer; with
+    `alert_missing`, that row's alert reads as absent."""
 
     def __init__(self, store, inv: str, fault: Exception, *, fails: int, commit: bool = False,
                  alert_missing: bool = False) -> None:
@@ -381,15 +285,16 @@ class _StoreWhoseFinishFails:
             return None
         return await self._store.get_alert(tenant_id, alert_id)
 
-    async def finish(self, tenant_id, investigation_id, **kw):
-        self.finishes.append((investigation_id, kw))
-        self.at.append((investigation_id, time.monotonic()))
-        if investigation_id == self._inv and self._fails > 0:
+    async def apply(self, tenant_id, owner_id, decision, *args, **kw):
+        owner = str(owner_id)
+        self.finishes.append((owner, _decided(decision)))
+        self.at.append((owner, time.monotonic()))
+        if owner == self._inv and self._fails > 0:
             self._fails -= 1
             if self._commit:
-                await self._store.finish(tenant_id, investigation_id, **kw)
+                await self._store.apply(tenant_id, owner_id, decision, *args, **kw)
             raise self._fault
-        return await self._store.finish(tenant_id, investigation_id, **kw)
+        return await self._store.apply(tenant_id, owner_id, decision, *args, **kw)
 
     def tries(self, inv: str) -> list[tuple]:
         return [(kw["stage"], kw["failure_reason"], kw["cost_usd"]) for i, kw in self.finishes if i == inv]
