@@ -7,7 +7,8 @@ Each poll first confirms or takes the worker's one lock (`people_lock()`); witho
 losing it the worker cancels everything it started, which deletes no ids. Every change between holding and not
 holding is one error line. Holding it, a poll reads the open requests, starts an expansion for each tenant's
 (none, T) requests (one per tenant at a time), starts runs for users in turn, at most `people_concurrency` in flight
-and never two for one user, and runs the cap job when it is due. It returns without waiting for what it started;
+and never two for one user, and runs the cap job when it is due. A user whose runs keep failing waits ever longer
+between attempts: none after the first failure, then 1, 3, 7, ... polls, at most `MAX_SKIPPED_POLLS`. It returns without waiting for what it started;
 `settle()` waits."""
 from __future__ import annotations
 
@@ -28,6 +29,9 @@ from defender.records.formats import PeopleRequestId, TenantId, UserId
 
 _logger = logging.getLogger(__name__)
 
+#: The most polls a user whose runs keep failing waits between attempts (about a minute at the default poll).
+MAX_SKIPPED_POLLS = 31
+
 
 class PeopleWorker:
     """`tenants` the tenancy repository (the requests, the wiring, the lock), `identity` the identity repository (the
@@ -47,6 +51,9 @@ class PeopleWorker:
         #: when each user was last attempted, as a sequence number (kept in the process; lost at restart, harmlessly)
         self._attempted: dict[UserId, int] = {}
         self._sequence = itertools.count()
+        #: a user's failed runs in a row, and how many more polls they wait before the next (kept in the process)
+        self._failures: dict[UserId, int] = {}
+        self._waiting: dict[UserId, int] = {}
         self._tasks: set[asyncio.Task[None]] = set()
 
     async def start(self) -> None:
@@ -174,7 +181,12 @@ class PeopleWorker:
         for request in requests:
             if request.user_id is not None:
                 by_user.setdefault(request.user_id, []).append(request)
-        waiting = sorted((u for u in by_user if u not in self._runs), key=lambda u: self._turn(u, by_user[u]))
+        for user in [u for u in self._waiting if u not in self._runs]:
+            self._waiting[user] -= 1
+            if self._waiting[user] < 0:
+                del self._waiting[user]
+        waiting = sorted((u for u in by_user if u not in self._runs and u not in self._waiting),
+                         key=lambda u: self._turn(u, by_user[u]))
         for user in waiting[:max(0, self.config.people_concurrency - len(self._runs))]:
             self._attempted[user] = next(self._sequence)
             task = self._spawn(self._run(user, by_user[user]))
@@ -194,10 +206,20 @@ class PeopleWorker:
             if done and self._holding:
                 await self.tenants.edit_people_requests(delete=[PeopleRequestId(r.id) for r in rows])
                 self._attempted.pop(user, None)
+                self._failures.pop(user, None)
+                return
         except asyncio.CancelledError:
             raise
         except Exception as error:  # noqa: BLE001 — the requests stay; the user goes to the back
             _logger.error("people request of user %s: the run failed, retried at a later poll: %s", user, error)
+        self._back_off(user)
+
+    def _back_off(self, user: UserId) -> None:
+        """After a failed run: no wait the first time, then 1, 3, 7, ... polls, at most `MAX_SKIPPED_POLLS`."""
+        failures = self._failures[user] = self._failures.get(user, 0) + 1
+        skipped = min(2 ** min(failures - 1, 16) - 1, MAX_SKIPPED_POLLS)
+        if skipped:
+            self._waiting[user] = skipped
 
     # --- the cap job ------------------------------------------------------------------------------------------------
     def _start_cap(self) -> None:
