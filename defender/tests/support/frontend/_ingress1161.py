@@ -48,8 +48,8 @@ from defender.tests.support.api._server1083 import REPO, free_port
 
 FRONTEND = REPO / "defender" / "frontend"
 ARTIFACT_DOMAIN = "artifacts.defender.test"
-#: #1592 OD-1: the Forgejo site's two required inputs (design, Edge): `DEFENDER_FORGE_DOMAIN`, the API's own setting,
-#: and `DEFENDER_INGRESS_FORGE_UPSTREAM`.
+#: #1592 OD-1: the Forgejo site's two required inputs (design, Edge): `DEFENDER_FORGE_DOMAIN` (the ingress's alone since the
+#: #1592 finalize: the API builds no link from it), and `DEFENDER_INGRESS_FORGE_UPSTREAM`.
 FORGE_DOMAIN = "forge.defender.test"
 FORGE_UPSTREAM_ENV = "DEFENDER_INGRESS_FORGE_UPSTREAM"
 #: Where a launcher with no Forgejo test of its own points the site: nothing listens there.
