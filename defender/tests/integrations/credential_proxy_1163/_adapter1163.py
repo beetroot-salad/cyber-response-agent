@@ -79,12 +79,15 @@ def elastic_files(base: str, *, ca: str | bytes | None = None, env_extra: str = 
 
 @contextlib.contextmanager
 def elastic_proxied(tmp_path: Path, data_root: Path, base: str, *, ca: bytes | None = None,
-                    ctx_kw: Mapping[str, Any] | None = None, **files_kw: Any) -> Iterator[tuple[VerbContext, Tap]]:
+                    ctx_kw: Mapping[str, Any] | None = None, extra_files: Mapping[str, str | None] | None = None,
+                    **files_kw: Any) -> Iterator[tuple[VerbContext, Tap]]:
     """`elastic` declared at `base` (basic auth, the two POST reads, `ca` when given; `files_kw`
     shape its files, see `elastic_files`) behind the real proxy over a stored basic credential;
-    yields the verb context (`ctx_kw`: more VerbContext fields) and the proxy's `Tap`."""
+    yields the verb context (`ctx_kw`: more VerbContext fields) and the proxy's `Tap`. `extra_files` (repo path to
+    content, `None` deletes) are published with them: a published tenant's `main` is what every run reads (#1618 K8),
+    so content a run must find is published, never placed beside it."""
     with published_tenant(tmp_path / "forge", root=data_root,
-                          files=elastic_files(base, ca=ca, **files_kw)) as t:
+                          files={**elastic_files(base, ca=ca, **files_kw), **(extra_files or {})}) as t:
         store = H.FakeStore({(t.tenant_id, "elastic"): T.basic_set()})
         with proxy_for(t, store) as (url, tap):
             yield ctx_for(tmp_path, T.run_record(t), url,
