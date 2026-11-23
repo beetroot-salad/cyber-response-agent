@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import io
 import sys
+import uuid
 from typing import Any, get_args
 
 import pytest
@@ -74,16 +75,26 @@ def _check(scene: Any, keys: _Keys) -> tuple[Readied, dict[str, Any]]:
     return done, row
 
 
-@pytest.mark.parametrize(("key_present", "expected"), [(False, [KIND]), (True, [])])
-def test_the_check_warns_of_a_missing_evidence_key_on_the_request_row_and_stays_ready(tmp_path, monkeypatch, migrated_database,
-                                                                                      key_present, expected):
-    """A tenant whose evidence key is missing reads `ready` on its finished `host_requests` row with the one warning and a
-    sentence; with the key present there is none; the key was asked for the tenant's own. (A-O7)"""
+def test_the_check_warns_of_a_missing_evidence_key_on_the_request_row_and_stays_ready(tmp_path, monkeypatch, migrated_database):
+    """Two checks of one tenant, its evidence key present and then missing: both read `ready` on their finished `host_requests`
+    rows; the missing key adds exactly one warning with a sentence to what the check reports with the key (the systems check's
+    own warnings stay, #1471 R4); each asked for the tenant's own key. (A-O7)"""
+    from collections import Counter
+    from dataclasses import replace
+
+    from defender.box import CLAIM_ENV
+
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
-        keys = _Keys(key_present)
-        done, result = _check(scene, keys)
-        assert isinstance(result, dict) and result["outcome"] == "ready", (result, done.said())
-        assert [w["kind"] for w in result["warnings"]] == expected, (result, done.said())
-        for warning in result["warnings"]:
-            assert warning["sentence"].strip(), warning
-        assert keys.asked == [scene.tenant], "the key check was not asked for the tenant's key"
+        kinds = {}
+        for present in (True, False):
+            keys = _Keys(present)
+            done, result = _check(scene, keys)
+            assert isinstance(result, dict) and result["outcome"] == "ready", (result, done.said())
+            assert keys.asked == [scene.tenant], "the key check was not asked for the tenant's key"
+            kinds[present] = [w["kind"] for w in result["warnings"]]
+            for warning in result["warnings"]:
+                assert warning["sentence"].strip(), warning
+            scene = replace(scene, claim=uuid.uuid4().hex)  # the next check is another request under its own claim
+            monkeypatch.setenv(CLAIM_ENV, scene.claim)
+        assert KIND not in kinds[True], kinds
+        assert Counter(kinds[False]) == Counter(kinds[True]) + Counter([KIND]), kinds
