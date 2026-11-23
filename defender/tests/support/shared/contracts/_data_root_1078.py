@@ -114,7 +114,7 @@ def set_up_tenant(root: Path, tenant_id: str = D9_TENANT_ID, *, published: bool 
     root = Path(location_path(root))
     knowledge = root / tenant_id / "knowledge"
     on_its_remote = False
-    if published and not knowledge.exists():
+    if not knowledge.exists():
         from defender.tests.support.tenancy._fetch_standin_1618 import served_remote
 
         # Already set up with its knowledge on its Forgejo repository only (`_spec1224.Estate.place`, a published

@@ -98,7 +98,7 @@ def test_1390_the_workspace_map_command_lists_the_registry(tmp_path, data_root, 
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     with B.run_tenant(tmp_path, data_root) as t:
-        out = B.launch(t, tmp_path, fetch=B.fetching(t))  # #1618 flow 2: the run's one fetch, of `main`
+        out = B.launch(t, tmp_path, publish=None, fetch=in_process_fetch(t.remote))  # #1618 flow 2: the run's one fetch, of `main`
         assert out.rc == 0, out.text()
         capsys.readouterr()
         rc = workspace_map.main(["workspace_map.py", "--tenant", t.tenant_id, out.run_dir.name], directory=t.directory, fetch=in_process_fetch())
@@ -121,7 +121,7 @@ def test_1390_the_workspace_map_command_lists_the_registry_whatever_today_grants
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     with B.run_tenant(tmp_path, data_root) as t:
-        out = B.launch(t, tmp_path, fetch=B.fetching(t))  # #1618 flow 2: the run's one fetch, of `main`
+        out = B.launch(t, tmp_path, publish=None, fetch=in_process_fetch(t.remote))  # #1618 flow 2: the run's one fetch, of `main`
         assert out.rc == 0, out.text()
         # Today's table is `main`'s on the tenant's Forgejo repository (#1618 D2, K8: no host copy): the withheld rows are
         # committed there, after the run.

@@ -188,6 +188,33 @@ def copy_at_main(data_root: Path | str, tenant_id: str) -> Path | None:
     return copy
 
 
+def commit_on_main(data_root: Path | str, tenant_id: str, files: dict[str, str | bytes | None], message: str) -> str:
+    """Commit `files` (`{"agent/..." | "settings/...": text, bytes or None to delete}`) on `main` of the tenant's served
+    remote, as a tenant admin's merge would land there (#1618 D2: knowledge changes only on Forgejo), through a scratch
+    checkout beside the data root. Returns the new `main`."""
+    import tempfile
+
+    root = Path(str(location_path(data_root)))
+    remote = served_remote(root, str(tenant_id))
+    with _lock_for(remote), tempfile.TemporaryDirectory(dir=forge_scratch(root)) as scratch:
+        work = Path(scratch) / "work"
+        subprocess.run(["git", "clone", "-q", "-b", "main", str(remote), str(work)],  # noqa: S603, S607
+                       check=True, capture_output=True)
+        _git(work, "config", "user.name", "P4 fixture")
+        _git(work, "config", "user.email", "p4@test.invalid")
+        for rel, data in files.items():
+            target = work / rel
+            if data is None:
+                target.unlink(missing_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data.encode("utf-8") if isinstance(data, str) else data)
+        _git(work, "add", "-A")
+        _git(work, "commit", "-q", "--allow-empty", "-m", message)
+        _git(work, "push", "-q", str(remote), "HEAD:main")
+        return _git(work, "rev-parse", "HEAD")
+
+
 def fetch_line(tenant_id: str, dest: Path, *, data_root: Any, commit: str | None = None,
                directory: Any = None, remote: Path | None = None) -> str:
     """The product's in-process fetch (`fetch_copy`) of `tenant_id`'s served remote into the empty `dest`, as one report
@@ -220,6 +247,32 @@ def fetch_line(tenant_id: str, dest: Path, *, data_root: Any, commit: str | None
         return f"ok {got}"
     finally:
         server.close()
+
+
+def fetched_copy(tenant_id: str, data_root: Path | str | None = None) -> Callable[[str], Any]:
+    """A judge pass's `copy=` seam (`grade_episode(copy=)`, #1618 K5), shaped as the launcher's own (`branch/cli.py`
+    `_judge_copy`): the product's fetch (`fetch_line`) of one commit by id into a fresh folder beside the data root,
+    removed when the pass releases it; a refusal is the judge's `KnowledgeRefused`, naming the report."""
+    import contextlib
+    import os
+    import tempfile
+
+    @contextlib.contextmanager
+    def copy(commit: str) -> Any:
+        from defender.learning.judge import KnowledgeRefused
+
+        root = Path(str(location_path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])))
+        scratch = forge_scratch(root) / "judge-copies"
+        scratch.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch) as held:
+            dest = Path(held) / "copy"
+            dest.mkdir()
+            line = fetch_line(str(tenant_id), dest, data_root=root, commit=commit)
+            if not line.startswith("ok "):
+                raise KnowledgeRefused(f"knowledge commit {commit} could not be copied: {line}")
+            yield dest
+
+    return copy
 
 
 def in_process_fetch(remote: Path | str | None = None) -> Callable[..., str]:

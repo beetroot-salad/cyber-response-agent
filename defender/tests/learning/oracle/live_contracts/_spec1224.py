@@ -475,7 +475,15 @@ class Estate:
 
     def run_tenant(self, data_root: Path | None = None,
                    tenant_id: str = FIXTURE_TENANT) -> Any:
-        return T6.run_tenant(self.place(data_root, tenant_id), records=self.records())
+        from defender.tests.support.tenancy._fetch_standin_1618 import copy_at_main
+
+        tenant = self.place(data_root, tenant_id)
+        root = Path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])
+        # #1618 K8: the tenant holds no knowledge folder; its halves are `main`'s on its Forgejo repository (a copy).
+        copy = copy_at_main(root, tenant_id)
+        if copy is None:
+            return T6.run_tenant(tenant, records=self.records())
+        return T6.run_tenant(tenant, agent_root=copy / "agent", settings_root=copy / "settings", records=self.records())
 
     def grant(self) -> Any:
         """The tenant's gather `VerbGrant` — the grant every branching query goes through."""
@@ -522,11 +530,14 @@ class TacitEstate(Estate):
         return "\n".join(lines) + "\n"
 
     def write_registry(self, text: str) -> Path:
-        """`text` as the placed tenant's registry (`agent/skills/tacit-knowledge/registry.yaml`)."""
-        path = Path(self.run_tenant().agent) / "skills" / TACIT / "registry.yaml"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-        return path
+        """`text` as the tenant's registry (`agent/skills/tacit-knowledge/registry.yaml`), committed on its Forgejo `main`
+        (#1618 D2: knowledge lives only there); returns the path in `run_tenant()`'s copy of that `main`."""
+        from defender.tests.support.tenancy._fetch_standin_1618 import commit_on_main
+
+        rel = f"agent/skills/{TACIT}/registry.yaml"
+        tenant = self.place()
+        commit_on_main(tenant.data_root, FIXTURE_TENANT, {rel: text}, "the tacit-knowledge registry")
+        return Path(self.run_tenant().agent) / "skills" / TACIT / "registry.yaml"
 
 
 # --------------------------------------------------------------------------------------
