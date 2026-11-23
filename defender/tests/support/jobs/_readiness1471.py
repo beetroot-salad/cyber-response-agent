@@ -128,22 +128,33 @@ class Readied:
     container_rc: int | None = None
     facts: dict[str, Any] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+    #: The claim the check ran under (#1546: its typed records are staged facts of this token).
+    token: str = ""
 
     @property
     def record_path(self) -> Path:
+        """Where the record was a file before #1546 (A-O2: nothing is written there now)."""
         return self.scene.runs / f"{self.rid}.readiness.json"
 
     @property
     def knowledge_path(self) -> Path:
         return self.scene.runs / f"{self.rid}.knowledge-source.json"
 
+    def staged(self) -> dict[str, Any]:
+        """The claim's staged facts (#1546 PR2: the helper's typed records), name -> body."""
+        from defender.tests.support.shared._postgres1339 import execute
+
+        return dict(execute(self.scene.dsn, "SELECT name, body FROM jobs.staged_facts WHERE token = %s", (self.token,)))
+
     @property
     def record(self) -> Any:
-        return read_json(self.record_path)
+        """The readiness record as the helper staged it (`result`), or None (#1546 D5: no record file)."""
+        return self.staged().get("result")
 
     @property
     def knowledge(self) -> Any:
-        return read_json(self.knowledge_path)
+        """The check's knowledge record as the helper staged it (`knowledge`), or None."""
+        return self.staged().get("knowledge")
 
     def said(self) -> str:
         """Everything a failing case should show: the record, the helper's stderr, a container fault."""
@@ -184,13 +195,16 @@ def entry_of(scene: HelperScene, rid: str, done: Readied, *, roster: Any = None,
 def readiness(  # noqa: PLR0913 — one keyword per seam the helper takes
               scene: HelperScene, *, signer: Any = None, docker: ContainerStandIn | None = None, rid: str | None = None,
               container: Callable[[Any], int] | None = None, roster: Any = None, publish: Callable[..., str] | None = None,
-              defender_dir: Path | None = None, directory: Any = None) -> Readied:
+              defender_dir: Path | None = None, directory: Any = None, evidence_keys: Any = None) -> Readied:
     """The helper for a readiness check of the scene's tenant (kind `readiness`, job id `rid`), its container the real
     `readiness_main` unless `container(Container) -> rc` says otherwise. `publish` is the launch-time publish seam
     (default: `fresh` at the published commit). `defender_dir`: the code tree the container entry reads. `directory`: the tenant records the helper is handed (`job_host.main(directory=)`),
-    passed only when given. Never raises for the subject's absence: the caller reads `.result()`."""
+    passed only when given. `evidence_keys`: the helper's key check (#1546 A-O7; default: the tenant's key is present).
+    #1546: the request row (running) and its claim under the scene's claim token are planted first, as the worker's claim
+    leaves them (`claim_check`). Never raises for the subject's absence: the caller reads `.result()`."""
     rid = rid or str(uuid.uuid4())
-    done = Readied(scene, rid, HelperRan(), ContainerStandIn(), "")
+    claim_check(scene, rid)
+    done = Readied(scene, rid, HelperRan(), ContainerStandIn(), "", token=scene.claim)
     stand_in = docker if docker is not None else ContainerStandIn()
 
     def captured(c: Any) -> int:
@@ -203,12 +217,38 @@ def readiness(  # noqa: PLR0913 — one keyword per seam the helper takes
     seams: dict[str, Any] = {} if publish is None else {"publish": publish}
     if directory is not None:
         seams["directory"] = directory
+    seams["evidence_keys"] = evidence_keys if evidence_keys is not None else KeyPresent()
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
         done.ran = drive_helper(scene, scene.argv("readiness", rid), docker=stand_in,
                                 signer=signer if signer is not None else make_signer(), **seams)
     done.err = err.getvalue()
     return done
+
+
+class KeyPresent:
+    """The helper's `evidence_keys` seam answering that every tenant's evidence key exists (#1546 A-O7)."""
+
+    def exists(self, tenant_id: str) -> bool:
+        return True
+
+
+def claim_check(scene: HelperScene, rid: str) -> None:
+    """The running readiness row `rid` and its claim under `scene.claim`, as the worker's claim transaction leaves them
+    (#1546 PR7). A second check in one scene first ends the previous live row (`failed/worker_error`, as a lapse would) and
+    drops the previous claim's rows, so the scene's one claim token names this check."""
+    from defender.tests.support.jobs._host_requests1471 import plant
+    from defender.tests.support.shared._postgres1339 import execute
+
+    execute(scene.dsn, "UPDATE jobs.host_requests SET stage = 'failed', failure_reason = 'worker_error', finished_at = now(), "
+                       "lease_expires_at = NULL WHERE tenant_id = %s AND kind = 'readiness' AND stage IN ('queued', 'running')",
+            (scene.tenant,))
+    for table in ("staged_facts", "uploads", "claims"):
+        execute(scene.dsn, f"DELETE FROM jobs.{table} WHERE token = %s", (scene.claim,))  # noqa: S608 — fixed names
+    if not execute(scene.dsn, "SELECT 1 FROM jobs.host_requests WHERE id = %s", (rid,)):
+        plant(scene.dsn, scene.tenant, "readiness", stage="running", request_id=rid)
+    execute(scene.dsn, "INSERT INTO jobs.claims (token, tenant_id, kind, host_request_id, launch, inputs) "
+                       "VALUES (%s, %s, 'readiness', %s, '{}'::jsonb, '[]'::jsonb)", (scene.claim, scene.tenant, rid))
 
 
 # --- test-only doubles and planted trees ----------------------------------------------------------------------------
