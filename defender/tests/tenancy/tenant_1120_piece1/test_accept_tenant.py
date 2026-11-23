@@ -298,7 +298,8 @@ def test_1120_accept_tenant_accepts_a_plain_local_clone_whose_git_objects_are_ha
     root = _cloned(tmp_path)
     _assert_hardlinked_objects(root)
     tenant = H.accept(_tenant, root)
-    assert tenant.knowledge == H.knowledge_dir(root)
+    # #1618 K8 (census: `Tenant.agent/.settings/.knowledge` deleted): acceptance names no knowledge path.
+    assert not hasattr(tenant, "knowledge"), tenant
 
 
 def _dot_github(knowledge: Path) -> Path:
@@ -522,8 +523,9 @@ def test_1120_accept_tenant_accepts_an_unversioned_knowledge_folder(tmp_path: Pa
     H.adopted(root)
     assert not (H.knowledge_dir(root) / ".git").exists()
     tenant = H.accept(_tenant, root)
-    assert tenant.knowledge == H.knowledge_dir(root)
-    assert tenant.agent == H.agent_dir(root)
+    # #1618 K8 (census: `Tenant.agent/.settings/.knowledge` deleted): acceptance names no knowledge path.
+    assert not hasattr(tenant, "knowledge"), tenant
+    assert not hasattr(tenant, "agent"), tenant
 
 
 def _fifo(where: Path) -> Path:

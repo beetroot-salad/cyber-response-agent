@@ -617,8 +617,8 @@ def test_o5_a_publish_between_the_claim_and_a_later_pass_leaves_the_jobs_export_
 
     def job(c) -> int:
         got["first"] = A.grant_of(claims_of(signer, c.request("pass", id=inv)["token"]))
-        scene.t.merge({"settings/verb-grants.yaml": _ungranted("identity")})
-        got["published"] = scene.t.publish().commit
+        # #1618: merged is `main`, what the next fetch reads; nothing publishes.
+        got["published"] = scene.t.merge({"settings/verb-grants.yaml": _ungranted("identity")})
         got["launch"] = c.request("launch")
         got["later"] = A.grant_of(claims_of(signer, c.request("pass", id=inv)["token"]))
         return 0
