@@ -129,7 +129,7 @@ def test_the_box_keeps_network_none_and_binds_the_run_dir_read_only(run_dir):
     extra = [m for m in readonly
              if not any(f"target={t}," in m or f"target={t}/" in m for t in MODEL_ROOTS)]
     named = [m for m in readonly if m not in extra]
-    assert len(named) == 2, named
+    assert len(named) == 3, named  # the run dir (now read-only, D4), its `alert_input` and the checkout
     assert len(extra) <= 1, f"more than the clock's one extra read-only bind: {extra}"
     for m in mounts:
         source = Path(m.split("source=")[1].split(",")[0])

@@ -341,10 +341,9 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
         f"a box mount is no longer a bind: {specs}"
     )
     writable = [m for m in rec.mounts() if not m["readonly"]]
-    assert len(writable) == 1, f"the writable bind set moved: {writable}"
-    assert Path(writable[0]["source"]).resolve() == run.resolve(), (
-        f"the writable bind is sourced at {writable[0]['source']!r}, not at the run dir itself"
-    )
+    assert writable == [], f"the box has a writable bind (#1546 D4: the run folder is read-only): {writable}"
+    at_run = [m for m in rec.mounts() if Path(m["source"]).resolve() == run.resolve()]
+    assert len(at_run) == 1, f"the run dir itself is not bound exactly once: {rec.mounts()}"
 
 
 def test_a_planted_hard_link_still_refuses_the_guarded_write(tmp_path):
