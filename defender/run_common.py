@@ -576,7 +576,8 @@ def resolve_knowledge(
         try:
             tenancy.check_run_settings(run_knowledge.RunCopy(temporary).settings)
         except TenantRefused as refused:
-            raise KnowledgeExit(f"[run.py] this run's tenant cannot be used: {refused}", report=None) from None
+            why = str(refused).replace(str(temporary), str(parent / run_id))  # the copy's name, not its build folder's
+            raise KnowledgeExit(f"[run.py] this run's tenant cannot be used: {why}", report=None) from None
         try:
             run_knowledge.place(temporary, parent / run_id)
         except (run_knowledge.KnowledgeRefused, OSError) as unplaced:

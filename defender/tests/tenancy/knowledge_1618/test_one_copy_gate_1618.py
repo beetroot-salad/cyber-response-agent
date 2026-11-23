@@ -71,7 +71,9 @@ def test_a_copy_whose_settings_fail_is_refused_before_it_is_placed(t, tmp_path):
     tenant = _accepted(t)
     missing = sorted(REQUIRED_SETTINGS)[0]
     K.advance_main(t, files={f"settings/{missing}": None})
+    run_id = str(uuid.uuid4())
     with pytest.raises(SystemExit) as refused:
-        _resolve(t, tenant, K.fetch_seam(t, tmp_path))
+        _resolve(t, tenant, K.fetch_seam(t, tmp_path), run_id=run_id)
     assert missing in str(refused.value.code), refused.value.code
+    assert str(A.run_copies(t) / run_id / "settings") in str(refused.value.code), "the refusal names the copy's own path"
     assert A.listing(A.run_copies(t)) == [], A.listing(A.run_copies(t))
