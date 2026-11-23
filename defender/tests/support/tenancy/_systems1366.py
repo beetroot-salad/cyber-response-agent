@@ -565,6 +565,13 @@ class ExportRecords(RecordsPort):
     def __init__(self, data_root: Path | str) -> None:
         self.data_root = Path(data_root)
         super().__init__(self._planted)
+        # #1618: a published tenant's settings are a copy of its Forgejo `main` (`settings_of`), built by git; build each
+        # served tenant's now, so the proxy's per-call read during a verb finds it made and starts no process.
+        from defender.tests.support.tenancy._fetch_standin_1618 import forge_scratch
+
+        served = forge_scratch(self.data_root) / "tenants"
+        for remote in sorted(served.glob("*.git")) if served.is_dir() else ():
+            settings_of(self.data_root, remote.name.removesuffix(".git"))
 
     def _planted(self, tenant_id: str) -> RecordsSpec | None:
         folder = settings_of(self.data_root, tenant_id)

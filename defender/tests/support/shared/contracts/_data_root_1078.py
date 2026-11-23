@@ -113,7 +113,14 @@ def set_up_tenant(root: Path, tenant_id: str = D9_TENANT_ID, *, published: bool 
     owner = _tenant_owner()
     root = Path(location_path(root))
     knowledge = root / tenant_id / "knowledge"
-    if not knowledge.exists():
+    on_its_remote = False
+    if published and not knowledge.exists():
+        from defender.tests.support.tenancy._fetch_standin_1618 import served_remote
+
+        # Already set up with its knowledge on its Forgejo repository only (`_spec1224.Estate.place`, a published
+        # scene): placing the fixture here would be committed over that `main` by the next fetch's seeding.
+        on_its_remote = (served_remote(root, tenant_id) / "HEAD").exists()
+    if not knowledge.exists() and not on_its_remote:
         shutil.copytree(FIXTURE, knowledge, symlinks=True)
         (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
     if published:

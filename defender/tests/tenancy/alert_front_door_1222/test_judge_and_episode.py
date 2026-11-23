@@ -115,8 +115,9 @@ def _trial(base: Path, name: str, raw: bytes, *, closing: dict[str, Any] | None 
 
 def _grade(ep: Path, base: Path, *, judge: J.FakeJudge | None = None) -> tuple[Any, J.FakeJudge]:
     fake = J.scripted_judge() if judge is None else judge
+    # #1618 K5: a stamp's knowledge commit is read through a copy at that commit (the pass's `copy=` seam), never a clone.
     grade = J.grade_at(ep, runs_base=base, judge=fake, store=_QUEUE[0],
-                                       draws=1, git_show=J.FakeGitShow())
+                       draws=1, git_show=J.FakeGitShow(), copy=J.FakeCopy(Path(base).parent / "judge-copies"))
     return grade, fake
 
 

@@ -1073,6 +1073,32 @@ class FakeGitShow:
         return [rev for rev, _path in self.asked]
 
 
+@dataclass
+class FakeCopy:
+    """A `copy=` seam for an in-process judge pass (`grade_episode(copy=)`; #1618 K5, flow 3: a post-move sibling's lesson
+    bodies are read from a copy of the tenant's knowledge at the family's pin, which in a job container the helper's
+    `copy.make` makes). Each ask makes a fresh folder under `root` holding `bodies` (`{rel: text}`) under `agent/` and
+    nothing else, and records the commit asked; with no bodies it answers as `FakeGitShow()` did: no body is found."""
+
+    root: Path
+    bodies: dict[str, str] = field(default_factory=dict)
+    asked: list[str] = field(default_factory=list)
+
+    def __call__(self, commit: str) -> Any:
+        import contextlib
+        import tempfile
+
+        self.asked.append(commit)
+        Path(self.root).mkdir(parents=True, exist_ok=True)
+        dest = Path(tempfile.mkdtemp(prefix="copy-", dir=self.root))
+        (dest / "agent").mkdir()
+        for rel, text in self.bodies.items():
+            target = dest / "agent" / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+        return contextlib.nullcontext(dest)
+
+
 def refusals() -> tuple[type[BaseException], ...]:
     """Every class a refusal here may be, never bare `Exception` (which a `ModuleNotFoundError`
     would satisfy). The tuple is evaluated before the `raises` block opens, so a missing target

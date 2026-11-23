@@ -145,6 +145,27 @@ def link_published(data_root: Path | str, tenant_id: str, remote: Path) -> None:
     served.symlink_to(remote, target_is_directory=True)
 
 
+def _main_of(remote: Path) -> str:
+    """`main`'s commit in the bare `remote`, read from its ref files (loose, else `packed-refs`) so a reader asking for a
+    copy it already has starts no process (a proxy-side records read in the middle of a verb must not: #1391 O1's
+    no-process check); git answers only for a layout it does not read."""
+    remote = Path(remote)
+    try:
+        loose = (remote / "refs" / "heads" / "main").read_text(encoding="ascii").strip()
+        if len(loose) in (40, 64):
+            return loose
+    except OSError:
+        pass
+    try:
+        for line in (remote / "packed-refs").read_text(encoding="ascii").splitlines():
+            oid, _sep, name = line.partition(" ")
+            if name == "refs/heads/main" and len(oid) in (40, 64):
+                return oid
+    except OSError:
+        pass
+    return _git(remote, "rev-parse", "refs/heads/main")
+
+
 def copy_at_main(data_root: Path | str, tenant_id: str) -> Path | None:
     """A test-side copy (`halves_at`) of `main`'s `agent/` and `settings/` on the tenant's served remote, beside the data
     root and one per commit (`<root>-p4-forge/copies/<T>/<commit>/`); None when the tenant has no served remote."""
@@ -154,7 +175,7 @@ def copy_at_main(data_root: Path | str, tenant_id: str) -> Path | None:
     remote = served_remote(root, str(tenant_id))
     if not (remote / "HEAD").exists():
         return None
-    commit = _git(remote, "rev-parse", "refs/heads/main")
+    commit = _main_of(remote)
     copy = forge_scratch(root) / "copies" / str(tenant_id) / commit
     if not copy.is_dir():
         building = copy.with_name(f".{commit}.{os.getpid()}.{threading.get_ident()}")
