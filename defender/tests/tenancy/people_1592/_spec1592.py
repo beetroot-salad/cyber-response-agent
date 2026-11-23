@@ -18,6 +18,7 @@ import asyncio
 import collections
 import contextlib
 import datetime as _dt
+import json
 from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -28,6 +29,8 @@ from defender.tests.tenancy.lifecycle_1214._fakes import ADMIN_TOKEN, FORGE_URL,
 from defender.tests.tenancy.people_1592._gob1592 import ANONYMOUS_P31, signed_in_data  # noqa: F401 — re-exported
 
 KEYCLOAK_SOURCE_ID = 7
+#: The account limits Forgejo's creation ignores (P20), which the fake records from an account PATCH.
+LIMITS = ("max_repo_creation", "allow_create_organization")
 #: The team every tenant's people are in.
 MEMBERS = "members"
 #: The sketch's name for P31's anonymous (OAuth-start) row.
@@ -237,6 +240,9 @@ class PeopleForge(FakeForge):
                 self.accounts[login].update(restricted=bool(body.get("restricted")), email=body.get("email"),
                                             full_name=body.get("full_name"))
                 return httpx.Response(201, json=self._account(login))
+            case ("PATCH", ["admin", "users", login]) if login in self.accounts:
+                body = json.loads(request.content or b"{}")
+                self.accounts[login].update({k: body[k] for k in LIMITS if k in body})
             case ("GET", ["orgs", org]):
                 self._record(request)
                 return httpx.Response(200, json={"username": org}) if org in self.orgs \
