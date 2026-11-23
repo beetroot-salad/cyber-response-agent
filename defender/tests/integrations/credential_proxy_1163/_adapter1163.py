@@ -8,7 +8,7 @@ Names this module chooses (the contract's seams, listed in the contract map):
   never read by an adapter from the model-visible `ctx.env`).
 - `run.main(signer=, proxy_url=)`: the operator's seams at the run process.
 - `run.main(issuer_transport=)` and the learning launcher's `issuer_transport=` (the name
-  `publish_for_run` already uses): the `httpx` transport the in-process signer reaches OpenBao by
+  `branch.cli.main` takes too): the `httpx` transport the in-process signer reaches OpenBao by
   when no `signer=` is injected. The signer logs in as the live generation's sign-only AppRole
   (`sign_role_id` and the host file `sign_secret_file`, read from the tenant records the run or the
   launcher holds, A24') at the deployment's OpenBao address, and signs through transit with that
