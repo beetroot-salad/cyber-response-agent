@@ -81,8 +81,9 @@ def _check(scene: Any, seams: dict[str, Any]) -> tuple[Readied, dict[str, Any]]:
 
 def test_the_check_warns_of_a_missing_evidence_key_on_the_request_row_and_stays_ready(
         tmp_path, monkeypatch, migrated_database, openbao, garage, evidence_keys):  # noqa: F811 — the imported fixtures
-    """Three checks of one tenant against a real OpenBao: its evidence key missing while another tenant's exists, then its own key
-    made. All read `ready` on their finished `host_requests` rows; the missing key adds exactly one warning with a sentence to
+    """Two checks of one tenant against a real OpenBao: its evidence key missing while another tenant's exists, then its own key
+    made. The tenant is a fresh id, not the published fixture's: other tests hold the fixture tenant's key on the shared
+    transit path, so only a fresh id is missing for certain. All read `ready` on their finished `host_requests` rows; the missing key adds exactly one warning with a sentence to
     what the check reports with the key (the systems check's own warnings stay, #1471 R4), and another tenant's key does not
     answer for this tenant's. (A-O7)"""
     from collections import Counter
@@ -90,7 +91,7 @@ def test_the_check_warns_of_a_missing_evidence_key_on_the_request_row_and_stays_
 
     from defender.box import CLAIM_ENV
 
-    with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
+    with readiness_scene(tmp_path, monkeypatch, migrated_database, tenant_id=str(uuid.uuid4())) as scene:
         kinds = {}
         for phase in ("missing", "present"):
             if phase == "missing":

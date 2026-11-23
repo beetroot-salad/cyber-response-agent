@@ -249,9 +249,12 @@ def claim_check(scene: HelperScene, rid: str) -> None:
     from defender.tests.support.jobs._host_requests1471 import plant
     from defender.tests.support.shared._postgres1339 import execute
 
+    if execute(scene.dsn, "SELECT 1 FROM jobs.claims WHERE token = %s AND kind = 'readiness' AND host_request_id = %s",
+               (scene.claim, rid)):
+        return  # the case planted this check's own row and claim: kept as it wrote them
     execute(scene.dsn, "UPDATE jobs.host_requests SET stage = 'failed', failure_reason = 'worker_error', finished_at = now(), "
-                       "lease_expires_at = NULL WHERE tenant_id = %s AND kind = 'readiness' AND stage IN ('queued', 'running')",
-            (scene.tenant,))
+                       "lease_expires_at = NULL WHERE tenant_id = %s AND kind = 'readiness' AND stage IN ('queued', 'running') "
+                       "AND id <> %s", (scene.tenant, rid))
     for table in ("staged_facts", "uploads", "claims"):
         execute(scene.dsn, f"DELETE FROM jobs.{table} WHERE token = %s", (scene.claim,))  # noqa: S608 — fixed names
     if not execute(scene.dsn, "SELECT 1 FROM jobs.host_requests WHERE id = %s", (rid,)):

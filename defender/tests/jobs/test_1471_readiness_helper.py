@@ -178,7 +178,7 @@ def test_p1_each_tenant_level_step_refuses_a_readiness_with_the_sentence_an_inve
         if fault.step in AFTER_PUBLISH:
             known = ran.knowledge
             assert isinstance(known, dict), f"a refusal after the publish carries its knowledge record: {ran.said()}"
-            assert (known["kind"], known["commit"]) == ("fresh", scene.t.commit), known
+            assert (known["status"], known["commit"]) == ("current", scene.t.commit), known  # staged served shape (#1546)
         else:
             assert ran.knowledge is None, f"no source was settled, so no knowledge record: {ran.knowledge!r}"
         assert listed_runs(scene) == [], "the runs listing refuses the readiness records the helper wrote"
@@ -300,8 +300,8 @@ def test_r3_a_stale_publish_over_a_published_copy_is_no_refusal_and_its_knowledg
         assert ran.docker.job_ran, f"a stale publish over a published copy refused the check: {ran.said()}"
         known = ran.knowledge
         assert isinstance(known, dict), ran.said()
-        assert (known["kind"], known["commit"], known["stale_kind"]) == (
-            run_knowledge.STALE, scene.t.commit, run_knowledge.TRANSIENT), known
+        assert (known["status"], known["commit"], known["stale_kind"]) == (  # staged served shape (#1546)
+            "stale", scene.t.commit, run_knowledge.TRANSIENT), known
         assert ran.record is None, "the helper writes no result record when it serves the job to its container"
 
 
@@ -594,7 +594,9 @@ def test_c4_a_readiness_container_is_started_for_readiness_is_answered_launch_al
 
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
         rid, refusals = str(uuid.uuid4()), {}
-        others = requests_other_than(("launch",))
+        # #1546 A-O2/PR2: a readiness job's typed records travel on the verbs `knowledge` and `result` (the helper stages them),
+        # so those two are the kind's besides `launch`; every other registered request stays refused for the kind.
+        others = requests_other_than(("launch", "knowledge", "result"))
         assert {"box.start", "pass", "pass.write_back"} <= set(others), f"premise: the registry's requests: {others}"
 
         def container(c: Any) -> int:
@@ -618,7 +620,7 @@ def test_c4_a_readiness_container_is_started_for_readiness_is_answered_launch_al
         assert (facts["kind"], facts["tenant"], facts["job"], facts["tenant_state"]) == (
             "readiness", scene.tenant, rid, "active"), facts
         assert facts["export_commit"] == scene.t.commit
-        assert Path(facts["run_copy"]) == scene.root / scene.tenant / ".job-inputs" / scene.claim / "run-knowledge" / rid
+        assert Path(facts["run_copy"]) == scene.root / ".job-inputs" / scene.claim / "run-knowledge" / rid  # design: `<data root>/.job-inputs/<claim>/`
         assert set(TenantRecords.handed(facts).systems) == set(J.proxied_records(("identity", "ticket")).systems)
         assert refusals == {name: ("refused", "not-for-kind") for name in others}, refusals
 

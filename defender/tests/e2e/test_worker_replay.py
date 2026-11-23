@@ -88,6 +88,7 @@ class Lane:
 
     def run(self, investigation: str, dest: Path) -> Path:
         """The run folder held in the investigation's stored bundle, extracted under `dest` (a copy a case may read or change)."""
+        investigation = str(investigation)  # an `InvestigationId` (a str subclass) cannot be a glob pattern
         body = self.bundle(investigation)
         assert body is not None, f"premise: the job stored a bundle ({self.uploads(investigation)})"
         with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as packed:

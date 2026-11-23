@@ -257,7 +257,8 @@ def drive(scene: HelperScene, planted: Planted, job: Callable[[Any], int] | None
         seams = {**forge, **seams}
     else:
         seams.setdefault("forge", ForgeCredentialRecorder())
-    ran = drive_helper(scene, argv_for(scene, planted), docker=docker, signer=signer or make_signer(), **seams)
+    ran = drive_helper(scene, argv_for(scene, planted), docker=docker, signer=signer or make_signer(), default_store=False,
+                       **seams)  # the #1546 cases hand their own store seams (or leave one out on purpose)
     if check:
         assert ran.raised is None, ran.raised
         assert docker.job_error is None, docker.job_error

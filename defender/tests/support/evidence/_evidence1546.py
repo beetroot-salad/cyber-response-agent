@@ -31,20 +31,24 @@ EvidenceKeys (OpenBao `transit/`, for tests verifying wrapping only; production 
   .make(tenant_id)                  create transit key `evidence-<tenant_id>` (aes256-gcm96)
   .datakey(tenant_id) -> DataKey(plaintext: bytes, wrapped: str)   `transit/datakey/plaintext/<key>`
   .unwrap(tenant_id, wrapped, *, token=None) -> bytes             `transit/decrypt/<key>` (default root token)
-  .destroy(tenant_id)
+  .destroy(tenant_id)               held by count across tests (the transit path is shared): the last holder deletes it
   .key_name(tenant_id) -> "evidence-<tenant_id>"   the design's naming rule, spelled here
 """
 from __future__ import annotations
 
 import base64
+import contextlib
 import datetime as dt
+import fcntl
 import hashlib
 import hmac
 import os
+import tempfile
 import uuid
 import xml.etree.ElementTree as ET
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote, urlsplit
 
@@ -214,7 +218,12 @@ class EvidenceKeys:
         return f"evidence-{tenant_id}"
 
     def make(self, tenant_id: str) -> None:
-        self.bao.ok("POST", f"{TRANSIT_MOUNT}/keys/{self.key_name(tenant_id)}", json={})
+        """Create the key (or join it: creating a key that exists changes nothing). The transit path is the deployment's
+        fixed one (A25), shared by every test and xdist worker, and many scenes share the published fixture's tenant id;
+        so the key is held by count across processes and deleted when its last holder ends (`destroy`)."""
+        with _key_hold(self.key_name(tenant_id)) as held:
+            self.bao.ok("POST", f"{TRANSIT_MOUNT}/keys/{self.key_name(tenant_id)}", json={})
+            held(+1)
         self.made.append(tenant_id)
 
     def datakey(self, tenant_id: str, *, token: str | None = None) -> DataKey:
@@ -228,9 +237,33 @@ class EvidenceKeys:
         return base64.b64decode(body["plaintext"])
 
     def destroy(self, tenant_id: str) -> None:
-        key = f"{TRANSIT_MOUNT}/keys/{self.key_name(tenant_id)}"
-        self.bao.call("POST", f"{key}/config", json={"deletion_allowed": True})
-        self.bao.call("DELETE", key)
+        """Release this test's hold on the key; the last holder deletes it (another test's live key is never pulled)."""
+        with _key_hold(self.key_name(tenant_id)) as held:
+            if held(-1) > 0:
+                return
+            key = f"{TRANSIT_MOUNT}/keys/{self.key_name(tenant_id)}"
+            self.bao.call("POST", f"{key}/config", json={"deletion_allowed": True})
+            self.bao.call("DELETE", key)
+
+
+@contextlib.contextmanager
+def _key_hold(name: str) -> Iterator[Callable[[int], int]]:
+    """A cross-process count of the tests holding transit key `name`, under an exclusive file lock: `held(delta)` adds
+    `delta` and answers the new count (never below 0)."""
+    folder = Path(tempfile.gettempdir()) / "defender-test-evidence-keys"
+    folder.mkdir(exist_ok=True)
+    count = folder / f"{name}.count"
+    with open(folder / f"{name}.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            def held(delta: int) -> int:
+                now = max(0, (int(count.read_text() or 0) if count.exists() else 0) + delta)
+                count.write_text(str(now))
+                return now
+
+            yield held
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 @pytest.fixture

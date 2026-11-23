@@ -837,21 +837,27 @@ class HelperRan:
     publishes: int = 0
 
 
-def drive_helper(scene: HelperScene, argv: list[str], *, docker: ContainerStandIn, signer: Any,
+def drive_helper(scene: HelperScene, argv: list[str], *, docker: ContainerStandIn, signer: Any, default_store: bool = True,
                  **seams: Any) -> HelperRan:
     """`job_host.main` on this thread (it takes SIGTERM here), its launch-time publish answered `fresh` at the
-    published commit (as `test_job_entry.run_job` answers the job's today)."""
+    published commit (as `test_job_entry.run_job` answers the job's today). `default_store=False`: the caller's seams are
+    exactly the store the helper gets (a #1546 case that leaves the store or key login unconfigured on purpose)."""
     from defender import job_host
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     ran = HelperRan()
     claim_for(scene, argv)
-    if "evidence" not in seams and _REQUEST:
+    if default_store and "evidence" not in seams and _REQUEST:
         # #1546 (design Flows: "an unconfigured store or evidence-key login is refused at helper setup, terminally"): every
         # helper run is configured with the real store and the tenant's evidence key (markers `garage`, `openbao`).
         from defender.tests.support.jobs._helper_evidence1546 import store_for
 
-        seams.update(store_for(_REQUEST[0], scene).seams)
+        try:
+            store = store_for(_REQUEST[0], scene)
+        except pytest.FixtureLookupError:  # a module without the store fixtures (`garage`, `openbao`): as the case wrote it
+            store = None
+        for name, seam in (store.seams.items() if store is not None else ()):
+            seams.setdefault(name, seam)
 
     def publish(*_a: Any, **_k: Any) -> str:
         ran.publishes += 1

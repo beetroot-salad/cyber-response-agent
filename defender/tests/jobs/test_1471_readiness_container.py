@@ -84,7 +84,7 @@ def test_r3_a_tenant_whose_launch_is_clean_reads_ready_with_no_warnings_and_leav
         assert _warnings(ran) == [], ran.said()
         assert ran.ran.publishes == 1, "readiness publishes at launch"
         assert ran.knowledge["commit"] == scene.t.commit
-        assert ran.knowledge["kind"] == "fresh"
+        assert ran.knowledge["status"] == "current"  # the staged served shape (#1546: `fresh` maps to `current`)
         assert (calls.helper("materialize_run"), calls.container("materialize_run"),
                 calls.helper("check_launch"), calls.container("check_launch")) == (0, 0, 0, 0)
         added = sorted(set(listing(scene.runs)) - set(runs_before))
@@ -379,7 +379,12 @@ def test_r13_1_4_an_exit_that_judges_whether_the_helper_and_container_agree_is_f
     with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL) as scene:
         rid = str(uuid.uuid4())
         ran = readiness(scene, rid=rid, container=_hand(scene, rid, HANDOVER[name]))
-        assert ran.result() == {"outcome": "failed", "reason": "handover"}, ran.said()
+        if name == "silent-helper":
+            # #1546 A-O2: a record reaches the store only through the helper (the `result` verb); a container with no helper
+            # to answer stages nothing, and the worker's end reads none.
+            assert ran.record is None, ran.said()
+        else:
+            assert ran.result() == {"outcome": "failed", "reason": "handover"}, ran.said()
     with readiness_scene(tmp_path / "ctl", monkeypatch, migrated_database, proxied=ALL, tenant_id=SECOND_TENANT) as scene:
         rid = str(uuid.uuid4())
         ran = readiness(scene, rid=rid, container=_hand(scene, rid, None))
@@ -389,7 +394,10 @@ def test_r13_1_4_an_exit_that_judges_whether_the_helper_and_container_agree_is_f
 #: The keys of the readiness launch facts (surface §4), spelled once; the helper's own facts are checked against them.
 FACT_KEYS = ("kind", "tenant", "job", "tenant_state", "export_commit", "knowledge", "run_copy", "records", "inputs_dir")
 #: Keys the design's handover list does not name (R13-1.4): the honest entry may read them or not.
-UNNAMED_KEYS = ("export_commit", "knowledge", "inputs_dir")
+UNNAMED_KEYS = ("export_commit", "knowledge")
+#: Keys the container's `JobTenant` is built from (#1546 design "JobTenant ... from the launch facts"): a missing or
+#: wrong-typed one may also be the container's refusal of its tenant, at `container_tenant`.
+TENANT_KEYS = ("tenant_state", "inputs_dir")
 
 
 def _wrong_typed(value: Any) -> Any:
@@ -416,7 +424,7 @@ def test_r13_1_4_launch_facts_missing_a_key_or_holding_a_value_of_another_type_e
         result = ran.result()
 
     handover = {"outcome": "failed", "reason": "handover"}
-    if key == "tenant_state":
+    if key in TENANT_KEYS:
         assert result == handover or (result["outcome"], result.get("step")) == ("refused", "container_tenant"), ran.said()
     elif key in UNNAMED_KEYS:
         assert result == handover or result["outcome"] == "ready", ran.said()
@@ -436,36 +444,10 @@ def test_r13_1_4_launch_facts_saying_the_tenant_is_not_active_are_refused_at_the
         assert isinstance(ran.knowledge, dict)
 
 
-def test_r13_1_4_launch_facts_saying_active_over_a_tenant_folder_the_container_refuses_are_refused_at_container_tenant(
-        tmp_path, monkeypatch, migrated_database):
-    """The container's own read of its tenant folder (the one it mounts) refuses it though the helper's admission passed:
-    `refused` at `container_tenant`, carrying the knowledge record; the same route over the sound folder reads `ready`.
-    (R13-1.4, C5)"""
-    from defender import run as run_py
-    from defender import tenancy
-
-    def entering(scene: Any, rid: str, damage: bool) -> Any:
-        def container(c: Any) -> int:
-            if damage:
-                (scene.root / scene.tenant / "knowledge" / "stray-1471.txt").write_text("not a tenant file", encoding="utf-8")
-            return int(run_py.readiness_main(["--readiness", rid, "--tenant", scene.tenant], environ=c.env))
-        return container
-
-    with readiness_scene(tmp_path / "ctl", monkeypatch, migrated_database, proxied=ALL) as scene:
-        rid = str(uuid.uuid4())
-        assert readiness(scene, rid=rid, container=entering(scene, rid, False)).result()["outcome"] == "ready"
-    with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL, tenant_id=SECOND_TENANT) as scene:
-        rid = str(uuid.uuid4())
-        ran = readiness(scene, rid=rid, container=entering(scene, rid, True))
-
-        assert ran.facts is not None
-        assert ran.facts["tenant_state"] == "active", "the helper's admission passed: its facts say active"
-        from defender.records.formats import TenantRefused
-
-        with pytest.raises(TenantRefused):  # repair 5: the refusal's home is `records.formats`, not `tenancy`
-            tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=run_py.DEFENDER_DIR, clone_tree=False)
-        assert_refused_shape(ran.result(), "container_tenant")
-        assert isinstance(ran.knowledge, dict), "a refusal at a container step carries the helper's knowledge record"
+# Retired (#1546 D4/A-O9): `test_r13_1_4_launch_facts_saying_active_over_a_tenant_folder_the_container_refuses_are_refused_at_
+# container_tenant`. The container no longer reads the host's tenant folder: it builds a `JobTenant` over its job root and
+# inputs, and "`accept_tenant` stays the host's ... the knowledge-clone, `.tenant-id` and settings-vs-mount checks have no
+# job-side counterpart" (design, JobTenant). The host-side refusal survives in the helper's admission (`test_1546_job_tenant`).
 
 
 @pytest.mark.parametrize("blind", [True, False], ids=["blind-adapter", "readable-tree"])
