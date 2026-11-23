@@ -322,8 +322,8 @@ jobs:
               ports: ["127.0.0.1:5433:5432"]
           YAML
           COMPOSE="docker compose -f .devcontainer/docker-compose.yml -f $RUNNER_TEMP/live-override.yml"
-          # The shipped dev setup script (r15.2 "setup.sh"): it takes COMPOSE from the environment, starts postgres,
-          # builds the sessions database and the two dev logins, starts keycloak and forgejo, and adds the `product`
+          # The shipped dev setup script (r15.2 "setup.sh"): it takes COMPOSE from the environment, starts keycloak and
+          # forgejo (compose's `forgejo-sessions` builds the sessions database and the two dev logins first), and adds the `product`
           # login source. Run as dev runs it, on a fresh volume; it prints nothing this job parses.
           COMPOSE="$COMPOSE" .devcontainer/forgejo/setup.sh
           # S4-11's non-superuser product login (the script's own logins are Forgejo's and the lifecycle's).

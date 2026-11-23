@@ -40,8 +40,8 @@ services:
       # The jobs daemon's network for job containers (#1170 N5): a job joins only a bridge network made for
       # it; `start-jobs-docker` makes this one.
       DEFENDER_JOB_NETWORK: defender-jobs
-      # The Forgejo site's public hostname (#1592): the API serves adoption's pull-request links
-      # under it, and the ingress answers it. Forgejo's own `DOMAIN` (forgejo/settings.env) is the same.
+      # The Forgejo site's public hostname (#1592): the ingress answers it, and dev-app's Vite forwards
+      # it to Forgejo. Forgejo's own `DOMAIN` (forgejo/settings.env) is the same.
       DEFENDER_FORGE_DOMAIN: forge.localhost
       # The dev issuer (the `openbao` service) serves a certificate from the private dev CA. Host
       # processes mint tokens from it (#1214), so this container trusts that CA, as `forgejo` does.
@@ -103,7 +103,8 @@ services:
   # issuer is the `openbao` service below. Host delivery processes log in to it themselves (AppRole)
   # and present its short-lived JWTs; see defender/docs/development-operations.md for provisioning
   # and scope. Runtime boxes receive exported files and never receive Forgejo or issuer credentials.
-  # `.devcontainer/forgejo/setup.sh` builds its sessions database and adds the `product` login source.
+  # The `forgejo-sessions` service builds its sessions database; `.devcontainer/forgejo/setup.sh` adds the
+  # `product` login source.
   forgejo:
     # Authorized Integrations authenticate short-lived Vault identities for API and git.
     # Override per machine in .devcontainer/.env.
@@ -113,6 +114,10 @@ services:
     # `forgejo-live` job runs too.
     env_file:
       - forgejo/settings.env
+    # Its sessions live in PostgreSQL (settings.env's `[session]`): the database and its login first.
+    depends_on:
+      forgejo-sessions:
+        condition: service_completed_successfully
     environment:
       USER_UID: "1000"
       USER_GID: "1000"
@@ -251,7 +256,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres/create-application-database.sql:/docker-entrypoint-initdb.d/10-defender.sql:ro
-      # The Forgejo sessions database's SQL (#1592), run by `.devcontainer/forgejo/setup.sh` with
+      # The Forgejo sessions database's SQL (#1592), run by the `forgejo-sessions` service below with
       # psql: not an initdb script, which runs only on a fresh volume and in POSTGRES_DB.
       - ./postgres:/defender-postgres:ro
     healthcheck:
@@ -262,6 +267,33 @@ services:
     mem_limit: 256m
     memswap_limit: 256m
     restart: unless-stopped
+
+  # Builds Forgejo's sessions database and the dev stack's two logins on it (#1592), on every start, before
+  # `forgejo` starts (it waits for this to finish): each statement skips what exists, so a fresh volume and an old
+  # one end the same. The healthcheck can pass before a fresh volume's first-start restart, so it retries over TCP.
+  forgejo-sessions:
+    image: postgres:${POSTGRES_VERSION:-17.11}
+    container_name: response-forgejo-sessions
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: defender
+      PGPASSWORD: dev-only-change-me
+      PGDATABASE: postgres
+    volumes:
+      - ./postgres:/defender-postgres:ro
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        tries=0
+        until psql -qtAc 'SELECT 1' >/dev/null 2>&1; do
+          tries=$$((tries + 1)); [ "$$tries" -lt 120 ] || { echo "postgres did not answer within 120s" >&2; exit 1; }
+          sleep 1
+        done
+        psql -q -f /defender-postgres/forgejo-sessions.sql && psql -q -f /defender-postgres/forgejo-sessions-dev-logins.sql
+    restart: "no"
 
   # The dev mail catcher (#1306): accepts Keycloak's mail (SMTP on mailpit:1025, the compose
   # network only) and shows it, set-password links included, at http://localhost:${MAILPIT_HTTP_PORT:-8025}.
