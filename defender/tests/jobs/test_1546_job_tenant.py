@@ -153,29 +153,35 @@ def test_the_readiness_entry_runs_over_its_job_root_and_stages_its_result(scene)
 @pytest.mark.postgres
 @pytest.mark.openbao
 @pytest.mark.garage
-def test_the_learning_job_entry_gets_past_its_tenant_step_without_reading_the_clones_settings(scene, evidence_store):
-    """With the host clone's working-tree settings damaged (a link in them) once the helper admitted the job, the learning entry
-    over its job root still reaches its launch steps: it reads the pinned export's settings from the inputs, never the clone's.
+@pytest.mark.parametrize(("damaged", "reaches"), [("clone", True), ("export", False)])
+def test_the_learning_job_entry_gets_past_its_tenant_step_without_reading_the_clones_settings(scene, evidence_store, damaged,
+                                                                                              reaches):
+    """A link planted, once the helper admitted the job, in the host clone's settings leaves the learning entry reaching its
+    launch steps; the same link in the pinned export's settings under its inputs stops it there: it reads the export's.
     (design: the learning job passes the export roots; admission of a faulted clone stays the helper's refusal, owner D4)"""
     from defender.learning.branch import cli, job_entry
     from defender.tests.support.jobs._container_entry1170 import ThreadCalls
 
-    stray = next(p for p in (scene.t.clone / "settings").rglob("*") if p.is_file())
-    kept = stray.read_bytes()
     planted = H.plant(scene, "learning")
+    damage: dict = {}
 
     def job(c) -> int:
-        stray.unlink()  # after admission: only a read inside the container can meet the damage
-        stray.symlink_to("/etc/passwd")
+        base = scene.t.clone if damaged == "clone" else H.job_inputs(scene)
+        files = sorted(p for d in base.rglob("settings") if d.is_dir() and not d.is_symlink()
+                       for p in d.rglob("*") if p.is_file() and not p.is_symlink())
+        assert files, f"premise: {damaged} holds settings to damage"
+        damage["file"], damage["kept"] = files[0], files[0].read_bytes()
+        files[0].unlink()  # after admission: only a read inside the container can meet the damage
+        files[0].symlink_to("/etc/passwd")
         try:
             return int(job_entry.main(["--job", planted.owner, "--tenant", scene.tenant, "--source", planted.source],
                                       environ=c.env, preflight=lambda *a, **k: 0))
         except SystemExit:
             return 1
         finally:
-            stray.unlink()
-            stray.write_bytes(kept)
+            damage["file"].unlink()
+            damage["file"].write_bytes(damage["kept"])
 
     with ThreadCalls({"source_opened": cli._open_launch_source}) as calls:
         H.drive(scene, planted, job, **evidence_store.seams)
-    assert calls.container("source_opened") >= 1, "the entry never reached its launch steps"
+    assert (calls.container("source_opened") >= 1) is reaches, (damaged, damage.get("file"))
