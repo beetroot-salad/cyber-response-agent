@@ -455,33 +455,29 @@ def _owner_unusable(payload: dict, unusable: Callable[[str, str], bool] | None) 
 
 
 def owner_unusable(tenant_id: str, run_id: str) -> bool:
-    """Whether the investigation `run_id` of `tenant_id` can never be an input (#1546 PR6, A-O6): no row, its evidence
-    `expired`, or its scrub not `clean`. Read from the jobs database at `DEFENDER_DATABASE_DSN` (a host's tick); a job
-    container has no database address, so a container's drain is handed its own reader (`unusable=`)."""
+    """Whether the investigation `run_id` of `tenant_id` can never be an input (#1546 PR6, A-O6): the job store's
+    `run_unusable` (no row, its evidence `expired`, or its scrub not `clean`), over the jobs database at
+    `DEFENDER_DATABASE_DSN` (a host's tick). A job container has no database address: its drain asks its helper
+    (`unusable=`, the `owner.unusable` request)."""
     import asyncio
+    import datetime as _dt
     import os
 
-    from sqlalchemy import select
-
-    from defender.database import async_engine, sessions
-    from defender.jobs.models import InvestigationRow
+    from defender.jobs import JobStore
     from defender.learning.core.store_tick import DSN_ENV
 
     dsn = os.environ.get(DSN_ENV)
     if not dsn:
         raise FatalConfigError(f"a run's owner is read from {DSN_ENV}, which is not set")
 
-    async def read() -> Any:
-        engine = async_engine(dsn, max_connections=1)
+    async def read() -> bool:
+        store = JobStore(dsn, clock=lambda: _dt.datetime.now(_dt.UTC), max_connections=1)
         try:
-            async with sessions(engine)() as s:
-                return (await s.execute(select(InvestigationRow.evidence_state, InvestigationRow.scrub).where(
-                    InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == run_id))).first()
+            return await store.run_unusable(tenant_id, run_id)
         finally:
-            await engine.dispose()
+            await store.close()
 
-    found = asyncio.run(read())
-    return found is None or found[0] == "expired" or found[1] != "clean"
+    return asyncio.run(read())
 
 
 def _run_of(payload: dict, tenant: Tenant | None, runs: Any = None) -> Run | Exception:

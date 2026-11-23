@@ -30,7 +30,8 @@ from collections.abc import AsyncIterator, Callable, Collection, Mapping, Sequen
 from contextlib import asynccontextmanager
 from typing import Any, TypeVar
 
-from sqlalchemy import case, delete, false, func, literal, select, tuple_, update
+from sqlalchemy import Text, and_, case, delete, false, func, literal, select, tuple_, update
+from sqlalchemy import cast as sql_cast
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, InterfaceError, InternalError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
@@ -45,6 +46,7 @@ from defender.records.formats import (
     AlertId,
     AlertMapping,
     HostRequestId,
+    IdRefused,
     InvestigationId,
     LearningJobId,
     TenantId,
@@ -52,6 +54,7 @@ from defender.records.formats import (
     check_mapping,
     derive_display,
     derive_facts,
+    digest_of,
 )
 
 from defender.records.job_facts import (
@@ -69,6 +72,7 @@ from defender.tenancy.models import AlertMappingRow, CaseVersionRow, TenantRecor
 from defender.tenancy.models import offboard as _tenancy_offboard
 from defender.tenancy.models import share_tenant
 
+from .learning_models import OPEN_WORK, WorkItemRow
 from .models import (
     ADOPTION,
     ALERT_LISTING_COLUMNS,
@@ -78,15 +82,17 @@ from .models import (
     HOST_REQUEST_LIVE,
     INVESTIGATION_CLAIM,
     LEARNING_CLAIM,
-    LEARNING_TERMINAL,
     POST_STEP_CLAIM,
+    READABLE_EVIDENCE,
     READINESS,
     LIVE,
     is_terminal,
+    AcceptedObject,
     AlertListing,
     AlertRow,
     Claim,
     ClaimRow,
+    ClaimView,
     HostRequestClaim,
     HostRequestRecord,
     HostRequestRow,
@@ -102,6 +108,7 @@ from .models import (
     StoredAlert,
     UploadRow,
     alert_listing,
+    claim_view,
     host_request_record,
     investigation_record,
     learning_job_record,
@@ -124,8 +131,6 @@ OFFBOARD_MAX_PASSES = 5
 _LEARNING_LIVE = ("queued", "running")
 #: The tenant states that take no new job and start nothing new (#1360 D7).
 _BEING_REMOVED = ("offboarding", "offboarded")
-#: A host request's two ends (#1471 R2).
-_HOST_REQUEST_ENDS = ("completed", "failed")
 #: How often a host request's create tries again when the queued row its insert met was claimed before it was read.
 _HOST_CREATE_TRIES = 3
 
@@ -472,7 +477,8 @@ class JobStore:
         transaction holds is skipped, never waited for. The state read takes no lock: a teardown
         that commits just after it still races the job, and the job's own tenant admission is what
         refuses it then. The claim's token is minted here and its claim row written in the same transaction (#1546
-        PR7): no inputs, the alert and attempt as its launch facts."""
+        PR7): no inputs; its launch facts are the launch record the helper copies into the job's root (the alert, its
+        digest and label as stored now, and the run box's start token), with the attempt."""
         async with self._tx() as s:
             oldest = (select(InvestigationRow.id).where(InvestigationRow.stage == "queued")
                       .order_by(InvestigationRow.created_at, InvestigationRow.id).limit(1)
@@ -491,7 +497,7 @@ class JobStore:
             # The investigation's tenant is a `tenancy.tenants` row (its foreign key), never deleted.
             state = (await s.execute(select(TenantRecord.state).where(TenantRecord.id == record.tenant_id))).scalar_one()
             token = _mint(s, record.tenant_id, INVESTIGATION_CLAIM, investigation_id=record.investigation_id,
-                          launch={"alert_id": record.alert_id, "attempt": record.attempt})
+                          launch=await _investigation_launch(s, record))
         announce("investigation.claim", actor=SYSTEM, tenant_id=record.tenant_id, target=record.investigation_id)
         return with_token(Claim(record=record, tenant_state=state), token)
 
@@ -536,6 +542,19 @@ class JobStore:
             if made is None:
                 raise Conflict(f"the object {obj!r} already has an upload row under this claim")
 
+    async def refuse_upload(self, token: str, obj: str, *, scrub: str | None = None) -> None:
+        """Make the upload row of `obj` `refused` at once under the live claim `token`, for an object the helper could not
+        put at all (no data key could be made): nothing was computed, so it carries no size, digest or key. Create-once
+        as `begin_upload`: `Conflict` for a second row of the object or a claim not live."""
+        async with self._tx() as s:
+            await _require_live(s, token)
+            made = (await s.execute(
+                pg_insert(UploadRow).values(token=token, object=obj, size=None, sha256=None, wrapped_key=None,
+                                            status="refused", scrub=scrub, created_at=func.now())
+                .on_conflict_do_nothing().returning(UploadRow.object))).first()
+            if made is None:
+                raise Conflict(f"the object {obj!r} already has an upload row under this claim")
+
     async def finish_upload(self, token: str, obj: str, *, status: str) -> None:
         """Move the `pending` upload row of `obj` to `uploaded` or `refused`, once, while the claim is live (A-O3).
         `Conflict` for a row that is not pending (moved already, or accepted), absent, or under a claim not live."""
@@ -555,6 +574,59 @@ class JobStore:
         `{object: {"status", "scrub"}}`. Empty for an unknown token."""
         async with self._tx() as s:
             return await _staged_under(s, token)
+
+    async def get_claim(self, token: str) -> ClaimView | None:
+        """The claim row `token` as its helper reads it (its kind, reference, launch facts and fixed input set), or
+        `None` when there is none."""
+        async with self._tx() as s:
+            row = (await s.execute(select(ClaimRow).where(ClaimRow.token == token))).scalars().first()
+        return None if row is None else claim_view(row)
+
+    async def run_unusable(self, tenant_id: str, run_id: str) -> bool:
+        """Whether the investigation `run_id` of `tenant_id` can never be a drain's input (#1546 PR6, A-O6, D7): no such row
+        (an id of no investigation's form included), its evidence `expired`, or its scrub not `clean`. The complement of
+        the rule `_drain_inputs` fixes a drain's set by. Read-only."""
+        try:
+            run = InvestigationId(run_id)
+        except (IdRefused, ValueError):
+            return True
+        async with self._tx() as s:
+            usable = (await s.execute(select(InvestigationRow.id).where(
+                InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == run, _usable_run()))).first()
+        return usable is None
+
+    async def accepted_input(self, tenant_id: str, owner_id: str, obj: str) -> AcceptedObject:
+        """The accepted object `obj` of the owner `owner_id` (an investigation or a learning job of `tenant_id`), as a pull
+        reads it (A-O6). `NotFound` for an owner that is no row of this tenant; `Conflict` for one that cannot be read
+        now: its tenant is not active, its evidence is not readable (`none`, `expired`), it is not `clean`, or it has no
+        accepted upload of `obj`. Read-only."""
+        async with self._tx() as s:
+            column: Any
+            inv = (await s.execute(select(InvestigationRow.tenant_id, InvestigationRow.evidence_state,
+                                          InvestigationRow.scrub).where(InvestigationRow.id == owner_id))).first()
+            if inv is not None:
+                owner_kind, column, (tenant, state, scrub) = ending.INVESTIGATION, ClaimRow.investigation_id, inv
+            else:
+                job = (await s.execute(select(LearningJobRow.tenant_id, LearningJobRow.evidence_state)
+                                       .where(LearningJobRow.id == owner_id))).first()
+                if job is None:
+                    raise NotFound(f"no owner {owner_id!r}")
+                owner_kind, column, (tenant, state), scrub = ending.LEARNING, ClaimRow.learning_job_id, job, "clean"
+            if str(tenant) != str(tenant_id):
+                raise NotFound(f"no owner {owner_id!r} of this tenant")
+            tenant_state = (await s.execute(select(TenantRecord.state).where(TenantRecord.id == tenant))).scalar()
+            if tenant_state != "active" or state not in READABLE_EVIDENCE or scrub != "clean":
+                raise Conflict(f"the owner {owner_id!r} cannot be read now")
+            found = (await s.execute(
+                select(UploadRow.token, UploadRow.size, UploadRow.sha256, UploadRow.wrapped_key)
+                .join(ClaimRow, ClaimRow.token == UploadRow.token)
+                .where(column == owner_id, UploadRow.object == obj, UploadRow.status == "uploaded",
+                       UploadRow.accepted_at.is_not(None)))).first()
+        claim, size, sha256, wrapped = (None, None, None, None) if found is None else found
+        if size is None:
+            raise Conflict(f"the owner {owner_id!r} has no accepted {obj!r}")
+        return AcceptedObject(owner_kind=owner_kind, claim=str(claim), size=int(size), sha256=str(sha256),
+                              wrapped_key=str(wrapped))
 
     # --- cancel -------------------------------------------------------------------------
 
@@ -872,17 +944,6 @@ class JobStore:
             failure_message=failure_message, scrub="not_run"))
         return None if record is None else _as(InvestigationRecord, record)
 
-    async def hand_back(
-        self, tenant_id: str, investigation_id: str, *, cost_usd: float | None, cost_is_lower_limit: bool = False,
-        knowledge: dict[str, Any] | None,
-    ) -> InvestigationRecord | None:
-        """A stopping worker gives a running row back (`apply` of a `HandBack`): its lease lapses at once, so any worker
-        takes it over within seconds, and its final cost and knowledge and the mark are written (B11). `None` when the
-        row is not a running, unmarked one of this tenant."""
-        record = await self.apply(tenant_id, investigation_id, ending.HandBack(
-            ending.INVESTIGATION, cost_usd=cost_usd, cost_is_lower_limit=cost_is_lower_limit, knowledge=knowledge))
-        return None if record is None else _as(InvestigationRecord, record)
-
     # --- the holder's lease (#1343) ---------------------------------------------------------------------------------------
 
     async def renew(
@@ -1136,46 +1197,6 @@ class JobStore:
                      target=claim.record.learning_job_id)
         return claim
 
-    async def finish_learning_job(  # noqa: PLR0913 — the end record's values
-        self, tenant_id: str, learning_job_id: str, *, status: str, reason: str | None, message: str | None,
-        progress: LearningProgress | None, findings: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
-    ) -> LearningJobRecord | None:
-        """Record the one terminal status of a running, not handed-back learning job as stated (the fence, O2), through
-        `apply` (`ending.stated`: evidence `none`). `progress` is the end record's final pick, stage and sibling cost;
-        `None` keeps what the running row was last given. `None` when it changed nothing (the row moved, was deleted
-        or handed back).
-
-        A `completed` end stores the job's findings with it (#1487 Flow 1 step 3), one transaction
-        in this order: the tenant's share lock, first; the fence; then `findings` (`{kind: rows}`,
-        already screened by the worker; `None`: the worker refused them) inserted as the job's
-        under a savepoint (`learning_models.insert_findings`), publish state `done` (how many rows
-        it added is in the finish event, not the row), or, refused there, for a tenant not `active`, or with `findings` `None`, `refused`
-        and nothing of the job stored, logged with its kind; then the tenant's check clock armed,
-        marked when a post-step holds it. An outage at the insert raises, the whole end with it, for
-        the caller to retry, and so does `FindingsNotStored` (an insert error neither the content nor
-        an outage explains, #1487 Amendment r5.3). `findings` is only a `completed` end's."""
-        if status not in LEARNING_TERMINAL:
-            raise ValueError(f"{status!r} is not a terminal status")
-        if findings is not None and status != "completed":
-            raise ValueError(f"a {status} end stores no findings")
-        record = await self.apply(tenant_id, learning_job_id, ending.stated(
-            ending.LEARNING, status, failure_reason=reason, failure_message=message,
-            findings=None if findings is None else {kind: [dict(r) for r in rows] for kind, rows in findings.items()},
-            **_stated_progress(progress)))
-        return None if record is None else _as(LearningJobRecord, record)
-
-    async def hand_back_learning_job(
-        self, tenant_id: str, learning_job_id: str, *, progress: LearningProgress | None = None,
-    ) -> LearningJobRecord | None:
-        """A stopped family's row given back (O6), `apply` of a `HandBack`: its lease lapses at once, so the next
-        take-over ends it, and it is marked so no renewal covers it again. `None` when the row is not a running, not
-        handed-back one of this tenant."""
-        record = await self.apply(tenant_id, learning_job_id,
-                                  ending.HandBack(ending.LEARNING, **_stated_progress(progress)))
-        return None if record is None else _as(LearningJobRecord, record)
-
-    # --- host requests (#1471): readiness checks, adoptions and drains (#1546 D7) -------------------------------------
-
     async def create_readiness(
         self, tenant_id: TenantId, *, actor: str, credential_id: str | None = None,
     ) -> tuple[HostRequestRecord, bool]:
@@ -1250,7 +1271,8 @@ class JobStore:
         """Move the oldest queued host request of any kind (by `created_at`, ties by id; R13-6) to `running` with a
         lease, or `None`. The tenant's state is not read: the helper's own admission refuses a tenant that is not
         active. A row another transaction holds is skipped, never waited for. The claim's token is minted with its
-        claim row (#1546 PR7), of the request's kind, with no inputs. Announced `<kind>.claim`."""
+        claim row (#1546 PR7), of the request's kind: a drain's input set is fixed here (`_drain_inputs`), every other kind
+        has none. Announced `<kind>.claim`."""
         async with self._tx() as s:
             # The id only, never the row as an entity: the UPDATE ... RETURNING below must hand back the row as it now
             # stands (see `claim_learning_job`).
@@ -1267,29 +1289,12 @@ class JobStore:
             if row is None:  # not reachable while this transaction holds the row; the compare-and-set is the contract
                 return None
             record = host_request_record(row)
-            token = _mint(s, record.tenant_id, record.kind, host_request_id=record.request_id,
+            inputs = await _drain_inputs(s, record.tenant_id) if record.kind == DRAIN else ()
+            token = _mint(s, record.tenant_id, record.kind, host_request_id=record.request_id, inputs=inputs,
                           launch={"kind": record.kind, "system_id": record.system_id})
         announce(f"{record.kind}.claim", actor=SYSTEM, tenant_id=record.tenant_id,  # type: ignore[arg-type]
                  target=record.request_id)
         return with_token(HostRequestClaim(record=record), token)
-
-    async def finish_host_request(  # noqa: PLR0913 — the one terminal write: stage, result and failure detail
-        self, tenant_id: str, request_id: str, *, stage: str, result: Mapping[str, Any] | None = None,
-        failure_reason: str | None = None, failure_message: str | None = None,
-    ) -> HostRequestRecord | None:
-        """Record the one end of a running host request as stated, through `apply` (the fence, as `finish`):
-        `completed` with its kind's `result` (the worker validated it), or `failed` with a fixed `failure_reason` and
-        the worker's own words; the lease is cleared. `None` when it changed nothing (the row moved: ended by an
-        offboard or a take-over, or never claimed). A `result` is set exactly on `completed`, a reason exactly on
-        `failed` (`ValueError`). Announced `<kind>.finish`."""
-        if stage not in _HOST_REQUEST_ENDS:
-            raise ValueError(f"{stage!r} is not a host request's end")
-        if (result is not None) != (stage == "completed") or (failure_reason is not None) != (stage == "failed"):
-            raise ValueError(f"a {stage} host request carries a result exactly when completed, a reason exactly when failed")
-        record = await self.apply(tenant_id, request_id, ending.stated(
-            ending.HOST_REQUEST, stage, result=None if result is None else dict(result), failure_reason=failure_reason,
-            failure_message=failure_message))
-        return None if record is None else _as(HostRequestRecord, record)
 
     # --- the family-less check clock (#1344 amendment 3) ---------------------------------------
 
@@ -1446,6 +1451,40 @@ def _mint(s: AsyncSession, tenant_id: TenantId, kind: str, *, inputs: Sequence[M
     return token
 
 
+async def _investigation_launch(s: AsyncSession, record: InvestigationRecord) -> dict[str, Any]:
+    """An investigation's launch facts (#1546 PR7): the launch record its helper copies into the job's root (the row, its
+    tenant and alert, the alert's digest and label as stored at the claim, and the run box's start token, r5 C1), with the
+    attempt. The alert is the row's foreign key, never deleted while the row lives."""
+    alert = (await s.execute(select(AlertRow.raw, AlertRow.title, AlertRow.vendor_ticket_id).where(
+        AlertRow.tenant_id == record.tenant_id, AlertRow.id == record.alert_id))).first()
+    launch: dict[str, Any] = {"investigation_id": str(record.investigation_id), "tenant_id": str(record.tenant_id),
+                              "alert_id": str(record.alert_id), "attempt": record.attempt, "box_token": _new_token()}
+    if alert is not None:
+        raw, title, ticket = alert
+        launch.update(digest=digest_of(bytes(raw)), label=title or ticket)
+    return launch
+
+
+async def _drain_inputs(s: AsyncSession, tenant_id: TenantId) -> list[dict[str, str]]:
+    """A drain's input set, fixed in its claim's transaction (#1546 D7, amendment r9 "Drain"): the bundle of each run the
+    tenant's open curation requests name (the lead lane's only run-naming kind) whose investigation is `clean` and not
+    `expired`. A request whose run is outside the set waits for the next drain; one whose run is unusable is dead."""
+    named = (select(WorkItemRow.source_run).where(
+        WorkItemRow.tenant_id == tenant_id, WorkItemRow.kind == "curation_request",  # lint-half-table: ok — the curation request is the lead lane's one kind that names a run, as the tick's own rule
+        WorkItemRow.status.in_(OPEN_WORK), WorkItemRow.source_run.is_not(None)))
+    owners = (await s.execute(
+        select(InvestigationRow.id).where(
+            InvestigationRow.tenant_id == tenant_id, sql_cast(InvestigationRow.id, Text).in_(named), _usable_run())
+        .order_by(InvestigationRow.id))).scalars().all()
+    return [{"owner": str(owner), "object": ending.BUNDLE} for owner in owners]
+
+
+def _usable_run() -> Any:
+    """An investigation a drain may take as an input (#1546 PR6): `clean` and not `expired` (`run_unusable` is its
+    complement)."""
+    return and_(InvestigationRow.scrub == "clean", InvestigationRow.evidence_state.is_distinct_from("expired"))
+
+
 async def _live_claim(s: AsyncSession, token: str) -> ClaimRow | None:
     """The claim `token` when it is live, its reference read under a share lock held to the caller's commit: the row has
     not ended (queued or running), or the hold still names the token. A writer racing an ender that holds the row waits
@@ -1557,14 +1596,6 @@ async def _delete_claims(s: AsyncSession, where: Any) -> None:
     await s.execute(delete(UploadRow).where(UploadRow.token.in_(tokens)))
     await s.execute(delete(StagedFactRow).where(StagedFactRow.token.in_(tokens)))
     await s.execute(delete(ClaimRow).where(ClaimRow.token.in_(tokens)))
-
-
-def _stated_progress(progress: LearningProgress | None) -> dict[str, Any]:
-    """A pre-#1546 learning writer's progress as an ending's: `None` keeps the row's."""
-    if progress is None:
-        return {"sibling_cost_usd": None}
-    return {"sibling_cost_usd": progress.sibling_cost_usd, "fork_message_id": progress.fork_message_id,
-            "family_stage": progress.stage}
 
 
 _R = TypeVar("_R")

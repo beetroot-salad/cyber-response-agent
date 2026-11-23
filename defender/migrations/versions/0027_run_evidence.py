@@ -33,6 +33,7 @@ _LIVE = "'queued', 'running'"
 _EVIDENCE = "'complete', 'partial', 'none', 'lost', 'expired'"
 _SCRUB = "'clean', 'tainted', 'not_run'"
 _UPLOAD = "'pending', 'uploaded', 'refused'"
+_COMPUTED = "status = 'refused' OR (size IS NOT NULL AND sha256 IS NOT NULL AND wrapped_key IS NOT NULL)"
 _CLAIM_KINDS = "'investigation', 'learning', 'readiness', 'adoption', 'drain', 'post-step'"
 _HOST_KINDS = "'readiness', 'adoption', 'drain'"
 _REFERENCES = ("investigation_id", "learning_job_id", "host_request_id", "hold_tenant_id")
@@ -130,9 +131,9 @@ def _claims() -> None:
         "uploads",
         sa.Column("token", sa.Text(), nullable=False),
         sa.Column("object", sa.Text(), nullable=False),
-        sa.Column("size", sa.BigInteger(), nullable=False),
-        sa.Column("sha256", sa.Text(), nullable=False),
-        sa.Column("wrapped_key", sa.Text(), nullable=False),
+        sa.Column("size", sa.BigInteger(), nullable=True),
+        sa.Column("sha256", sa.Text(), nullable=True),
+        sa.Column("wrapped_key", sa.Text(), nullable=True),
         sa.Column("status", sa.Text(), nullable=False),
         sa.Column("scrub", sa.Text(), nullable=True),
         _time("accepted_at"),
@@ -142,6 +143,8 @@ def _claims() -> None:
         sa.CheckConstraint(f"status IN ({_UPLOAD})", name=op.f("ck_uploads_status")),
         sa.CheckConstraint(f"scrub IN ({_SCRUB})", name=op.f("ck_uploads_scrub")),
         sa.CheckConstraint("size >= 0", name=op.f("ck_uploads_size")),
+        # A refused row may be made before anything was computed (no data key); every other row carries all three.
+        sa.CheckConstraint(_COMPUTED, name=op.f("ck_uploads_computed_unless_refused")),
         sa.CheckConstraint("accepted_at IS NULL OR status = 'uploaded'", name=op.f("ck_uploads_only_uploaded_is_accepted")),
         schema=SCHEMA)
     op.create_index("uploads_unaccepted_by_age", "uploads", ["created_at"], schema=SCHEMA,

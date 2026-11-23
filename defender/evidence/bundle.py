@@ -23,9 +23,9 @@ import sqlite3
 import stat
 import tarfile
 import tempfile
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path, PurePosixPath
-from typing import IO
+from typing import IO, Any
 
 from defender.box import Finding, Lister, classify_entry, unreadable_finding
 
@@ -92,7 +92,7 @@ def _finding_row(root: Path, finding: Finding) -> dict:
             "mode": finding.filemode, "link_count": finding.nlink, "target": finding.target}
 
 
-def _member(name: str, **attrs: object) -> tarfile.TarInfo:
+def _tar_member(name: str, **attrs: object) -> tarfile.TarInfo:
     info = tarfile.TarInfo(name)
     for key, value in attrs.items():
         setattr(info, key, value)
@@ -102,8 +102,8 @@ def _member(name: str, **attrs: object) -> tarfile.TarInfo:
 def _tar_info(rel: str, st: os.stat_result, *, directory: bool) -> tarfile.TarInfo:
     owner = {"uid": 0, "gid": 0, "uname": "", "gname": "", "mtime": int(st.st_mtime)}
     if directory:
-        return _member(rel, type=tarfile.DIRTYPE, mode=0o755, **owner)
-    return _member(rel, type=tarfile.REGTYPE, size=st.st_size, mode=0o644 | (st.st_mode & 0o111), **owner)
+        return _tar_member(rel, type=tarfile.DIRTYPE, mode=0o755, **owner)
+    return _tar_member(rel, type=tarfile.REGTYPE, size=st.st_size, mode=0o644 | (st.st_mode & 0o111), **owner)
 
 
 def _open_plain(path: Path) -> tuple[int, os.stat_result]:
@@ -122,7 +122,7 @@ def _open_plain(path: Path) -> tuple[int, os.stat_result]:
 
 class _Packer:
     def __init__(self, root: Path, tar: tarfile.TarFile, excludes: Sequence[PurePosixPath], scratch: Path) -> None:
-        self.root, self.tar, self.excludes, self.scratch = root, tar, excludes, scratch
+        self.root, self.tar, self.excludes, self.spill = root, tar, excludes, scratch
         self.findings: list[Finding] = []
 
     def add_file(self, path: Path, rel: str) -> None:
@@ -138,7 +138,7 @@ class _Packer:
         """A session store with a write-ahead log, as one `.db` file holding every row. `False`
         when it is not a store that can be checkpointed, which then rides as it is."""
         try:
-            copy = self.scratch / f"store-{len(os.listdir(self.scratch))}.db"
+            copy = self.spill / f"store-{len(os.listdir(self.spill))}.db"
             for source, target in ((path, copy), (wal, copy.with_name(copy.name + "-wal"))):
                 fd, _ = _open_plain(source)
                 with os.fdopen(fd, "rb") as src, open(target, "wb") as dst:
@@ -223,7 +223,7 @@ def _pack_walk(root: Path, tar: tarfile.TarFile, excludes: Sequence[PurePosixPat
 def _findings_member(root: Path, findings: Sequence[Finding]) -> tuple[tarfile.TarInfo, bytes]:
     rows = [_finding_row(root, f) for f in sorted(findings, key=lambda f: f.path)]
     body = (json.dumps(rows, indent=2) + "\n").encode("utf-8")
-    return _member(FINDINGS_FILE, size=len(body), mode=0o644, mtime=0), body
+    return _tar_member(FINDINGS_FILE, size=len(body), mode=0o644, mtime=0), body
 
 
 def pack(root: Path, dest: Path, *, exclude: Iterable[str] = (), max_packed: int = MAX_PACKED_BYTES,
@@ -277,7 +277,7 @@ def _make_parents(into: Path, rel: PurePosixPath) -> Path:
     for part in rel.parts[:-1]:
         here = here / part
         with contextlib.suppress(FileExistsError):
-            os.mkdir(here, 0o755)
+            os.mkdir(here, 0o755)  # lint-unguarded-tree-write: ok — the unpack's own fresh folder; checked by lstat below, no link followed
         if not stat.S_ISDIR(os.lstat(here).st_mode):
             raise BundleRefused(f"the member {rel} lies beyond something that is not a folder")
     return here / rel.parts[-1]
@@ -320,13 +320,27 @@ def _extract(tar: tarfile.TarFile, into: Path, budget: _Budget) -> None:
         try:
             if member.isdir():
                 with contextlib.suppress(FileExistsError):
-                    os.mkdir(target, 0o755)
+                    os.mkdir(target, 0o755)  # lint-unguarded-tree-write: ok — the unpack's own fresh folder; checked by lstat below
                 if not stat.S_ISDIR(os.lstat(target).st_mode):
                     raise BundleRefused(f"the member {member.name!r} lies over something that is not a folder")
             else:
                 _write_member(tar, member, target, budget)
         except FileExistsError as e:
             raise BundleRefused(f"the member {member.name!r} is there twice") from e
+
+
+def push(request: Callable[..., dict[str, Any]], root: Path, packed: Path, *, exclude: Iterable[str] = ()) -> None:
+    """Pack the tree at `root` into `packed` (`pack`) and push it to the job's helper as the `bundle` object
+    (`job_socket.push_object`); `packed` is removed however that ends. A refusal raises (`BundleRefused`,
+    `job_socket.Refused`, `OSError`, `ValueError`): the caller logs it."""
+    from defender import job_socket
+    from defender.records.job_facts import BUNDLE
+
+    try:
+        pack(root, packed, exclude=exclude)
+        job_socket.push_object(request, BUNDLE, packed)
+    finally:
+        packed.unlink(missing_ok=True)
 
 
 def unpack(source: Path, into: Path, *, max_unpacked: int = MAX_UNPACKED_BYTES) -> None:

@@ -504,11 +504,6 @@ class RunPaths:
         """The job lane's alert file (#1342): the alert's exact bytes, beside the launch record."""
         return self._container(runs_base) / f"{self.run_dir.name}{_LAUNCH_ALERT_SUFFIX}"
 
-    def learning_progress(self, runs_base: RunsBase | None = None) -> Path:
-        """A learning job's progress record (#1344), when this name is a job id: the fork it
-        picked, its stage and its siblings' cost, replaced whole by the job entry."""
-        return self._container(runs_base) / f"{self.run_dir.name}{_LEARNING_PROGRESS_SUFFIX}"
-
     def session_pointer(self, runs_base: RunsBase | None = None) -> Path:
         """The run -> case link: which case's session store this run belongs to. Beside the
         run folder, so the box cannot rewrite it (#1235)."""

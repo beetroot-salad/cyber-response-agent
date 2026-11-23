@@ -4,10 +4,9 @@ The helper is synchronous and answers each connection on its own thread; the job
 thread of its own for the helper's life, and every call is handed to it and waited for (`Rows.call`), so no transaction is
 ever held across a socket request: each write is one store transaction that checks the claim is live (PR7).
 
-Writes go through `JobStore` alone (`stage_fact`, `begin_upload`, `finish_upload`); a `Conflict` (the claim no longer
-live, a second write of a create-once name) is answered as False, never raised. The reads the store has no verb for (the
-claim row itself, and an input's accepted upload for a pull) are read-only queries over the jobs tables, here; they write
-nothing."""
+Every read and write goes through `JobStore` alone (`stage_fact`, `begin_upload`, `finish_upload`, `refuse_upload`;
+`get_claim`, `claim_live`, `accepted_input`, `get_alert`); a `Conflict` on a write (the claim no longer live, a second
+write of a create-once name) is answered as False, never raised."""
 from __future__ import annotations
 
 import asyncio
@@ -19,6 +18,9 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
+from defender.evidence import object_key
+from defender.jobs.models import ClaimView
+
 _logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
@@ -28,21 +30,6 @@ _CALL_WAIT = 60.0
 #: Pull refusal codes (A-O6): not in the claim's input set (any tenant, any object: one code, no existence oracle); in the
 #: set but not usable now (non-`clean`, expired, offboarded); the store did not answer the accepted bytes.
 OUT_OF_CLAIM, UNAVAILABLE, STORE_FAULT = "out_of_claim", "unavailable", "store_fault"
-#: Evidence states whose accepted objects may be read (an owner whose state is `none` or `expired` has none).
-_READABLE_STATES = ("complete", "partial", "lost")
-
-
-@dataclass(frozen=True)
-class ClaimView:
-    """The claim row the worker's claim transaction wrote: its token, tenant, kind, fixed input set `(owner, object)`, launch
-    facts and the id of the row it references."""
-
-    token: str
-    tenant_id: str
-    kind: str
-    inputs: tuple[tuple[str, str], ...]
-    launch: dict[str, Any]
-    reference: str | None
 
 
 @dataclass(frozen=True)
@@ -56,22 +43,6 @@ class InputObject:
     wrapped_key: str
 
 
-def _now() -> _dt.datetime:
-    return _dt.datetime.now(_dt.UTC)
-
-
-def object_key(tenant_id: str, owner_kind: str, owner: str, claim: str, obj: str) -> str:
-    """The store key of an object (design: `t/<tenant>/<owner kind>/<owner id>/<claim token>/<object>`)."""
-    return f"t/{tenant_id}/{owner_kind}/{owner}/{claim}/{obj}"
-
-
-def _inputs(raw: Any) -> tuple[tuple[str, str], ...]:
-    if not isinstance(raw, list):
-        return ()
-    return tuple((str(i["owner"]), str(i["object"])) for i in raw
-                 if isinstance(i, dict) and isinstance(i.get("owner"), str) and isinstance(i.get("object"), str))
-
-
 class Rows:
     """The job store and the claim's reads over `dsn`, on one loop thread (module doc). `close()` at the helper's end."""
 
@@ -81,17 +52,12 @@ class Rows:
         self._thread.start()
         self._dsn = dsn
         self._store: Any = None
-        self._sessions: Any = None
-        self._engine: Any = None
         self.call(self._open)
 
     async def _open(self) -> None:
-        from defender.database import async_engine, sessions
         from defender.jobs import JobStore
 
-        self._store = JobStore(self._dsn, clock=_now, max_connections=4)
-        self._engine = async_engine(self._dsn, max_connections=2)
-        self._sessions = sessions(self._engine)
+        self._store = JobStore(self._dsn, clock=lambda: _dt.datetime.now(_dt.UTC), max_connections=4)
 
     def call(self, make: Callable[[], Awaitable[_T]], *, timeout: float = _CALL_WAIT) -> _T:
         """`make()` awaited on the loop thread; its result, or what it raised."""
@@ -104,8 +70,6 @@ class Rows:
         async def shut() -> None:
             if self._store is not None:
                 await self._store.close()
-            if self._engine is not None:
-                await self._engine.dispose()
 
         try:
             self.call(shut, timeout=10)
@@ -135,6 +99,9 @@ class Rows:
                                                                  wrapped_key=wrapped_key, scrub=scrub),
                                 f"the upload row of {obj!r}")
 
+    def refuse_upload(self, token: str, obj: str, *, scrub: str | None) -> bool:
+        return self._conflicted(lambda: self._store.refuse_upload(token, obj, scrub=scrub), f"the refusal of {obj!r}")
+
     def finish_upload(self, token: str, obj: str, *, status: str) -> bool:
         return self._conflicted(lambda: self._store.finish_upload(token, obj, status=status),
                                 f"the upload end of {obj!r}")
@@ -153,63 +120,32 @@ class Rows:
 
     def claim(self, token: str) -> ClaimView | None:
         """The claim row `token`, or None when there is none."""
-        return self.call(lambda: self._claim(token))
+        return self.call(lambda: self._store.get_claim(token))
 
-    async def _claim(self, token: str) -> ClaimView | None:
-        from sqlalchemy import select
-
-        from defender.jobs.models import ClaimRow
-
-        async with self._sessions() as s:
-            row = (await s.execute(select(ClaimRow).where(ClaimRow.token == token))).scalars().first()
-        if row is None:
-            return None
-        reference = row.investigation_id or row.learning_job_id or row.host_request_id or row.hold_tenant_id
-        return ClaimView(token=row.token, tenant_id=str(row.tenant_id), kind=row.kind, inputs=_inputs(row.inputs),
-                         launch=dict(row.launch) if isinstance(row.launch, dict) else {},
-                         reference=None if reference is None else str(reference))
+    def run_unusable(self, tenant_id: str, run_id: str) -> bool:
+        """Whether the tenant's investigation `run_id` can never be a drain's input (`JobStore.run_unusable`)."""
+        return self.call(lambda: self._store.run_unusable(tenant_id, run_id))
 
     def input_object(self, claim: ClaimView, owner: object, obj: object) -> InputObject | str:
         """The accepted object a pull of `(owner, obj)` under `claim` reads, or the refusal code (A-O6): `out_of_claim` for
-        anything the claim's fixed input set does not name, `unavailable` for a member whose owner is not `clean`, has no
-        readable evidence, has no accepted upload of the object, or whose tenant is not active."""
+        anything the claim's fixed input set does not name (or an owner of no row of the claim's tenant), `unavailable`
+        while the pulling claim is no longer live (a read after an offboard or a take-over), or for a member whose owner
+        is not `clean`, has no readable evidence or no accepted upload of the object, or whose tenant is not active."""
+        from defender.jobs import Conflict, NotFound
+
         if not isinstance(owner, str) or not isinstance(obj, str) or (owner, obj) not in claim.inputs:
             return OUT_OF_CLAIM
         try:
-            parsed = uuid.UUID(owner)
+            parsed = str(uuid.UUID(owner))
         except ValueError:
             return OUT_OF_CLAIM
-        return self.call(lambda: self._input(claim.tenant_id, str(parsed), obj))
-
-    async def _input(self, tenant_id: str, owner: str, obj: str) -> InputObject | str:
-        from sqlalchemy import select
-
-        from defender.jobs.models import ClaimRow, InvestigationRow, LearningJobRow, UploadRow
-        from defender.tenancy.models import TenantRecord
-
-        column: Any
-        async with self._sessions() as s:
-            inv = (await s.execute(select(InvestigationRow.tenant_id, InvestigationRow.evidence_state, InvestigationRow.scrub)
-                                   .where(InvestigationRow.id == owner))).first()
-            if inv is not None:
-                owner_kind, column, (tenant, state, scrub) = "investigation", ClaimRow.investigation_id, inv
-            else:
-                job = (await s.execute(select(LearningJobRow.tenant_id, LearningJobRow.evidence_state)
-                                       .where(LearningJobRow.id == owner))).first()
-                if job is None:
-                    return OUT_OF_CLAIM
-                owner_kind, column, (tenant, state), scrub = "learning", ClaimRow.learning_job_id, job, "clean"
-            if str(tenant) != tenant_id:
-                return OUT_OF_CLAIM
-            tenant_state = (await s.execute(select(TenantRecord.state).where(TenantRecord.id == tenant))).scalar()
-            if tenant_state != "active" or state not in _READABLE_STATES or scrub != "clean":
-                return UNAVAILABLE
-            found = (await s.execute(
-                select(UploadRow.token, UploadRow.size, UploadRow.sha256, UploadRow.wrapped_key)
-                .join(ClaimRow, ClaimRow.token == UploadRow.token)
-                .where(column == owner, UploadRow.object == obj, UploadRow.status == "uploaded",
-                       UploadRow.accepted_at.is_not(None)))).first()
-        if found is None:
+        if not self.call(lambda: self._store.claim_live(claim.token)):
             return UNAVAILABLE
-        claim, size, sha256, wrapped = found
-        return InputObject(object_key(tenant_id, owner_kind, owner, claim, obj), int(size), str(sha256), str(wrapped))
+        try:
+            found = self.call(lambda: self._store.accepted_input(claim.tenant_id, parsed, obj))
+        except NotFound:
+            return OUT_OF_CLAIM
+        except Conflict:
+            return UNAVAILABLE
+        return InputObject(object_key(claim.tenant_id, found.owner_kind, parsed, found.claim, obj), found.size,
+                           found.sha256, found.wrapped_key)

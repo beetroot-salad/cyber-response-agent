@@ -33,10 +33,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from defender._io import read_text_utf8
+from defender.evidence import object_key
 from defender.job_socket import Refused
+from defender.jobs.models import ClaimView
+from defender.records.job_facts import BUNDLE, EPISODE_PAGE, RUN_PAGE
 
 from . import _records
-from ._rows import STORE_FAULT, ClaimView, Rows, object_key
+from ._rows import STORE_FAULT, Rows
 from ._session import Registry, Session
 
 _logger = logging.getLogger(__name__)
@@ -46,7 +50,6 @@ INVESTIGATION, LEARNING = "investigation", "learning"
 EVIDENCE_KINDS = (INVESTIGATION, LEARNING)
 HOST_REQUEST_KINDS = ("readiness", "adoption", "drain")
 
-BUNDLE, RUN_PAGE, EPISODE_PAGE = "bundle", "page/runtime.html", "page/learning.html"
 _ARM_PAGE = re.compile(r"page/runs/([0-9a-f-]{36})/runtime\.html")
 #: The largest part a put carries, and the largest object of each class.
 PART_CAP = 8 * 1024 * 1024
@@ -218,6 +221,7 @@ class Evidence:
             made = self.keys.datakey(tenant)
         except EvidenceKeyError as fault:
             _logger.error("%s was not stored: no data key could be made: %s", obj, fault)
+            self.rows.refuse_upload(token, obj, scrub=s.scrub)
             return
         if not self.rows.begin_upload(token, obj, size=s.size, sha256=digest, wrapped_key=made.wrapped, scrub=s.scrub):
             return
@@ -330,7 +334,7 @@ def keys_from_generation(session: Session) -> Any:
     if not role or not secret_file or not Path(secret_file).is_absolute():
         return None
     try:
-        secret = Path(secret_file).read_text(encoding="utf-8").strip()
+        secret = read_text_utf8(Path(secret_file)).strip()
     except OSError as unreadable:
         _logger.warning("the evidence login's secret file cannot be read: %s", unreadable)
         return None
@@ -364,13 +368,13 @@ def _record_verb(name: str, parse: Any) -> Any:
     return handler
 
 
-def _outcome(ev: Evidence, record: Any) -> Any:
+def _outcome_record(ev: Evidence, record: Any) -> Any:
     if ev.kind == LEARNING:
         return _records.learning_outcome(record, str(ev.job_id))
     return _records.investigation_outcome(record)
 
 
-def _arms(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
+def _answer_arms(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     ev = state(session)
     answer = _record_verb("arms", lambda _ev, r: _records.arms(r))(session, fields)
     roster = ev.fact("arms")
@@ -391,7 +395,7 @@ def _arm(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
 
 def _progress(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     ev = state(session)
-    parse = _records.learning_progress if ev.kind == LEARNING else _records.investigation_progress
+    parse = _records.learning_progress_record if ev.kind == LEARNING else _records.investigation_progress_record
     try:
         body = parse(fields.get("record"))
     except _records.Malformed as bad:
@@ -410,11 +414,11 @@ def _result(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
 def register_evidence(registry: Registry) -> None:
     """The record verbs and the object requests, each for the kinds that send it; all still answered once the helper is
     told to stop, so a job that unwinds can record its end and push what it owes."""
-    registry.add("outcome", kinds=EVIDENCE_KINDS, handler=_record_verb("outcome", _outcome), optional=("record",),
+    registry.add("outcome", kinds=EVIDENCE_KINDS, handler=_record_verb("outcome", _outcome_record), optional=("record",),
                  after_signal=True)
     registry.add("page", kinds=(INVESTIGATION,), handler=_record_verb("page", lambda _ev, r: _records.page(r)),
                  optional=("record",), after_signal=True)
-    registry.add("arms", kinds=(LEARNING,), handler=_arms, optional=("record",), after_signal=True)
+    registry.add("arms", kinds=(LEARNING,), handler=_answer_arms, optional=("record",), after_signal=True)
     registry.add("arm", kinds=(LEARNING,), handler=_arm, required=("run_id",), optional=("record",), after_signal=True)
     registry.add("progress", kinds=EVIDENCE_KINDS, handler=_progress, optional=("record",), after_signal=True)
     registry.add("result", kinds=HOST_REQUEST_KINDS, handler=_result, optional=("record",), after_signal=True)

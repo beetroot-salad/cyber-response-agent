@@ -23,6 +23,10 @@ from typing import Any
 
 from defender.records.job_facts import (
     BAD_RECORD,
+    BUNDLE,
+    EPISODE_PAGE,
+    RUN_PAGE,
+    arm_page,
     BOX_START_FAILED,
     EXITED_WITHOUT_RESULT,
     EXPIRED,
@@ -41,12 +45,6 @@ from defender.records.job_facts import (
 INVESTIGATION, LEARNING, HOST_REQUEST = "investigation", "learning", "host_request"
 KINDS = (INVESTIGATION, LEARNING, HOST_REQUEST)
 
-#: The objects every owner pushes, and the page a rendered run or arm owes (PR8).
-#: Evidence store object names under a claim (PR8), not the run's or the episode's record names.
-BUNDLE = "bundle"
-RUN_PAGE = "page/runtime.html"  # lint-run-records: ok — an evidence object's name under its claim, not the run record's
-EPISODE_PAGE = "page/learning.html"  # lint-run-records: ok — an evidence object's name, not the episode record's
-_ARM_PAGE = "page/runs/{}/runtime.html"  # lint-run-records: ok — an arm page's evidence object name (PR8)
 UPLOADED = "uploaded"
 #: The evidence states whose uploaded rows the ending promotes.
 _KEEPS = ("complete", "partial", "lost")
@@ -224,9 +222,8 @@ Decision = End | HandBack
 
 
 def stated(kind: str, stage: str, **values: Any) -> End:
-    """An ending its caller states value by value instead of deciding it from staged facts: the store's pre-#1546 writers
-    (`finish`, `finish_learning_job`, `finish_host_request`) keep their signatures through it until their callers move to
-    `decide`. Nothing was staged for it, so its evidence is `none` and it promotes nothing; a completed investigation
+    """An ending its caller states value by value instead of deciding it from staged facts: the store's one pre-#1546
+    writer kept (`finish`, the stated end of an investigation) goes through it. Nothing was staged for it, so its evidence is `none` and it promotes nothing; a completed investigation
     copies its verdict to the alert, a completed learning job arms the check clock."""
     basis = Basis(started=False, decided=True, uploaded=frozenset(), owed=frozenset())
     end = End(kind, Exited(0), stage, basis, evidence_state=None if kind == HOST_REQUEST else "none", **values)
@@ -424,7 +421,7 @@ def _learning(facts: dict[str, Any], uploaded: frozenset[str], ended_by: EndedBy
     progress = _learning_progress(facts, outcome, ended_by)
     if not decided and (isinstance(ended_by, Stopped) or (status == _STOPPED and isinstance(ended_by, Exited))):
         return HandBack(LEARNING, **progress)
-    owed = {BUNDLE, EPISODE_PAGE} | {_ARM_PAGE.format(name[len('arm/'):]) for name, body in facts.items()
+    owed = {BUNDLE, EPISODE_PAGE} | {arm_page(name[len('arm/'):]) for name, body in facts.items()
                                     if name.startswith("arm/") and isinstance(body, dict) and body.get("page") == "rendered"}
     basis = Basis(started="started" in facts, decided=decided, uploaded=uploaded, owed=frozenset(owed))
     stage, reason, words = _learning_stage(facts, outcome, decided, ended_by)
@@ -515,6 +512,6 @@ def _host_request_failed(ended_by: EndedBy, basis: Basis, reason: str, words: st
                failure_message=words or HOST_WORDS.get(reason, HOST_WORDS[WORKER_ERROR]))
 
 
-__all__ = ["BUNDLE", "EPISODE_PAGE", "HOST_WORDS", "KINDS", "REFUSED_WORDS", "RUN_PAGE", "UNREADABLE_KNOWLEDGE", "Basis",
+__all__ = ["BUNDLE", "EPISODE_PAGE", "HOST_WORDS", "KINDS", "REFUSED_WORDS", "RUN_PAGE", "UNREADABLE_KNOWLEDGE", "Basis", "arm_page",
            "Cancelled", "Decision", "End", "EndedBy", "Exited", "ExpiredInQueue", "FollowOns", "HandBack", "Lapsed",
            "NotLaunched", "Offboarded", "Stopped", "decide", "lesser", "stated"]

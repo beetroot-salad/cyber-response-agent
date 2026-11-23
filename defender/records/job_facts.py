@@ -25,3 +25,18 @@ OFFBOARD_MESSAGE = "its tenant was offboarded"
 BAD_RECORD, NO_RECORD, WORKER_STOPPED, WORKER_LOST = "bad_record", "no_record", "worker_stopped", "worker_lost"
 #: The words of a lapsed host request's take-over.
 WORKER_LOST_MESSAGE = "its worker stopped renewing its lease; a host request is never retried"
+
+
+# --- evidence object names (#1546 PR8) ------------------------------------------------------------------------------
+
+#: Evidence store object names under a claim: the objects every owner pushes, and the page a rendered run or arm owes.
+#: They name stored objects, not the run's or the episode's record files.
+BUNDLE = "bundle"
+RUN_PAGE = "page/runtime.html"  # lint-run-records: ok — an evidence object's name under its claim, not the run record's
+EPISODE_PAGE = "page/learning.html"  # lint-run-records: ok — an evidence object's name, not the episode record's
+_ARM_PAGE = "page/runs/{}/runtime.html"  # lint-run-records: ok — an arm page's evidence object name (PR8)
+
+
+def arm_page(run_id: str) -> str:
+    """The evidence object name of the page of the arm `run_id` (PR8)."""
+    return _ARM_PAGE.format(run_id)

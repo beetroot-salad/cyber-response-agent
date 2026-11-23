@@ -721,3 +721,21 @@ class EpisodeRuns:
             raise TenantRefused(f"the arm container {unwrap_runs_base(self._folder)} is absent — RUNS makes it "
                                 "before the roster") from None
         return Run.under(self._folder, arm_id, io=self._io, tenant_id=self._tenant.id)
+
+    def create_listed(self, arm_id: RunId, listed: Mapping[str, RunId]) -> Run:
+        """As `create`, for a roster its caller holds rather than the episode's file (#1546 PR2: a learning job's roster
+        is its staged `arms` fact): `listed` must hold the id (`RunRefused`), a roster file, when there is one, must be
+        `listed` (`RunRefused`), and the container must be there (`TenantRefused`). Nothing is made."""
+        arm_id = require_run_id(arm_id)
+        if arm_id not in listed.values():
+            raise RunRefused(f"the staged arm roster holds no arm id {quoted(str(arm_id))} — an arm is made only at an "
+                             "id its launcher minted")
+        filed = self.arm_ids()
+        if filed is not None and dict(filed) != dict(listed):
+            raise RunRefused(f"the arm roster {self._roster_path} is not the staged one")
+        try:
+            self._hold_container().close()
+        except FileNotFoundError:
+            raise TenantRefused(f"the arm container {unwrap_runs_base(self._folder)} is absent — RUNS makes it "
+                                "before the roster") from None
+        return Run.under(self._folder, arm_id, io=self._io, tenant_id=self._tenant.id)

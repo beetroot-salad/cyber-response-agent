@@ -146,13 +146,13 @@ class InvestigationRow(Base, kw_only=True):
     scrub: Mapped[str | None] = mapped_column(Text, default=None)
 
 
-LEARNING_STATUSES = ("queued", "running", "completed", "failed", "skipped")
+_LEARNING_LIVE = ("queued", "running")
+LEARNING_TERMINAL = ("completed", "failed", "skipped")
+LEARNING_STATUSES = (*_LEARNING_LIVE, *LEARNING_TERMINAL)
 LEARNING_TRIGGERS = ("auto", "explicit")
 #: Whether a job's findings reached the queue (#1344, #1487): `none` for a job not ended `completed`; set by the
 #: `completed` end write itself, `done` with its findings stored, or `refused` with none of them stored.
 PUBLISH_STATES = ("none", "done", "refused")
-LEARNING_TERMINAL = ("completed", "failed", "skipped")
-_LEARNING_LIVE = ("queued", "running")
 
 
 class LearningJobRow(Base, kw_only=True):
@@ -277,8 +277,8 @@ class HostRequestRow(Base, kw_only=True):
     finished_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
     stage: Mapped[str] = mapped_column(Text)
     lease_expires_at: Mapped[_dt.datetime | None] = mapped_column(_TIME, default=None)
-    #: The kind's result, validated by the worker: set exactly on a `completed` row.
-    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True), default=None)
+    #: The kind's result, validated by the worker: set exactly on a `completed` row (a drain's is its tick's exit status).
+    result: Mapped[dict[str, Any] | int | None] = mapped_column(JSONB(none_as_null=True), default=None)
     failure_reason: Mapped[str | None] = mapped_column(Text, default=None)
     failure_message: Mapped[str | None] = mapped_column(Text, default=None)
 
@@ -356,7 +356,8 @@ class StagedFactRow(Base, kw_only=True):
 
 class UploadRow(Base, kw_only=True):
     """One object the claim's helper put in the evidence store (#1546 A-O3): create-once by `(token, object)`, inserted
-    `pending` before its PUT and moved once to `uploaded` or `refused`, each only while the claim is live; `accepted_at` is
+    `pending` before its PUT and moved once to `uploaded` or `refused` (or made `refused` at once, with nothing computed, for
+    an object the helper could not put at all), each only while the claim is live; `accepted_at` is
     set by the applier alone, when the owner's ending promotes it, and an accepted row never changes. An arm page's row
     copies its arm's `scrub`."""
 
@@ -366,6 +367,8 @@ class UploadRow(Base, kw_only=True):
         CheckConstraint(f"status IN ({_quoted(UPLOAD_STATUSES)})", name="status"),
         CheckConstraint(f"scrub IN ({_quoted(SCRUB_VERDICTS)})", name="scrub"),
         CheckConstraint("size >= 0", name="size"),
+        CheckConstraint("status = 'refused' OR (size IS NOT NULL AND sha256 IS NOT NULL AND wrapped_key IS NOT NULL)",
+                        name="computed_unless_refused"),
         CheckConstraint("accepted_at IS NULL OR status = 'uploaded'", name="only_uploaded_is_accepted"),
         Index("uploads_unaccepted_by_age", "created_at", postgresql_where=text("accepted_at IS NULL")),
         Index("uploads_accepted_by_age", "accepted_at", postgresql_where=text("accepted_at IS NOT NULL")),
@@ -374,9 +377,11 @@ class UploadRow(Base, kw_only=True):
 
     token: Mapped[str] = mapped_column(Text, primary_key=True)
     object: Mapped[str] = mapped_column(Text, primary_key=True)
-    size: Mapped[int] = mapped_column(BigInteger)
-    sha256: Mapped[str] = mapped_column(Text)
-    wrapped_key: Mapped[str] = mapped_column(Text)
+    #: Size, digest and wrapped data key, computed by the helper before the PUT; null only on a row refused before any
+    #: was (`refuse_upload`).
+    size: Mapped[int | None] = mapped_column(BigInteger)
+    sha256: Mapped[str | None] = mapped_column(Text)
+    wrapped_key: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text)
     created_at: Mapped[_dt.datetime] = mapped_column(_TIME)
     scrub: Mapped[str | None] = mapped_column(Text, default=None)
@@ -420,7 +425,8 @@ class HostRequestRecord:
     created_at: _dt.datetime
     started_at: _dt.datetime | None
     finished_at: _dt.datetime | None
-    result: dict[str, Any] | None
+    #: A readiness or adoption result's record; a drain's tick exit status (#1546 amendment r9 "Drain").
+    result: dict[str, Any] | int | None
     failure_reason: str | None
     failure_message: str | None
 
@@ -431,6 +437,45 @@ class HostRequestClaim(_Token):
     state, and the helper's own tenant admission refuses a tenant that is not active."""
 
     record: HostRequestRecord
+
+
+#: Evidence states whose accepted objects may be read (#1546 A-O6): an owner `none` or `expired` has none.
+READABLE_EVIDENCE = ("complete", "partial", "lost")
+
+
+@dataclasses.dataclass(frozen=True)
+class ClaimView:
+    """A claim row as its helper reads it (#1546 PR7): its token, tenant, kind, fixed input set `(owner, object)`, launch
+    facts and the id of the row (or hold tenant) it references."""
+
+    token: str
+    tenant_id: str
+    kind: str
+    inputs: tuple[tuple[str, str], ...]
+    launch: dict[str, Any]
+    reference: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class AcceptedObject:
+    """One accepted object of an owner (#1546 A-O6): the owner's kind (`investigation` or `learning`), the claim it was
+    uploaded under, its recorded size and digest, and its wrapped data key."""
+
+    owner_kind: str
+    claim: str
+    size: int
+    sha256: str
+    wrapped_key: str
+
+
+def claim_view(row: ClaimRow) -> ClaimView:
+    reference = row.investigation_id or row.learning_job_id or row.host_request_id or row.hold_tenant_id
+    raw = row.inputs if isinstance(row.inputs, list) else []
+    inputs = tuple((str(i["owner"]), str(i["object"])) for i in raw
+                   if isinstance(i, dict) and isinstance(i.get("owner"), str) and isinstance(i.get("object"), str))
+    return ClaimView(token=row.token, tenant_id=str(row.tenant_id), kind=row.kind, inputs=inputs,
+                     launch=dict(row.launch) if isinstance(row.launch, dict) else {},
+                     reference=None if reference is None else str(reference))
 
 
 def host_request_record(row: HostRequestRow) -> HostRequestRecord:

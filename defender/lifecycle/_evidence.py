@@ -21,7 +21,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from defender.evidence import BlobStore, BlobStoreError
+from defender.evidence import BlobStore, BlobStoreError, object_key
 from defender.lifecycle._job import StepFailed
 
 _logger = logging.getLogger(__name__)
@@ -45,10 +45,6 @@ _CLAIM_LIVE = """(
  OR EXISTS (SELECT 1 FROM jobs.learning_checks k WHERE k.tenant_id = c.hold_tenant_id AND k.holder = c.token))"""
 
 Sessions = async_sessionmaker[AsyncSession]
-
-
-def object_key(tenant: str, kind: str, owner: str, token: str, name: str) -> str:
-    return f"t/{tenant}/{kind}/{owner}/{token}/{name}"
 
 
 async def _delete_objects(blob: BlobStore, keys: Sequence[str]) -> None:

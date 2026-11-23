@@ -57,7 +57,8 @@ from defender.learning.branch.endings import (
 )
 from defender.learning.branch.fork_pick import fork_candidates, pick_fork
 from defender.records import EpisodeRuns, Run, RunRefused, session_store
-from defender.records.formats import TenantRefused, unwrap_data_root
+from defender.records.formats import TenantRefused
+from defender.records.job_facts import EPISODE_PAGE, arm_page
 from defender.records.job_lane import (
     LEARNING_COMPLETED,
     LEARNING_FAILED,
@@ -245,7 +246,7 @@ class _Job:
         try:
             self.ask("arm", run_id=str(arm), record={"scrub": scrub, "page": page})
             if page == "rendered" and page_file is not None:
-                job_socket.push_object(self.ask, f"page/runs/{arm}/runtime.html", page_file.read_bytes())
+                job_socket.push_object(self.ask, arm_page(str(arm)), page_file)
         except (job_socket.Refused, OSError, ValueError) as unsent:
             _logger.error(f"job {self.job_id}: arm {arm}'s fact or page was not sent ({unsent!r})")
 
@@ -402,7 +403,7 @@ def main(  # noqa: PLR0913 — the entry's inputs plus the launcher's seams
     except NotInContainer as outside:
         sys.exit(f"[learning job] job {ns.job}: {outside}; nothing was done")
     try:
-        data_root = unwrap_data_root(tenancy.resolve_data_root())
+        data_root = tenancy.data_root_for_child(tenancy.resolve_data_root())
     except TenantRefused as refused:
         sys.exit(f"[learning job] job {ns.job}: its root cannot be used: {refused}")
     on_main = threading.current_thread() is threading.main_thread()
@@ -470,7 +471,7 @@ def _push_episode(ask: Callable[..., dict[str, Any]], data_root: Path, ns: argpa
     page = tenant_root / "episodes" / ns.job / "learning.html"  # lint-run-records: ok — the episode's own page
     try:
         if page.is_file():
-            job_socket.push_object(ask, "page/learning.html", page.read_bytes())
+            job_socket.push_object(ask, EPISODE_PAGE, page)
     except (job_socket.Refused, OSError, ValueError) as unsent:
         _logger.error(f"job {ns.job}: the episode page was not pushed ({unsent!r})")
     packed = data_root / f".{ns.job}.bundle"
@@ -479,12 +480,9 @@ def _push_episode(ask: Callable[..., dict[str, Any]], data_root: Path, ns: argpa
     excludes = sorted({f"runs/{ns.source}", f"runs/{ns.job}.launch.json", "run-knowledge", "exports",
                        "scrub-findings.json", *(rel for rel in pulled if not rel.startswith("sessions/"))})
     try:
-        bundle.pack(tenant_root, packed, exclude=excludes)
-        job_socket.push_object(ask, "bundle", packed)
+        bundle.push(ask, tenant_root, packed, exclude=excludes)
     except (bundle.BundleRefused, job_socket.Refused, OSError, ValueError) as unsent:
         _logger.error(f"job {ns.job}: the job's bundle was not pushed ({unsent!r})")
-    finally:
-        packed.unlink(missing_ok=True)
 
 
 def _run(job: _Job, ns: argparse.Namespace, ask: Callable[..., dict[str, Any]], *,

@@ -19,7 +19,7 @@ from typing import Any
 
 from defender import job_socket, tenancy
 from defender._paths import process_defender_dir
-from defender.learning.branch.container import JobContainer, NotInContainer, sigterm_on_stdin_eof
+from defender.learning.branch.container import JobContainer, NotInContainer, interrupt_on_sigterm, sigterm_on_stdin_eof
 from defender.records.formats import TenantRefused
 
 _logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ _logger = logging.getLogger(__name__)
 __all__ = ["main"]
 
 
-def _parse(argv: list[str]) -> argparse.Namespace:
+def _parse_drain_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="python -m defender.learning.branch.drain_job",
                                 description="A drain request's lead-author tick, run in its job container.")
     p.add_argument("--job", required=True, help="the drain request's id")
@@ -35,15 +35,21 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _default_tick(paths: Any, *, store: Any, runs: Any) -> int:
+def _lead_tick(paths: Any, *, store: Any, runs: Any, unusable: Callable[[str, str], bool]) -> int:
     from defender.learning.core import drains
 
-    return drains.lead_author_drain(paths, store=store, runs=runs)
+    return drains.lead_author_drain(paths, store=store, runs=runs, unusable=unusable)
 
 
-def _interrupt(_signum: int, _frame: Any) -> None:
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    raise KeyboardInterrupt
+def _asked_unusable(ask: Callable[..., dict[str, Any]], tenant_id: str) -> Callable[[str, str], bool]:
+    """How the tick judges an absent run's owner (#1546 PR6): the helper's `owner.unusable`, for the drain's own tenant only
+    (the container opens no database). A refusal raises, and the tick leaves that request waiting."""
+    def unusable(tenant: str, run_id: str) -> bool:
+        if tenant != tenant_id:
+            raise ValueError(f"run {run_id} names tenant {tenant}, not the drain's")
+        return bool(ask("owner.unusable", run_id=run_id)["unusable"])
+
+    return unusable
 
 
 def main(argv: list[str], *, tick: Callable[..., int] | None = None, environ: Mapping[str, str] | None = None,
@@ -51,13 +57,13 @@ def main(argv: list[str], *, tick: Callable[..., int] | None = None, environ: Ma
     """Run the tick once and send its exit status as the drain's `result` (module doc); returns that status."""
     from defender.learning.core.config import LoopPaths
 
-    ns = _parse(argv)
+    ns = _parse_drain_args(argv)
     try:
         ask = JobContainer.client(environ)
     except NotInContainer as outside:
         sys.exit(f"[drain] request {ns.job}: {outside}; nothing was done")
     on_main = threading.current_thread() is threading.main_thread()
-    previous = signal.signal(signal.SIGTERM, _interrupt) if on_main else None
+    previous = signal.signal(signal.SIGTERM, interrupt_on_sigterm) if on_main else None
     try:
         if watch_stdin:
             sigterm_on_stdin_eof()
@@ -73,7 +79,8 @@ def main(argv: list[str], *, tick: Callable[..., int] | None = None, environ: Ma
             store = container.tick_store()
         except (TenantRefused, OSError, ValueError) as unusable:
             sys.exit(f"[drain] request {ns.job}: the tenant cannot be used: {unusable}")
-        status = (tick or _default_tick)(LoopPaths.for_tenant(tenant), store=store, runs=runs)
+        status = (tick or _lead_tick)(LoopPaths.for_tenant(tenant), store=store, runs=runs,
+                                      unusable=_asked_unusable(ask, ns.tenant))
         try:
             ask("result", record=int(status))
         except job_socket.Refused as refused:

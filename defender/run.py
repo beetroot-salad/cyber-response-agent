@@ -1497,8 +1497,7 @@ class _JobFacts:
         try:
             self._request("page", record={"page": self.page})
             if self.page == "rendered":
-                job_socket.push_object(self._request, "page/runtime.html",  # lint-run-records: ok — the object's name
-                                       (run_dir / "runtime.html").read_bytes())
+                job_socket.push_object(self._request, job_facts.RUN_PAGE, RunPaths(run_dir).runtime_html)
         except (job_socket.Refused, OSError, ValueError) as e:
             _logger.error(f"job {self._job}: the run page was not pushed: {e}")
         # The bundle is the job's tenant folder in its root (its run folder, its session store), without the helper's
@@ -1507,14 +1506,10 @@ class _JobFacts:
         paths = RunPaths(run_dir)
         excludes = [f"runs/{paths.launch_record().name}", f"runs/{paths.launch_alert().name}", "run-knowledge",
                     "exports"]
-        packed = tenant_root.parent / f".{run_dir.name}.bundle"
         try:
-            bundle.pack(tenant_root, packed, exclude=excludes)
-            job_socket.push_object(self._request, "bundle", packed)
+            bundle.push(self._request, tenant_root, tenant_root.parent / f".{run_dir.name}.bundle", exclude=excludes)
         except (bundle.BundleRefused, job_socket.Refused, OSError, ValueError) as e:
             _logger.error(f"job {self._job}: the run's bundle was not pushed: {e}")
-        finally:
-            packed.unlink(missing_ok=True)
 
 
 class _HelperPass:

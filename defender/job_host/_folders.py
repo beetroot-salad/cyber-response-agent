@@ -26,7 +26,7 @@ from ._session import Session, StartFailed
 RUN_KNOWLEDGE, EXPORTS = "run-knowledge", "exports"
 
 
-def _give(path: Path, owner: os.stat_result) -> None:
+def _give_entry(path: Path, owner: os.stat_result) -> None:
     if os.geteuid() == 0 and (owner.st_uid, owner.st_gid) != (0, 0):
         os.chown(path, owner.st_uid, owner.st_gid, follow_symlinks=False)
 
@@ -37,10 +37,10 @@ def give_tree(session: Session, top: Path) -> None:
     owner = os.stat(session.root_folder)
     if os.geteuid() != 0:
         return
-    _give(top, owner)
+    _give_entry(top, owner)
     for folder, dirs, files in os.walk(top):
         for name in (*dirs, *files):
-            _give(Path(folder) / name, owner)
+            _give_entry(Path(folder) / name, owner)
 
 
 def make_claim_folders(session: Session) -> None:
@@ -55,7 +55,7 @@ def make_claim_folders(session: Session) -> None:
         tenant = session.job_root / session.tenant_id
         for folder in (tenant, tenant / "runs", tenant / "episodes"):
             folder.mkdir(mode=0o700)  # lint-unguarded-tree-write: ok — fresh, under the claim's own root before the job
-            _give(folder, owner)
+            _give_entry(folder, owner)
     except OSError as e:
         raise StartFailed(f"the claim's folders could not be made: {e}") from None
 
@@ -96,11 +96,11 @@ class CopyTenant:
     from, and where the copy is made: the claim's inputs (`<inputs>/run-knowledge/`)."""
 
     id: Any
-    exports: Any
+    export_at: Any
     run_knowledge: Path
 
     def export_folder(self, commit: str) -> Path:
-        return Path(self.exports(commit))
+        return Path(self.export_at(commit))
 
 
 def copy_tenant(session: Session, tenant: Any, *, exports_in_inputs: bool = False) -> CopyTenant:

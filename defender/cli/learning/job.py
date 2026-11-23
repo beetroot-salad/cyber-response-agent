@@ -22,7 +22,7 @@ def _preflight(model: str | None = None, **kwargs: Any) -> int:
     return preflight_role_models(model, **kwargs)
 
 
-def _render_page(runs: Any, episode_id: str) -> Any:
+def _episode_page(runs: Any, episode_id: str) -> Any:
     """The episode page (`learning.html`, in the episode's own folder), which the entry pushes to its helper (#1546)."""
     from defender.presentation.visualize_episode import render_episode
 
@@ -32,7 +32,7 @@ def _render_page(runs: Any, episode_id: str) -> Any:
 def main(argv: list[str], **seams: Any) -> int:
     """The job entry with the real role preflight and the episode page's renderer unless one is injected."""
     seams.setdefault("preflight", _preflight)
-    seams.setdefault("render_page", _render_page)
+    seams.setdefault("render_page", _episode_page)
     return job_entry.main(argv, **seams)
 
 

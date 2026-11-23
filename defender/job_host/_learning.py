@@ -230,7 +230,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
         cleanup.close()
         raise
     session.minted.add(job)
-    pin, placed, job_tenant = _pinned_export(session, accepted, source.commit)
+    pin, placed, job_tenant = _place_pinned_export(session, accepted, source.commit)
     state = _Learning(accepted, source.commit, scratch, records=current, job_tenant=job_tenant, pin=pin, export=placed)
     cleanup.callback(_remove_copies, state)
     command = session.command or ["python3", "-m", "defender.cli.learning.job", "--job", job,
@@ -243,7 +243,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
                     exited=_learning_exited, shared=shared)
 
 
-def _pinned_export(session: Session, accepted: Any, settled: str) -> tuple[str, Path, Any]:
+def _place_pinned_export(session: Session, accepted: Any, settled: str) -> tuple[str, Path, Any]:
     """The family's pin (the claim's launch facts' `knowledge_commit`; the export the launch settled on when it names
     none), its export placed in the inputs (`<inputs>/exports/<pin>/`, every file anew), and the job's own tenant."""
     from defender import tenancy
@@ -548,8 +548,8 @@ def _materialize_sibling(session: Session, state: _Learning, world: str, run: st
     """The sibling's run, made by run setup's shared half (`run_common.materialize_run`) at the roster's arm id."""
     from defender import run_common
     from defender.investigation.driver import resolve_main_model
-    from defender.records import Run, RunRefused, artifact_file, formats
-    from defender.records.formats import RunsBase, TenantRefused
+    from defender.records import RunAbsent, RunRefused, artifact_file, formats
+    from defender.records.formats import TenantRefused
 
     try:
         with state.job_tenant.runs_repository().episode(str(session.job_id)) as view:
@@ -563,12 +563,12 @@ def _materialize_sibling(session: Session, state: _Learning, world: str, run: st
             alert = _source_alert(view.episode)
             if not artifact_file(alert):
                 raise Refused("the episode's copy of the source alert is not a plain file", "confinement")
-            arm = Run.under(RunsBase(Path(view.episode.dir) / "runs"), arms[world], tenant_id=session.tenant_id)
+            arm = view.create_listed(arms[world], arms)
             if str(arm.run_dir.name) != run:
                 raise Refused("the roster moved while the sibling's run was made", "internal")
             made = run_common.materialize_run(alert, run=arm, tenant=state.job_tenant, model=resolve_main_model(None),
                                               world=resumed, knowledge=source)
-    except (FileNotFoundError, RunRefused, TenantRefused, KeyError, ValueError, OSError) as refused:
+    except (FileNotFoundError, RunAbsent, RunRefused, TenantRefused, KeyError, ValueError, OSError) as refused:
         raise Refused(f"the sibling's run could not be made: {type(refused).__name__}: {refused}",
                       "internal") from None
     except SystemExit as refused:
@@ -737,6 +737,23 @@ def _batch_box(session: Session, ident: str) -> Any:
     return _drain_delivery(session, state).start_box(request, docker=session.docker)
 
 
+def _answer_owner_unusable(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
+    """`owner.unusable(run_id=)`, a drain's (#1546 PR6, D7): whether the claim's tenant's investigation `run_id` can never
+    be an input (the job store's `run_unusable`), so the tick ends its absent request dead rather than waiting. The
+    container opens no database; the tenant is the claim's, never the container's word."""
+    from . import _evidence
+
+    run = fields["run_id"]
+    if not isinstance(run, str):
+        raise Refused("owner.unusable takes a run id", "bad-fields")
+    ev = _evidence.state(session)
+    try:
+        unusable = ev.rows.run_unusable(ev.claim.tenant_id, run)
+    except Exception as fault:  # noqa: BLE001 — an unread state is no verdict: the container's request waits
+        raise Refused(f"the owner of run {run!r} could not be read: {type(fault).__name__}", "internal") from None
+    return {"unusable": bool(unusable)}
+
+
 def register(registry: Registry) -> None:
     """The learning kinds' hooks, requests and boxes (module doc)."""
     registry.kind(LEARNING, KindSpec(prepare=_prepare_learning, end=_learning_end))
@@ -745,6 +762,7 @@ def register(registry: Registry) -> None:
     registry.add("pass", kinds=(LEARNING,), handler=answer_pass, required=("id",))
     registry.add("copy.make", kinds=(LEARNING,), handler=_copy_make, required=("world",))
     registry.add("export.materialise", kinds=(LEARNING,), handler=_export_materialise, required=("commit",))
+    registry.add("owner.unusable", kinds=(DRAIN,), handler=_answer_owner_unusable, required=("run_id",))
     registry.add("batch.start", kinds=TICK_KINDS, handler=_batch_start, required=("lanes",))
     registry.add("forge.token", kinds=TICK_KINDS, handler=_forge_token, required=("min_validity",),
                  after_signal=True)

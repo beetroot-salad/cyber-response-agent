@@ -54,6 +54,8 @@ LANES = (AUTHOR_LANE, LEAD_LANE, FEEDBACK_LANE)
 BRANCH_PREFIX = {AUTHOR_LANE: "lessons/", LEAD_LANE: "lead-author/", FEEDBACK_LANE: "feedback/"}
 REVERT_PREFIX = "lessons/revert-"
 STATUSES = ("waiting", "in_batch", "held", "published", "skipped", "dead")
+#: The item statuses a tick reads: what can be claimed and what is in a batch (the rest is history or a person's).
+OPEN_WORK = ("waiting", "in_batch")
 BATCH_KINDS = ("author", "revert", "registry")
 #: The batch kinds that hold their lane while not ended (O3, H4; A4: a registry batch is the feedback lane's writer
 #: lease). One set, so no site lists the kinds by hand.

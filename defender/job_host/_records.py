@@ -51,7 +51,7 @@ def _object(record: Any, keys: tuple[str, ...], what: str, *, optional: tuple[st
     return record
 
 
-def _member(value: Any, allowed: tuple[Any, ...], field: str) -> Any:
+def _one_of(value: Any, allowed: tuple[Any, ...], field: str) -> Any:
     if not isinstance(value, str) or value not in allowed:
         raise Malformed(f"{field} is not one of {list(allowed)}")
     return value
@@ -63,7 +63,7 @@ def _flag(value: Any, field: str) -> bool:
     return value
 
 
-def _text(value: Any, field: str, *, nullable: bool = True) -> str | None:
+def _text_field(value: Any, field: str, *, nullable: bool = True) -> str | None:
     if value is None and nullable:
         return None
     if not isinstance(value, str) or len(value) > _TEXT_CAP:
@@ -71,7 +71,7 @@ def _text(value: Any, field: str, *, nullable: bool = True) -> str | None:
     return value
 
 
-def _cost(value: Any, field: str, *, nullable: bool = False) -> float | None:
+def _cost_field(value: Any, field: str, *, nullable: bool = False) -> float | None:
     if value is None and nullable:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
@@ -91,15 +91,15 @@ def _closing(value: Any) -> dict[str, Any] | None:
     found = value.get("found")
     if found == "record":
         _object(value, ("found", "disposition", "review_outcome", "summary"), "closing")
-        _member(value["disposition"], DISPOSITION_VALUES, "closing.disposition")
-        _text(value["review_outcome"], "closing.review_outcome")
-        _text(value["summary"], "closing.summary")
+        _one_of(value["disposition"], DISPOSITION_VALUES, "closing.disposition")
+        _text_field(value["review_outcome"], "closing.review_outcome")
+        _text_field(value["summary"], "closing.summary")
     elif found == "never_closed":
         _object(value, ("found",), "closing")
     elif found == "could_not_look":
         _object(value, ("found",), "closing", optional=("wording",))
         if "wording" in value:
-            _text(value["wording"], "closing.wording", nullable=False)
+            _text_field(value["wording"], "closing.wording", nullable=False)
     else:
         raise Malformed("closing.found is not record, never_closed or could_not_look")
     return value
@@ -110,14 +110,14 @@ def investigation_outcome(record: Any) -> dict[str, Any]:
     from defender.records.run_end import TRUNCATED_BY_VALUES
 
     r = _object(record, _INV_OUTCOME, "outcome")
-    _member(r["setup"], _SETUPS, "setup")
-    _member(r["box"], _BOXES, "box")
+    _one_of(r["setup"], _SETUPS, "setup")
+    _one_of(r["box"], _BOXES, "box")
     _flag(r["report_committed"], "report_committed")
-    _member(r["scrub"], _SCRUBS, "scrub")
+    _one_of(r["scrub"], _SCRUBS, "scrub")
     if r["cut_short"] is not None:
-        _member(r["cut_short"], tuple(TRUNCATED_BY_VALUES), "cut_short")
+        _one_of(r["cut_short"], tuple(TRUNCATED_BY_VALUES), "cut_short")
     _closing(r["closing"])
-    _cost(r["cost_usd"], "cost_usd", nullable=True)
+    _cost_field(r["cost_usd"], "cost_usd", nullable=True)
     _flag(r["cost_is_lower_limit"], "cost_is_lower_limit")
     return dict(r)
 
@@ -145,16 +145,16 @@ def _screened(findings: Any, job_id: str) -> dict[str, Any] | None:
 def learning_outcome(record: Any, job_id: str) -> dict[str, Any]:
     """A learning job's outcome: its end fields as sent, its findings screened (`_screened`)."""
     r = _object(record, _LEARNING_OUTCOME, "outcome")
-    _member(r["status"], _LEARNING_STATUSES, "status")
+    _one_of(r["status"], _LEARNING_STATUSES, "status")
     for field in ("reason", "message", "fork_message_id", "stage"):
-        _text(r[field], field)
-    _cost(r["sibling_cost_usd"], "sibling_cost_usd")
+        _text_field(r[field], field)
+    _cost_field(r["sibling_cost_usd"], "sibling_cost_usd")
     return {**{k: r[k] for k in _LEARNING_OUTCOME if k != "findings"}, "findings": _screened(r["findings"], job_id)}
 
 
 def page(record: Any) -> dict[str, Any]:
     r = _object(record, ("page",), "page")
-    _member(r["page"], _PAGES, "page")
+    _one_of(r["page"], _PAGES, "page")
     return dict(r)
 
 
@@ -182,7 +182,7 @@ def arms(record: Any) -> dict[str, Any]:
         run = canonical_run_id(e["run_id"])
         if run is None or run in seen:
             raise Malformed("a roster entry's run_id is not a canonical run id, or names a run twice")
-        if not _text(e["world_id"], "world_id", nullable=False):
+        if not _text_field(e["world_id"], "world_id", nullable=False):
             raise Malformed("a roster entry's world_id is empty")
         seen.add(run)
     return {"roster": [{"run_id": e["run_id"], "world_id": e["world_id"]} for e in roster]}
@@ -190,22 +190,22 @@ def arms(record: Any) -> dict[str, Any]:
 
 def arm(record: Any) -> dict[str, Any]:
     r = _object(record, ("scrub", "page"), "arm")
-    _member(r["scrub"], _SCRUBS, "scrub")
-    _member(r["page"], _PAGES, "page")
+    _one_of(r["scrub"], _SCRUBS, "scrub")
+    _one_of(r["page"], _PAGES, "page")
     return dict(r)
 
 
-def investigation_progress(record: Any) -> dict[str, Any]:
+def investigation_progress_record(record: Any) -> dict[str, Any]:
     r = _object(record, ("cost_usd",), "progress")
-    _cost(r["cost_usd"], "cost_usd")
+    _cost_field(r["cost_usd"], "cost_usd")
     return dict(r)
 
 
-def learning_progress(record: Any) -> dict[str, Any]:
+def learning_progress_record(record: Any) -> dict[str, Any]:
     r = _object(record, ("fork_message_id", "stage", "sibling_cost_usd"), "progress")
-    _text(r["fork_message_id"], "fork_message_id")
-    _text(r["stage"], "stage")
-    _cost(r["sibling_cost_usd"], "sibling_cost_usd")
+    _text_field(r["fork_message_id"], "fork_message_id")
+    _text_field(r["stage"], "stage")
+    _cost_field(r["sibling_cost_usd"], "sibling_cost_usd")
     return dict(r)
 
 
