@@ -79,10 +79,14 @@ def test_the_container_is_handed_the_tenant_the_system_and_the_rendering(scene, 
     from defender.system_rules import base_files
 
     from defender.tests.tenancy.tenant_1108_delivery._support import git
+    from defender.tests.tenancy.tenant_1108_p4._support import plant_old_clone
 
     job_id, got = str(uuid.uuid4()), {}
-    # the clone's own remote is a dead address unlike the recorded wiring: the facts must carry the wiring (G3, repair 5)
-    git(scene.t.clone, "config", "remote.origin.url", DEAD_ORIGIN)
+    # A repository at the old clone's place (#1618 K8: no host clone) whose remote is a dead address unlike the recorded
+    # wiring: the facts must carry the wiring (G3, repair 5).
+    clone = plant_old_clone(scene.t, {})
+    git(clone, "init", "-q")
+    git(clone, "remote", "add", "origin", DEAD_ORIGIN)
 
     def job(c) -> int:
         got["facts"] = c.request("launch")
@@ -182,8 +186,10 @@ def test_a_system_whose_adapter_ships_no_base_files_is_failed_no_base_files(scen
 
 def test_the_helper_never_reads_the_tenants_own_files_for_the_rendering(scene, checkout):
     """The rendering is the release's: a tenant `agent/skills/identity/SKILL.md` of other text does not change what is handed over. (P-9 digest of the render, never checked-out files)"""
-    (scene.t.clone / "agent" / "skills" / "identity").mkdir(parents=True, exist_ok=True)
-    (scene.t.clone / "agent" / "skills" / "identity" / "SKILL.md").write_bytes(b"the tenant's own text\n")
+    from defender.tests.tenancy.tenant_1108_p4._support import plant_old_clone
+
+    # #1618 K8: the tenant's own files on the host would be at the old clone's place; a decoy there.
+    plant_old_clone(scene.t, {"agent/skills/identity/SKILL.md": "the tenant's own text\n"})
     got = {}
     ran, _, _ = _run(scene, str(uuid.uuid4()), SYSTEM, lambda c: (got.update(f=c.request("launch")), 0)[1])
     assert "f" in got, f"premise: the container never ran (the helper's rc {ran.rc!r}): the adoption kind is not served"

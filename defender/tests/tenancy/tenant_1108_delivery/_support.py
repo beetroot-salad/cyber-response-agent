@@ -1320,14 +1320,14 @@ _FRESH_SCRIPT = """
 import json, sys
 from pathlib import Path
 from defender.tests.support.tenancy import _tenants1106 as tenants
-from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, LANES, ForgeHTTP, configured_origin, target, fixture_identity
-root, tenant_id, remote, batch_id = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, LANES, ForgeHTTP, target, fixture_identity
+root, tenant_id, remote, batch_id, origin = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 mod = target()
 tenant = tenants.accept(root, tenant_id)
-http = ForgeHTTP(remote=remote, origin=configured_origin(tenant.knowledge))
+http = ForgeHTTP(remote=remote, origin=origin)
 out = {}
 try:
-    d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
+    d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)), origin=origin)
     batch = d.start_batch(batch_id, lanes=LANES)
     (batch.draft_root / "agent/lessons" / (batch_id + ".md")).write_bytes(b"a lesson\\n")
     out["commit"] = batch.commit(batch.change_set(), "claim")
@@ -1362,60 +1362,26 @@ def fresh_process_env(tenant, scratch: Path):
 def in_a_fresh_process_finishing(repo, batch_id, *, python_prelude=""):
     """A batch started, committed with one lesson and finished on a `TenantDelivery` opened for `repo`'s tenant in
     another, freshly started process with its own forge double (backed by the same remote, as the real forge is) and
-    a fresh environment: nothing of this process's objects, memory or environment reaches it. Returns
+    a fresh environment: nothing of this process's objects, memory or environment reaches it. The origin it is handed
+    is `repo.origin` (#1618 K8: the tenant has no clone whose configured origin it could read). Returns
     `{"status", "url", "commit", "branch"}` or `{"refused": ...}`, with `"creates"`, the PR requests it sent."""
     tenant, remote = repo[0], repo[1]
     scratch = Path(location_path(tenant.data_root)).parent / f"later-{len(list(Path(location_path(tenant.data_root)).parent.glob('later-*')))}"
     proc = subprocess.run([sys.executable, "-c", python_prelude + "\n" + _FRESH_SCRIPT, str(location_path(tenant.data_root)), str(tenant.id),
-                           str(remote), batch_id], capture_output=True, text=True,
+                           str(remote), batch_id, str(repo.origin)], capture_output=True, text=True,
                           env=fresh_process_env(tenant, scratch), timeout=300, check=False)
     assert proc.returncode == 0, f"the fresh process crashed: {proc.stderr}"
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
 # ---------------------------------------------------------------------------------------
-# The per-tenant lock, observed from another process
+# The per-tenant lock (retired, #1618 K1)
 # ---------------------------------------------------------------------------------------
 
-_LOCK_SCRIPT = """
-import json, sys, time
-from pathlib import Path
-from defender.tests.support.tenancy import _tenants1106 as tenants
-from defender.tests.tenancy.tenant_1108_delivery._support import target
-root, tenant_id, mode = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
-mod = target()
-tenant = tenants.accept(root, tenant_id)
-started = time.monotonic()
-try:
-    with mod.tenant_lock(tenant):
-        if mode == "hold":
-            Path(sys.argv[4]).write_text("held", encoding="utf-8")
-            release = Path(sys.argv[5])
-            while not release.exists() and time.monotonic() - started < 120:
-                time.sleep(0.02)
-except mod.LockBusy as busy:
-    print(json.dumps({"busy": str(busy), "seconds": time.monotonic() - started}))
-else:
-    print(json.dumps({"free": True, "seconds": time.monotonic() - started}))
-"""
-
-
-def _lock_argv(tenant, mode, *extra):
-    return [sys.executable, "-c", _LOCK_SCRIPT, str(location_path(tenant.data_root)), str(tenant.id), mode,
-            *map(str, extra)]
-
-
-def _probe_env():
-    return {**os.environ, "PYTHONPATH": str(IMPORT_ROOT)}
-
-
 def lock_probe(tenant):
-    """Try the tenant's lock from another process (a lock's same-process semantics differ by
-    primitive) and give it straight back: `{"free": True}` or `{"busy": <refusal>}`."""
-    proc = subprocess.run(_lock_argv(tenant, "try"), capture_output=True, text=True,
-                          env=_probe_env(), timeout=120, check=False)
-    assert proc.returncode == 0, f"lock probe crashed: {proc.stderr}"
-    return json.loads(proc.stdout.strip().splitlines()[-1])
+    """Retired with the per-tenant lock (#1618 design r5, K1: no knowledge lock remains; `test_no_lock_1618`): the name
+    is kept for its importers, and a call fails naming why rather than probing a lock that no longer exists."""
+    pytest.fail(f"#1618 K1: there is no per-tenant knowledge lock to probe for {tenant.id}")
 
 
 _GIT_OPTION_VALUES = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
@@ -1477,35 +1443,18 @@ class LockAudit:
 
 
 class LockHolder:
-    """Holds the tenant's lock in another process, through the production lock, until exit."""
+    """Retired with the per-tenant lock (#1618 design r5, K1: no knowledge lock remains; `test_no_lock_1618`): kept for
+    its importers; entering it fails naming why rather than holding a lock that no longer exists."""
 
     def __init__(self, tenant, scratch: Path):
         self.tenant = tenant
-        scratch.mkdir(parents=True, exist_ok=True)
-        self.ready, self.release = scratch / "held", scratch / "release"
         self.proc = None
 
     def __enter__(self):
-        self.proc = subprocess.Popen(_lock_argv(self.tenant, "hold", self.ready, self.release),
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                     env=_probe_env())
-        deadline = time.monotonic() + 60
-        while not self.ready.exists():
-            if self.proc.poll() is not None or time.monotonic() > deadline:
-                out, err = self.proc.communicate(timeout=10)
-                raise AssertionError(f"the lock holder never held the lock: {out} {err}")
-            time.sleep(0.02)
-        return self
-
-    @property
-    def pid(self):
-        return self.proc.pid
+        pytest.fail(f"#1618 K1: there is no per-tenant knowledge lock to hold for {self.tenant.id}")
 
     def __exit__(self, *exc):
-        self.release.write_text("go", encoding="utf-8")
-        out, err = self.proc.communicate(timeout=60)
-        assert self.proc.returncode == 0, err
-        assert json.loads(out.strip().splitlines()[-1]).get("free") is True, out
+        return False
 
 
 def bounded(fn, *, seconds=30.0, fifos=()):

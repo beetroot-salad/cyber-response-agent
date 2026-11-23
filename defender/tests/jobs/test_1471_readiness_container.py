@@ -233,12 +233,13 @@ def test_r13_3_the_census_reads_the_published_copy_not_the_host_clone(tmp_path, 
     (repair 5 and 6, G3)"""
     files = {"settings/case-record.yaml": "system: ticket\n"}
     with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL, files=files) as scene:
-        clone_settings = Path(scene.t.clone) / "settings"
-        (clone_settings / "case-record.yaml").unlink()  # the copy holds it, the clone no longer does
-        (clone_settings / "lead-zero.yaml").write_text("system: elastic\n", encoding="utf-8")  # the clone only
-        registry = Path(scene.t.clone) / "agent" / "skills" / "tacit-knowledge" / "registry.yaml"
-        assert registry.is_file(), "premise: the clone holds the tacit registry the copy holds"
-        registry.write_text(REGISTRY_BROKEN, encoding="utf-8")  # the clone only: the copy's stays sound
+        from defender.tests.tenancy.tenant_1108_p4._support import plant_old_clone
+
+        # #1618 K8: there is no host clone; its divergent halves are a decoy at the old clone's place (`<T>/knowledge`),
+        # where a census still reading the clone would find them: a retired file and a broken tacit registry, the
+        # clone's only (the copy, fetched from Forgejo, holds `case-record.yaml` and a sound registry).
+        clone = plant_old_clone(scene.t, {"settings/lead-zero.yaml": "system: elastic\n",
+                                          "agent/skills/tacit-knowledge/registry.yaml": REGISTRY_BROKEN})
         ran = readiness(scene)
         warnings = _warnings(ran)
         retired = _of(warnings, "retired_file")
@@ -247,7 +248,7 @@ def test_r13_3_the_census_reads_the_published_copy_not_the_host_clone(tmp_path, 
         assert "lead-zero.yaml" not in retired, f"the host clone was censused, not the published copy: {ran.said()}"
         assert not [w for w in warnings if w["kind"].startswith("tacit_")], (
             f"the host clone's agent half was censused, not the published copy's: {ran.said()}")
-        assert Path(ran.facts["run_copy"]) != Path(scene.t.clone), "premise: the copy is not the clone"
+        assert Path(ran.facts["run_copy"]) != clone, "premise: the copy is not the old clone's place"
 
 
 @pytest.mark.parametrize("recorded", [True, False], ids=["recorded", "unrecorded"])
