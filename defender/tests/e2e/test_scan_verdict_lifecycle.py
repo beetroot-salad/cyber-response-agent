@@ -152,8 +152,13 @@ def _plant(tree: Path, kind: str) -> None:
         os.mkfifo(tree / "x")
     elif kind == "socket":
         sock = socket.socket(socket.AF_UNIX)
-        sock.bind(str(tree / "x"))
-        sock.close()
+        here = os.getcwd()
+        os.chdir(tree)  # bind by a relative name: the tree's absolute path can overrun a unix socket's 108 bytes
+        try:
+            sock.bind("x")
+        finally:
+            os.chdir(here)
+            sock.close()
     elif kind == "hardlink":
         os.link(tree / "report.md", tree / "x")
     else:
