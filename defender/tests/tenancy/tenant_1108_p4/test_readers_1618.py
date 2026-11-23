@@ -115,3 +115,33 @@ def test_1618_g2_a_pin_forgejo_does_not_serve_refuses_naming_it_and_never_falls_
         assert None not in commits, f"the reader fell back to main: {commits}"
     assert not res.spent
     assert res.left == []
+
+
+@pytest.mark.parametrize("record", ["missing", "garbled"])
+def test_1618_k5_the_workspace_map_of_a_run_whose_record_names_no_commit_fetches_nothing(record, tmp_path, data_root, capsys):
+    """A run whose host-held knowledge record names no commit (missing, or garbled: it reads `unreadable`, K9) has no
+    tenant knowledge the map could show by id: the map is drawn without it, and nothing is fetched, `main` included (no
+    fallback to another commit for an object the run never named, K5, K12). Control: the same tool with the record naming a
+    commit asks for that commit by id."""
+    from pathlib import Path
+
+    from defender.cli import workspace_map
+    from defender.records import RunPaths
+    from defender.tests.tenancy.knowledge_1618 import _readers_1618 as RD
+
+    with K.scene(tmp_path, data_root) as t:
+        argv = lambda run_id: ["workspace_map.py", "--tenant", t.tenant_id, run_id]  # noqa: E731
+        control = RD.run_tool(t, tmp_path, capsys, workspace_map.main, argv(RD.plant_run(t, t.commit)))
+        assert control.rc == 0, control.err
+        assert [a["commit"] for a in control.fetches] == [t.commit], "control: the named commit is fetched by id"
+        run_id = RD.plant_run(t, t.commit)
+        source = Path(RunPaths(K.tenant_root(t) / "runs" / run_id).knowledge_source())
+        if record == "missing":
+            source.unlink()
+        else:
+            source.write_text("{not json", encoding="utf-8")
+        ran = RD.run_tool(t, tmp_path, capsys, workspace_map.main, argv(run_id))
+    assert ran.rc == 0, ran.err
+    assert ran.out.strip(), "control: the map was drawn"
+    assert ran.fetches == [], f"a run naming no commit had knowledge fetched: {ran.fetches}"
+    assert ran.requests == 0, "a run naming no commit reached Forgejo"
