@@ -8,7 +8,8 @@ losing it the worker cancels everything it started, which deletes no ids. Every 
 holding is one error line. Holding it, a poll reads the open requests, starts an expansion for each tenant's
 (none, T) requests (one per tenant at a time), starts runs for users in turn, at most `people_concurrency` in flight
 and never two for one user, and runs the cap job when it is due. A user whose runs keep failing waits ever longer
-between attempts: none after the first failure, then 1, 3, 7, ... polls, at most `MAX_SKIPPED_POLLS`. It returns without waiting for what it started;
+between attempts: none after the first failure, then 1, 3, 7, ... polls, at most `MAX_SKIPPED_POLLS`; a request
+recorded for them since their last failed run ends the wait. It returns without waiting for what it started;
 `settle()` waits."""
 from __future__ import annotations
 
@@ -54,6 +55,8 @@ class PeopleWorker:
         #: a user's failed runs in a row, and how many more polls they wait before the next (kept in the process)
         self._failures: dict[UserId, int] = {}
         self._waiting: dict[UserId, int] = {}
+        #: the request ids a user's last failed run took: a request outside them ends the user's wait
+        self._failed_on: dict[UserId, frozenset[Any]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
 
     async def start(self) -> None:
@@ -183,7 +186,8 @@ class PeopleWorker:
                 by_user.setdefault(request.user_id, []).append(request)
         for user in [u for u in self._waiting if u not in self._runs]:
             self._waiting[user] -= 1
-            if self._waiting[user] < 0:
+            fresh = {r.id for r in by_user.get(user, [])} - self._failed_on.get(user, frozenset())
+            if self._waiting[user] < 0 or fresh:
                 del self._waiting[user]
         waiting = sorted((u for u in by_user if u not in self._runs and u not in self._waiting),
                          key=lambda u: self._turn(u, by_user[u]))
@@ -207,11 +211,13 @@ class PeopleWorker:
                 await self.tenants.edit_people_requests(delete=[PeopleRequestId(r.id) for r in rows])
                 self._attempted.pop(user, None)
                 self._failures.pop(user, None)
+                self._failed_on.pop(user, None)
                 return
         except asyncio.CancelledError:
             raise
         except Exception as error:  # noqa: BLE001 — the requests stay; the user goes to the back
             _logger.error("people request of user %s: the run failed, retried at a later poll: %s", user, error)
+        self._failed_on[user] = frozenset(r.id for r in rows)
         self._back_off(user)
 
     def _back_off(self, user: UserId) -> None:
