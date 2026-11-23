@@ -808,9 +808,15 @@ def archived_world(episode_dir: Path, label: str, *, disposition: str = "malicio
     (w / "gather_raw").mkdir(parents=True, exist_ok=True)
     (w / "investigation.md").write_text(f"# world {label}\n", encoding="utf-8")
     (w / "executed_queries.jsonl").write_text("", encoding="utf-8")
-    (w / "provenance.json").write_text(
-        json.dumps(provenance_record(commit=commit, dirty=dirty, unavailable=unavailable)),
-        encoding="utf-8")
+    # The knowledge commit a world's stamp names is its OWN tenant's `main` (`<root>/<T>/episodes/<id>`): the judge reads a
+    # world's bodies from a copy of that tenant's commit (#1618 K5, `_judge_921.grade_at`'s `fetched_copy` of the episode's
+    # tenant), so a stamp naming another tenant's `main` (the data root's one seeded tenant) is a pin Forgejo does not
+    # serve for it. An episode outside a tenant's `episodes/` keeps the default.
+    episode_dir = Path(episode_dir)
+    owner = episode_dir.parent.parent.name if episode_dir.parent.name == "episodes" else None
+    stamp = provenance_record(commit=commit, dirty=dirty, unavailable=unavailable,
+                              **({"knowledge": {"commit": scene_knowledge(owner)}} if owner else {}))
+    (w / "provenance.json").write_text(json.dumps(stamp), encoding="utf-8")
     (w / "scrub_verdict.json").write_text(json.dumps({"ran": scrub_ran}), encoding="utf-8")
     return w
 
