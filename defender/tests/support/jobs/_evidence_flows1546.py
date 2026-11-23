@@ -85,12 +85,13 @@ def facts(dsn: str, token: str) -> dict[str, Any]:
 
 def stage_upload(dsn: str, token: str, obj: str, data: bytes | None, *, status: str | None = None,
                  scrub: str | None = None) -> None:
-    """An upload row as the helper leaves it: `uploaded` with data, `refused` with none, unless `status` says."""
+    """An upload row as the helper leaves it: `uploaded` with data, `refused` with none (the PUT that failed), unless `status`
+    says. Every row carries the size, digest and wrapped key it was inserted with `pending`, before the PUT (design: uploads)."""
     status = status or ("refused" if data is None else "uploaded")
+    sent = data if data is not None else f"{token}/{obj}: the bytes whose PUT the store refused".encode()
     execute(dsn, "INSERT INTO jobs.uploads (token, object, size, sha256, wrapped_key, status, scrub, created_at) "
                  "VALUES (%s, %s, %s, %s, %s, %s, %s, now())",
-            (token, obj, None if data is None else len(data), None if data is None else sha(data),
-             None if data is None else f"wrapped:{obj}", status, scrub))
+            (token, obj, len(sent), sha(sent), f"wrapped:{obj}", status, scrub))
 
 
 def accepted(dsn: str, token: str) -> list[str]:
