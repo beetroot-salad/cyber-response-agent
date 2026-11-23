@@ -25,6 +25,7 @@ from typing import Any
 from defender._clock import parse_iso_utc
 from defender.learning.author.version_control.forgejo import ForgeError
 from defender.learning.core import feedback_decide, feedback_registry
+from defender.records.formats import login_of
 from defender.learning.core.config import FEEDBACK_DRAIN_LABEL, FatalConfigError, LoopPaths
 
 _logger = logging.getLogger(__name__)
@@ -105,7 +106,7 @@ class Tick:
 def people_logins(people: Any, tenant_id: Any, bots: frozenset[str]) -> frozenset[str]:
     """The logins a comment is taken in from (#1592 OD-6): exactly `p-` followed by the canonical id of each user the
     tick's one membership read finds wanted in the tenant; never a bot's."""
-    return frozenset(f"p-{user}" for user in people.wanted_users(tenant_id)) - bots
+    return frozenset(login_of(user) for user in people.wanted_users(tenant_id)) - bots
 
 
 def _default_people(dsn: str) -> Any:

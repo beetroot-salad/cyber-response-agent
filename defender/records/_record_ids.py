@@ -136,3 +136,19 @@ class PeopleRequestId(UuidId):
 
     __slots__ = ()
     domain = "people request"
+
+
+def login_of(user: str) -> str:
+    """A person's Forgejo login (#1592): `p-<user id>`. The one owner of the spelling, for the lifecycle that makes the
+    accounts and the feedback tick that trusts their comments."""
+    return f"p-{user}"
+
+
+def user_of(login: str) -> UserId | None:
+    """The user a Forgejo login names: `p-` followed by a canonical user id, else None."""
+    if not login.startswith("p-"):
+        return None
+    try:
+        return UserId(login[2:])
+    except IdRefused:
+        return None

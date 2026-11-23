@@ -123,11 +123,9 @@ class LifecycleConfig:
             raise ConfigRefused("poll_interval, lock_keepalive and teardown_wait are positive numbers of seconds")
         if not all(getattr(self, name) > 0 for name in PEOPLE_DURATIONS):
             raise ConfigRefused(f"{', '.join(PEOPLE_DURATIONS)} are positive numbers of seconds")
-        if isinstance(self.people_concurrency, bool) or not isinstance(self.people_concurrency, int) \
-                or self.people_concurrency < 1:
+        if not _is_positive_whole(self.people_concurrency):
             raise ConfigRefused("people_concurrency is a positive whole number of users")
-        if isinstance(self.keycloak_source_id, bool) or not isinstance(self.keycloak_source_id, int) \
-                or self.keycloak_source_id < 1:
+        if not _is_positive_whole(self.keycloak_source_id):
             raise ConfigRefused("keycloak_source_id is the positive id of Forgejo's sign-in login source")
 
     @classmethod
@@ -169,12 +167,20 @@ def _check_public_url(value: str) -> None:
 
 
 def source_id_from_env() -> int:
-    """`KEYCLOAK_SOURCE_ID_ENV` as the login source's id; refused naming the variable when it is not a whole number."""
+    """`KEYCLOAK_SOURCE_ID_ENV` as the login source's id; refused naming the variable when it is not a positive whole
+    number."""
     raw = os.environ.get(KEYCLOAK_SOURCE_ID_ENV, "")
     try:
-        return int(raw)
+        value = int(raw)
     except ValueError:
-        raise ConfigRefused(f"{KEYCLOAK_SOURCE_ID_ENV} is not the id of a login source: {raw!r}") from None
+        value = 0
+    if not _is_positive_whole(value):
+        raise ConfigRefused(f"{KEYCLOAK_SOURCE_ID_ENV} is not the id of a login source: {raw!r}")
+    return value
+
+
+def _is_positive_whole(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
 def _secret_file(path: str, variable: str) -> str:

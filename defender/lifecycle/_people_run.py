@@ -28,10 +28,10 @@ from typing import Any
 
 import httpx
 
-from defender.lifecycle._eligibility import PAGE
+from defender.lifecycle._eligibility import single_team_id, teams_named
 from defender.lifecycle._job import StepFailed, answered
 from defender.lifecycle._sessions import SessionRow, UnreadableSession, session_uid
-from defender.records.formats import TenantId, UserId
+from defender.records.formats import TenantId, UserId, login_of
 
 #: The team of a tenant's organisation that holds its people (and alone may merge `main`, #1163 A23 amended).
 MEMBERS = "members"
@@ -39,41 +39,15 @@ MEMBERS = "members"
 _logger = logging.getLogger(__name__)
 
 
-def login_of(user: str) -> str:
-    """A person's Forgejo login: `p-<user id>`."""
-    return f"p-{user}"
-
-
-def user_of(login: str) -> UserId | None:
-    """The user a Forgejo login names: `p-` followed by a canonical user id, else None."""
-    if not login.startswith("p-"):
-        return None
-    try:
-        return UserId(login[2:])
-    except Exception:  # noqa: BLE001 — the family's refusal: not a canonical id, so no person
-        return None
-
-
 async def team_lookup(tenants: Any, forge: httpx.AsyncClient, tenant: TenantId) -> int | None:
     """T's team `members`: its id when found; None when absent (T has no wiring, its organisation answers 404, or no
-    team is named exactly `members`: the search matches substrings). Any other answer raises (the lookup failed)."""
+    team is named exactly `members`). Any other answer raises (the lookup failed)."""
     wiring = await tenants.forge_wiring(tenant)
     if wiring is None:
         return None
     org = wiring.repo.split("/", 1)[0]
-    found = await forge.get(f"/api/v1/orgs/{org}/teams/search", params={"q": MEMBERS, "limit": PAGE})
-    if found.status_code == 404:
-        return None
-    body = answered(found).json()
-    teams = body.get("data") if isinstance(body, dict) else None
-    if not isinstance(teams, list):
-        raise StepFailed(f"the team search of {org} answered no list")
-    named = [t for t in teams if isinstance(t, dict) and t.get("name") == MEMBERS]
-    if not named:
-        return None
-    if len(named) != 1 or not isinstance(named[0].get("id"), int):
-        raise StepFailed(f"the team {MEMBERS} of {org} has no single id")
-    return int(named[0]["id"])
+    named = await teams_named(forge, org, MEMBERS, absent_org_ok=True)
+    return single_team_id(named, org, MEMBERS) if named else None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -110,20 +84,21 @@ class PersonRun:
         self._ok = True
 
     async def carry_out(self) -> bool:
-        wanted = await self._read("R", None, self._wanted)
+        wanted = await self._step("R", None, self._wanted)
         if wanted is FAILED:
             return False
-        account = await self._read("A", None, self._account)
-        teams = {t: await self._read("L", t, functools.partial(team_lookup, self._p.tenants, self._p.forge, t))
+        account = await self._step("A", None, self._account)
+        teams = {t: await self._step("L", t, functools.partial(team_lookup, self._p.tenants, self._p.forge, t))
                  for t in self._named}
         await self._removals(wanted, account, teams)
         await self._grants(wanted, account, teams)
         return self._ok
 
     # --- reading the inputs ---------------------------------------------------------------------------------------
-    async def _read(self, step: str, tenant: TenantId | None, read: Callable[[], Awaitable[Any]]) -> Any:
+    async def _step(self, step: str, tenant: TenantId | None, act: Callable[[], Awaitable[Any]]) -> Any:
+        """One input read or step: its result, or FAILED (logged) when it raised."""
         try:
-            return await read()
+            return await act()
         except asyncio.CancelledError:
             raise
         except Exception as error:  # noqa: BLE001 — any failure is that input's: the steps needing it are skipped
@@ -131,15 +106,15 @@ class PersonRun:
             return FAILED
 
     def _failed(self, step: str, tenant: TenantId | None, error: BaseException | str) -> None:
-        self._ok = False
-        where = f" for tenant {tenant}" if tenant is not None else ""
-        _logger.error("people request of user %s: step %s%s failed, retried at a later poll: %s",
-                      self._user, step, where, error)
+        self._missed(step, tenant, f"failed, retried at a later poll: {error}")
 
     def _skipped(self, step: str, tenant: TenantId | None = None) -> None:
+        self._missed(step, tenant, "skipped: an input it needs failed")
+
+    def _missed(self, step: str, tenant: TenantId | None, how: str) -> None:
         self._ok = False
         where = f" for tenant {tenant}" if tenant is not None else ""
-        _logger.error("people request of user %s: step %s%s skipped: an input it needs failed", self._user, step, where)
+        _logger.error("people request of user %s: step %s%s %s", self._user, step, where, how)
 
     async def _wanted(self) -> Wanted:
         tenants = await self._p.identity.wanted_tenants(self._user)
@@ -158,9 +133,6 @@ class PersonRun:
             raise StepFailed(f"the account {self._login} answered no numeric id")
         return Account(uid, body.get("prohibit_login") is True)
 
-    async def _step(self, step: str, tenant: TenantId | None, act: Callable[[], Awaitable[Any]]) -> Any:
-        return await self._read(step, tenant, act)
-
     # --- removals: steps 1, 2, 3 ----------------------------------------------------------------------------------
     async def _removals(self, wanted: Wanted, account: Any, teams: dict[TenantId, Any]) -> None:
         for tenant in self._named:
@@ -172,7 +144,7 @@ class PersonRun:
                 self._skipped("2/3")
             return
         if nowhere and account is not None and not account.prohibit_login \
-                and await self._step("2", None, lambda: self._prohibit(True)) is not FAILED:
+                and await self._step("2", None, self._suspend) is not FAILED:
             account.prohibit_login = True
         if account is not None and (nowhere or wanted.signed_out_at is not None):
             await self._step("3", None, lambda: self._end_sessions(wanted, account))
@@ -184,8 +156,8 @@ class PersonRun:
             await self._step("1", tenant, lambda: self._call(
                 "DELETE", f"/api/v1/teams/{team}/members/{self._login}", 404))
 
-    async def _prohibit(self, on: bool) -> None:
-        await self._call("PATCH", f"/api/v1/admin/users/{self._login}", json={"prohibit_login": on})
+    async def _suspend(self) -> None:
+        await self._call("PATCH", f"/api/v1/admin/users/{self._login}", json={"prohibit_login": True})
 
     async def _end_sessions(self, wanted: Wanted, account: Account) -> None:
         rows = await self._p.forge_sessions.signed_in_rows()

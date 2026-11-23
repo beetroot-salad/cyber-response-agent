@@ -41,6 +41,7 @@ from defender.database import async_engine, url
 from defender.records.formats import AlertMapping, PeopleRequestId, TenantId, UserId
 from defender.tenancy.models import (SCHEMA, AlertMappingRow, CaseRecord, CaseVersionRow, ForgeWiring, Generation,
                                      PeopleRequest, PublishStatus, SystemVersionRow, TenantRecord, TenantRecords)
+from defender.tenancy._directory import why_unreachable
 from defender.tenancy.record_refusals import refuse_unless_active
 from defender.tenancy.repository import (
     ALL,
@@ -273,8 +274,7 @@ class PostgresTenantRepository:
             await self._drop_people_connection()
             if not held:
                 raise
-            why = str(e.orig).splitlines()[0] if isinstance(e, DBAPIError) and e.orig is not None else type(e).__name__
-            _logger.warning("the people lock's connection failed (%s); its hold, if any, is gone", why)
+            _logger.warning("the people lock's connection failed (%s); its hold, if any, is gone", why_unreachable(e))
             return False
 
     @staticmethod

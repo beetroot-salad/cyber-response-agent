@@ -10,26 +10,15 @@ from typing import Any
 
 import httpx
 
-from defender.lifecycle._eligibility import PAGE
-from defender.lifecycle._job import StepFailed, answered
-from defender.lifecycle._people_run import user_of
-from defender.records.formats import TenantId, UserId
+from defender.lifecycle._eligibility import listed_entries
+from defender.records.formats import TenantId, UserId, user_of
 
 
 async def source_accounts(forge: httpx.AsyncClient, source_id: int) -> list[dict[str, Any]]:
-    """Every account on login source `source_id`, page by page until a page adds none (the forge may page by less)."""
-    found: dict[str, dict[str, Any]] = {}
-    page = 1
-    while True:
-        answer = answered(await forge.get("/api/v1/admin/users",
-                                          params={"source_id": source_id, "page": page, "limit": PAGE})).json()
-        if not isinstance(answer, list):
-            raise StepFailed("the forge's account listing is not a list")
-        new = {str(a["login"]): a for a in answer if isinstance(a, dict) and "login" in a and str(a["login"]) not in found}
-        if not new:
-            return list(found.values())
-        found.update(new)
-        page += 1
+    """Every account on login source `source_id` (`listed_entries`: page by page until a page adds none)."""
+    accounts = await listed_entries(forge, "/api/v1/admin/users", "the forge's accounts", key="login",
+                                    params={"source_id": source_id})
+    return [a for a in accounts if "login" in a]
 
 
 async def resync_people(tenants: Any, identity: Any, forge: httpx.AsyncClient, *, source_id: int,

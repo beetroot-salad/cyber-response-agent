@@ -14,6 +14,7 @@ recorded for them since their last failed run ends the wait. It returns without 
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime as _dt
 import functools
 import itertools
@@ -24,14 +25,42 @@ from typing import Any
 import httpx
 
 from defender.lifecycle._eligibility import listed_logins
-from defender.lifecycle._people_run import PersonRun, team_lookup, user_of
+from defender.lifecycle._people_run import PersonRun, team_lookup
 from defender.lifecycle.config import LifecycleConfig
-from defender.records.formats import PeopleRequestId, TenantId, UserId
+from defender.records.formats import PeopleRequestId, TenantId, UserId, user_of
 
 _logger = logging.getLogger(__name__)
 
 #: The most polls a user whose runs keep failing waits between attempts (about a minute at the default poll).
 MAX_SKIPPED_POLLS = 31
+
+
+@dataclasses.dataclass
+class _Tries:
+    """A user's runs since their last one that finished (kept in the process; lost at restart, harmlessly): the last
+    attempt's place in the worker's sequence, the failures in a row, the polls still to skip, and the request ids the
+    last failed run took (a request outside them ends the wait)."""
+
+    attempted: int = -1
+    failures: int = 0
+    wait: int = 0
+    failed_on: frozenset[Any] = frozenset()
+
+    def skips(self, rows: list[Any]) -> bool:
+        """Whether this poll skips the user: while `wait` lasts, unless `rows` holds a request the failed run did not."""
+        if not self.wait:
+            return False
+        if {r.id for r in rows} - self.failed_on:
+            self.wait = 0
+            return False
+        self.wait -= 1
+        return True
+
+    def failed(self, rows: list[Any]) -> None:
+        """After a failed run: no wait the first time, then 1, 3, 7, ... polls, at most `MAX_SKIPPED_POLLS`."""
+        self.failures += 1
+        self.wait = min(2 ** min(self.failures - 1, 16) - 1, MAX_SKIPPED_POLLS)
+        self.failed_on = frozenset(r.id for r in rows)
 
 
 class PeopleWorker:
@@ -49,14 +78,8 @@ class PeopleWorker:
         self._expanding: dict[TenantId, asyncio.Task[None]] = {}
         self._capping: asyncio.Task[None] | None = None
         self._last_cap: _dt.datetime | None = None
-        #: when each user was last attempted, as a sequence number (kept in the process; lost at restart, harmlessly)
-        self._attempted: dict[UserId, int] = {}
+        self._tries: dict[UserId, _Tries] = {}
         self._sequence = itertools.count()
-        #: a user's failed runs in a row, and how many more polls they wait before the next (kept in the process)
-        self._failures: dict[UserId, int] = {}
-        self._waiting: dict[UserId, int] = {}
-        #: the request ids a user's last failed run took: a request outside them ends the user's wait
-        self._failed_on: dict[UserId, frozenset[Any]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
 
     async def start(self) -> None:
@@ -184,22 +207,17 @@ class PeopleWorker:
         for request in requests:
             if request.user_id is not None:
                 by_user.setdefault(request.user_id, []).append(request)
-        for user in [u for u in self._waiting if u not in self._runs]:
-            self._waiting[user] -= 1
-            fresh = {r.id for r in by_user.get(user, [])} - self._failed_on.get(user, frozenset())
-            if self._waiting[user] < 0 or fresh:
-                del self._waiting[user]
-        waiting = sorted((u for u in by_user if u not in self._runs and u not in self._waiting),
-                         key=lambda u: self._turn(u, by_user[u]))
+        due = [u for u in by_user if u not in self._runs and not (u in self._tries and self._tries[u].skips(by_user[u]))]
+        waiting = sorted(due, key=lambda u: self._turn(u, by_user[u]))
         for user in waiting[:max(0, self.config.people_concurrency - len(self._runs))]:
-            self._attempted[user] = next(self._sequence)
+            self._tries.setdefault(user, _Tries()).attempted = next(self._sequence)
             task = self._spawn(self._run(user, by_user[user]))
             self._runs[user] = task
             task.add_done_callback(functools.partial(_forget, self._runs, user))
 
-    def _turn(self, user: UserId, rows: list[Any]) -> tuple[bool, int, _dt.datetime]:
+    def _turn(self, user: UserId, rows: list[Any]) -> tuple[int, _dt.datetime]:
         """Users never attempted first, by their oldest request; then by their last attempt, oldest first."""
-        return (user in self._attempted, self._attempted.get(user, 0), min(r.requested_at for r in rows))
+        return (self._tries[user].attempted if user in self._tries else -1, min(r.requested_at for r in rows))
 
     async def _run(self, user: UserId, rows: list[Any]) -> None:
         """Carry out the requests `rows` of `user` and delete exactly their ids if every step succeeded; a request
@@ -209,23 +227,13 @@ class PeopleWorker:
             done = await PersonRun(self, user, named).carry_out()
             if done and self._holding:
                 await self.tenants.edit_people_requests(delete=[PeopleRequestId(r.id) for r in rows])
-                self._attempted.pop(user, None)
-                self._failures.pop(user, None)
-                self._failed_on.pop(user, None)
+                self._tries.pop(user, None)
                 return
         except asyncio.CancelledError:
             raise
         except Exception as error:  # noqa: BLE001 — the requests stay; the user goes to the back
             _logger.error("people request of user %s: the run failed, retried at a later poll: %s", user, error)
-        self._failed_on[user] = frozenset(r.id for r in rows)
-        self._back_off(user)
-
-    def _back_off(self, user: UserId) -> None:
-        """After a failed run: no wait the first time, then 1, 3, 7, ... polls, at most `MAX_SKIPPED_POLLS`."""
-        failures = self._failures[user] = self._failures.get(user, 0) + 1
-        skipped = min(2 ** min(failures - 1, 16) - 1, MAX_SKIPPED_POLLS)
-        if skipped:
-            self._waiting[user] = skipped
+        self._tries.setdefault(user, _Tries()).failed(rows)
 
     # --- the cap job ------------------------------------------------------------------------------------------------
     def _start_cap(self) -> None:

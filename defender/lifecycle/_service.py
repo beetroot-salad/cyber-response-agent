@@ -25,7 +25,7 @@ from defender.configuration.issuer import TRANSIT_MOUNT
 from defender.credential_proxy import transit_key_for
 from defender.identity import audit
 from defender.lifecycle._bot import Minted, log_in, mint
-from defender.lifecycle._eligibility import PAGE, _team_id, listed, listed_logins
+from defender.lifecycle._eligibility import _team_id, listed, listed_logins, teams_named
 from defender.lifecycle._job import SERVICE, Actor, Step, StepFailed, answered, field_of, next_step, only
 from defender.lifecycle._people_run import MEMBERS
 from defender.lifecycle.config import LifecycleConfig
@@ -287,10 +287,7 @@ class ManagementService(Actor):
 
     async def _members_team(self, org: str) -> int:
         """Team `members` of `org`, made or PATCHed to `MEMBERS_SHAPE` when it differs, then read back; its id."""
-        found = answered(await self._forge.get(f"/api/v1/orgs/{org}/teams/search",
-                                               params={"q": MEMBERS, "limit": PAGE})).json()
-        teams = found.get("data") if isinstance(found, dict) else None
-        named = [t for t in teams if isinstance(t, dict) and t.get("name") == MEMBERS] if isinstance(teams, list) else []
+        named = await teams_named(self._forge, org, MEMBERS)
         if not named:
             made = answered(await self._forge.post(f"/api/v1/orgs/{org}/teams", json={"name": MEMBERS, **MEMBERS_SHAPE}))
             team = field_of(made, "id")

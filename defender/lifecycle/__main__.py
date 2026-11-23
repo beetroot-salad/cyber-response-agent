@@ -88,13 +88,11 @@ async def _make_runs_folders() -> int:
 async def _resync_people() -> int:
     """`resync-people` (#1592 F6(c)): a (none, T) request for every wired tenant and a (U, none) one for every `p-<id>`
     account on the sign-in provider's source; the accounts it cannot vouch for are listed on stdout, unchanged."""
-    from defender._io import read_text_utf8
     from defender.identity.postgres import PostgresIdentityRepository
-    from defender.kit.internal_http import internal_async_client, tls_trust
-    from defender.lifecycle._process import CALL_TIMEOUT
+    from defender.lifecycle._process import forge_client
     from defender.lifecycle._resync import resync_people
     from defender.lifecycle.config import (FORGE_TOKEN_FILE_ENV, FORGE_URL_ENV, KEYCLOAK_SOURCE_ID_ENV, ConfigRefused,
-                                           source_id_from_env)
+                                           _secret_file, source_id_from_env)
     from defender.tenancy import database_address_variable
     from defender.tenancy.postgres import PostgresTenantRepository
 
@@ -103,14 +101,10 @@ async def _resync_people() -> int:
     if missing:
         raise ConfigRefused(f"set {', '.join(missing)}")
     source_id = source_id_from_env()
-    try:
-        token = read_text_utf8(Path(os.environ[FORGE_TOKEN_FILE_ENV])).strip()
-    except OSError as unreadable:
-        raise ConfigRefused(f"{FORGE_TOKEN_FILE_ENV}: the file could not be read ({unreadable.strerror})") from None
+    token = _secret_file(os.environ[FORGE_TOKEN_FILE_ENV], FORGE_TOKEN_FILE_ENV)
     dsn = _dsn()
     tenants, identity = PostgresTenantRepository(dsn), PostgresIdentityRepository(dsn)
-    forge = internal_async_client(trust=tls_trust(), base_url=os.environ[FORGE_URL_ENV], timeout=CALL_TIMEOUT,
-                                  headers={"Authorization": f"token {token}"})
+    forge = forge_client(os.environ[FORGE_URL_ENV], token)
     try:
         await resync_people(tenants, identity, forge, source_id=source_id, say=print)
     finally:
