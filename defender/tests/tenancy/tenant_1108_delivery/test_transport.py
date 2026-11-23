@@ -17,7 +17,6 @@ from ._support import (
     merge_on_remote,
     opened,
     remote_refs,
-    target,
 )
 
 
