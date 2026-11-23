@@ -62,22 +62,39 @@ wiring. By hand, on development deployments only:
    `repo_delete_after` forward and let `delete_repo` run.
 2. For each remaining tenant, the lab included: stop the lifecycle; create the private organisation `t-<T>` with the
    forge admin token; transfer the repository into it and rename it `knowledge`; update the tenant's
-   `tenancy.forge_wiring` row (`repo` `t-<T>/knowledge`, `origin` its clone URL) and `repo_url`; then run
-   `git -C <data root>/<T>/knowledge remote set-url origin <the new origin>` on the host clone.
-3. Run the Forgejo sessions setup script (`.devcontainer/postgres/forgejo-sessions.sql`, which builds the
-   `forgejo_sessions` database), and make its two logins: one in `fs_forgejo` (Forgejo's `[session] PROVIDER_CONFIG`)
-   and one in `fs_lifecycle` (`DEFENDER_LIFECYCLE_FORGE_SESSIONS_DSN`). Set `DEFENDER_LIFECYCLE_KEYCLOAK_SOURCE_ID` to
-   the id of Forgejo's `product` login source (`forgejo admin auth list`).
-4. Run migrations (revision `0027_people_requests`). It refuses, changing nothing, while any tenant has a pending
+   `tenancy.forge_wiring` row (`repo` `t-<T>/knowledge`, `origin` its clone URL) and `repo_url` (`<the Forgejo site's
+   address>/t-<T>/knowledge`, as in step 4); then run `git -C <data root>/<T>/knowledge remote set-url origin <the new
+   origin>` on the host clone.
+3. In the sign-in realm (the dev realm file is imported on first start only), add what the realm file now holds, in
+   this order. First the flow `forgejo browser`: the username and password form, required, then the second factor
+   a person has set up, conditional, as in the realm's own browser flow, and no Cookie step. Then the client
+   `forgejo`: confidential, standard flow only, the realm file's secret (dev) or one of the deployment's own,
+   redirect URI `<the Forgejo site's address>/user/oauth2/product/callback`, and its browser flow overridden to
+   `forgejo browser` (Advanced > Authentication flow overrides). Without the override the client signs a person in
+   on any open sign-in session, without the password. Check it: signed in to the product, open the Forgejo site and
+   sign in there: it must ask for the password.
+4. Build Forgejo's sessions database and its two logins: on the dev stack, start compose (its `forgejo-sessions`
+   service runs `.devcontainer/postgres/forgejo-sessions.sql` and the dev logins before Forgejo starts) and run
+   `.devcontainer/forgejo/setup.sh`, which adds Forgejo's `product` login source. Elsewhere, run that SQL as a
+   superuser and make one login in `fs_forgejo` (Forgejo's `[session] PROVIDER_CONFIG`) and one in `fs_lifecycle`.
+   Then set the lifecycle's three new required settings: `DEFENDER_LIFECYCLE_KEYCLOAK_SOURCE_ID` (the `product`
+   source's id, `forgejo admin auth list`), `DEFENDER_LIFECYCLE_FORGE_SESSIONS_DSN` (the `fs_lifecycle` login), and
+   `DEFENDER_LIFECYCLE_FORGE_PUBLIC_URL`, the Forgejo site's address (dev `http://forge.localhost:8000`, Forgejo's
+   `ROOT_URL`). An unset one refuses the lifecycle's start, naming it.
+5. Start the ingress with its two new required inputs: `DEFENDER_FORGE_DOMAIN`, the Forgejo site's host (dev
+   `forge.localhost`, Forgejo's `DOMAIN`), and `DEFENDER_INGRESS_FORGE_UPSTREAM`, Forgejo's private `host:port` (dev
+   `forgejo:3000`). Unset, it refuses to start, naming it. The API reads neither: an adoption's pull-request link is
+   the tenant's recorded repository page plus `/pulls/<n>`.
+6. Run migrations (revision `0027_people_requests`). It refuses, changing nothing, while any tenant has a pending
    action or a wiring other than `t-<T>/knowledge`, naming each one. It then adds that constraint,
    `identity.users.signed_out_at`, the people requests table and its three triggers, and drops the old #1414 table
    of who may merge, whose readers are gone.
-5. Start the lifecycle service.
-6. Rotate each tenant (`POST /api/admin/tenants/<T>/rotate-forge-credential`): its integration is bound to the
+7. Start the lifecycle service.
+8. Rotate each tenant (`POST /api/admin/tenants/<T>/rotate-forge-credential`): its integration is bound to the
    repository's path, and rotation also builds team `members` and `main`'s rule on it.
-7. Run `python -m defender.lifecycle resync-people`: the request worker then adds every member to the tenant's team.
-8. Delete the hand-made person accounts: the members of the old `tenants` organisation that are neither `p-` logins nor
-   bots. Deleting them also removes any direct collaborator rights they kept through the transfer.
+9. Run `python -m defender.lifecycle resync-people`: the request worker then adds every member to the tenant's team.
+10. Delete the hand-made person accounts: the members of the old `tenants` organisation that are neither `p-` logins nor
+    bots. Deleting them also removes any direct collaborator rights they kept through the transfer.
 
 Removed (F9): `cli/learning/revert_lesson.py`. A member reverts a lesson in Forgejo's editor, as a pull request.
 
@@ -89,7 +106,7 @@ browser to the page the lifecycle recorded on the tenant (`tenancy.tenants.repo_
 cannot reach (the lab's `http://forgejo:3000`). Once:
 
 1. Set `DEFENDER_LIFECYCLE_FORGE_PUBLIC_URL` to the forge's address as a browser reaches it (http or https, no
-   credentials, query or fragment; a path is allowed), and restart the lifecycle service. Unset, it is the forge URL.
+   credentials, query or fragment; a path is allowed), and restart the lifecycle service. Since #1592 it is required.
 2. Rewrite the page already recorded on each tenant, which a resume or rotation keeps:
    `UPDATE tenancy.tenants t SET repo_url = '<public url>/' || w.repo FROM tenancy.forge_wiring w WHERE w.tenant_id =
    t.id AND t.repo_url IS NOT NULL`. Until then the link opens the old address.
