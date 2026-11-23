@@ -8,9 +8,10 @@ const upstream = process.env.DEFENDER_INGRESS_API_UPSTREAM;
 const forgeDomain = process.env.DEFENDER_FORGE_DOMAIN;
 const forgeUpstream = process.env.DEFENDER_INGRESS_FORGE_UPSTREAM;
 
-// `bun run dev` only (#1592): a request for the Forgejo site's host goes to Forgejo whole, as `.devcontainer/dev-app.sh`
-// names them, so its pages and its sign-in callback work beside the app on the one port. This is not the edge: no
-// allowlist, and the sign-in start keeps its Cookie header. The edge's rules are the ingress's (CI's `forgejo-live`).
+// `bun run dev` only (#1592): a request for the Forgejo site's host goes to Forgejo whole, as
+// `.devcontainer/dev-app.sh` names them, so its pages and its sign-in callback work beside the app on the one port.
+// This is not the edge: no allowlist, and the sign-in start keeps its Cookie header. The edge's rules are the
+// ingress's (CI's `forgejo-live`).
 function forgeSite(domain, target) {
   const at = target.lastIndexOf(":");
   const hostname = target.slice(0, at);
