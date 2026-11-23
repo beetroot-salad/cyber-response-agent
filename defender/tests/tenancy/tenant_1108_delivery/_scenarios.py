@@ -6,6 +6,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 import json
 
 import os
+from pathlib import Path
 
 import shutil
 
@@ -64,10 +65,11 @@ def _write(path, text):
 
 
 def _clone_state(clone):
-    """What the commit-maker never touches: the clone's `HEAD`, `main`, index entries and
-    status."""
+    """What the commit-maker never touches: the repository's `HEAD`, `main`, and (a non-bare one's) index entries and
+    status. Since #1618 (K8) a batch's repository is its delivery's private bare one: no index or checkout exists."""
+    bare = git(clone, "rev-parse", "--is-bare-repository") == "true"
     return (git(clone, "rev-parse", "HEAD"), git(clone, "rev-parse", "refs/heads/main"),
-            git(clone, "ls-files", "-s"), git(clone, "status", "--porcelain"))
+            None if bare else git(clone, "ls-files", "-s"), None if bare else git(clone, "status", "--porcelain"))
 
 
 def _drafts(tenant):
@@ -170,7 +172,7 @@ _REFUSED_BASE = {
 
 
 def _gitdir_file(lane, clone):
-    _write(lane / ".git", f"gitdir: {clone / '.git'}\n")
+    _write(lane / ".git", f"gitdir: {(Path(clone) / git(clone, 'rev-parse', '--git-dir')).resolve()}\n")
 
 
 def _nested_repository(lane, clone):

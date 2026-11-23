@@ -89,21 +89,20 @@ def test_1120_a_run_from_a_checkout_with_different_lab_settings_reads_the_data_r
     assert len(rec.lifecycle_calls) == 1, f"the lifecycle ran {len(rec.lifecycle_calls)} times"
     run_tenant = rec.lifecycle_calls[0]["tenant"]
 
-    # The run reads its own copy of the tenant's published export
-    # (`<T>/run-knowledge/<run id>/settings`), made from the folder above.
+    # The run reads its own copy of the tenant's Forgejo `main` (`<T>/run-knowledge/<run id>/settings`), committed from
+    # the folder above (#1618; a `Tenant` names no settings path of its own, K8).
     assert H.run_copy_part(run_tenant.settings, data_root, LAB_ID) == ("settings",), (
         f"the run read its tenant's settings from {run_tenant.settings}, not its run copy of "
         f"the data root's {settings} — a checkout copy decided the run")
-    assert Path(run_tenant.tenant.settings) == settings
     assert Path(run_tenant.grants.path) == Path(run_tenant.settings) / "verb-grants.yaml"
     expected = set(D995.GATHER_CENSUS) - {WITHHELD}
     assert WITHHELD in D995.GATHER_CENSUS, "the census no longer holds the withheld pair"
     assert _gather_pairs(run_tenant.grants.gather) == expected, (
         "the run's gather grant is not the data-root table's")
     checkout_knowledge = H.KNOWLEDGE_ROOT
-    for label, path in (("settings", run_tenant.tenant.settings),
-                        ("agent", run_tenant.tenant.agent),
-                        ("knowledge", run_tenant.tenant.knowledge),
+    # #1618 K8: the run's knowledge is its copy's halves (`RunTenant.settings`/`.agent`); a `Tenant` names none.
+    for label, path in (("settings", run_tenant.settings),
+                        ("agent", run_tenant.agent),
                         ("table", run_tenant.grants.path)):
         assert _under(path, data_root), f"the run's tenant {label} {path} is not under the root"
         assert not _under(path, checkout_knowledge), (
@@ -143,7 +142,7 @@ def test_1120_a_replay_without_a_named_tenant_runs_as_the_fixture_tenant_under_t
     # filters it.
     from defender.tests.support.tenancy import _tenants1106
 
-    agent = Path(_tenants1106.fixture_tenant().agent)
+    agent = _tenants1106.placed_half(_tenants1106.fixture_tenant(), "agent")  # #1618 K8: the placed half
     for system in sorted({s for s, _ in D995.GATHER_CENSUS}):
         skill = agent / "skills" / system / "SKILL.md"
         if not skill.exists():
@@ -164,16 +163,16 @@ def test_1120_a_replay_without_a_named_tenant_runs_as_the_fixture_tenant_under_t
     assert not _under(handed, H.KNOWLEDGE_ROOT), (
         f"the replay ran as a tenant whose settings live in the checkout ({handed}) — the "
         "harness still resolves the lab, not the fixture under the data root")
-    assert _under(handed, data_root), f"the verb was handed {handed}, not a data-root folder"
 
     folders = sorted(p for p in data_root.iterdir() if p.is_dir())
     assert len(folders) == 1, f"expected one tenant folder under the data root: {folders}"
     folder = folders[0]
     tenant_id = folder.name
-    # The harness runs the settings half of the tenant's published export (the one
-    # `exports/current` names), not the clone's working tree.
-    current = (folder / "exports" / "current").read_text(encoding="utf-8").strip()
-    assert handed.resolve() == (folder / "exports" / current / "settings").resolve()
+    # The harness runs the settings half of the tenant's Forgejo `main` (a copy of that commit beside the data root:
+    # #1618, no export or `current`), not the placed folder it was committed from.
+    from defender.tests.support.tenancy._fetch_standin_1618 import copy_at_main
+
+    assert handed.resolve() == (copy_at_main(data_root, tenant_id) / "settings").resolve()
     assert not (folder / H.ROW_NAME).exists(), "the replay wrote a tenant row (O6: the tenant is not on disk)"
     id_file = (folder / "knowledge" / H.TENANT_ID_FILE).read_text(encoding="utf-8")
     assert id_file.rstrip("\r\n") == tenant_id, f"agent/.tenant-id reads {id_file!r}"

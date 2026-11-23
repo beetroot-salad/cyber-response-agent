@@ -54,9 +54,10 @@ RAW_LAYER = "tenancy/_tenant.py"
 #: A3: the processes covered by their starter, which load the folder with the folder rules only. Exactly these.
 #: (#1366 O11/O1: `skills/connect/validate_scaffold.py` left this set; it is a no-tenant surface judging a handoff.)
 #: (#1618: the fetch child, `version_control/fetch.py`, replaced the deleted publish child, `publish.py`, under the same starter.)
+#: (#1618: `investigation/publish_launch.py` is only the child's launcher: it hands the child ids and reads its report,
+#: and reaches no acceptance itself, so it is not in the set.)
 A3_SET = frozenset({
     "learning/author/version_control/fetch.py",
-    "investigation/publish_launch.py",
 })
 
 #: The entry points that move to the host acceptance step (design: "Callers that move to it").

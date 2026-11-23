@@ -16,6 +16,7 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
 
 
 @pytest.fixture(autouse=True)
@@ -90,7 +91,7 @@ class Launch:
             spawn=self.spawn, questioner=self.questioner, judge=self.judge,
             preflight=lambda model, **_kw: self.roles.append(model) or 0,
             live_tree=self.live_tree, roster=self.estate.roster(), oracle=self.oracle.model,
-            verifier=self.verifier.model,
+            verifier=self.verifier.model, fetch=in_process_fetch(),  # #1618 flow 4: the launch's one fetch
             directory=self.estate.launch_directory(self.src.parent.parent.name))
         return self.rc
 

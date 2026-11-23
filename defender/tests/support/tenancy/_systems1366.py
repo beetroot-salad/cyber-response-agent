@@ -245,19 +245,19 @@ def _readable(path: Path, *, folder: bool) -> bool:
 
 
 def settings_of(data_root: Path | str | None, tenant: str) -> Path | None:
-    """The `settings/` a run of `tenant` would read: the published run copy (`exports/current`) else the placed folder;
-    None when neither can be seen."""
+    """The `settings/` a run of `tenant` would read (#1618: there is no `exports/current`; knowledge is the tenant's
+    Forgejo `main`): `main`'s on the data root's served remote when the tenant was published (a copy,
+    `_fetch_standin_1618.copy_at_main`, so a merge is seen on the next call), else the placed folder the test seeds
+    `main` from; None when neither can be seen."""
     if data_root is None:
         return None
+    from defender.tests.support.tenancy._fetch_standin_1618 import copy_at_main, served_remote
+
+    if served_remote(data_root, str(tenant)).is_symlink():
+        copy = copy_at_main(data_root, str(tenant))
+        if copy is not None and _readable(copy / "settings", folder=True):
+            return copy / "settings"
     base = Path(str(data_root)) / str(tenant)
-    pointer = base / "exports" / "current"
-    if _readable(pointer, folder=False):
-        try:
-            published = base / "exports" / pointer.read_text("utf-8").strip() / "settings"
-        except OSError:
-            published = None
-        if published is not None and _readable(published, folder=True):
-            return published
     placed = base / "knowledge" / "settings"
     return placed if _readable(placed, folder=True) else None
 
@@ -565,6 +565,13 @@ class ExportRecords(RecordsPort):
     def __init__(self, data_root: Path | str) -> None:
         self.data_root = Path(data_root)
         super().__init__(self._planted)
+        # #1618: a published tenant's settings are a copy of its Forgejo `main` (`settings_of`), built by git; build each
+        # served tenant's now, so the proxy's per-call read during a verb finds it made and starts no process.
+        from defender.tests.support.tenancy._fetch_standin_1618 import forge_scratch
+
+        served = forge_scratch(self.data_root) / "tenants"
+        for remote in sorted(served.glob("*.git")) if served.is_dir() else ():
+            settings_of(self.data_root, remote.name.removesuffix(".git"))
 
     def _planted(self, tenant_id: str) -> RecordsSpec | None:
         folder = settings_of(self.data_root, tenant_id)
@@ -575,7 +582,7 @@ def run_tenant_for(tenant: Any, *, records: Any = DERIVED, settings_root: Path |
                    catalog: Any = None, **kwargs: Any) -> Any:
     """Production's `run_tenant_for(tenant, ..., records=TenantRecords, catalog=Catalog)` (the run's tenant is built from
     records, no folder read for systems, access or case; grants still come from `settings_root`). `records` defaults to
-    DERIVED over `settings_root` (else the tenant's own `settings`); `None` is a tenant not imported; a `RecordsSpec` is
+    DERIVED over `settings_root` (else the tenant's placed `<T>/knowledge/settings`, #1618 K8; `agent_root` defaults to its sibling `agent/`); `None` is a tenant not imported; a `RecordsSpec` is
     exactly that. `catalog` is the one the caller holds (#1504 O3: the builder takes the adapter's list from it); with none
     the wrapper builds one over the checkout's roster, once per call, as a run's caller does. Test support only: it passes a
     catalog, the rule that reads it is production's."""
@@ -584,10 +591,16 @@ def run_tenant_for(tenant: Any, *, records: Any = DERIVED, settings_root: Path |
 
     kwargs["catalog"] = catalog if catalog is not None else Catalog.of_checkout()
 
+    from defender.tests.support.shared._locations_1210 import location_path as _location_path
+
+    # #1618 K8: production takes both halves explicitly (a `Tenant` names none); a caller naming neither runs over the
+    # halves the test placed (`<T>/knowledge/`), one naming only `settings_root` over that folder's sibling `agent/`.
+    placed = Path(str(_location_path(tenant.tenant_root))) / "knowledge"
+    settings = Path(settings_root) if settings_root is not None else placed / "settings"
     if records is DERIVED:
-        records = derive(Path(settings_root) if settings_root is not None else Path(tenant.settings))
-    if settings_root is not None:
-        kwargs["settings_root"] = Path(settings_root)
+        records = derive(settings)
+    kwargs["settings_root"] = settings
+    kwargs.setdefault("agent_root", settings.parent / "agent")
     return production(tenant, records=value_of(records), **kwargs)
 
 

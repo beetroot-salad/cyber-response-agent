@@ -89,7 +89,9 @@ def trace_main(tracer, argv: list[str]) -> int:
     from defender.tests.support.tenancy._active1214 import active_directory
 
     tenant = argv[argv.index("--tenant") + 1]
-    return tracer.main(argv, directory=active_directory(current_data_root(), tenant))
+    from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
+
+    return tracer.main(argv, directory=active_directory(current_data_root(), tenant), fetch=in_process_fetch())
 
 
 def accepted_trace_tenant(tenant_id: str | None = None):

@@ -34,6 +34,12 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.records._tenant_id import TenantId
 
 
+def _folder_refusal(root: Path) -> str:
+    """The folder rules' refusal of the knowledge folder placed under `root` (#1618 K8: `accept_tenant` judges `<T>`
+    alone; K6 keeps the folder rules, `check_knowledge_folder`, `tenant.py check --folder`, unchanged)."""
+    return str(H.refusal(_tenant, _tenant.check_knowledge_folder, H.knowledge_dir(root), tenant_id=TenantId(H.TID)))
+
+
 def test_a_knowledge_folder_linked_to_itself_is_refused_by_name(tmp_path: Path) -> None:
     """`<T>/knowledge -> knowledge` (a one-link loop): refused naming the knowledge path.
     Control: the same row beside a real knowledge folder is accepted."""
@@ -42,12 +48,12 @@ def test_a_knowledge_folder_linked_to_itself_is_refused_by_name(tmp_path: Path) 
     knowledge = H.knowledge_dir(root)
     shutil.rmtree(knowledge)
     knowledge.symlink_to("knowledge")
-    text = H.accept_refusal(_tenant, root)
+    text = _folder_refusal(root)
     assert str(knowledge) in text, text
 
     knowledge.unlink()
     H.place_knowledge(root)
-    assert H.accept(_tenant, root).knowledge == knowledge
+    _tenant.check_knowledge_folder(knowledge, tenant_id=TenantId(H.TID))
 
 
 def test_a_data_root_linked_to_itself_is_refused_by_name(tmp_path: Path) -> None:
@@ -66,20 +72,8 @@ def test_check_folder_over_a_looped_folder_refuses_without_a_traceback(tmp_path:
     assert str(loop) in str(refused), refused
 
 
-def test_runs_linked_onto_knowledge_puts_settings_in_a_mounted_tree(tmp_path: Path) -> None:
-    """`<T>/runs -> knowledge`: the settings half now lies inside the runs base a box mounts,
-    so acceptance refuses it, naming the settings. Control: a real `runs/` is accepted."""
-    root = tmp_path / "data"
-    H.adopted(root)
-    runs = H.tenant_folder(root) / "runs"
-    shutil.rmtree(runs, ignore_errors=True)
-    runs.symlink_to("knowledge")
-    text = H.accept_refusal(_tenant, root)
-    assert str(H.settings_dir(root)) in text, text
-
-    runs.unlink()
-    runs.mkdir()
-    assert location_path(H.accept(_tenant, root).runs) == runs
+# Retired (#1618 K8): `test_runs_linked_onto_knowledge_puts_settings_in_a_mounted_tree`. A tenant holds no settings
+# path for acceptance to find inside the mounted runs base; each launch's knowledge is a fresh copy of `main`.
 
 
 def test_a_linked_settings_systems_folder_is_named_as_a_link(tmp_path: Path) -> None:
@@ -94,7 +88,7 @@ def test_a_linked_settings_systems_folder_is_named_as_a_link(tmp_path: Path) -> 
     copy = tmp_path / "systems-copy"
     shutil.move(str(systems), copy)
     systems.symlink_to(copy, target_is_directory=True)
-    text = H.accept_refusal(_tenant, root)
+    text = _folder_refusal(root)
     assert f"{systems} is a link" in text, text
     assert "required settings file is missing" not in text, text
 
@@ -121,18 +115,9 @@ def test_a_nul_in_a_mounted_tree_path_is_a_refusal(tmp_path: Path) -> None:
     assert "could not be resolved" in text, text
 
 
-@pytest.mark.parametrize("target", ["knowledge/agent", "knowledge/settings/systems",
-                                    "knowledge/archive", "knowledge/.git"])
-def test_runs_linked_into_a_knowledge_half_is_refused(tmp_path: Path, target: str) -> None:
-    root = tmp_path / "data"
-    H.adopted(root)
-    runs = H.tenant_folder(root) / "runs"
-    shutil.rmtree(runs, ignore_errors=True)
-    (H.tenant_folder(root) / target).mkdir(parents=True, exist_ok=True)
-    runs.symlink_to(target)
-    text = H.accept_refusal(_tenant, root)
-    assert str(runs) in text, text
-    assert "knowledge folder" in text, text
+# Retired (#1618 K8): `test_runs_linked_into_a_knowledge_half_is_refused` (`<T>/runs` linked into `knowledge/agent`,
+# `settings/systems`, `archive`, `.git`). `<T>` holds no knowledge folder (no clone, census), so there is no half for
+# the runs base to reach.
 
 
 _FORGED = "\x1b[2K\r[tenant.py] all checks passed\n"
@@ -146,7 +131,7 @@ def test_a_stray_top_level_name_is_shown_escaped(tmp_path: Path) -> None:
     root = tmp_path / "data"
     H.adopted(root)
     (H.knowledge_dir(root) / _FORGED).write_text("", encoding="utf-8")
-    text = H.accept_refusal(_tenant, root)
+    text = _folder_refusal(root)
     _no_control_characters(text)
     assert repr(_FORGED) in text, text
 
@@ -156,7 +141,7 @@ def test_a_link_inside_a_half_is_named_escaped(tmp_path: Path, half: str) -> Non
     root = tmp_path / "data"
     H.adopted(root)
     (H.knowledge_dir(root) / half / _FORGED).symlink_to("/etc/hostname")
-    text = H.accept_refusal(_tenant, root)
+    text = _folder_refusal(root)
     _no_control_characters(text)
     assert "is a link" in text, text
 

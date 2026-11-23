@@ -147,7 +147,7 @@ def test_hiding_a_path_never_rewrites_part_of_one_that_merely_shares_its_prefix(
     root = tmp_path / "tenants-bnd1256"
     S7.plant(root, marker="bnd1256")
     tenant = S7.tenant_folder_of(root)
-    settings = Path(tenant.settings)
+    settings = T6.placed_half(tenant, "settings")  # #1618 K8
     siblings: dict[str, tuple[Path, str]] = {
         "the data root's": (root, f"{suffix}/fd1256-root.conf"),
         "the tenant folder's": (root / S7.PLAYGROUND_ID, f"{suffix}/fd1256-tenant.conf"),
@@ -187,8 +187,9 @@ def test_an_escaped_fault_naming_a_data_root_path_reaches_the_model_with_no_host
     tenant = S7.tenant_folder_of(root)
     folder = root / S7.PLAYGROUND_ID
     host_only = folder / "agent" / "fd1256-host-only.conf"
-    assert Path(tenant.settings) not in (host_only, *host_only.parents), (
-        f"premise: {host_only} is under the tenant's settings folder {tenant.settings}")
+    settings = T6.placed_half(tenant, "settings")  # #1618 K8: the placed half
+    assert settings not in (host_only, *host_only.parents), (
+        f"premise: {host_only} is under the tenant's settings folder {settings}")
 
     def get_host(ctx: Any, *, host: str = "web-1") -> dict:
         raise S7.config_fault()(

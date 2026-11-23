@@ -54,5 +54,6 @@ lifecycle = functools.partial(
     start_box=_start_box,
     stop_box=lambda *a, **k: (marks / "stop-box").touch(), scrub=lambda *a, **k: None)
 
+# The job entry takes no knowledge seam: its copy is its host helper's (#1618; `publish=` was never read here).
 sys.exit(run_py.job_main(argv, lifecycle=lifecycle, preflight=lambda *a, **k: 0,
-                         visualize=lambda *a, **k: None, publish=lambda *a, **k: f"fresh {commit}"))
+                         visualize=lambda *a, **k: None))

@@ -6,12 +6,12 @@ Other slices import: `helper_scene(tmp_path, monkeypatch, dsn, *, proxied, files
 `make_signer` (the marked signer), `claims_of` (a pass token's claims), `after_the_signal`, `listing`, the fixtures
 `process_state` (autouse where imported) and `scene` (the default `helper_scene`), and the pure parsers `parse_mounts`,
 `parse_env`, `parse_labels`, `flag_values`, `host_path`, `until`. Picked names of the not-yet-built target (sketch choices, not settled
-by the design): `job_host.main(argv, *, docker, signer, publish, forge, command)`, the client `job_host.ask(socket, request,
+by the design): `job_host.main(argv, *, docker, signer, fetch, forge, command)`, the client `job_host.ask(socket, request,
 **fields) -> dict` raising `job_host.Refused`, the in-container variable `job_host.SOCKET_ENV` naming the job socket, the label
 `job_host.JOB_LABEL` carried by every job container, and the settings `job_host.IMAGE_ENV` (the image). Requests name an id as `id=`.
-One request beyond the design's socket table: `export.materialise(commit=)`, a learning job's only (its pre-flight's
-`--knowledge-commit` pin), answers `{commit, path}` for `<T>/exports/<commit>/` made from the tenant's clone (flow 2), or is
-refused `delivery` for a commit the clone lacks.
+One request beyond the design's socket table: `copy.make(commit=)`, a learning job's only (#1618 F3: `export.materialise`
+merged into it), answers `{commit, path}` for a copy of that commit's `agent/` and `settings/` fetched from Forgejo into the
+claim's `shared/` folder, or is refused `delivery` for a commit Forgejo does not serve.
 
 Docker double. The helper starts its job container as an attached `docker run` asked of the docker seam's `.popen`, and makes
 every other docker call through the seam. `ContainerStandIn` runs the job as a function on a thread (`job(container) -> rc`)
@@ -106,14 +106,16 @@ def child_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
 _HELPER_CHILD = Path(__file__).resolve().with_name("_helper_child1170.py")
 
 
-def helper_child(mode: str, commit: str, marks: Path, launch: Any, *, stderr_to: Path | None = None) -> list[str]:
+def helper_child(mode: str, commit: str, marks: Path, launch: Any, *, remote: Path,
+                 stderr_to: Path | None = None) -> list[str]:
     """A worker's `child_argv` answer for an investigation: the real helper in front of the replay job entry
     (`_helper_child1170.py`; `mode`, `commit` and `marks` are `_job_entry1342.py`'s), in place of `python -m
-    defender.job_host` (which would need a real vault, publish and docker). `stderr_to`: the child's stderr appended to it."""
+    defender.job_host` (which would need a real vault and docker). `remote` is the tenant's bare Forgejo repository the
+    helper's knowledge fetch reads (#1618: a `PublishedTenant`'s `.remote`). `stderr_to`: the child's stderr appended to it."""
     # C-1 (#1471 P-5): the worker's own start hands the helper the alert digest (required) and, flagged, the post flag and link.
     ticket = [*(["--alert-digest", launch.alert_digest] if launch.alert_digest is not None else []),
               *(["--post-ticket", "--ticket-link", launch.ticket_link] if launch.update_ticket else [])]
-    child = [sys.executable, str(_HELPER_CHILD), mode, commit, str(marks), "--job", launch.investigation_id,
+    child = [sys.executable, str(_HELPER_CHILD), mode, commit, str(marks), str(remote), "--job", launch.investigation_id,
              "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid), *ticket]
     return ["/bin/sh", "-c", 'exec "$@" 2>>"$0"', str(stderr_to), *child] if stderr_to is not None else child
 

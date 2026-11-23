@@ -2,6 +2,7 @@
 tests here."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618 flow 4: the launch's one fetch
 from defender.tests.support.shared._locations_1210 import location_path
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -1418,7 +1419,8 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000) -> Any:
         return rnd.render(ep, label, git_show=FakeGitShow(),
                           payload_cap=payload_cap, facts=facts, lessons_commit=None,
                           manifest=manifest, samples=samples,
-                          family_text=rnd.render_family_text(pre, failed), bound=bound, episode_runs=view)
+                          family_text=rnd.render_family_text(pre, failed), bound=bound, episode_runs=view,
+                          knowledge=J.pass_knowledge(ep, bound))
 
 
 # --------------------------------------------------------------------------------------
@@ -1955,7 +1957,7 @@ def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *
         rc = mod("cli.learning.branch").main(["--tenant", src.parent.parent.name, src.name,
                             str(T.BRANCH_MESSAGE_ID)],
                            spawn=spawn, directory=est.launch_directory(src.parent.parent.name),
-                           **seams)
+                           **{"fetch": in_process_fetch(), **seams})
     except SystemExit as stop:
         rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
     # The launch itself makes the tenant's `episodes/`; a launch refused before that leaves

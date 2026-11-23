@@ -114,7 +114,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     `proxy_url`, `issuer_transport`, `directory`, ...) are handed as given, over the defaults. `source_closing` and
     `source_fault` plant the source's closing record and a fault on its lookup (`_triplet_947.runs_base`, #1534)."""
     from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, handed_records
-    from defender.tests.support.jobs._socket_standin1170 import materialise as materialise_export
+    from defender.tests.support.jobs._socket_standin1170 import copy_make
     from defender.tests.support.jobs._socket_standin1170 import passes as helper_passes
 
     est = estate(tmp_path) if estate is not None else S.estate(tmp_path)
@@ -141,7 +141,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     if grade is not None:
         seams["grade"] = grade
     launch: dict[str, Any] = {"kind": "learning", "job": job}
-    answers: dict[str, Any] = {"export.materialise": materialise_export(tenant)}
+    answers: dict[str, Any] = {"copy.make": copy_make(tenant)}
     if "proxy_url" in extra:
         # The helper signs the job's passes (#1170 O5): the launcher's signing seams become the stand-in helper's.
         launch["proxy_url"], answers["pass"] = helper_passes(
@@ -150,7 +150,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     seams.update(extra)
     launch["records"] = handed_records(seams["directory"], tenant)
     # In its job container (#1170 A6): no `--parent-pid`, and a job socket answering the helper's `launch` facts and the
-    # export it materialises; the helper's own answers are `tests/jobs/test_job_helper_learning.py`'s.
+    # copies it makes (`copy.make`, #1618); the helper's own answers are `tests/jobs/test_job_helper_learning.py`'s.
     argv = ["--job", job, "--tenant", tenant, "--source", src.name]
     from defender.learning.branch import job_entry
     previous = signal.signal(signal.SIGTERM, _unexpected_sigterm)

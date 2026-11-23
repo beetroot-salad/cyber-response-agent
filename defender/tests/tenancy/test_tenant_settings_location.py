@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests.support.shared._locations_1210 import location_path
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an operator tool's one fetch
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T
@@ -31,11 +31,12 @@ def _committed_tenant_dirs() -> list[Path]:
 def test_the_playground_resolves_through_the_real_resolver():
     td = T.fixture_tenant()
     assert td.id == T.PLAYGROUND_ID
-    assert td.settings == location_path(td.data_root) / T.PLAYGROUND_ID / "knowledge" / "settings"
-    assert td.agent == location_path(td.data_root) / T.PLAYGROUND_ID / "knowledge" / "agent"
-    assert (td.settings / "verb-grants.yaml").read_bytes() == \
+    # #1618 K8 (census: `Tenant.agent/.settings` deleted): the resolver names no knowledge path; what was placed is read
+    # from the placed folder.
+    assert not hasattr(td, "settings") and not hasattr(td, "agent"), td
+    assert (T.placed_half(td, "settings") / "verb-grants.yaml").read_bytes() == \
         (T.FIXTURE_SETTINGS / "verb-grants.yaml").read_bytes()
-    assert td.agent.is_dir()
+    assert T.placed_half(td, "agent").is_dir()
 
 
 def test_every_template_row_grants_nobody_and_says_why():
@@ -74,7 +75,7 @@ def test_a_tenant_copied_from_the_template_resolves_and_grants_gather_nothing(tm
     shutil.copytree(T.TEMPLATE_DIR, root / fixture_uuid("tenant:newco") / "knowledge")
     (root / fixture_uuid("tenant:newco") / "knowledge" / "agent" / ".tenant-id").write_text(f"{fixture_uuid('tenant:newco')}\n", encoding="utf-8")
     td = T.accept(root, fixture_uuid("tenant:newco"))
-    grants = T.run_grants(td.settings)
+    grants = T.run_grants(T.placed_half(td, "settings"))
     assert grants.gather.entries == ()
     assert grants.correlation_system is None
 
@@ -150,8 +151,8 @@ def injected(tmp_path) -> Path:
         root, T.PLAYGROUND_ID, table=T.TABLE_B, marker=MARK,
     )
     td = T.accept(root, T.PLAYGROUND_ID)
-    assert not td.settings.is_relative_to(T.REPO_ROOT), "the fixture root must be outside"
-    return td.settings
+    assert not T.placed_half(td, "settings").is_relative_to(T.REPO_ROOT), "the fixture root must be outside"
+    return T.placed_half(td, "settings")
 
 
 def _record(settings: Path):
@@ -188,7 +189,7 @@ def test_a_system_with_no_settings_in_the_injected_tenant_is_a_config_fault_nami
     cmdb = T.mod("integrations.cmdb_adapter")
     root = tmp_path / "injected-root"
     T.place_tenant(root, T.PLAYGROUND_ID, configs={})
-    settings = T.accept(root, T.PLAYGROUND_ID).settings
+    settings = T.placed_half(T.accept(root, T.PLAYGROUND_ID), "settings")
     # cmdb is declared, so its missing settings are the one fault left (the declaration is judged first,
     # #1391 r5 S1): an access file with no config.env plants a recorded cmdb with empty settings.
     (settings / "systems" / "cmdb").mkdir(parents=True, exist_ok=True)
@@ -332,7 +333,7 @@ def test_the_policy_cli_shows_every_role_that_names_no_tenant(tmp_path, capsys, 
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     corpus = ["--corpus-name", "lessons"] if agent == "corpus_author" else []  # the role's own per-spawn input
-    assert policy_cli.main(["show", agent, "--run-dir", str(run_dir), "--defender-dir", str(tree), *corpus]) == 0
+    assert policy_cli.main(["show", agent, "--run-dir", str(run_dir), "--defender-dir", str(tree), *corpus], fetch=in_process_fetch()) == 0
     assert f"agent: {agent}" in capsys.readouterr().out
 
 
@@ -346,13 +347,13 @@ def test_the_policy_cli_builds_gathers_policy_from_an_injected_root_and_named_te
     (run_dir / "gather_raw").mkdir(parents=True)
     base = ["show", "gather", "--run-dir", str(run_dir)]
     acme = [*base, "--tenant", fixture_uuid("tenant:acme")]
-    assert policy_cli.main(acme, directory=directory_for_argv(acme)) == 0
+    assert policy_cli.main(acme, fetch=in_process_fetch(), directory=directory_for_argv(acme)) == 0
     assert "agent: gather" in capsys.readouterr().out
 
     text = ""
     ghost = [*base, "--tenant", fixture_uuid("tenant:ghost")]
     try:
-        rc = policy_cli.main(ghost, directory=directory_for_argv(ghost))
+        rc = policy_cli.main(ghost, fetch=in_process_fetch(), directory=directory_for_argv(ghost))
     except SystemExit as e:
         text = str(e.code)
     except Exception as e:  # noqa: BLE001 — the refusal's text is what is asserted
@@ -376,7 +377,7 @@ def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
     (run_dir / "gather_raw").mkdir(parents=True)
     argv = ["show", "gather", "--run-dir", str(run_dir), "--tenant", fixture_uuid("tenant:newco")]
     with pytest.raises(SystemExit) as caught:
-        policy_cli.main(argv, directory=directory_for_argv(argv))
+        policy_cli.main(argv, fetch=in_process_fetch(), directory=directory_for_argv(argv))
     text = str(caught.value.code)
     assert text.startswith("defender-policy:"), text
     assert "verb-grants.yaml" in text, text
@@ -398,11 +399,11 @@ def test_1366_p4_the_policy_cli_builds_the_tenant_from_its_records_not_its_folde
     (run_dir / "gather_raw").mkdir(parents=True)
     argv = ["show", "gather", "--run-dir", str(run_dir), "--tenant", fixture_uuid("tenant:acme")]
 
-    assert policy_cli.main(argv, directory=directory_for_argv(argv, records=R.fixture_records())) == 0
+    assert policy_cli.main(argv, fetch=in_process_fetch(), directory=directory_for_argv(argv, records=R.fixture_records())) == 0
     assert "agent: gather" in capsys.readouterr().out
 
     with pytest.raises(SystemExit) as caught:
-        policy_cli.main(argv, directory=directory_for_argv(argv, records=R.RecordsSpec()))
+        policy_cli.main(argv, fetch=in_process_fetch(), directory=directory_for_argv(argv, records=R.RecordsSpec()))
     text = str(caught.value.code)
     assert text.startswith("defender-policy:"), text
     assert all(system in text for system in ("cmdb", "elastic")), text

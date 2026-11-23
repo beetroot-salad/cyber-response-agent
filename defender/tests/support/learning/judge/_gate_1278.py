@@ -30,7 +30,7 @@ def gate_lane(tmp_path: Path, *, lanes: tuple[str, ...] = C.AUTHOR_LANES) -> Any
     source = C.draft_agent(scene / "agent-source")
     with published_tenant(scene / "forge", root=scene / "data", agent=source) as t:
         batch = t.open_delivery().start_batch("b1", lanes=lanes)
-        clone = t.clone
+        clone = Path(batch.repository.path)  # #1618 K8: the batch's branch lives in its delivery's private repository
     product = scene / "product"
     product.mkdir(exist_ok=True)
     return C.DraftLane(tmp=scene, clone=clone, batch=batch, paths=LoopPaths(repo_root=product), lanes=tuple(lanes))

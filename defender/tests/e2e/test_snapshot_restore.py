@@ -20,7 +20,6 @@ from defender.kit.faults import TransportFault  # noqa: E402
 from defender.tests.support.runtime.state import _1255_snapshot as S
 from defender.tests.support.runtime.permissions import _review_bundle
 from defender.tests.support.tenancy import _tenants1106
-from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.learning.branch._branch_947 import (  # noqa: E402
     GOLDEN_INVESTIGATION,
     LEGACY_BRANCH_CALL,
@@ -288,7 +287,7 @@ def _planted_tree(root: Path) -> Path:
         if entry.name in {".venv", "__pycache__", "tests", "fixtures-e2e", "lessons"}:
             continue
         (tree / entry.name).symlink_to(entry)
-    lessons = Path(location_path(_tenants1106.fixture_tenant().agent)) / "lessons"
+    lessons = _tenants1106.placed_half(_tenants1106.fixture_tenant(), "agent") / "lessons"  # #1618 K8
     lessons.mkdir(exist_ok=True)
     _write_lesson(lessons, "compute-class-1255", nodes=("type: compute, slot: class",))
     _write_lesson(lessons, "identity-class-1255", nodes=("type: identity, slot: class",))
@@ -523,7 +522,7 @@ def _tree(root: Path) -> list[str]:
 
 
 def test_p3_the_fork_snapshot_is_not_kept_in_the_run_folder_or_the_tenant_agent_half(tmp_path):
-    agent = _tenants1106.fixture_tenant().agent
+    agent = _tenants1106.placed_half(_tenants1106.fixture_tenant(), "agent")  # #1618 K8
     agent_before = _tree(agent)
     source = S.drive_source(tmp_path, (S.append(CHUNKS[0]), S.echo("x"), S.append(CHUNKS[1]),
                                        S.done()))

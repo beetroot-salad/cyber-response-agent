@@ -435,7 +435,7 @@ _DRAFT_SEQ = iter(range(1, 1_000_000))
 @dataclasses.dataclass
 class DraftLane:
     """One batch of the fixture tenant, started for real: its git-free draft (the lane's corpus
-    root), its branch in the tenant clone, and scratch learning state. The origin server is
+    root), its branch in its delivery's private repository (`clone`, #1618 K8: no tenant clone), and scratch learning state. The origin server is
     already closed: change sets, commits and resets are local work."""
 
     tmp: Path
@@ -471,7 +471,7 @@ class DraftLane:
 
     @property
     def base(self) -> str:
-        return str(self.batch.export.commit)
+        return str(self.batch.base_commit)  # #1618: `Batch.export` is deleted
 
     def git(self, *args: str, check: bool = True) -> Any:
         from defender.tests.support.learning.curation._drain719 import git
@@ -551,7 +551,7 @@ def draft_lane(tmp_path: Path, *, lanes: tuple[str, ...] = AUTHOR_LANES,
     source = agent if agent is not None else draft_agent(scene / "agent-source", files)
     with published_tenant(scene / "forge", root=scene / "data", agent=source) as t:
         batch = t.open_delivery().start_batch("b1", lanes=lanes)
-        clone = t.clone
+        clone = Path(batch.repository.path)  # #1618 K8: the batch's branch lives in its delivery's private repository
     # The product checkout holds no corpus: the lane's `paths` name a scratch checkout with none,
     # so a lane still reading `paths.lessons_dir` finds nothing there.
     if product is None:

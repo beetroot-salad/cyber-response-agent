@@ -346,13 +346,13 @@ def drive_main(argv: list[str], rec: Recorder, *, directory: Any = None) -> tupl
     launch-time publish (it publishes the requested tenant's folder for real). `directory` defaults to
     `directory_for_argv(argv)`: `--tenant` active whatever its folder. Returns
     `(exit status, None)` or `(None, the SystemExit it refused with)`."""
-    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
     seams = dict(rec.seams())
     if directory is not None:
         seams["directory"] = directory
     try:
-        return run_py().main(list(argv), **with_publish(seams, argv)), None
+        return run_py().main(list(argv), **with_fetch(seams, argv)), None
     except SystemExit as refused:
         return None, refused
 

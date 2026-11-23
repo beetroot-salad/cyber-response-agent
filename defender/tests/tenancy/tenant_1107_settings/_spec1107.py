@@ -642,14 +642,13 @@ def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | No
     """Drive the real `run.main` over `argv` with `rec`'s seams (plus `seams`). Returns
     `(exit status, None)` or `(None, the SystemExit it refused with)`.
 
-    Unless the caller passes its own, the launch-time publish is `_launch_publish_p4`'s
-    in-process stand-in, which publishes the tenant's folder for real, so the run reads an
-    export. No request signer is injected: a run that must reach a system passes one (or
+    Unless the caller passes its own, the launch's one fetch is `_launch_publish_p4`'s in-process stand-in (#1618: the
+    product's fetch over the tenant's served remote, seeded from its placed folder), so the run reads a copy of `main`. No request signer is injected: a run that must reach a system passes one (or
     `ProxyStandIn.seams()`), so the tests of the production signing path stay on it."""
-    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
     try:
-        return run_py().main(argv, **with_publish(
+        return run_py().main(argv, **with_fetch(
             {**rec.seams(), **seams}, argv)), None
     except SystemExit as refused:
         return None, refused
