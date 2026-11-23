@@ -1863,9 +1863,11 @@ class InProcessSiblings:
             directory = directory_for_argv(tail, records=self.est.records())
             roster = read_roster(self.est.adapters)
             S24.R.assert_records_within_roster(directory, tail[tail.index("--tenant") + 1], roster)
+            # Run start fetches the tenant's knowledge at the family's pin from its served remote (#1618 flow 4): the
+            # product's fetch, in process (`_fetch_standin_1618.in_process_fetch`), as the launcher's own `fetch=`.
             return mod(RUN).main(tail, lifecycle=lifecycle, directory=directory, visualize=_no_visualize,
                                  preflight=_no_preflight, oracle=oracle.model,
-                                 verifier=self.verifier.model, roster=roster)
+                                 verifier=self.verifier.model, roster=roster, fetch=in_process_fetch())
         except SystemExit as stop:
             return 0 if stop.code is None else (stop.code if isinstance(stop.code, int) else 2)
         except Exception as escaped:  # noqa: BLE001 — recorded for the scenario; rc 1 like a crashed child

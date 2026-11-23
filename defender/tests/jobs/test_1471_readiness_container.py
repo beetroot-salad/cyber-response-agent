@@ -435,22 +435,23 @@ def test_r13_1_4_launch_facts_saying_the_tenant_is_not_active_are_refused_at_the
 
 def test_r13_1_4_launch_facts_saying_active_over_a_tenant_folder_the_container_refuses_are_refused_at_container_tenant(
         tmp_path, monkeypatch, migrated_database):
-    """The container's own read of its tenant folder (the one it mounts) refuses it though the helper's admission passed:
-    `refused` at `container_tenant`, carrying the knowledge record; the same route over the sound folder reads `ready`.
-    (R13-1.4, C5)"""
+    """The container's own acceptance of its tenant folder refuses it though the helper's admission passed (the folder
+    lies inside the container's code tree, which a box mounts): `refused` at `container_tenant`, carrying the knowledge
+    record; the same route with the container's own code tree reads `ready`. (R13-1.4, C5; #1618 K8)"""
     from defender import run as run_py
     from defender import tenancy
 
+    def damaging_tree(scene: Any) -> Path:
+        """#1618 K8: acceptance judges `<T>` alone (a tenant holds no knowledge folder to plant a stray file in), and
+        a link at `<T>` or its `runs` is refused by the job lane before any record can be written there. What the
+        container's own acceptance judges and the helper's does not is `<T>` against the container's code tree: a tree
+        holding the data root (the container's `DEFENDER_DIR`, `readiness_main(defender_dir=)`)."""
+        return Path(scene.root).parent
+
     def entering(scene: Any, rid: str, damage: bool) -> Any:
         def container(c: Any) -> int:
-            if damage:
-                # #1618 K8: acceptance judges `<T>` alone (a tenant holds no knowledge folder to plant a stray file in),
-                # so the damage the container's own read refuses is at `<T>`: a link in place of the real folder.
-                folder = scene.root / scene.tenant
-                real = folder.with_name(f"{folder.name}.real-1471")
-                folder.rename(real)
-                folder.symlink_to(real, target_is_directory=True)
-            return int(run_py.readiness_main(["--readiness", rid, "--tenant", scene.tenant], environ=c.env))
+            tree = {"defender_dir": damaging_tree(scene)} if damage else {}
+            return int(run_py.readiness_main(["--readiness", rid, "--tenant", scene.tenant], environ=c.env, **tree))
         return container
 
     with readiness_scene(tmp_path / "ctl", monkeypatch, migrated_database, proxied=ALL) as scene:
@@ -464,8 +465,9 @@ def test_r13_1_4_launch_facts_saying_active_over_a_tenant_folder_the_container_r
         assert ran.facts["tenant_state"] == "active", "the helper's admission passed: its facts say active"
         from defender.records.formats import TenantRefused
 
-        with pytest.raises(TenantRefused):  # repair 5: the refusal's home is `records.formats`, not `tenancy`
-            tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=run_py.DEFENDER_DIR)
+        with pytest.raises(TenantRefused, match="which a box mounts"):  # repair 5: the refusal's home is `records.formats`, not `tenancy`
+            tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=damaging_tree(scene))
+        tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=run_py.DEFENDER_DIR)  # the helper's
         assert_refused_shape(ran.result(), "container_tenant")
         assert isinstance(ran.knowledge, dict), "a refusal at a container step carries the helper's knowledge record"
 

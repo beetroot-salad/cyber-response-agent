@@ -615,10 +615,15 @@ def episode_location(episode_dir: Path) -> tuple[Path, str]:
     test's `DEFENDER_DATA_ROOT` or one a scene set up of its own (several same-id episodes in one
     test each need one). An episode anywhere else is a fixture bug, raised here rather than met
     as a confusing "absent" refusal further in."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import served_remote
+
     episode_dir = Path(episode_dir).absolute()
     container = episode_dir.parent
     tenant_dir = container.parent
-    if container.name != "episodes" or not (tenant_dir / "knowledge").is_dir():
+    # Set up: its knowledge placed at `<T>/knowledge`, or (#1618 K8: knowledge lives only in Forgejo) seeded on the data
+    # root's served remote for `<T>` (`_data_root_1078.set_up_tenant`'s two shapes).
+    set_up = (tenant_dir / "knowledge").is_dir() or (served_remote(tenant_dir.parent, tenant_dir.name) / "HEAD").exists()
+    if container.name != "episodes" or not tenant_dir.is_dir() or not set_up:
         raise AssertionError(
             f"fixture bug: {episode_dir} is not at <data root>/<T>/episodes/<id> under a set-up "
             "tenant — build it with `_triplet_947.episode` (default root), or under "

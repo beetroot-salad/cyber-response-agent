@@ -15,6 +15,7 @@ import sys
 import textwrap
 import time
 from dataclasses import dataclass, field
+from unittest import mock
 from pathlib import Path
 from typing import Any
 
@@ -156,7 +157,11 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     previous = signal.signal(signal.SIGTERM, _unexpected_sigterm)
     outcome: object = None
     try:
-        with SocketStandIn(tenant, launch=launch, answers=answers) as helper:
+        # The job socket is named in this process's environment too, as it is in the job container's whole process: the
+        # judge's default copy path (`learning.judge.knowledge.helper_copy`, #1618 F3) reads it there, as the post-step's
+        # in-process driver does (`test_1344_post_step.py`).
+        with SocketStandIn(tenant, launch=launch, answers=answers) as helper, \
+                mock.patch.dict(os.environ, helper.environ_delta()):
             try:
                 outcome = job_entry.main(argv, environ=helper.environ(), **seams)
             except SystemExit as stop:

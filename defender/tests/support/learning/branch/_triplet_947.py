@@ -467,9 +467,15 @@ def current_tenant() -> Any:
     an accepted `Tenant`; set up from the committed fixture when the root has none yet."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
+    from defender.tests.support.tenancy._fetch_standin_1618 import served_remote
+
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
-    existing = sorted(p.name for p in root.iterdir()
-                      if (p / "knowledge").is_dir()) if root.is_dir() else []
+    # Set up: its knowledge placed at `<T>/knowledge` (taken first, as before), else (#1618 K8: knowledge lives only in
+    # Forgejo; `_spec1224.Estate.place`) its folder beside a seeded served remote.
+    placed = sorted(p.name for p in root.iterdir() if (p / "knowledge").is_dir()) if root.is_dir() else []
+    seeded = sorted(p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")
+                    and (served_remote(root, p.name) / "HEAD").is_file()) if root.is_dir() else []
+    existing = placed or seeded
     return set_up_tenant(root, existing[0] if existing else SOURCE_TENANT)
 
 
