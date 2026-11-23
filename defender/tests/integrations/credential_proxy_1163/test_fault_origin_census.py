@@ -50,7 +50,7 @@ def _all_groups(tmp_path, data_root):
                ghosts={O.GHOST: Path()}) as r:
         r.t.merge({f"settings/systems/{O.BASIC_SYSTEM}/access.yaml": H.declaration(r.up.url + BASE, scheme=H.basic_scheme()),
                    f"settings/systems/{O.BROKEN_SYSTEM}/access.yaml": "{ not a declaration"}, "more systems")
-        r.t.publish()
+        # #1618 D7/K8: the merge is `main`, which the proxy's next read fetches; there is no publish step.
         take(r, O.bearer_rows())
     with H.upstream() as aux, _oauth(tmp_path / "oauth", data_root, aux.url + "/token") as r:
         take(r, O.oauth_rows(aux))

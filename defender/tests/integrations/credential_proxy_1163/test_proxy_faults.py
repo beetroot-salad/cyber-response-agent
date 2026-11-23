@@ -65,7 +65,7 @@ def test_f1_an_unreachable_upstream_is_a_transport_fault(tmp_path, data_root):
         assert (answer["fault"], r.up.seen) == ("TransportFault", [])
         r.t.merge({"settings/systems/identity/access.yaml": H.declaration(r.up.url + BASE)},
                   "point at the live upstream")
-        r.t.publish()
+        # #1618 D7/K8: the merge is `main`, which the proxy's next read fetches; there is no publish step.
         control = r.ask()
 
     assert control["fault"] is None
@@ -494,7 +494,7 @@ def test_1391_o4_a_declared_ca_reaches_its_private_upstream_and_dropping_it_refu
             trusted = r.ask(url=server.url + PATH)
             reached = [p for _, p, _ in server.seen]
             r.t.merge({ACCESS: H.declaration(base)}, "drop the ca")
-            r.t.publish()
+            # #1618 D7/K8: the merge is `main`, which the proxy's next read fetches; there is no publish step.
             dropped = r.ask(url=server.url + PATH)
 
     assert (trusted["fault"], trusted["status"]) == (None, 200), trusted
@@ -515,7 +515,7 @@ def test_1391_o4_a_ca_naming_another_root_refuses_even_what_the_environment_trus
         with _ca_rig(tmp_path, data_root, base, server.ca.read_bytes()) as r:
             control = r.ask(url=server.url + PATH)
             r.t.merge({ACCESS: H.declaration(base, ca=other.cert)}, "another root")
-            r.t.publish()
+            # #1618 D7/K8: the merge is `main`, which the proxy's next read fetches; there is no publish step.
             refused = r.ask(url=server.url + PATH)
 
     assert control["fault"] is None, control
@@ -590,7 +590,7 @@ def test_1391_o4_ca_adds_nothing_from_the_public_bundle_and_a_system_without_one
             pinned = r.ask(url=server.url + PATH)
             reached_pinned = len(server.seen)
             r.t.merge({ACCESS: H.declaration(base)}, "drop the ca")
-            r.t.publish()
+            # #1618 D7/K8: the merge is `main`, which the proxy's next read fetches; there is no publish step.
             public = r.ask(url=server.url + PATH)
 
     assert pinned["fault"] == "TransportFault", pinned

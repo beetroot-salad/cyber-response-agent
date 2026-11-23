@@ -16,6 +16,7 @@ from defender.records._episode_handle import Episode
 from defender._io import bind
 from defender.records import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 
@@ -238,7 +239,8 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
         _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                     spawn=T.FakeSpawn(), questioner=agent,
                     preflight=S.no_preflight, live_tree=T.source_capture(),
-                    directory=T.launcher_directory(src.parent.parent.name))
+                    directory=T.launcher_directory(src.parent.parent.name),
+                    fetch=in_process_fetch())  # #1618 flow 4 (K8): the launch's one fetch, so the screen is what refuses
     assert "alert" in str(refusal.value)
     assert agent.prompts == [], "the planted link reached the questioner's prompt"
     assert "ROOT-PRIVATE-KEY" not in str(refusal.value)

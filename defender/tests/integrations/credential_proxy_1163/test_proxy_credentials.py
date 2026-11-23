@@ -286,7 +286,7 @@ def test_c4_a_merged_change_to_the_auth_block_means_a_fresh_exchange(
                       else H.oauth_scheme(auth.url + "/token2"))
             r.t.merge({"settings/systems/identity/access.yaml": H.declaration(
                 r.up.url + BASE, scheme=scheme)}, "change auth block")
-            r.t.publish()
+            # #1618 D7/K8: the merge is `main`, which the proxy's next read fetches; there is no publish step.
             r.ask()
 
     assert len(issued) == 2
