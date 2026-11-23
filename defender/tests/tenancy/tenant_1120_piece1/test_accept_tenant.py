@@ -120,14 +120,6 @@ def _off_grammar_and_no_knowledge(root: Path, tmp_path: Path) -> tuple[str, str,
     return "A", repr("A"), str(H.knowledge_dir(root, "A"))
 
 
-def _knowledge_link_over_missing_settings(root: Path, tmp_path: Path) -> tuple[str, str, str]:
-    elsewhere = tmp_path / "linked-knowledge"
-    (elsewhere / "agent").mkdir(parents=True)
-    H.knowledge_dir(root).parent.mkdir(parents=True)
-    H.knowledge_dir(root).symlink_to(elsewhere, target_is_directory=True)
-    return H.TID, str(H.knowledge_dir(root)), str(H.settings_dir(root))
-
-
 def _missing_settings_and_agent_link(root: Path, tmp_path: Path) -> tuple[str, str, str]:
     H.adopted(root)
     shutil.rmtree(H.settings_dir(root))
@@ -144,7 +136,8 @@ def _hardlink_and_wrong_tenant_id(root: Path, tmp_path: Path) -> tuple[str, str,
 #: Each case plants the faults of two adjacent checks; the refusal must name the earlier one's.
 ADJACENT_PAIRS = [
     pytest.param(_off_grammar_and_no_knowledge, id="grammar-before-knowledge"),
-    pytest.param(_knowledge_link_over_missing_settings, id="knowledge-before-halves"),
+    # Retired (#1618 K8): "knowledge-before-halves". A linked `<T>/knowledge` was acceptance's to refuse, judging it from
+    # `<T>`; a tenant holds no knowledge folder now, and the folder rules judge the folder they are handed.
     pytest.param(_missing_settings_and_agent_link, id="halves-before-link-walk"),
     pytest.param(_hardlink_and_wrong_tenant_id, id="link-walk-before-tenant-id"),
     # Retired (#1618 K8): "tenant-id-before-mounted-tree". Acceptance no longer reads settings, so no mounted-tree
@@ -167,12 +160,6 @@ def _knowledge_absent(root: Path, tmp_path: Path) -> None:
     (root / H.TID).mkdir(parents=True)
 
 
-def _knowledge_symlink(root: Path, tmp_path: Path) -> None:
-    complete = H.place_knowledge(tmp_path / "other-place")
-    H.knowledge_dir(root).parent.mkdir(parents=True)
-    H.knowledge_dir(root).symlink_to(complete, target_is_directory=True)
-
-
 def _knowledge_file(root: Path, tmp_path: Path) -> None:
     (root / H.TID).mkdir(parents=True)
     H.knowledge_dir(root).write_text("a file, not a folder\n", encoding="utf-8")
@@ -189,7 +176,7 @@ def _tenant_dir_symlink(root: Path, tmp_path: Path) -> None:
 
 KNOWLEDGE_NOT_REAL = [
     pytest.param(_knowledge_absent, id="absent"),
-    pytest.param(_knowledge_symlink, id="symlink"),
+    # Retired (#1618 K8): "symlink" (a linked `<T>/knowledge`), as "knowledge-before-halves" above.
     pytest.param(_knowledge_file, id="file"),
     pytest.param(_tenant_dir_symlink, id="tenant-dir-symlink"),
 ]
