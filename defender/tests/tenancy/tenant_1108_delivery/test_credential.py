@@ -478,8 +478,14 @@ print(json.dumps(out))
 """
 
 
-def test_git_never_prompts_on_a_terminal(http_repo, rewritten, tmp_path):
-    tenant = http_repo[0]
+def test_git_never_prompts_on_a_terminal(http_repo, tmp_path):
+    """Git, refused whatever it sends (401 on the fetch), never prompts on the process's controlling terminal: the delivery's
+    open is refused instead. #1618: the prompt path is reached by the forge rejecting the credential, not by a per-user
+    `insteadOf` rewrite, which product git never reads (`transport.py`: `GIT_CONFIG_GLOBAL=/dev/null`). Control: git was
+    asked for credentials (the forge saw the fetch)."""
+    tenant, _remote, _credentials, server = http_repo
+    server.refuse.add("git-upload-pack")
+    before = len(server.seen)
     # This process keeps the terminal's other end open throughout, so reading it never ends
     # early (a terminal nobody holds reads as closed before the child has opened it).
     try:
@@ -518,7 +524,9 @@ def test_git_never_prompts_on_a_terminal(http_repo, rewritten, tmp_path):
     assert written == b"", f"git prompted on the terminal: {written!r}"
     assert child.returncode == 0, err_path.read_bytes()
     verdict = json.loads(out_path.read_bytes().decode().strip().splitlines()[-1])
-    assert verdict.get("published") or "refused" in verdict, verdict
+    assert "refused" in verdict, f"a forge refusing every credential let the open through: {verdict}"
+    assert any(service == "git-upload-pack" for service, _sent, _ok in server.seen[before:]), \
+        "premise: the open never reached the forge, so git never met the 401"
 
 
 def test_clone_push_urls_do_not_select_a_delivery_destination(http_repo, spies):
