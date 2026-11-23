@@ -626,8 +626,9 @@ def test_git_does_not_send_bearer_to_another_repository_on_the_same_server(http_
     git(http_repo.checkout, "config", "--file", str(_global_config(http_repo)),
         f"url.{server.url}/tenants/other.git.insteadOf", origin)
     server.seen.clear()
-    _, error, _hung = bounded(lambda: delivery(http_repo, ForgeHTTP()).close(), seconds=60)
-    assert error is None or isinstance(error, target().DeliveryRefused), error
+    _, error, hung = bounded(lambda: delivery(http_repo, ForgeHTTP()).close(), seconds=60)
+    assert not hung, "git waited on a prompt"
+    assert error is None, error
     assert server.authorizations
     assert all(auth == "Bearer " + TOKEN for auth in server.authorizations)
     _silent(log)
