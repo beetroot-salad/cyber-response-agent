@@ -5,6 +5,7 @@ investigation removes its claims, facts and uploads."""
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 import pytest
 
@@ -50,9 +51,12 @@ async def _upload(store, token, obj=BUNDLE, **kw):
 
 
 async def _running(store, dsn):
-    inv = await _queued(store)
+    """A fresh queued row (its own alert and key) and its claim: `(row id, claim token)`."""
+    tag = uuid.uuid4().hex[:8]
+    inv = await _queued(store, f"T-{tag}", f"k-{tag}")
     claim = await store.claim()
     assert claim is not None
+    assert str(claim.record.investigation_id) == str(inv), "premise: the claim took the row just queued"
     return inv, claim.token
 
 
@@ -131,6 +135,8 @@ async def test_a_claim_is_live_until_its_row_ends_and_a_lapsed_lease_alone_does_
         assert await store.claim_live(ta) is True
         await store.take_over()
         assert await store.claim_live(ta) is False
+        for (retry,) in execute(dsn, "SELECT id FROM jobs.investigations WHERE tenant_id = %s AND stage = 'queued'", (T1,)):
+            await store.cancel_investigation(T1, str(retry), actor="u-1")  # the take-over's retry: not this case's row
         b, tb = await _running(store, dsn)
         assert await store.claim_live(tb) is True
         await store.cancel_investigation(T1, b, actor="u-1")
