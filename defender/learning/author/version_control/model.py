@@ -196,9 +196,6 @@ class DeliveryStatus(StrEnum):
     """A PR this call opened."""
     OPEN = "open"
     """An open PR this call found; nothing was pushed or opened."""
-    MERGED = "merged"
-    CLOSED = "closed"
-    """Closed unmerged: a rejection (D-closed)."""
     NOTHING = "nothing to deliver"
     """No branch, or a branch holding nothing past its base."""
 

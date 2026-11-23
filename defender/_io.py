@@ -914,24 +914,3 @@ def rename_into(src: Held, name: str, dst: Held) -> None:
         os_.rename(name, name, src_dir_fd=src_fd, dst_dir_fd=dst_fd)
         _fsync_folder(os_, dst_fd)
         _fsync_folder(os_, src_fd)
-
-
-def open_lock_at(held: Held, name: str | PurePath) -> IO[str]:
-    """An open file at `name` below the held root, for `flock`: the holding folders walked and
-    made with no link followed, the name judged by a no-follow stat (a link, hard link, FIFO or
-    folder there is the core's refusal, before any open), then opened `O_RDWR|O_CREAT` through
-    `_open_leaf` (no-follow, non-blocking, close-on-exec, the descriptor judged plain). Created
-    `0644` (umask applied), never truncated. Timing stays in `_flock.take` / `release`; the
-    caller closes the file."""
-    os_ = held._os
-    _spelling, parts = _parse_name(name)
-    where = Path(held._where, *parts)
-    with held._dup() as root_fd, _descend(
-            os_, root_fd, parts[:-1], held._where, create=True) as dir_fd:
-        _leaf_present(os_, dir_fd, parts[-1], where)
-        fd = _open_leaf(os_, dir_fd, parts[-1], os.O_RDWR | os.O_CREAT, where)
-    try:
-        return os_.fdopen(fd, "a+", encoding="utf-8")
-    except BaseException:
-        os_.close(fd)
-        raise
