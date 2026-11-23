@@ -123,16 +123,23 @@ def _fetch_seam(scene, asked: list):
     return fetch
 
 
+def _shared(scene) -> Path:
+    """The claim's `shared/` folder: where a learning job's copies go (#1618 owner ruling: the job container mounts it)."""
+    return scene.root / ".job-scratch" / scene.claim / "shared"
+
+
 def _copy_dirs(scene) -> list[Path]:
-    """What the claim's scratch holds besides the job's own `shared/` folder."""
+    """Every copy the claim's scratch holds: each entry of its `shared/` folder, and anything beside that folder."""
     base = scene.root / ".job-scratch" / scene.claim
-    return sorted(p for p in base.iterdir() if p.name != "shared") if base.is_dir() else []
+    beside = [p for p in base.iterdir() if p.name != "shared"] if base.is_dir() else []
+    inside = list(_shared(scene).iterdir()) if _shared(scene).is_dir() else []
+    return sorted(beside + inside)
 
 
 @pytest.mark.parametrize("kind", ["learning", "post-step", "investigation"])
 def test_1618_c1_copy_make_with_a_commit_copies_that_commit_from_forgejo_for_a_learning_job_only(scene, kind):
-    """`copy.make(commit=)` answers a copy of that older commit's `agent/` and `settings/` made from Forgejo under the
-    claim's scratch (not main's, not `exports/`), only for a learning job; the copy goes with the claim. (F3, K5)"""
+    """`copy.make(commit=)` answers a copy of that older commit's `agent/` and `settings/` made from Forgejo in the
+    claim's `shared/` folder (not main's, not `exports/`), only for a learning job; the copy goes with the claim. (F3, K5)"""
     t = scene.t
     old = t.commit
     t.merge({"agent/lessons/merged-after-the-pin.md": "merged on main after the pinned commit\n"})
@@ -157,7 +164,7 @@ def test_1618_c1_copy_make_with_a_commit_copies_that_commit_from_forgejo_for_a_l
         return
     assert got["answer"]["commit"] == old
     folder = Path(got["answer"]["path"])
-    assert folder.parent == scene.root / ".job-scratch" / scene.claim, folder
+    assert folder.parent == _shared(scene), f"the copy is not in the claim's shared folder: {folder}"
     assert got["agent"] == K.half_at(t, old, "agent")
     assert got["settings"] == K.half_at(t, old, "settings")
     assert "lessons/merged-after-the-pin.md" not in got["agent"], "main's later commit was copied"
@@ -200,6 +207,25 @@ def test_1618_c1_a_commit_forgejo_does_not_serve_is_refused_naming_it_and_leaves
     assert got["control"] == scene.t.commit
     assert _ABSENT_COMMIT in str(got["refusal"]), f"the refusal does not name the commit: {got['refusal']}"
     assert len(got["dirs"]) == 1, f"a refused copy left a folder behind: {got['dirs']}"
+
+
+def test_1618_c1_the_answered_copy_is_inside_a_folder_the_job_container_is_mounted_with(scene):
+    """The job reads its copy at the path the helper answers, so that path lies inside a `--mount source=` of the job
+    container's own `docker run` (the argv `job_host`'s container start built), mounted at that same path; the claim
+    folder itself is not mounted. (F3; #1618 owner ruling: the copy goes in the claim's `shared/` folder)"""
+    got: dict = {}
+
+    def job(c) -> int:
+        got["path"] = Path(c.request("copy.make", commit=scene.t.commit)["path"])
+        return 0
+
+    ran = run_kind(scene, "learning", job, fetch=_fetch_seam(scene, []))
+
+    mounts = ran.docker.box.mounts
+    holding = [m for m in mounts if got["path"].is_relative_to(m["source"])]
+    assert holding, f"the answered copy {got['path']} lies in no folder the job container is mounted with: {mounts}"
+    assert all(m["target"] == m["source"] for m in holding), f"the copy's folder is mounted at another path: {holding}"
+    assert str(_shared(scene).parent) not in {m["source"] for m in mounts}, "premise: the claim folder is not mounted"
 
 
 def test_1618_c4_the_grant_is_read_from_mains_settings_not_the_kept_export(scene):
