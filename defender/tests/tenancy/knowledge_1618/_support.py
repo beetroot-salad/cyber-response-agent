@@ -384,6 +384,9 @@ import json, sys
 from pathlib import Path
 
 spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+# The launcher starts its child with only its own environment (no PYTHONPATH: `publish_launch.child_environ`), and a
+# script's own folder, not the cwd, leads `sys.path`: the checkout this test runs from is named in the spec.
+sys.path.insert(0, spec["import_root"])
 from defender.tests.support.tenancy._active1214 import active_directory
 from defender.tests.tenancy.tenant_1108_delivery._identity import VaultHTTP
 import importlib
@@ -402,7 +405,8 @@ def child_report(t: Any, tmp_path: Path, dest: Path, commit: str | None = None, 
     wrapper.write_text(_CHILD_WRAPPER, encoding="utf-8")
     spec = tmp_path / f"fetch_child_spec-{abs(hash(str(dest)))}.json"
     spec.write_text(json.dumps({"module": CHILD_MODULE, "tenant_id": t.tenant_id, "origin": t.origin,
-                                "data_root": str(location_path(t.data_root))}), encoding="utf-8")
+                                "data_root": str(location_path(t.data_root)), "import_root": str(IMPORT_ROOT)}),
+                    encoding="utf-8")
     argv = [t.tenant_id, "--data-root", str(location_path(t.data_root)), "--dest", str(dest)]
     if commit is not None:
         argv += ["--commit", commit]

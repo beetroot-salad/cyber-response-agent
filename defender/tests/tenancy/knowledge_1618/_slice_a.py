@@ -51,7 +51,8 @@ def child_command(t: Any, tmp_path: Path, *, tag: str = "child") -> list[str]:
     wrapper.write_text(K._CHILD_WRAPPER, encoding="utf-8")
     spec = folder / "spec.json"
     spec.write_text(json.dumps({"module": K.CHILD_MODULE, "tenant_id": t.tenant_id, "origin": t.origin,
-                                "data_root": str(location_path(t.data_root))}), encoding="utf-8")
+                                "data_root": str(location_path(t.data_root)), "import_root": str(IMPORT_ROOT)}),
+                    encoding="utf-8")
     return [sys.executable, str(wrapper), str(spec)]
 
 

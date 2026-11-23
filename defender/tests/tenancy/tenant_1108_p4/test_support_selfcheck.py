@@ -1,5 +1,9 @@
-"""Self-check of `_support`: the shared machinery produces a real export of the committed fixture
-tenant through P3. It pins the machinery, nothing about P4 behaviour."""
+"""Self-check of `_support`: the shared machinery seeds the tenant's served remote with the committed fixture tenant, and
+the product's real fetch reads it back. It pins the machinery, nothing about P4 behaviour.
+
+#1618 K8 / D2: there is no publish, clone, `exports/` or `current` (knowledge lives only in Forgejo), so the self-checks
+that read an export folder and `current` now read what the product's own fetch (`fetch_copy`, through
+`_fetch_standin_1618.fetch_line` over the served remote) copies at a commit, and the remote's `main`."""
 from __future__ import annotations
 
 import contextlib
@@ -17,8 +21,6 @@ from ._support import (
     OTHER_LESSON,
     agent_blobs,
     bind_forge,
-    current_commit,
-    export_dir,
     files_under,
     fixture_agent_files,
     publish_once,
@@ -31,56 +33,63 @@ def _with_id(files, tenant_id):
     return {**files, ".tenant-id": f"{tenant_id}\n".encode()}
 
 
-def test_o11_helper_exports_the_committed_fixture_agent_at_the_published_commit(p4_tenant):
-    """The export's `agent/` is the committed fixture's agent content (plus the placed
-    `.tenant-id`) at the commit origin's `main` holds, and `current` names that commit."""
+def _fetched_agent(t, commit: str | None, into: Path) -> dict:
+    """The `agent/` the product's real fetch (`fetch_copy`, in process, over `t.remote` served by smart HTTP) copies at
+    `commit` (`None`: `main`) into the empty `into`, by path, with its bytes. Asserted `ok` at the commit asked for."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import fetch_line
+
+    into.mkdir(parents=True)
+    line = fetch_line(t.tenant_id, into, data_root=t.data_root, commit=commit, remote=t.remote)
+    assert line == f"ok {commit if commit is not None else t.origin_main()}", line
+    return files_under(into / "agent")
+
+
+def _no_host_knowledge(tenant) -> None:
+    """#1618 K8: the tenant folder holds no clone, `exports/` or `knowledge.lock` once seeded."""
+    folder = Path(location_path(tenant.tenant_root))
+    left = [name for name in ("knowledge", "exports", "knowledge.lock") if (folder / name).exists()]
+    assert left == [], f"the seeded tenant's folder still holds {left}"
+
+
+def test_o11_helper_seeds_the_committed_fixture_agent_that_a_real_fetch_copies_at_the_seed_commit(p4_tenant, tmp_path):
+    """The remote's `main` is the seed commit, whose `agent/` is the committed fixture's agent content (plus the placed
+    `.tenant-id`); the product's fetch of `main` copies exactly that, and the tenant folder holds no knowledge (K8)."""
     t = p4_tenant
     assert t.tenant_id == FIXTURE_TENANT_ID
     expected = _with_id(fixture_agent_files(), FIXTURE_TENANT_ID)
     assert "lessons/fixture-owner-before-close.md" in expected  # the fixture is not empty
-    exported = files_under(export_dir(t.tenant, t.commit) / "agent")
-    assert exported == expected
-    assert agent_blobs(t.remote, t.commit) == expected
     assert t.origin_main() == t.commit
-    assert current_commit(t.tenant) == t.commit
-    # Published through P3's network path, not a local export: the origin served an
-    # authenticated fetch and the forge was asked about `main`'s protection.
-    assert t.server.authorized("git-upload-pack")
-    assert any(r.url.path.endswith("/branches/main") for r in t.forge.requests)
+    assert agent_blobs(t.remote, t.commit) == expected
+    assert _fetched_agent(t, None, tmp_path / "main") == expected
+    _no_host_knowledge(t.tenant)
 
 
-def test_o11_merge_then_publish_moves_current_to_the_merged_commit(p4_tenant):
-    """The advance helper lands a merge on origin that only a real publish brings in: before
-    publishing `current` still names the first export; after, it names the merge, whose export
-    holds the merged lesson, and the first export is unchanged."""
+def test_o11_a_merge_moves_main_and_a_fetch_of_each_commit_holds_that_commits_lessons(p4_tenant, tmp_path):
+    """The advance helper lands a merge on origin's `main`: a fetch of `main` then holds the merged lesson, and a fetch of
+    the seed commit by id does not (K5: a pinned read fetches its commit by id). #1618 K8: no `current` or export moves."""
     t = p4_tenant
     merged = t.merge({"agent/lessons/merged-later.md": "merged after the first publish\n"})
     assert merged != t.commit
     assert t.origin_main() == merged
-    assert current_commit(t.tenant) == t.commit
-    export = t.publish()
-    assert export.commit == merged
-    assert len(t.vault.calls) == 2  # each publish asked the issuer afresh
-    assert current_commit(t.tenant) == merged
-    assert files_under(export_dir(t.tenant, merged) / "agent")["lessons/merged-later.md"] == \
-        b"merged after the first publish\n"
-    assert "lessons/merged-later.md" not in files_under(export_dir(t.tenant, t.commit) / "agent")
+    assert _fetched_agent(t, None, tmp_path / "main")["lessons/merged-later.md"] == b"merged after the first publish\n"
+    assert "lessons/merged-later.md" not in _fetched_agent(t, t.commit, tmp_path / "seed")
+    _no_host_knowledge(t.tenant)
 
 
-def test_second_tenant_is_published_apart_under_the_same_data_root(p4_tenant):
-    """The second tenant has its own export holding its own lesson; the first tenant's export
-    and `current` do not change and do not hold it."""
+def test_second_tenant_is_seeded_apart_under_the_same_data_root(p4_tenant, tmp_path):
+    """The second tenant has its own remote whose fetched `agent/` holds its own lesson and id; the first tenant's `main`
+    does not move and its fetched `agent/` does not hold it."""
     first = p4_tenant
     path, data = OTHER_LESSON
     rel = path.removeprefix("agent/")
     with second_tenant(first) as other:
         assert other.tenant_id != first.tenant_id
         assert other.data_root == first.data_root
-        theirs = files_under(export_dir(other.tenant, other.commit) / "agent")
+        assert other.remote != first.remote
+        theirs = _fetched_agent(other, other.commit, tmp_path / "other")
         assert theirs == _with_id({**fixture_agent_files(), rel: data}, other.tenant_id)
-        assert current_commit(other.tenant) == other.commit
-    assert current_commit(first.tenant) == first.commit
-    assert rel not in files_under(export_dir(first.tenant, first.commit) / "agent")
+    assert first.origin_main() == first.commit
+    assert rel not in _fetched_agent(first, first.commit, tmp_path / "first")
 
 
 def test_forge_binding_is_recorded_in_the_directory_and_writes_nothing_to_the_folder(p4_tenant):
@@ -102,23 +111,27 @@ def test_forge_binding_is_recorded_in_the_directory_and_writes_nothing_to_the_fo
     assert t.directory.forge_wiring(t.tenant_id) is None
 
 
-def test_publish_placed_exports_a_hand_planted_tenant_and_republishes_its_edits(tmp_path, data_root):
-    """`publish_once` over a tenant a suite planted itself (`_tenants1106.place_tenant`, its own
-    agent marker file): the export holds exactly the planted agent half; an edit to the folder
-    and a second call export the edit as a new commit and move `current` to it."""
+def test_publish_placed_seeds_a_hand_planted_tenant_and_pushes_its_next_placement(tmp_path, data_root):
+    """`publish_once` over a tenant a suite planted itself (`_tenants1106.place_tenant`, its own agent marker file): a
+    fetch of the seed holds exactly the planted agent half, and the placed folder is taken (K8: `<T>` holds no
+    knowledge); placing it again with an edit and a second call push the edit as a new commit on `main`."""
+    import shutil
+
     tenant_id = fixture_uuid("tenant:p4-hand-planted")
     knowledge = tenants.place_tenant(data_root, tenant_id)
     planted = files_under(knowledge / "agent")
+    kept = tmp_path / "placed-copy"
+    shutil.copytree(knowledge, kept, symlinks=True)
     first = publish_once(tmp_path / "forge", root=data_root, tenant_id=tenant_id)
-    assert files_under(export_dir(first.tenant, first.commit) / "agent") == planted
-    assert current_commit(first.tenant) == first.commit
+    assert _fetched_agent(first, first.commit, tmp_path / "first") == planted
+    _no_host_knowledge(first.tenant)
+    shutil.copytree(kept, knowledge, symlinks=True)  # the operator places the folder again, edited
     (knowledge / "agent" / "lessons").mkdir()
     (knowledge / "agent" / "lessons" / "edit.md").write_text("edited\n", encoding="utf-8")
     second = publish_once(tmp_path / "forge", root=data_root, tenant_id=tenant_id)
     assert second.commit != first.commit
-    assert current_commit(second.tenant) == second.commit
-    assert files_under(export_dir(second.tenant, second.commit) / "agent") == {
-        **planted, "lessons/edit.md": b"edited\n"}
+    assert second.origin_main() == second.commit
+    assert _fetched_agent(second, second.commit, tmp_path / "second") == {**planted, "lessons/edit.md": b"edited\n"}
 
 
 @pytest.mark.parametrize(("sentence", "part", "key"), [

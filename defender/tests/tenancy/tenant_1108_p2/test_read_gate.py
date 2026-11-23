@@ -25,8 +25,14 @@ def _put(root: Path, relative: str, marker: str) -> Path:
     return path
 
 
+def _agent(tenant) -> Path:
+    """The tenant's agent half as this replay hands it to the driver: the half the test placed (#1618 K8: a `Tenant`
+    names no knowledge path; `R.drive(tenant=...)` hands the driver `T.knowledge_half`, the placed folder)."""
+    return T.placed_half(tenant, 'agent')
+
+
 def _model(path: Path, *, tenant=None, run_dir: Path | None = None) -> str:
-    for host, model in ((getattr(tenant, 'agent', None), '/agent'), (T.DEFENDER, '/defender'),
+    for host, model in ((_agent(tenant) if tenant is not None else None, '/agent'), (T.DEFENDER, '/defender'),
                         (run_dir, '/runs/current')):
         if host is not None and Path(path).is_relative_to(host):
             return f"{model}/{Path(path).relative_to(host).as_posix()}"
@@ -64,11 +70,11 @@ def test_own_tenant_corpus_reads_work_and_other_tenant_and_settings_reads_refuse
         read_scene, tmp_path, role, surface, relative):
     """Same-path corpus bytes reach both roles and surfaces; other roots remain denied."""
     tenant, _ = read_scene
-    mine = _put(tenant.agent, relative, 'OWN-TENANT-P2-CONTENT')
+    mine = _put(_agent(tenant), relative, 'OWN-TENANT-P2-CONTENT')
     # This is just a neighboring physical tree; it need not bypass the one-tenant guard.
-    other = _put(tenant.agent.parents[2] / 'other' / 'knowledge' / 'agent',
+    other = _put(_agent(tenant).parents[2] / 'other' / 'knowledge' / 'agent',
                  relative, 'OTHER-TENANT-P2-CONTENT')
-    settings = _put(tenant.settings, 'operator.md', 'SETTINGS-P2-CONTENT')
+    settings = _put(T.placed_half(tenant, 'settings'), 'operator.md', 'SETTINGS-P2-CONTENT')
     checkout = T.DEFENDER / 'skills' / 'gather' / 'SKILL.md'
     checkout_mark = 'The query computes the answer server-side and returns it small and exact.'
     assert checkout_mark in checkout.read_text(encoding='utf-8')
@@ -93,8 +99,8 @@ def test_tenant_root_preserves_secret_extension_and_corpus_shape_denies(
         read_scene, role, surface, relative):
     """Adding a read root grants neither arbitrary files nor secrets."""
     tenant, _ = read_scene
-    denied = _put(tenant.agent, relative, 'DENIED-TENANT-P2-CONTENT')
-    allowed = _put(tenant.agent, 'lessons/control.md', 'CONTROL-TENANT-P2-CONTENT')
+    denied = _put(_agent(tenant), relative, 'DENIED-TENANT-P2-CONTENT')
+    allowed = _put(_agent(tenant), 'lessons/control.md', 'CONTROL-TENANT-P2-CONTENT')
     model = _drive_as(read_scene, role, [_read_turn(surface, _model(denied, tenant=tenant)),
                                          _read_turn(surface, _model(allowed, tenant=tenant))])
     assert 'Blocked' in model.seen[1]
@@ -108,7 +114,7 @@ def test_raw_payload_permissions_keep_the_existing_role_partition(read_scene, ro
     """Adding tenant knowledge cannot hand MAIN the captured payloads GATHER owns."""
     tenant, run_dir = read_scene
     raw = _put(run_dir, 'gather_raw/l-abc123/0.json', 'ROLE-PAYLOAD-P2-CONTENT')
-    allowed = _put(tenant.agent, 'lessons/control.md', 'ROLE-CONTROL-P2-CONTENT')
+    allowed = _put(_agent(tenant), 'lessons/control.md', 'ROLE-CONTROL-P2-CONTENT')
     model = _drive_as(read_scene, role, [
         _read_turn(surface, _model(raw, tenant=tenant, run_dir=run_dir)),
         _read_turn(surface, _model(allowed, tenant=tenant))])
@@ -130,7 +136,7 @@ def test_confined_curator_binding_keeps_tenant_knowledge_outside_its_read_scope(
     repo = tmp_path / 'curator-worktree'
     tree = repo / 'defender'
     allowed = _put(tree, 'lessons/control.md', 'CURATOR-CONTROL-P2')
-    denied = _put(tenant.agent, 'lessons/p2.md', 'CURATOR-DENIED-P2')
+    denied = _put(_agent(tenant), 'lessons/p2.md', 'CURATOR-DENIED-P2')
     deps = CuratorDeps.for_run(run_dir, repo, allowed.parent,
                                box=box_mod.unboxed_executor())
     for path, expected in ((allowed, True), (denied, False)):

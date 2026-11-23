@@ -152,7 +152,8 @@ def test_1618_k7_a_killed_fetch_childs_repository_is_swept_by_the_host_sweep(wor
     wrapper.write_text(K._CHILD_WRAPPER, encoding="utf-8")
     spec = tmp_path / "spec.json"
     spec.write_text(json.dumps({"module": K.CHILD_MODULE, "tenant_id": t.tenant_id, "origin": t.origin,
-                                "data_root": str(R.scratch_root(t).parent)}), encoding="utf-8")
+                                "data_root": str(R.scratch_root(t).parent), "import_root": str(A.IMPORT_ROOT)}),
+                    encoding="utf-8")
     dest = K.owned_dest(K.tenant_root(t) / "run-knowledge")
     child = subprocess.Popen([sys.executable, str(wrapper), str(spec), t.tenant_id, "--data-root", str(R.scratch_root(t).parent),  # noqa: S603
                               "--dest", str(dest)], cwd=A.IMPORT_ROOT, env={**os.environ, "PYTHONPATH": str(A.IMPORT_ROOT)},

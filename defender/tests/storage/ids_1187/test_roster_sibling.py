@@ -752,7 +752,10 @@ def _run_control(scene: _Scene, case: str):
     return ok
 
 
-@pytest.mark.parametrize("case", ["mismatched-manifest", "settings-in-arms", "old-episode-id"])
+#: #1618 K8: the `settings-in-arms` cell (the arm container linked to the tenant's `<T>/knowledge`, so a box would mount
+#: its host-only settings half) is retired with the host knowledge folder: a tenant holds none (design "Delete
+#: `<T>/knowledge`"), acceptance judges `<T>` alone, and a run's settings are its own copy's.
+@pytest.mark.parametrize("case", ["mismatched-manifest", "old-episode-id"])
 def test_the_sibling_refuses_invalid_identity_or_settings_before_spend(tmp_path, data_root, case):
     scene = _Scene(tmp_path, data_root, B_ID)
     scene.start_runs_by_hand()
@@ -760,11 +763,6 @@ def test_the_sibling_refuses_invalid_identity_or_settings_before_spend(tmp_path,
     if case == "mismatched-manifest":
         other = S.near_miss_id(scene.episode_id)
         T.write_family(scene.ep, {**scene.doc, "episode_id": other})
-    elif case == "settings-in-arms":
-        (scene.ep / "runs").rmdir()
-        os.symlink(S.tenant_dir(data_root, B_ID) / "knowledge", scene.ep / "runs",
-                   target_is_directory=True)
-        scene.poison()
     else:
         requested = S.OLD_MINTED_ID
         scene.ep.rename(scene.ep.parent / requested)
@@ -784,14 +782,8 @@ def test_the_sibling_refuses_invalid_identity_or_settings_before_spend(tmp_path,
     else:
         assert SENTINEL not in said, "the manifest was read before admission refused"
         assert S.EPISODES_BASE_ENV not in said
-        if case == "settings-in-arms":
-            assert "settings" in text, text
-            assert "a box mounts" in text, text
-            os.unlink(scene.ep / "runs")
-            (scene.ep / "runs").mkdir()
-        else:
-            assert requested in text, text
-            (scene.ep.parent / requested).rename(scene.ep)
+        assert requested in text, text
+        (scene.ep.parent / requested).rename(scene.ep)
     scene.restore()
     _run_control(scene, case)
 

@@ -62,8 +62,10 @@ KNOWLEDGE = "{id}.knowledge-source.json"
 
 #: Helper steps whose refusal carries no knowledge: they come at or before `publish` (R3, R13-1.5).
 STEPS_WITHOUT_KNOWLEDGE = ("tenant", "records", "alert_mapping", "publish")
-#: Steps after `publish`, the container's included: the knowledge record is read there.
-STEPS_WITH_KNOWLEDGE = ("knowledge_copy", "run_tenant", "roster", "tenant_verdict", "signing", "first_pass",
+#: Steps after `publish`, the container's included: the knowledge record is read there. #1618 D10: `knowledge_copy` is
+#: merged into `publish` and is no step a record may name (a stored one reads back as `publish`:
+#: `jobs/test_readiness_retired_step_1618.py`).
+STEPS_WITH_KNOWLEDGE = ("run_tenant", "roster", "tenant_verdict", "signing", "first_pass",
                         "container_tenant", "systems")
 READINESS_STEPS = (*STEPS_WITHOUT_KNOWLEDGE, *STEPS_WITH_KNOWLEDGE)
 READINESS_HELPER_REASONS = ("start_failed", "worker_error")

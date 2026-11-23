@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -165,7 +166,10 @@ def test_a_refused_commit_is_routed_as_a_refused_claim_773(tmp_path, fault):
         if fault == "forbidden-name":
             (cfg.corpus_dir / ".gitattributes").write_text("* filter=tenant\n", encoding="utf-8")
         elif fault == "ref-locked":
-            lock = sc.repo / ".git" / "refs" / "heads" / f"{sc.lane.batch.branch}.lock"
+            # #1618 K8: the batch's branch lives in its delivery's private BARE repository, whose git dir is the folder
+            # itself (no `.git/` below it): the lock goes where git takes it for the branch's compare-and-swap move.
+            git_dir = Path(S.git(sc.repo, "rev-parse", "--absolute-git-dir").stdout.strip())
+            lock = git_dir / "refs" / "heads" / f"{sc.lane.batch.branch}.lock"
             lock.parent.mkdir(parents=True, exist_ok=True)
             lock.write_text("held by another writer\n")
         elif fault == "unrelated":

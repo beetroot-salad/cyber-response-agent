@@ -238,7 +238,9 @@ def test_o7_an_operator_waives_dirty_siblings_and_the_stamp_says_so(tmp_path):
 
 
 def test_o7_jobs_never_waive_unproven_knowledge(tmp_path):
-    """A job whose source knowledge is unproven is refused before spend; the operator flag is the only waiver. (Family check)"""
+    """A job whose source knowledge is unproven is refused before spend. (Family check) #1618 r5.1-b/K8: so is an operator's
+    with the flag (was: the operator flag waived it, through the fallback to the tenant's `current`, which #1618 retires and
+    does not replace with `main`); the refusal names the pin and that the flag does not reach it."""
     job = _prepare(tmp_path)
     A._restamp(job.src, knowledge=T.NO_KNOWLEDGE_KEY)
     message = A._refused_before_spending(job, *_lane("job", "k"))
@@ -246,7 +248,8 @@ def test_o7_jobs_never_waive_unproven_knowledge(tmp_path):
 
     operator = _prepare(tmp_path)
     A._restamp(operator.src, knowledge=T.NO_KNOWLEDGE_KEY)
-    assert A._accepted(operator, "--allow-dirty")["waived"] == ["knowledge"]
+    refused = A._refused_before_spending(operator, "--allow-dirty")
+    assert "not waived by --allow-dirty" in refused, refused
 
 
 # a family whose stamps came from a code copy's marker

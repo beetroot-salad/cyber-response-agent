@@ -194,7 +194,11 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
     plant_alert(runs / rid)
     run = t.runs_repository().open(RunId.parse(rid))
     assert getattr(run, "run_dir", None) == runs / rid, f"runs.open handed out {run!r}"
-    create = _create_argv("defender-run-r1", run.run_dir, H.DEFENDER, BoxSpec(runtime="runc", rootfs="busybox"), lane=_run_lane_mounts(run.run_dir, H.DEFENDER, t.agent))
+    # #1618 K8: a `Tenant` names no agent half; the lane is handed an agent folder (a run's own copy in production), here
+    # the one `H.tenant` placed, mounted read-only like any.
+    agent = Path(location_path(t.tenant_root)) / "knowledge" / "agent"
+    assert agent.is_dir(), f"premise: {agent} was placed"
+    create = _create_argv("defender-run-r1", run.run_dir, H.DEFENDER, BoxSpec(runtime="runc", rootfs="busybox"), lane=_run_lane_mounts(run.run_dir, H.DEFENDER, agent))
     argv = create.argv
     mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
     binds = []

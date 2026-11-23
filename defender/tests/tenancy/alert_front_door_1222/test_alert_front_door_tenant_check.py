@@ -411,8 +411,10 @@ def test_a_legacy_case_history_folder_is_a_check_finding_naming_the_retired_fold
 LEFTOVER_SHAPES = ("missing_file", "valid", "empty_file", "comment_only", "explicit_null", "unparseable_yaml",
                    "non_utf8", "unknown_key", "misspelled_key", "null_entry", "empty_entry", "number_entry",
                    "list_entry", "empty_segment")
-#: `unreadable` cannot be published (`git add` reads it), so only the sites that do not publish judge it.
-UNPUBLISHED_SITES = ("acceptance", "check-folder", "policy-cli")
+#: `unreadable` cannot be published (`git add` reads it), so only the sites that do not publish judge it. #1618 K8: the
+#: policy CLI is no longer one of them: it is handed a copy fetched from Forgejo (design K8, "a reader that names no copy
+#: is handed one: the policy CLI, ..."), so it reads only what a commit can hold, as run start does.
+UNPUBLISHED_SITES = ("acceptance", "check-folder")
 
 
 @pytest.mark.parametrize("shape", [*LEFTOVER_SHAPES, pytest.param("unreadable", marks=S.needs_non_root)])

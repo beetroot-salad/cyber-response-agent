@@ -18,6 +18,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 from defender.records._episode_handle import Episode
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core import _typed_output1579 as TY
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.systems.verbs import VerbContext  # noqa: E402
 from defender.kit.faults import UpstreamFault  # noqa: E402
@@ -110,7 +111,8 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
     rc = entry.main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
                   preflight=lambda model, **_kw: seen.append("family") or 0,
                   spawn=spawn, live_tree=T.source_capture(), questioner=questioner,
-                  directory=T.launcher_directory(src.parent.parent.name))
+                  directory=T.launcher_directory(src.parent.parent.name),
+                  fetch=in_process_fetch())  # #1618 flow 4 (K8): the launch's one fetch
     assert rc == 1
     assert questioner.calls == 3
     assert spawn.launches == []
