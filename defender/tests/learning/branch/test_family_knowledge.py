@@ -239,19 +239,19 @@ SOURCE_WAIVABLE: dict[str, Any] = {k: v for k, v in UNPROVABLE.items()
 
 
 @pytest.mark.parametrize("shape", sorted(SOURCE_WAIVABLE))
-def test_1204_a_source_whose_knowledge_is_unprovable_is_refused_at_preflight_unless_waived(
+def test_1204_a_source_whose_knowledge_is_unprovable_is_refused_at_preflight_and_the_flag_cannot_waive_it(
         tmp_path, shape):
-    """Only the pre-#1204 shapes (`SOURCE_WAIVABLE`)."""
-    launch = A._prepare(tmp_path)
-    A._restamp(launch.src, knowledge=SOURCE_WAIVABLE[shape])
-    message = A._refused_before_spending(launch)
-    A._waivable(message, "source", "knowledge")
-    _never_called_dirt(message)
-
-    waived = A._prepare(tmp_path)
-    A._restamp(waived.src, knowledge=SOURCE_WAIVABLE[shape])
-    stamp = A._accepted(waived, "--allow-dirty")
-    assert stamp["allow_dirty"] is True
+    """The pre-#1204 shapes (`SOURCE_WAIVABLE`: no host knowledge record and a stamp naming no knowledge) are refused before
+    anything is spent, with and without `--allow-dirty`, for the pin the source cannot give. Was "refused unless waived":
+    the flag reached it only through the fallback to the tenant's `current`, which #1618 retires (K8) and does not replace
+    with `main` (r5.1-b, D3; launch side: `tenant_1108_p4/test_branch_replay.py::test_1618_r51b_...`)."""
+    for argv in ((), ("--allow-dirty",)):
+        launch = A._prepare(tmp_path)
+        A._restamp(launch.src, knowledge=SOURCE_WAIVABLE[shape])
+        message = A._refused_before_spending(launch, *argv)
+        assert "no knowledge commit to pin its siblings to" in message, (argv, message)
+        assert "not waived by --allow-dirty" in message, (argv, message)
+        _never_called_dirt(message)
 
 
 @pytest.mark.parametrize("argv", [(), ("--allow-dirty",)], ids=["plain", "allow-dirty"])
@@ -272,31 +272,34 @@ def test_1204_a_launch_whose_siblings_read_another_knowledge_commit_ends_incompl
     assert not (launch.episode_dir / "provenance.json").exists()
 
 
+#: Each case's source is `T.provenance_record(**its keywords)`, built inside the test: a default stamp names the knowledge
+#: `main` of the test's own data root (`T.scene_knowledge` reads `DEFENDER_DATA_ROOT`), which at import time is the
+#: ambient environment's, not the case's (#1618: the commit is a real one on the forge, no longer a constant).
 WAIVED: dict[str, tuple[dict, dict[str, dict], bool, list[str]]] = {
-    "clean-flag-off": (T.provenance_record(), {}, False, []),
-    "clean-flag-on": (T.provenance_record(), {}, True, []),
-    "dirty-sibling": (T.provenance_record(), {"b": {"dirty": True}}, True, ["dirt"]),
+    "clean-flag-off": ({}, {}, False, []),
+    "clean-flag-on": ({}, {}, True, []),
+    "dirty-sibling": ({}, {"b": {"dirty": True}}, True, ["dirt"]),
     "unknown-tree-sibling": (
-        T.provenance_record(), {"c": {"dirty": None, "unavailable": T.GIT_STATUS_FAILED}},
+        {}, {"c": {"dirty": None, "unavailable": T.GIT_STATUS_FAILED}},
         True, ["dirt"]),
     # #1344 r5 (the family check): the source's cleanliness is no longer judged, so its dirt is nothing to waive.
-    "dirty-source": (T.provenance_record(dirty=True), {}, True, []),
-    "dirty-source-flag-off": (T.provenance_record(dirty=True), {}, False, []),
-    "pre-1204-source": (T.provenance_record(knowledge=T.NO_KNOWLEDGE_KEY), {}, True,
+    "dirty-source": ({"dirty": True}, {}, True, []),
+    "dirty-source-flag-off": ({"dirty": True}, {}, False, []),
+    "pre-1204-source": ({"knowledge": T.NO_KNOWLEDGE_KEY}, {}, True,
                         ["knowledge"]),
-    "unversioned-sibling": (T.provenance_record(), {"b": {"knowledge": "unversioned"}}, True,
+    "unversioned-sibling": ({}, {"b": {"knowledge": "unversioned"}}, True,
                             ["knowledge"]),
-    "unavailable-source": (T.provenance_record(knowledge=UNAVAILABLE_REFTABLE), {}, True,
+    "unavailable-source": ({"knowledge": UNAVAILABLE_REFTABLE}, {}, True,
                            ["knowledge"]),
-    "both": (T.provenance_record(knowledge=T.NO_KNOWLEDGE_KEY), {"b": {"dirty": True}}, True,
+    "both": ({"knowledge": T.NO_KNOWLEDGE_KEY}, {"b": {"dirty": True}}, True,
              ["dirt", "knowledge"]),
 }
 
 
 @pytest.mark.parametrize("case", sorted(WAIVED))
 def test_1204_the_family_stamp_records_which_fault_kinds_the_override_waived(tmp_path, case):
-    source, siblings, flag, waived = WAIVED[case]
-    report, stamp = _verify(tmp_path, f"waived-{case}", source=source,
+    source_keywords, siblings, flag, waived = WAIVED[case]
+    report, stamp = _verify(tmp_path, f"waived-{case}", source=T.provenance_record(**source_keywords),
                                       siblings=siblings, allow_dirty=flag)
     assert report["comparable"] is True, report["reason"]
     assert stamp is not None
@@ -304,19 +307,9 @@ def test_1204_the_family_stamp_records_which_fault_kinds_the_override_waived(tmp
     assert stamp["allow_dirty"] is flag
 
 
-@pytest.mark.parametrize("dirty_source", [False, True], ids=["clean-code", "dirty-code"])
-def test_1204_a_launch_that_waives_a_pre_1204_sources_knowledge_records_it_as_knowledge(
-        tmp_path, dirty_source):
-    """The same record end to end through the launcher. The source's dirt is not judged (#1344 r5), so only its
-    knowledge is waived; the family stamp still keeps the source's whole record, dirt included."""
-    launch = A._prepare(tmp_path)
-    A._restamp(launch.src, knowledge=T.NO_KNOWLEDGE_KEY, dirty=dirty_source)
-    stamp = A._accepted(launch, "--allow-dirty")
-    assert stamp["waived"] == ["knowledge"]
-    assert stamp["source"]["dirty"] is dirty_source
-    assert stamp["allow_dirty"] is True
-    # The siblings name the published tenant's real commit.
-    assert stamp["agreed"]["knowledge"] == {"commit": T.scene_knowledge()}
+# (`test_1204_a_launch_that_waives_a_pre_1204_sources_knowledge_records_it_as_knowledge`, retired by #1618 r5.1-b/K8: a pre-#1204
+# source can no longer be launched, so no launch waives its knowledge; the refusal is the case above, and the verify tier's
+# `waived == ["knowledge"]` for such a source stays in `WAIVED["pre-1204-source"]`.)
 
 
 #: Siblings that name no knowledge commit, in the FIRST position (`a` is handed over first).
