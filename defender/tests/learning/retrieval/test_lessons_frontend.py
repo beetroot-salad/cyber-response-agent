@@ -12,6 +12,7 @@ import pytest
 
 from defender.learning.frontend import serialize  # noqa: E402
 from defender.tests.support.shared.contracts._frontend_outputs import frontend_outputs_lock  # noqa: E402,F401 — shared pytest fixture
+from defender.tests.support.tenancy._fetch_standin_1618 import halves_at
 from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
 DEFENDER = Path(__file__).resolve().parents[3]
@@ -28,9 +29,10 @@ FIXTURE_TITLES = {
 
 @pytest.fixture
 def export_agent(tmp_path: Path, data_root: Path) -> Path:
-    """The fixture tenant's `agent/` inside a real export: the root the frontend reads."""
+    """The fixture tenant's `agent/` in a copy of its seed commit: the root the frontend reads. #1618 K8: exports are
+    deleted; a reader is handed a knowledge copy (`agent/` and `settings/` at one commit), here the test-side copy."""
     with published_tenant(tmp_path / "forge", root=data_root) as tenant:
-        yield tenant.export.path / "agent"
+        yield halves_at(tenant.remote, tenant.commit, tmp_path / "copy") / "agent"
 
 
 def test_o_u5_the_posture_page_has_only_the_live_groups(export_agent: Path):

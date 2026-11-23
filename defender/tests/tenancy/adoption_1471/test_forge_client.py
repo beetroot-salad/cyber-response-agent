@@ -7,7 +7,7 @@ import pytest
 from defender.learning.author.version_control import forgejo
 from defender.learning.author.version_control.forgejo import ForgeError
 from defender.tests.tenancy.tenant_1108_delivery._identity import identity as fixture_identity
-from defender.tests.tenancy.tenant_1108_delivery._support import configured_origin, delivery, git
+from defender.tests.tenancy.tenant_1108_delivery._support import delivery, git, origin_of
 
 from ._forge import AdoptionForge
 
@@ -19,10 +19,10 @@ def client(http, origin):
 @pytest.fixture
 def served(repo):
     http = AdoptionForge()
-    delivery(repo, http)  # points the double at the bare remote and the clone's origin
+    delivery(repo, http)  # points the double at the bare remote and the served origin
     git(repo[1], "update-ref", "refs/heads/adopt/x/aaaa", git(repo[1], "rev-parse", "refs/heads/main"))
     git(repo[1], "update-ref", "refs/heads/adopt/x/bbbb", git(repo[1], "rev-parse", "refs/heads/main"))
-    return http, client(http, configured_origin(repo[0].knowledge))
+    return http, client(http, origin_of(repo))  # #1618 K8: no tenant clone; the origin the seed is served at
 
 
 def _open(forge, head="adopt/x/aaaa"):
