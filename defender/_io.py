@@ -9,7 +9,7 @@ import stat
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path, PurePath
-from typing import IO, Any, Literal, overload
+from typing import Any, Literal, overload
 
 from defender._filesystem.bound import (
     ALIAS_READ_REFUSAL as ALIAS_READ_REFUSAL,

@@ -1179,7 +1179,8 @@ def _grade_job(runs: RunsRepository[Tenant], *, episode_id: str, judge: Any, lan
     grade = grade_episode if lane.grade is None else lane.grade
     try:
         # Inside a job container the judge's default copy is the job helper's; a host launch brings its own (#1618 K5).
-        graded = grade(runs, episode_id, judge=judge, job_lane=True, **({} if copy is None else {"copy": copy}))
+        graded = (grade(runs, episode_id, judge=judge, job_lane=True) if copy is None
+                  else grade(runs, episode_id, judge=judge, job_lane=True, copy=copy))
     except Exception as judge_failed:  # noqa: BLE001 — every failure of the pass is the job's judge_failed
         raise ending(f"[branch] episode {episode_id}: the judge pass failed ({judge_failed!r})",
                      reason=JUDGE_FAILED,

@@ -636,7 +636,7 @@ def create_app_from_config(config: Mapping[str, Any], *, openbao_addr: str | Non
     deployment's (`DEPLOYMENT_ISSUER`, https) on the fixed transit mount; `openbao_addr` and
     `transport` are a test's seam, never configuration. A missing or unknown key (the retired
     `tenant_keys`, `tenant_exports`, `transit_mount`, `openbao_addr` and `max_response_bytes`
-    included) or a value of
+    included; lint-stale-ref: ok — retired keys the proxy still refuses) or a value of
     the wrong type is `ConfigFault`."""
     missing = [k for k in CONFIG_KEYS if k not in config]
     unknown = sorted(set(config) - set(CONFIG_KEYS) - set(TOKEN_KEYS) - set(OPTIONAL_CONFIG_KEYS))
