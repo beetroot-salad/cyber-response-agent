@@ -655,7 +655,6 @@ class _TokenMint:
 # Run setup's host half lives in `run_common` (#1170 A6): the per-job host helper runs it for a job, and the
 # operator command runs it here, beside its run half.
 _resolve_run_tenant = _run.run_tenant_or_exit
-_publish_report = _run.publish_report
 FetchSeam = _run.FetchSeam
 _knowledge_source = _run.resolve_knowledge
 _copy_knowledge = _run.copy_knowledge

@@ -25,6 +25,7 @@ from ._support import (
     odd_entries,
     opened,
     push_and_open,
+    push_to_remote,
     target,
 )
 
@@ -252,3 +253,26 @@ def _force_moved_remote_branch(repo, tmp_path, branch):
         git(writer, "push", "--force", "origin", f"HEAD:refs/heads/{branch}")
         tips.append(git(writer, "rev-parse", "HEAD"))
     return tuple(tips)
+
+
+_OTHER_TENANT = "00000000-0000-4000-8000-0000000000ff"
+
+
+@pytest.mark.parametrize("case", ["other-tenant", "settings-not-plain"])
+def test_start_batch_refuses_a_main_the_run_copy_would_refuse_and_leaves_no_draft(repo, tmp_path, case):
+    """A batch's draft is read through the same check as a run's copy (#1618 follow-up): a `main` whose
+    `agent/.tenant-id` names another tenant, or whose `settings/` holds a path that is not plain, refuses the
+    batch, naming why, and leaves no draft. Control: the earlier `main` drafts."""
+    tenant = repo[0]
+    with delivery(repo, ForgeHTTP()) as d:
+        assert d.start_batch("before", lanes=LANES).id == "before", "control: a good main drafts"
+
+    def bad(writer):
+        if case == "other-tenant":
+            (writer / "agent" / ".tenant-id").write_text(f"{_OTHER_TENANT}\n", encoding="utf-8")
+        else:
+            (writer / "settings" / " lead-space.yaml").write_text("x: 1\n", encoding="utf-8")
+    push_to_remote(repo, tmp_path, bad)
+    with delivery(repo, ForgeHTTP()) as d, pytest.raises(target().DeliveryRefused, match="names tenant|not a plain path"):
+        d.start_batch("after", lanes=LANES)
+    assert not (location_path(tenant.tenant_root) / "drafts" / "after").exists()

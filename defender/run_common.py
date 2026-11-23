@@ -540,32 +540,51 @@ class KnowledgeExit(SystemExit):
         self.report = report
 
 
-def publish_report(
-    fetch: FetchSeam | None, tenant: tenancy.Tenant, data_root: DataRoot,
-    records: tenancy.TenantDirectory, *, run_id: str, commit: str | None = None, trigger: str | None = None,
-    into: Path | None = None,
-) -> PublishReport:
-    """D5: the CALLER makes an owned empty folder beside the copy's final place (`<T>/run-knowledge/` or `into`), has
-    the fetch child fill it (`fetch_report`), and on `ok` renames it into place as `run_id` with this process as its
-    owner; on a refusal it discards the folder."""
+def resolve_knowledge(
+    tenant: tenancy.Tenant, *, pin: str | None, fetch: FetchSeam | None,
+    data_root: DataRoot, records: tenancy.TenantDirectory, run_id: str, trigger: str | None = None,
+) -> KnowledgeSource:
+    """Which commit this run reads and why — the pinned one, else `main`'s tip — and the run's own copy of it, made by
+    the one operation every run copy is made by (D5): an owned empty folder beside the copy's place under
+    `<T>/run-knowledge/`, filled by the fetch child, held to the pin and to the run settings rules, and only then
+    placed as `run_id`, owned by this process. Any refusal before the box (O-A, O9) is a `KnowledgeExit`, holding the
+    report it was refused on (`None` for a settings refusal), and leaves nothing under `<T>/run-knowledge/`. `records`
+    is not read. A stop (a plain `SystemExit` from the fetch's signal handler) goes on up, the folder discarded."""
     from defender.tenancy import run_knowledge
 
-    parent = tenant.run_knowledge if into is None else into
-    temporary = run_knowledge.make_owned_empty(parent, run_id)
+    del records
+    parent = tenant.run_knowledge
+
+    def refused_fetch(why: object) -> KnowledgeExit:
+        report = run_knowledge.read_publish_report(run_knowledge.failed_line(str(why)))
+        try:
+            run_knowledge.resolve_source(tenant, report=report, pinned=pin)
+        except run_knowledge.KnowledgeRefused as refused:
+            return KnowledgeExit(f"[run.py] {refused}", report=report)
+        raise AssertionError("a failed report resolved")  # pragma: no cover — `failed_line` is never `ok`
+
     try:
-        report = fetch_report(fetch, tenant.id, temporary, data_root, commit=commit, trigger=trigger)
+        temporary = run_knowledge.make_owned_empty(parent, run_id)
+    except (OSError, ValueError) as unmade:
+        raise refused_fetch(f"the run's copy folder could not be made under {parent}: {unmade}") from None
+    try:
+        report = fetch_report(fetch, tenant.id, temporary, data_root, commit=pin, trigger=trigger)
+        try:
+            source = run_knowledge.resolve_source(tenant, report=report, pinned=pin)
+        except run_knowledge.KnowledgeRefused as refused:
+            raise KnowledgeExit(f"[run.py] {refused}", report=report) from None
+        try:
+            tenancy.check_run_settings(run_knowledge.RunCopy(temporary).settings)
+        except TenantRefused as refused:
+            raise KnowledgeExit(f"[run.py] this run's tenant cannot be used: {refused}", report=None) from None
+        try:
+            run_knowledge.place(temporary, parent / run_id)
+        except (run_knowledge.KnowledgeRefused, OSError) as unplaced:
+            raise refused_fetch(unplaced) from None
     except BaseException:
         _discard(temporary)
         raise
-    if report.kind != run_knowledge.OK:
-        _discard(temporary)
-        return report
-    try:
-        run_knowledge.place(temporary, parent / run_id)
-    except (run_knowledge.KnowledgeRefused, OSError) as refused:
-        _discard(temporary)
-        return run_knowledge.read_publish_report(run_knowledge.failed_line(str(refused)))
-    return report
+    return source
 
 
 def _discard(temporary: Path) -> None:
@@ -574,38 +593,15 @@ def _discard(temporary: Path) -> None:
     remove_entry(temporary.parent, temporary.name)
 
 
-def resolve_knowledge(
-    tenant: tenancy.Tenant, *, pin: str | None, fetch: FetchSeam | None,
-    data_root: DataRoot, records: tenancy.TenantDirectory, run_id: str, trigger: str | None = None,
-) -> KnowledgeSource:
-    """Which commit this run reads and why: the pinned one, else `main`'s tip, fetched by the fetch child into the run's
-    own copy `run_id` (`publish_report`) — or the refusal before the box (O-A, O9), a `KnowledgeExit` holding the
-    report it was refused on."""
-    from defender.tenancy import run_knowledge
-
-    report = publish_report(fetch, tenant, data_root, records, run_id=run_id, commit=pin, trigger=trigger)
-    try:
-        source = run_knowledge.resolve_source(tenant, report=report, pinned=pin)
-    except run_knowledge.KnowledgeRefused as refused:
-        raise KnowledgeExit(f"[run.py] {refused}", report=report) from None
-    return source
-
-
 def copy_knowledge(tenant: tenancy.Tenant, source: KnowledgeSource, run_id: str) -> RunCopy:
-    """The run's own copy of its export (U9), made and owned by the calling process, or the
-    refusal before the box."""
+    """The run's own copy, as `resolve_knowledge` placed and checked it (U9), or the refusal before the box."""
     from defender.tenancy import run_knowledge
 
+    del source
     try:
-        copy = run_knowledge.adopt_copy(tenant, run_id)
+        return run_knowledge.adopt_copy(tenant, run_id)
     except (run_knowledge.KnowledgeRefused, OSError) as refused:
         sys.exit(f"[run.py] the run's knowledge could not be copied: {refused}")
-    try:
-        tenancy.check_run_settings(copy.settings)
-    except TenantRefused as refused:
-        copy.remove()
-        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
-    return copy
 
 
 def run_tenant_or_exit(

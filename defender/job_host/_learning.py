@@ -202,8 +202,11 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
         # systems the proxy refuses, and would miss none it serves.
         grant_id = f"{job}-grant"
         source = settle_knowledge(session, accepted, records, run_id=grant_id)
-        grant_copy = run_knowledge.adopt_copy(accepted, grant_id)
-        cleanup.callback(grant_copy.remove)
+        cleanup.callback(run_knowledge.RunCopy(accepted.run_knowledge / grant_id).remove)
+        try:
+            grant_copy = run_knowledge.adopt_copy(accepted, grant_id)
+        except (run_knowledge.KnowledgeRefused, OSError) as refused:
+            raise SetupRefused(f"this job's knowledge could not be copied: {refused}") from None
         try:
             ready = run_tenant_for(accepted, dispatches_lead_zero=False, records=current, catalog=Catalog(roster),
                                    agent_root=grant_copy.agent, settings_root=grant_copy.settings)
@@ -469,11 +472,13 @@ def _sibling_copy(session: Session, state: _Learning, world: object) -> dict[str
     session.inside_tenant(run_dir, must_exist=False)
     source = run_knowledge.KnowledgeSource(kind=run_knowledge.PINNED,
                                            commit=_pinned_commit(state, session, state.commit))
-    try:  # the fetch child fetches the pin by id into the sibling's own copy (owned by this helper)
-        report = run_common.publish_report(session.fetch, state.tenant, session.root, state.records, run_id=run,
-                                           commit=source.commit)
-        run_knowledge.resolve_source(state.tenant, report=report, pinned=source.commit)
+    try:  # run setup's own copy operation: the pin fetched by id into the sibling's copy (owned by this helper), checked
+        run_common.resolve_knowledge(state.tenant, pin=source.commit, fetch=session.fetch, data_root=session.root,
+                                     records=state.records, run_id=run)
         copy = run_knowledge.adopt_copy(state.tenant, run)
+    except run_common.KnowledgeExit as refused:
+        why = str(refused.code).removeprefix("[run.py] ")
+        raise Refused(f"the sibling's run copy could not be made: {why}", "internal") from None
     except (run_knowledge.KnowledgeRefused, OSError) as refused:
         raise Refused(f"the sibling's run copy could not be made: {refused}", "internal") from None
     try:

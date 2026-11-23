@@ -70,8 +70,11 @@ def build_draft(
 ) -> None:
     """The draft (U9) `<T>/drafts/<id>/{owner, stage/agent/...}` of `commit`'s `agent/` (and each lane's folder), built
     whole in a fresh `<T>/drafts/<owned temporary>` (owned from its first instant: no lock), then renamed into place,
-    refusing any entry already there. `repository` is the caller's private repository, outside `<T>`."""
-    files = agent_blobs(repository, commit)
+    refusing any entry already there. `repository` is the caller's private repository, outside `<T>`. `commit` is read
+    through `knowledge_at`, the check a run's copy is held to (tenant marker, plain paths, regular blobs): a draft is
+    never built from a commit a run would refuse."""
+    files = {path.removeprefix("agent/"): data for path, data in knowledge_at(tenant, repository, commit).items()
+             if path.startswith("agent/")}
     drafts = unwrap_drafts_root(tenant.drafts)
     temporary = owned_temporary(f"{_DRAFT_TEMPORARY}{batch_id}")
     try:
