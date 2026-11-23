@@ -7,6 +7,8 @@ defender/tests/fixtures/tenant-fixture` to a scratch folder, drive `_1255_snapsh
 drop `run/wire_logs`, tar sorted with mtime 0, gzip -9n. Each test unpacks it into its own tmp_path; none writes to it."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an entry's one knowledge fetch, in-process
+
 import hashlib
 import json
 import os
@@ -188,6 +190,7 @@ def _launch_over_the_old_run(tmp_path: Path, **seams):
     seams.setdefault("oracle", S.oracle(then=S.submit()).model)
     seams.setdefault("verifier", S.passing_verifier().model)
     seams.setdefault("directory", est.launch_directory(tenant.id))
+    seams.setdefault("fetch", in_process_fetch())  # #1618 flow 4: the launch's one fetch
     from defender.cli.learning import branch as cli
 
     try:

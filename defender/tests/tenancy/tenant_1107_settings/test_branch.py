@@ -1,6 +1,7 @@
 """Branch launcher and tenant settings: box-mounted tenants-root refusal; a sibling resolves its own record."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an entry's one knowledge fetch, in-process
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import fixture_data_root
 
@@ -65,7 +66,7 @@ def _launch(src: Path, root: Path, seams: dict[str, Any]) -> tuple[Any, BaseExce
     # The tenant and the source run, by id.
     argv = ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)]
     try:
-        return branch_entry.main(argv, directory=directory_for_argv(argv), **seams), None
+        return branch_entry.main(argv, directory=directory_for_argv(argv), **{"fetch": in_process_fetch(), **seams}), None
     except SystemExit as refused:
         return None, refused
 

@@ -1,6 +1,7 @@
 """The entry points take a tenant through `accept_tenant`, once."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an entry's one knowledge fetch, in-process
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
 
@@ -71,7 +72,8 @@ def _launch(source: Path, spawn: Any, *, tenant_id: str | None = None,
     requested = source.parent.parent.name if tenant_id is None else tenant_id
     argv = ["--tenant", requested, source.name, str(T.BRANCH_MESSAGE_ID)]
     try:
-        return branch_entry.main(argv, spawn=spawn, directory=directory_for_argv(argv), **seams)
+        return branch_entry.main(argv, spawn=spawn, directory=directory_for_argv(argv),
+                                 **{"fetch": in_process_fetch(), **seams})
     except SystemExit as refused:
         return refused
 
@@ -91,9 +93,9 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
         f"RunTenant.tenant is not the Tenant accept_tenant returns: {run_tenant.tenant!r} "
         f"!= {expected!r}")
     assert type(run_tenant.tenant) is type(expected)
-    # The accepted Tenant names the tenant's own folder, but the run reads its own copy of the
-    # published export (settings and grant table), never the clone's working tree.
-    assert run_tenant.tenant.settings == H.settings_dir(data_root)
+    # The accepted Tenant names no knowledge path (#1618 K8); the run reads its own copy of the fetched commit
+    # (settings and grant table), never a folder kept on the host.
+    assert not hasattr(run_tenant.tenant, "settings"), run_tenant.tenant
     assert H.run_copy_part(run_tenant.settings, data_root) == ("settings",), (
         f"the run read settings from {run_tenant.settings}, not its own run copy")
     assert run_tenant.tenant_id == H.TID
@@ -203,7 +205,7 @@ def _drive(entry: str, cell: _Cell, base: Path, monkeypatch, capsys) -> tuple[bo
         if cell.defender_dir is not None:
             argv += ["--defender-dir", str(cell.defender_dir)]
         try:
-            rc = policy_cli.main(argv, directory=directory_for_argv(argv))
+            rc = policy_cli.main(argv, directory=directory_for_argv(argv), fetch=in_process_fetch())
         except SystemExit as refused:
             return True, H.exit_text(refused) + capsys.readouterr().err, False
         cap = capsys.readouterr()

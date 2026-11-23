@@ -1,6 +1,7 @@
 """The operator commands and the settings loaders read the data root's copy of a tenant."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an entry's one knowledge fetch, in-process
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -48,7 +49,7 @@ def _policy_gather(tmp_path: Path, tenant_id: str) -> tuple[int | None, str]:
     — a `sys.exit(msg)` refusal comes back as `(None, msg)`."""
     argv = ["show", "gather", "--run-dir", str(tmp_path / "policy-run"), "--tenant", tenant_id]
     try:
-        return policy_cli.main(argv, directory=directory_for_argv(argv)), ""
+        return policy_cli.main(argv, directory=directory_for_argv(argv), fetch=in_process_fetch()), ""
     except SystemExit as refused:
         return None, H.exit_text(refused)
 
@@ -143,7 +144,8 @@ def _launch(source: Path) -> BaseException | int:
     spawn = _SpawnRecorder()
     argv = ["--tenant", source.parent.parent.name, source.name, str(T947.BRANCH_MESSAGE_ID)]
     try:
-        return branch_entry.main(argv, directory=directory_for_argv(argv), spawn=spawn, preflight=T947.no_preflight)
+        return branch_entry.main(argv, directory=directory_for_argv(argv), spawn=spawn, preflight=T947.no_preflight,
+                                 fetch=in_process_fetch())
     except SystemExit as refused:
         return refused
     finally:

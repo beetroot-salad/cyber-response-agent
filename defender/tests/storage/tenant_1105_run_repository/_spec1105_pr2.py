@@ -1,6 +1,7 @@
 """Shared helpers for the PR 2 run-repository tests (tenant fixtures, CLI/process drivers). No test functions."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an entry's one knowledge fetch, in-process
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
 import logging
@@ -195,7 +196,8 @@ def drive_launch(est: Any, argv: list[str], *, spawn: Any = None, judge: Any = N
     message = ""
     raised: BaseException | None = None
     try:
-        rc = branch_entry.main(list(argv), spawn=spawn, judge=judge, questioner=questioner, **seams)
+        rc = branch_entry.main(list(argv), spawn=spawn, judge=judge, questioner=questioner,
+                               **{"fetch": in_process_fetch(), **seams})
     except SystemExit as stop:
         raised = stop
         if isinstance(stop.code, str):
