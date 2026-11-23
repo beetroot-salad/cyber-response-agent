@@ -361,7 +361,9 @@ def test_1186_learning_operator_commands_refuse_identity_before_state_access(
 
 @pytest.mark.parametrize(("script", "args", "lane", "diagnostic", "status"), [
     ("defender/learning/loop.py", ["--author-drain"], "author", "skipping", 0),
-    ("defender/learning/loop.py", ["--lead-author-drain"], "lead_author", "skipping", 0),
+    # #1546 D7: the operator's lead-author drain queues a `drain` host request (the helper's drain container runs the tick); it
+    # never claims the lane on the host, so it neither skips nor meets the lane's busy check: it prints the request's id.
+    ("defender/learning/loop.py", ["--lead-author-drain"], "lead_author", "drain_request=", 0),
     # A curator module's own command runs the author lane's tenant batch, as
     # `loop.py --author-drain --tenant T` does, so it meets the author lane's working batch.
     ("defender/learning/author/lessons/run.py", [], "author", "skipping", 0),
@@ -375,7 +377,9 @@ def test_1186_learning_operator_cli_meets_the_explicit_tenants_busy_lane(
 ):
     """A valid --tenant meets its own tenant's working batch despite a conflicting retired state-dir override: the
     command leaves the one batch as it was, makes no second, and writes nothing under the ambient root.
-    (#1278 r8 Locks: the drain locks are the store's working-batch rule; this was the file lock's case.)"""
+    (#1278 r8 Locks: the drain locks are the store's working-batch rule; this was the file lock's case.) The lead-author
+    command is #1546 D7's: it queues exactly one `drain` host request for the tenant and touches the held batch and the
+    waiting work no more than the others do."""
     from defender.tests.support.learning.core._store1278 import FINDING, ONE, batches, call, finding
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
@@ -403,6 +407,11 @@ def test_1186_learning_operator_cli_meets_the_explicit_tenants_busy_lane(
         "the command did not leave the tenant's one working batch alone")
     assert [i.status for i in call(migrated_database, "work", H.TID) if i.key in ("f2", "run-2")] == ["waiting"], (
         "the command took the work waiting behind the tenant's busy lane")
+    from defender.tests.support.shared._postgres1339 import execute
+
+    queued = execute(migrated_database, "SELECT kind, stage FROM jobs.host_requests WHERE tenant_id = %s", (H.TID,))
+    assert queued == ([("drain", "queued")] if "--lead-author-drain" in args else []), (
+        f"the operator command's host requests: {queued}")
     assert {p.name for p in data_root.iterdir() if p.name != H.TID} <= ambient | {".host-locks"}, (
         "retired ambient root received state")
 

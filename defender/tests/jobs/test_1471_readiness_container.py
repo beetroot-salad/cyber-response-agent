@@ -5,7 +5,6 @@ of the same tenant (green at the base)."""
 from __future__ import annotations
 
 import dataclasses
-import json
 import sys
 import uuid
 from pathlib import Path
@@ -30,7 +29,11 @@ from defender.tests.support.jobs._readiness1471 import (
 )
 
 process_state = J.process_state
-pytestmark = [pytest.mark.postgres, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: E402, F401 — fixtures the helper's store seams take
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: E402, F401 — fixture
+
+pytestmark = [pytest.mark.postgres, pytest.mark.garage, pytest.mark.openbao,
+              pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
 
 ALL = J.ALL_SYSTEMS
 
@@ -60,10 +63,10 @@ def _of(warnings: list[dict[str, str]], kind: str) -> str:
     return "\n".join(w["sentence"] for w in warnings if w["kind"] == kind)
 
 
-def test_r3_a_tenant_whose_launch_is_clean_reads_ready_with_no_warnings_and_leaves_only_its_two_records(
+def test_r3_a_tenant_whose_launch_is_clean_reads_ready_with_no_warnings_and_leaves_no_file_in_its_runs_folder(
         tmp_path, monkeypatch, migrated_database):
     """A tenant everything of which is usable: `ready` with an empty list, the launch publish run once, the knowledge
-    record at the published commit, and a runs folder holding only the two records, still listed. (R3, R13-1.7, P-1)"""
+    record at the published commit, and a runs folder holding nothing of the check's (its two records are staged facts, A-O2, D5), still listed. (R3, R13-1.7, P-1)"""
     from defender import run_common
     from defender.records import job_lane
     from defender.tests.support.jobs._container_entry1170 import ThreadCalls
@@ -85,7 +88,8 @@ def test_r3_a_tenant_whose_launch_is_clean_reads_ready_with_no_warnings_and_leav
         assert (calls.helper("materialize_run"), calls.container("materialize_run"),
                 calls.helper("check_launch"), calls.container("check_launch")) == (0, 0, 0, 0)
         added = sorted(set(listing(scene.runs)) - set(runs_before))
-        assert added == sorted([f"{ran.rid}.knowledge-source.json", f"{ran.rid}.readiness.json"]), added
+        assert added == [], f"a check wrote a file into the runs folder (A-O2, D5: its two records are staged facts): {added}"
+        assert set(ran.staged()) >= {"result", "knowledge"}, ran.said()
         assert not list((scene.root / scene.tenant / "run-knowledge").glob("*")), "the check's copy was left behind"
         assert [r for r in listed_runs(scene) if r == ran.rid] == [], "a check is not a run"
         (scene.runs / "stray.unknown.json").write_text("{}", encoding="utf-8")
@@ -286,7 +290,7 @@ def test_p2_d7_a_tenant_value_with_markup_in_a_warning_reaches_its_sentence_verb
     with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL, files=files) as scene:
         ran = readiness(scene)
         ran.result()
-        record = json.loads(ran.record_path.read_text(encoding="utf-8"))
+        record = ran.result()
         assert set(record) == {"outcome", "warnings"}
         assert record["outcome"] == "ready", ran.said()
         assert [w["kind"] for w in record["warnings"]] == ["feedback_setting"]
@@ -344,7 +348,7 @@ def _hand(scene: Any, rid: str, mutate: Any) -> Any:
         handed = set(facts)
         if mutate is not None:
             mutate(facts)
-        with SocketStandIn(scene.tenant, launch=facts) as stand_in:
+        with SocketStandIn(scene.tenant, launch=facts, forward=c.request) as stand_in:  # the rest of the verbs: the real helper's
             for gone in handed - set(facts):  # the stand-in fills `tenant`/`tenant_state` by default: serve the removal
                 stand_in.launch.pop(gone, None)
             env = {**c.env, SOCKET_ENV: str(stand_in.path)}
@@ -383,9 +387,9 @@ def test_r13_1_4_an_exit_that_judges_whether_the_helper_and_container_agree_is_f
 
 
 #: The keys of the readiness launch facts (surface §4), spelled once; the helper's own facts are checked against them.
-FACT_KEYS = ("kind", "tenant", "job", "tenant_state", "export_commit", "knowledge", "run_copy", "records")
+FACT_KEYS = ("kind", "tenant", "job", "tenant_state", "export_commit", "knowledge", "run_copy", "records", "inputs_dir")
 #: Keys the design's handover list does not name (R13-1.4): the honest entry may read them or not.
-UNNAMED_KEYS = ("export_commit", "knowledge")
+UNNAMED_KEYS = ("export_commit", "knowledge", "inputs_dir")
 
 
 def _wrong_typed(value: Any) -> Any:
