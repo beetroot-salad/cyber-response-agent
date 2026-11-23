@@ -424,6 +424,11 @@ def drive_launch(source: Path, *, spawn: Any = None, tenant_id: str | None = Non
     preflight neutralised (`no_preflight`) so a refusal is never the host's credentials.
     Returns the exit status, or the refusal it raised."""
     seams.setdefault("preflight", no_preflight)
+    # #1618 flow 4: the launch reads the episode's tenant through its one fetch seam; here the product's fetch in-process
+    # over the data root's served remote (what the test placed stands for the tenant's main).
+    from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
+
+    seams.setdefault("fetch", in_process_fetch())
     argv = launch_argv(source, tenant_id=tenant_id)
     seams.setdefault("directory", directory_for_argv(argv))  # r10 A1/C9: the launcher admits through the tenant records
     # The fixture tenant's elastic is proxied (#1391 D12): the launcher signs its read token through a port, here
