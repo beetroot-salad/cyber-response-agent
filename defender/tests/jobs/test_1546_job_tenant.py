@@ -90,12 +90,11 @@ def test_a_job_tenant_is_refused_for_an_id_that_is_no_tenant_id(tmp_path, bad):
 
 def test_a_job_tenant_is_refused_for_a_relative_root_or_one_inside_the_code_tree(tmp_path):
     """Placement runs in the constructor: a relative data root, and a root inside the checkout's `defender/` tree, are refused. (design)"""
-    import defender
     from defender.records.formats import TenantRefused
     from defender.tenancy import JobTenant
 
     _, inputs = _layout(tmp_path)
-    inside = Path(defender.__file__).resolve().parent / "job-root-1546"
+    inside = Path(__file__).resolve().parents[2] / "job-root-1546"  # the checkout's `defender/` (a namespace package: no __file__)
     for root in (Path("relative/root"), inside):
         with pytest.raises((TenantRefused, ValueError)):
             JobTenant(id=ID, data_root=root, inputs=inputs)
@@ -155,23 +154,27 @@ def test_the_readiness_entry_runs_over_its_job_root_and_stages_its_result(scene)
 @pytest.mark.openbao
 @pytest.mark.garage
 def test_the_learning_job_entry_gets_past_its_tenant_step_without_reading_the_clones_settings(scene, evidence_store):
-    """With the host clone's working-tree settings damaged (a link in them), the learning entry over its job root still
-    reaches its launch steps (`_open_launch_source` runs in the container): it reads the pinned export's settings from the
-    inputs, never the clone's. (design: the learning job passes the export roots)"""
+    """With the host clone's working-tree settings damaged (a link in them) once the helper admitted the job, the learning entry
+    over its job root still reaches its launch steps: it reads the pinned export's settings from the inputs, never the clone's.
+    (design: the learning job passes the export roots; admission of a faulted clone stays the helper's refusal, owner D4)"""
     from defender.learning.branch import cli, job_entry
     from defender.tests.support.jobs._container_entry1170 import ThreadCalls
 
     stray = next(p for p in (scene.t.clone / "settings").rglob("*") if p.is_file())
-    stray.unlink()
-    stray.symlink_to("/etc/passwd")
+    kept = stray.read_bytes()
     planted = H.plant(scene, "learning")
 
     def job(c) -> int:
+        stray.unlink()  # after admission: only a read inside the container can meet the damage
+        stray.symlink_to("/etc/passwd")
         try:
             return int(job_entry.main(["--job", planted.owner, "--tenant", scene.tenant, "--source", planted.source],
                                       environ=c.env, preflight=lambda *a, **k: 0))
         except SystemExit:
             return 1
+        finally:
+            stray.unlink()
+            stray.write_bytes(kept)
 
     with ThreadCalls({"source_opened": cli._open_launch_source}) as calls:
         H.drive(scene, planted, job, **evidence_store.seams)
