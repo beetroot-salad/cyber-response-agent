@@ -33,7 +33,8 @@ def test_the_playground_resolves_through_the_real_resolver():
     assert td.id == T.PLAYGROUND_ID
     # #1618 K8 (census: `Tenant.agent/.settings` deleted): the resolver names no knowledge path; what was placed is read
     # from the placed folder.
-    assert not hasattr(td, "settings") and not hasattr(td, "agent"), td
+    assert not hasattr(td, "settings"), td
+    assert not hasattr(td, "agent"), td
     assert (T.placed_half(td, "settings") / "verb-grants.yaml").read_bytes() == \
         (T.FIXTURE_SETTINGS / "verb-grants.yaml").read_bytes()
     assert T.placed_half(td, "agent").is_dir()

@@ -55,7 +55,7 @@ def _lock_for(remote: Path) -> threading.Lock:
         return _SEEDING.setdefault(str(remote), threading.Lock())
 
 
-def seed_placed(data_root: Path | str, tenant_id: str) -> str | None:
+def seed_placed(data_root: Path | str, tenant_id: str) -> str | None:  # noqa: C901 — one commit of every placed half, with its no-change and no-remote exits
     """Commit what is placed at `<T>/knowledge` (its `agent/` and `settings/`) into the seed checkout and push it to the
     served remote's `main` (a fast-forward; nothing new when unchanged). Returns `main`'s commit, or None when nothing is
     placed and no remote was ever seeded. The placed folder is read, never moved or changed."""
