@@ -26,6 +26,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from defender import _git as _git_facade
 from defender.tests.support.shared._locations_1210 import location_path
 
 #: One seeding at a time per served remote (concurrent launches of one tenant push one main).
@@ -121,8 +122,7 @@ def halves_at(remote: Path, commit: str, into: Path) -> Path:
         mode, _kind, oid = meta.split()
         target = into / path.decode()
         target.parent.mkdir(parents=True, exist_ok=True)
-        data = subprocess.run(["git", "cat-file", "blob", oid.decode()],  # noqa: S603, S607
-                              cwd=remote, capture_output=True, check=True).stdout
+        data = _git_facade.git_blob_bytes(remote, oid.decode())  # the facade's one blob read (no filter applied)
         if mode == b"120000":
             target.symlink_to(data.decode())
         else:

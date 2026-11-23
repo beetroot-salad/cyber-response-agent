@@ -25,16 +25,21 @@ LIFECYCLE_MAIN = Path(__file__).resolve().parents[3] / "lifecycle" / "__main__.p
 
 
 def _wired_fetch() -> tuple[str, str]:
-    """`(module, name)` of what `lifecycle/__main__.py` passes as `HostActor(..., fetch=)`: the name it passes and the module
-    it imports that name from, read from its source."""
+    """`(module, name)` of what `lifecycle/__main__.py` passes as `HostActor(..., fetch=)`, read from its source with the
+    lints' shared name resolver (`tooling/lint/_astlib.py`: real scoping, so an alias, an attribute form or a local
+    shadow resolves as Python would)."""
+    from defender.tests.support.shared.contracts._by_path import import_lint_lib
+
+    astlib = import_lint_lib("_astlib")
     tree = ast.parse(LIFECYCLE_MAIN.read_text(encoding="utf-8"))
-    imported = {alias.asname or alias.name: node.module for node in ast.walk(tree)
-                if isinstance(node, ast.ImportFrom) for alias in node.names}
-    passed = [kw.value.id for node in ast.walk(tree) if isinstance(node, ast.Call)
-              and getattr(node.func, "id", None) == "HostActor"
-              for kw in node.keywords if kw.arg == "fetch" and isinstance(kw.value, ast.Name)]
-    assert len(passed) == 1, f"lifecycle/__main__.py does not hand HostActor one named fetch seam: {passed}"
-    return imported[passed[0]], passed[0]
+    env = astlib.module_env(tree, module="defender.lifecycle.__main__", package="defender.lifecycle")
+    passed = [astlib.origin(kw.value, env) for node in ast.walk(tree) if isinstance(node, ast.Call)
+              and astlib.callee(node, env) == "defender.lifecycle.HostActor"
+              for kw in node.keywords if kw.arg == "fetch"]
+    assert len(passed) == 1, f"lifecycle/__main__.py does not hand HostActor one fetch seam: {passed}"
+    assert passed[0] is not None, "lifecycle/__main__.py's fetch seam is not an imported name"
+    module, _dot, name = passed[0].rpartition(".")
+    return module, name
 
 
 @pytest.fixture
