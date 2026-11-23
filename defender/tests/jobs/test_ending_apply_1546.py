@@ -3,6 +3,7 @@ an evidence state, promotes only what the rules say, runs its follow-ons and sto
 Real store, real Postgres; the helper's staging is planted by SQL under the row's claim token."""
 from __future__ import annotations
 
+import datetime as dt
 
 import pytest
 
@@ -32,7 +33,7 @@ from defender.tests.support.jobs._ending1546 import (
     token_of,
     up,
 )
-from defender.tests.support.jobs._jobs1342 import T1, T2, job_store, lapse_lease, register_tenant
+from defender.tests.support.jobs._jobs1342 import NOW, T1, T2, job_store, lapse_lease, register_tenant
 from defender.tests.support.jobs._worker1342 import _queued
 from defender.tests.support.shared._postgres1339 import execute
 
@@ -363,7 +364,8 @@ async def test_a_learning_job_expired_in_the_queue_and_one_offboarded_end_with_n
     async with job_store(dsn, learning_max_age=60) as store:
         alert, source = await plant_complete_source(dsn, store, T1)
         old = await queue_learning_job(dsn, T1, alert.alert_id, source, key="k-old")
-        execute(dsn, "UPDATE jobs.learning_jobs SET created_at = now() - interval '1 day' WHERE id = %s", (old,))
+        execute(dsn, "UPDATE jobs.learning_jobs SET created_at = %s WHERE id = %s",  # aged by the store's clock, which wrote it
+                (NOW - dt.timedelta(days=1), old))
         assert await store.claim_learning_job() is None
         alert2, source2 = await plant_complete_source(dsn, store, T2)
         waiting = await queue_learning_job(dsn, T2, alert2.alert_id, source2, key="k-wait")
