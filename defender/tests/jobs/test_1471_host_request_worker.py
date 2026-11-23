@@ -34,7 +34,7 @@ from defender.tests.support.jobs._host_requests1471 import (
     WITH_NUMBER,
     adopted,
     failed,
-    host_child,
+    HostChild,
     host_row,
     host_rows,
     host_worker,
@@ -45,7 +45,9 @@ from defender.tests.support.jobs._host_requests1471 import (
     set_created,
     warning,
 )
+from defender.tests.support.jobs._evidence_flows1546 import claim_of
 from defender.tests.support.jobs._jobs1342 import NOW, T1, job_store, row
+from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.support.jobs._worker1342 import _FAST, EXIT, _child, _names_code, _queued, _until
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
@@ -53,6 +55,60 @@ world = _shared.world
 _no_database_address_in_the_workers_environment = _shared._no_database_address_in_the_workers_environment
 
 SYSTEM = "ticket"
+
+
+# --- the helper stand-in: what a launched helper leaves is staged rows, not files (#1546 A-O2, PR2) -------------------------
+
+def _served_knowledge(text: str | None) -> dict | None:
+    """The served knowledge shape of a request's knowledge record, as the helper maps it once; None for text that is no status."""
+    try:
+        body = json.loads(text or "")
+    except ValueError:
+        return None
+    if not (isinstance(body, dict) and body.get("kind") in ("fresh", "stale") and isinstance(body.get("commit"), str)):
+        return None
+    return {"status": "current" if body["kind"] == "fresh" else "stale", "commit": body["commit"],
+            "stale_kind": body.get("stale_kind")}
+
+
+class StagedHostChild(HostChild):
+    """`HostChild` behind the helper stand-in. `files` may name the kind's record (`READINESS`/`ADOPTION`) and a readiness
+    request's knowledge record (`KNOWLEDGE`): when the worker has claimed the request and launches the helper, these are
+    staged under its claim as the helper stages them on receipt (the record parsed by the kind's own parser: `result` when it
+    parses, `refused/result` when not; the knowledge record mapped to the served shape, or `refused/knowledge`). The files
+    themselves are never left: nothing the worker could read."""
+
+    stage_dsn: str | None = None  # not `dsn`: that name is `ScriptedChild`'s switch for its own staging
+    records: dict | None = None
+
+    def __call__(self, launch) -> list[str]:
+        from defender.records.job_lane import AdoptionRecord, ReadinessRecord
+
+        kind = "adoption" if getattr(launch, "system_id", None) else "readiness"
+        token = claim_of(self.stage_dsn, kind, launch.request_id)
+        assert token, f"the worker's claim of the {kind} request wrote no claim row"
+        facts: dict = {}
+        text = (self.records or {}).get(ADOPTION if kind == "adoption" else READINESS)
+        if text is not None:
+            parsed = (AdoptionRecord if kind == "adoption" else ReadinessRecord).parse(text)
+            facts["result"] = json.loads(text) if parsed is not None else None
+        if kind == "readiness" and KNOWLEDGE in (self.records or {}):
+            served = _served_knowledge(self.records[KNOWLEDGE])
+            facts["knowledge"] = served
+        for name, body in facts.items():
+            staged = {f"refused/{name}": {"reason": "malformed"}} if body is None else {name: body}
+            for fact, value in staged.items():
+                execute(self.stage_dsn, "INSERT INTO jobs.staged_facts (token, name, body, staged_at) "
+                                  "VALUES (%s, %s, %s::jsonb, now()) ON CONFLICT DO NOTHING", (token, fact, json.dumps(value)))
+        return super().__call__(launch)
+
+
+def host_child(world: dict, name: str = "host", **kw: Any) -> StagedHostChild:
+    """`host_child` whose record files are staged as rows, not left as files (`StagedHostChild`)."""
+    records = {k: v for k, v in (kw.pop("files", None) or {}).items()}
+    child = StagedHostChild(world["tmp"] / name, world["runs"], **kw)
+    child.stage_dsn, child.records = world["dsn"], records
+    return child
 
 
 async def _run(world, kind: str, files: dict, *, exit: int = 0, system: str = SYSTEM, **worker_kw):  # noqa: A002
@@ -170,8 +226,9 @@ async def test_r13_1_5_a_refusal_before_the_publish_carries_no_knowledge_and_the
     """Refused at a step up to `publish`: completed, `knowledge` null, even beside a malformed knowledge record. (R3, R13-1.5)"""
     _, stored, _ = await _readiness(world, refused(step, "the tenant is not active"), "{not json")
     assert stored["stage"] == "completed"
-    assert stored["result"] == {"outcome": "refused", "step": step, "sentence": "the tenant is not active",
-                                "knowledge": None}
+    assert {k: v for k, v in stored["result"].items() if k != "knowledge"} == {
+        "outcome": "refused", "step": step, "sentence": "the tenant is not active"}
+    assert stored["result"].get("knowledge") is None  # r9: the knowledge fact is staged only when there is a record: null or absent
 
 
 @pytest.mark.parametrize("step", STEPS_WITH_KNOWLEDGE)
@@ -183,19 +240,22 @@ async def test_r13_1_5_a_refusal_after_the_publish_carries_the_knowledge_record(
                                 "knowledge": STALE_OPERATOR_SERVED}
 
 
-@pytest.mark.parametrize("record", [ready(), refused("systems")], ids=["ready", "refused-at-systems"])
-async def test_r13_1_5_an_absent_knowledge_record_where_it_is_carried_is_bad_record(world, record):
-    """`ready` or a late refusal with no knowledge record fails `bad_record`. (R13-1.5)"""
-    _, stored, _ = await _readiness(world, record, None)
-    _bad(stored)
-
-
-@pytest.mark.parametrize("text", MALFORMED_KNOWLEDGE)
+# #1546 r9 (retired): `test_r13_1_5_an_absent_knowledge_record_where_it_is_carried_is_bad_record` and `..._a_malformed_knowledge_record_
+# where_it_is_carried_is_bad_record`. The worker reads no knowledge file (A-O2); "a malformed outcome or result of every kind ends
+# `bad_record`; any other malformed record is staged refused and owes nothing" (r9 criteria), so a knowledge record the helper
+# refused or never staged no longer fails a request whose `result` is staged (decided: "readiness, adoption, drain: a `result` is
+# staged"). What survives is the next test.
+@pytest.mark.parametrize("text", [None, *MALFORMED_KNOWLEDGE])
 @pytest.mark.parametrize("record", [ready(), refused("first_pass")], ids=["ready", "refused-at-first_pass"])
-async def test_r13_1_5_a_malformed_knowledge_record_where_it_is_carried_is_bad_record(world, record, text):
-    """Any text at the knowledge path that is not a status fails `bad_record`. (R13-1.5)"""
+async def test_r13_1_5_a_missing_or_refused_knowledge_record_owes_nothing_and_none_of_its_text_reaches_the_row(world, record, text):
+    """No knowledge record, or one the helper refused, beside a staged result: the request still ends (the result decides) and
+    the row carries no knowledge status and none of the record's text (`bogus` is the one word of it a status never holds). (r9: another malformed record is staged refused and
+    owes nothing; R13-1.5)"""
     _, stored, _ = await _readiness(world, record, text)
-    _bad(stored)
+    assert stored["stage"] in ("completed", "failed"), stored
+    assert (stored["result"] or {}).get("knowledge") is None, stored
+    assert "bogus" not in json.dumps(stored, default=str), "the refused record's text reached the row"
+    assert stored["finished_at"] is not None
 
 
 @pytest.mark.parametrize("record", [failed("handover"), failed("census_unavailable")])
@@ -354,20 +414,6 @@ async def test_a3_an_adoption_record_outside_its_shapes_is_bad_record(world, rec
     """Unknown outcome or reason, a number where none belongs or none where one does, a non-integer, extra keys: `bad_record`. (A3, P-2)"""
     _, stored, _ = await _adoption(world, record)
     _bad(stored)
-
-
-async def test_a3_the_kinds_records_are_read_from_their_own_files(world):
-    """A readiness record beside an adoption request, and the reverse, is no record. (R13-1.5)"""
-    _, adoption, _ = await _run(world, "adoption", {READINESS: ready()})
-    assert adoption["failure_reason"] == "no_record"
-    _, readiness, _ = await _run(world, "readiness", {ADOPTION: adopted("nothing_to_adopt")})
-    assert readiness["failure_reason"] == "no_record"
-
-
-async def test_a3_an_adoption_never_reads_a_knowledge_record(world):
-    """A malformed knowledge record beside a valid adoption record is ignored. (R13-1.5)"""
-    _, stored, _ = await _run(world, "adoption", {ADOPTION: adopted("opened", 5), KNOWLEDGE: "{not json"})
-    assert stored["stage"] == "completed"
 
 
 # --- R13-1.1: the lane is opened before any helper starts ------------------------------------------------------------

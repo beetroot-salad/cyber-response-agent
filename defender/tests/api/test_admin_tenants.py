@@ -42,6 +42,7 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     tenants_of,
     user_id,
 )
+from defender.tests.support.shared._postgres1339 import execute  # noqa: E402
 from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 CREATE, RESUME, OFFBOARD, ROTATE = "tenant.create", "tenant.resume", "tenant.offboard", "tenant.rotate"
@@ -432,6 +433,9 @@ def test_1360_d6_a_refused_offboard_request_ends_no_job(tenant_state: str | None
     world.register(T2)
     if tenant_state is not None:
         world.register(T1, state=tenant_state)
+        if tenant_state == "offboarded":  # its jobs name its retention row, which an offboarded tenant keeps (r9: the FK is NOT VALID, new rows are checked)
+            execute(world.dsn, "INSERT INTO tenancy.evidence_retention (tenant_id, investigation_days, learning_days) "
+                               "VALUES (%s, 90, 90)", (T1,))
     control = _seed_jobs(world, T2, 2)
     refused = None if tenant_state is None else _seed_jobs(world, T1, 1)  # an unknown tenant holds no jobs (#1496)
 

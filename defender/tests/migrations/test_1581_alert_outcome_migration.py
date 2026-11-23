@@ -177,10 +177,11 @@ def _head_alert(dsn: str, ticket: str) -> str:
 def _head_investigation(dsn: str, alert: str, stage: str, disposition: str | None, key: str = "k") -> str:
     inv = _id("head-inv", f"{alert}-{key}-{stage}")
     lease = "now() + interval '30 seconds'" if stage == "running" else "NULL"
+    ended = stage not in ("queued", "running")  # #1546 A-O4: an ended row has an evidence state (and its scrub)
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
-                 "disposition, cost_usd, cost_is_lower_limit, update_ticket, lease_expires_at) "
-                 f"VALUES (%s, %s, %s, %s, 1, %s, %s, %s, 0, false, false, {lease})",  # noqa: S608 — test-built SQL: the lease clause is a literal of this file
-            (inv, T1, alert, key, stage, T0, disposition))
+                 "disposition, cost_usd, cost_is_lower_limit, update_ticket, lease_expires_at, evidence_state, scrub) "
+                 f"VALUES (%s, %s, %s, %s, 1, %s, %s, %s, 0, false, false, {lease}, %s, %s)",  # noqa: S608 — test-built SQL: the lease clause is a literal of this file
+            (inv, T1, alert, key, stage, T0, disposition, "none" if ended else None, "not_run" if ended else None))
     return inv
 
 
@@ -199,7 +200,8 @@ def test_o10_a_completed_investigation_without_a_disposition_is_refused_on_inser
         _head_investigation(at_head, alert, "completed", None)
     running = _head_investigation(at_head, alert, "running", None)
     with pytest.raises(psycopg.errors.CheckViolation, match="completed_has_a_disposition"):
-        execute(at_head, "UPDATE jobs.investigations SET stage = 'completed', finished_at = now() WHERE id = %s", (running,))
+        execute(at_head, "UPDATE jobs.investigations SET stage = 'completed', finished_at = now(), "
+                        "evidence_state = 'none', scrub = 'not_run' WHERE id = %s", (running,))
     for n, stage in enumerate(("queued", "failed", "aborted", "unparseable")):  # control: no other stage needs one
         _head_investigation(at_head, _head_alert(at_head, f"c{n}"), stage, None)
     assert execute(at_head, "SELECT stage FROM jobs.investigations WHERE disposition IS NULL AND stage <> 'running'"

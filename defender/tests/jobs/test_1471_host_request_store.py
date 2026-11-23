@@ -16,6 +16,7 @@ from defender.tests.support.jobs._host_requests1471 import (
     lapse,
     plant,
 )
+from defender.tests.support.jobs._ending1546 import decide, facts_of, plant_facts
 from defender.tests.support.jobs._jobs1342 import NOW, T1, T2, JobsAudit, job_store, move_tenant, register_tenant
 from defender.tests.support.shared._postgres1339 import execute
 
@@ -226,39 +227,52 @@ async def test_r13_6_claiming_a_host_request_never_takes_a_running_row(world):
 
 # --- the fenced finish --------------------------------------------------------------------------------------------------
 
-async def test_the_finish_is_fenced_on_running_and_stores_the_result_once(world, caplog):
-    """A running row finishes `completed` with its result, announced; a second finish, and a finish of a queued row,
-    change nothing and answer None. (B2)"""
+async def _end(store, dsn, tenant, request, claim, *, result=None, by="exited"):
+    """The worker's end of a claimed host request: stage the helper's `result` under the claim's token (when it has one), then
+    `decide` over the rows and `apply` (#1546 PR9: the one writer of a terminal column; the removed `finish_host_request`)."""
+    if result is not None:
+        plant_facts(dsn, claim.token, {"result": result})
+    decision = decide("host_request", facts_of(dsn, claim.token), {}, by)
+    return await store.apply(tenant, request, decision)
+
+
+async def test_the_end_is_fenced_on_running_and_stores_the_result_once(world, caplog):
+    """A running row ends `completed` with its staged result, announced; a second end, and the end of a queued row, change
+    nothing and answer None. (B2, PR9)"""
     audit = JobsAudit(caplog)
-    result = {"outcome": "refused", "step": "tenant", "sentence": "the tenant is not active", "knowledge": None}
+    result = {"outcome": "refused", "step": "tenant", "sentence": "the tenant is not active"}
     async with job_store(world) as store:
         running, _ = await store.create_readiness(T1, actor="u-1")
         claimed = await store.claim_host_request()
         assert claimed.record.request_id == running.request_id, "premise: the claim took T1's row"
         queued, _ = await store.create_readiness(T2, actor="u-1")  # after the claim: the claim takes the oldest queued row
-        assert await store.finish_host_request(T2, queued.request_id, stage="completed", result=result) is None
-        ended = await store.finish_host_request(T1, running.request_id, stage="completed", result=result)
-        again = await store.finish_host_request(T1, running.request_id, stage="failed", failure_reason="worker_error",
-                                                failure_message="late")
+        # a queued row has no claim: a decision made over no rows is still refused by the fence
+        refused_end = await store.apply(T2, queued.request_id, decide("host_request", {}, {}, "exited"))
+        ended = await _end(store, world, T1, running.request_id, claimed, result=result)
+        again = await store.apply(T1, running.request_id, decide("host_request", {}, {}, "exited_failed"))
+    assert refused_end is None
     assert ended.stage == "completed"
     assert again is None
     row = host_row(world, running.request_id)
-    assert (row["stage"], row["result"], row["failure_reason"], row["lease_expires_at"]) == ("completed", result, None, None)
+    assert (row["stage"], {k: v for k, v in row["result"].items() if k != "knowledge"}, row["failure_reason"],
+            row["lease_expires_at"]) == ("completed", result, None, None)
+    assert row["result"].get("knowledge") is None  # r9: no knowledge fact staged, none on the row (null or absent)
     assert row["finished_at"] is not None
     assert host_row(world, queued.request_id)["stage"] == "queued"
     assert [e.action for e in audit.events() if e.action.endswith(".finish")] == ["readiness.finish"]
 
 
-async def test_a_failed_finish_stores_its_reason_and_words_and_no_result(world):
-    """`failed` carries a fixed reason and our words. (R3, P-3)"""
+async def test_a_failed_end_stores_its_reason_and_our_words_and_no_result(world):
+    """A container's `failed` result ends the row `failed` with its closed reason and the worker's words, never the
+    container's text; no result is stored. (R3, P-3, PR2)"""
     async with job_store(world) as store:
         rec, _ = await store.create_adoption(T1, SYSTEM, actor="u-1")
-        await store.claim_host_request()
-        await store.finish_host_request(T1, rec.request_id, stage="failed", failure_reason="repository_busy",
-                                        failure_message="a ref lock collided")
+        claimed = await store.claim_host_request()
+        await _end(store, world, T1, rec.request_id, claimed,
+                   result={"outcome": "failed", "reason": "repository_busy"})
     row = host_row(world, rec.request_id)
-    assert (row["stage"], row["failure_reason"], row["failure_message"], row["result"]) == (
-        "failed", "repository_busy", "a ref lock collided", None)
+    assert (row["stage"], row["failure_reason"], row["result"]) == ("failed", "repository_busy", None)
+    assert row["failure_message"]
 
 
 # --- B1: offboarding ----------------------------------------------------------------------------------------------------
