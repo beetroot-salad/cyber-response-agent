@@ -205,3 +205,20 @@ async def test_an_account_whose_limits_were_never_set_is_limited_by_the_next_run
             people.forge.accounts[login].get("allow_create_organization")) == (0, False)
     assert login in people.forge.members(T)
     assert (str(user.id), T) not in await people.open_requests()
+
+
+async def test_a_person_whose_run_keeps_failing_is_retried_ever_less_often_and_still_finishes(people: People):
+    """OD-9 (finalize, #1623 review): a run that fails every time is retried at the next poll, then after ever longer
+    runs of polls (doubling, capped), not at every poll; once the fault is gone a later poll still carries it out."""
+    _user, login = await _create(people)
+    lookup = _signatures_create(people, login)["L"]
+    people.forge.fail(lookup, status=500)
+
+    await people.steps(32)
+
+    attempts = people.forge.arrived.count(_signatures_create(people, login)["A"])
+    assert 2 <= attempts <= 7, f"{attempts} runs in 32 polls"
+    people.forge.clear_faults()
+    await people.steps(40)
+    assert _created(people, login) == {"created", "added"}
+    assert await people.open_requests() == []
