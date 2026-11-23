@@ -109,7 +109,7 @@ def _relocate_pointers(runs: Path, tenant_root: Path) -> None:
     copy each pointer is made to name the same database under the copy's tenant folder."""
     import re
 
-    pattern = re.compile(r"[^\"]*/\.job-roots/[0-9a-f]+/" + re.escape(tenant_root.name) + r"(?=/)")
+    pattern = re.compile(r"[^\"]*/\.job-roots/[0-9a-f]+/[^/\"]+(?=/)")
     for pointer in runs.glob("*.session-pointer.json"):
         pointer.write_text(pattern.sub(lambda _m: str(tenant_root), pointer.read_text(encoding="utf-8")), encoding="utf-8")
 
