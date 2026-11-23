@@ -84,9 +84,9 @@ def test_1618_k7_the_run_copy_holds_its_owner_record_at_the_instant_it_is_rename
                             "owner": json.loads(Path(owner).read_text(encoding="utf-8")) if os.path.isfile(owner) else None})
         return real_rename(src, dst, *args, **kwargs)
 
-    monkeypatch.setattr(os, "rename", spy)
-    out = B.launch(t, tmp_path, publish=None, fetch=A.fetching(t, tmp_path))
-    monkeypatch.setattr(os, "rename", real_rename)
+    with monkeypatch.context() as patched:
+        patched.setattr(os, "rename", spy)  # lint-monkeypatch: ok — the rename is the instant under test, with no seam between it and the owner write; the spy records, then renames
+        out = B.launch(t, tmp_path, publish=None, fetch=A.fetching(t, tmp_path))
     assert out.reached, out.text()
     assert len(renames) == 1, f"premise: one rename made the run copy: {renames}"
     assert renames[0]["dst"] == out.seen[0].run_dir.name, renames
