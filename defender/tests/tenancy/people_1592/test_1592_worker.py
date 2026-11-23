@@ -315,14 +315,23 @@ async def test_a_failing_user_goes_to_the_back_and_does_not_hold_the_others(peop
 
 # --- the turn order over generated worlds (OD-9, "Expansion keeps the request's age") -------------------------------
 
-def _due(rows: list, attempted: dict[str, int], concurrency: int) -> tuple[set[str], set[str], int]:
-    """The reference schedule of one poll, from the design's rule alone (written apart from the worker): users never
-    attempted first, by their oldest `requested_at`; then attempted users by their last attempt, oldest first; at most
+def _skipped_polls(failures: int) -> int:
+    """How many polls a user waits after `failures` failed runs in a row: none after the first, then 1, 3, 7, ...,
+    at most 31 (finalize, #1623 review)."""
+    return min(2 ** (failures - 1) - 1, 31) if failures else 0
+
+
+def _due(rows: list, attempted: dict[str, int], concurrency: int, poll: int = 0,
+         failures: dict[str, int] | None = None) -> tuple[set[str], set[str], int]:
+    """The reference schedule of one poll, from the design's rule alone (written apart from the worker): a user whose
+    runs failed `n` times in a row waits `_skipped_polls(n)` polls after the last; of the rest, users never attempted
+    first, by their oldest `requested_at`; then attempted users by their last attempt, oldest first; at most
     `concurrency`. Returns (must start, may start, how many start): the rule does not order equal keys (users expanded
     from one tenant share its age), so a tie at the cut may go either way."""
+    failures = failures or {}
     oldest: dict[str, dt.datetime] = {}
     for r in rows:
-        if r.user is not None:
+        if r.user is not None and poll - attempted.get(r.user, -1) > _skipped_polls(failures.get(r.user, 0)):
             oldest[r.user] = min(oldest.get(r.user, r.requested_at), r.requested_at)
 
     def key(user: str) -> tuple:
@@ -381,6 +390,7 @@ async def test_generated_worlds_take_users_in_the_design_turn_order_and_expansio
     use(people, people_concurrency=concurrency)
 
     attempted: dict[str, int] = {}
+    failures: dict[str, int] = {}
     expansions_checked = False
     for poll in range(len(everyone) // concurrency + len(failing) + 4):
         rows = requests_sql(dsn)
@@ -391,7 +401,7 @@ async def test_generated_worlds_take_users_in_the_design_turn_order_and_expansio
                     got = [r.requested_at for r in rows if r.user == str(member_.id) and r.tenant == tenant]
                     assert got == [min(ages_of)], f"seed {seed}: expanded at {got}, the tenant's (none, T) ages {ages_of}"
             expansions_checked = True
-        must, may, size = _due(rows, attempted, concurrency)
+        must, may, size = _due(rows, attempted, concurrency, poll, failures)
         before = len(people.forge.arrived)
         people.clock.advance(dt.timedelta(minutes=1))
         await people.step()
@@ -404,6 +414,8 @@ async def test_generated_worlds_take_users_in_the_design_turn_order_and_expansio
         left = {r.user for r in requests_sql(dsn) if r.user is not None}
         for user in started:
             attempted[user] = poll
+            if user in failing:
+                failures[user] = failures.get(user, 0) + 1
             assert (user in left) == (user in failing), f"{where}: {user} failing={user in failing}, kept={user in left}"
     assert expansions_checked
     assert {r.user for r in requests_sql(dsn) if r.user is not None} == failing, f"seed {seed}: only the failing stay"
