@@ -511,7 +511,7 @@ def test_1414_a_lookup_with_a_lone_surrogate_does_not_wedge_the_requests_beside_
     from defender.tests.support.tenancy import _tenants1106 as T1106
 
     settings = fb.tmp / "settings-copy"
-    shutil.copytree(location_path(fb.t.tenant.settings), settings)
+    shutil.copytree(fb.t.checkout / "settings", settings)  # #1618 K8: the seeded `main`'s settings (no host clone)
     (settings / S.SETTING_FILE).write_text(S.setting_text(["inconclusive"]), encoding="utf-8")
     runs = Path(location_path(fb.t.tenant.tenant_root)) / "runs"
     runs.mkdir(exist_ok=True)

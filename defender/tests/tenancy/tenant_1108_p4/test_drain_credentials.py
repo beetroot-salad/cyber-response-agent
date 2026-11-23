@@ -22,7 +22,7 @@ from defender.tests.support.learning.core._store1278 import (
     world,  # noqa: F401 — the tick's world: tenant, forge and learning store
 )
 from defender.tests.support.learning.curation import _spec773 as S
-from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, bind_forge, git, minting, unbind_forge
+from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, bind_forge, minting, unbind_forge
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     SECRET_ID,
     LESSON_NAME,

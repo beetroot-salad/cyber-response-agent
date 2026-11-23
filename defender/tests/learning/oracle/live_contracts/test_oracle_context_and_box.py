@@ -113,6 +113,11 @@ def _episode(where: Path, *, doc: dict | None = None, rows: tuple[dict, ...] = B
         S.captured("idp", "query", Q_ALICE, _answer(*rows)), *extra])
 
 
+def _run_copies(tenant: Any) -> Path:
+    """`<T>/run-knowledge/`: where every run's own knowledge copy, the agent half its box mounts, lives (#1618 K8)."""
+    return Path(location_path(tenant.tenant_root)) / "run-knowledge"
+
+
 def _estate(where: Path, *, rows: tuple[dict, ...] = BASE_ROWS, **kw: Any) -> S.Estate:
     est = S.estate(Path(where), **kw)
     est.answer("idp", "query", Q_ALICE, _answer(*rows))
@@ -1069,7 +1074,9 @@ def test_oracle_python_scratch_files_and_the_investigators_box(tmp_path, monkeyp
         f"the oracle box factory never reached a container create through the docker on PATH: "
         f"{sent}")
     investigator_container = S.mod("box").container_name(run_dir.name)
-    forbidden = {"the sibling's run dir": run_dir, "the tenant's agent half": tenant.agent}
+    # #1618 K8: a `Tenant` names no agent half; every agent half a box mounts is a run's own copy under
+    # `<T>/run-knowledge/` (design Model "Knowledge copy"), so the oracle box may overlap none of that folder.
+    forbidden = {"the sibling's run dir": run_dir, "the tenant's run copies (agent halves)": _run_copies(tenant)}
     for argv in sent:
         for source, read_only in _binds(argv):
             for what, root in forbidden.items():
@@ -1205,7 +1212,7 @@ def test_oracle_side_files_and_the_investigators_filesystem_view(tmp_path):
     od = S.oracle_dir(ep, "b")
     assert [r["forged_id"] for r in S.oracle_rows(ep, "b", "forged")] == ["fg-1"]
     assert any(r.get("value") == "RECFACT-6061" for r in S.oracle_rows(ep, "b", "facts"))
-    for mount in (run_dir, S.DEFENDER, est.place().agent):
+    for mount in (run_dir, S.DEFENDER, _run_copies(est.place())):  # #1618 K8: the agent halves are run copies
         assert not _under(od, mount), f"the oracle's state lies under a box mount: {mount}"
     assert _files_holding(run_dir, "FACTSTMT-6060", "RECFACT-6061") == []
 
