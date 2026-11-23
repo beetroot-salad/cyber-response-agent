@@ -293,6 +293,9 @@ def publish_placed(scratch: Path, *, root: Path, tenant_id: str,
         remote.parent.mkdir(parents=True, exist_ok=True)
         git(scratch, "clone", "--bare", *BARE_NO_UPKEEP, work, remote)
     assert git(remote, "rev-parse", "refs/heads/main") == head, "premise: the remote's main is the seed"
+    from defender.tests.support.tenancy._fetch_standin_1618 import link_published
+
+    link_published(root, tenant_id, remote)  # the data root's forge names it (`in_process_fetch()`, `settings_of`)
     server = GitHTTP(scratch, token=issuer_token(tenant_id))
     try:
         origin = f"{server.url}/tenants/{name}.git"

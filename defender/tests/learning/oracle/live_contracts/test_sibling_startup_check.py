@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import types
+
 from defender.tests.support.shared._locations_1210 import fixture_runs_base
 
 import re
@@ -45,6 +47,13 @@ CAPTURE_MARK = "FD1256-CAPTURED-OWNER-OF-WEB-1"
 DROPPED = "CMDB_TIMEOUT_SEC"
 
 
+def accepted_halves(accepted: Any, half: str) -> Path:
+    """The placed `half` (`agent` or `settings`) of the accepted tenant (`_tenants1106.placed_half`)."""
+    from defender.tests.support.tenancy._tenants1106 import placed_half
+
+    return placed_half(accepted, half)
+
+
 def _plant_tenant() -> tuple[Path, Any]:
     """A complete tenant under this test's data root (every system configured), its table
     granting gather cmdb.get-host: (knowledge folder, accepted Tenant)."""
@@ -77,8 +86,12 @@ def _sibling(tmp_path: Path, label: str, *, accepted: Any, spec: Any, source_dir
     world = S.load_world(ep, "a")
     # #1504 O3: run start builds the tenant over a catalog of the run's one roster read (no default).
     catalog = S.mod("system_rules").Catalog(run_py._run_roster(S.DEFENDER))
-    tenant = run_py._resolve_run_tenant(accepted, defender_dir=S.DEFENDER,
-                                        dispatches_lead_zero=False, records=R.value_of(records), catalog=catalog)
+    # #1618 K8: run start resolves the tenant over the two halves of the commit its run reads (its copy's); here the halves
+    # placed for this tenant stand in for that copy, so the grants come from the same table the records were derived from.
+    halves = types.SimpleNamespace(agent=accepted_halves(accepted, "agent"), settings=accepted_halves(accepted, "settings"),
+                                   token=None)
+    tenant = run_py._resolve_run_tenant(accepted, defender_dir=S.DEFENDER, dispatches_lead_zero=False,
+                                        records=R.value_of(records), catalog=catalog, copy=halves)
     source = Run.under(fixture_runs_base(source_dir.parent), source_dir.name)
     sibling_dir = LZ.materialize_alert(tmp_path / f"sibling-{label}", LZ.alert_doc())
     main = H.ReplayFn([

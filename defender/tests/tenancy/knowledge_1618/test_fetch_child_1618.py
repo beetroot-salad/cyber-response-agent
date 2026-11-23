@@ -92,6 +92,28 @@ def test_a11_content_the_validation_refuses_is_refused_with_todays_wording_and_n
     assert ok.commit == t.commit, "control: the earlier good commit is fetchable by id"
 
 
+#: Entry names under `agent/` that are not a plain path component (K6: today's `_plain_component` rule plus no `.git` in any
+#: case), each held in a commit as given.
+_NOT_PLAIN = {"dotgit-casefold": ".GIT", "control-character": "lesson\x01.md", "leading-space": " lesson.md"}
+
+
+@pytest.mark.parametrize("case", sorted(_NOT_PLAIN))
+def test_k6_a_path_component_that_is_not_plain_is_refused_lasting_naming_the_commit_and_nothing_is_left(t, tmp_path, case):
+    """A merged commit holding a path that is not plain (a `.git` component in any case, a control character, a name led by
+    whitespace) is refused through the real child as `lasting`, naming the commit and the path, with today's wording, and
+    nothing is written into the caller's folder. Control: the earlier commit is still fetched. (K6, D11)"""
+    name = _NOT_PLAIN[case]
+    bad = K.commit_raw_entry_on_main(t, "agent", name, b"not a plain path\n")
+    dest = _dest(t)
+    report = K.child_report(t, tmp_path, dest)
+    assert (report.word, report.klass) == ("refused", "lasting"), report
+    assert bad in report.reason, report.reason
+    assert "not a plain path" in report.reason, report.reason
+    assert K.tree_bytes(dest) == {}, "refused content was left in the folder"
+    ok = K.child_report(t, tmp_path, _dest(t), commit=t.commit)
+    assert (ok.word, ok.commit) == ("ok", t.commit), "control: the earlier good commit is fetched by id"
+
+
 def test_a10_a_sibling_copy_of_a_commit_by_id_holds_that_commits_bytes(t, tmp_path):
     """A commit that is neither the seed nor main's tip is fetched by id into the helper-made folder (K5)."""
     old = K.advance_main(t, "K1618-SIBLING-PIN")

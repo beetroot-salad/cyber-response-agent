@@ -677,7 +677,7 @@ def run_sibling(tmp_path: Path, ep: Path, main: S.MainScript) -> S.Drive:
         return S.drive_run(d, Path(kw["run"].run_dir), tenant=kw["tenant"].tenant)
 
     from defender import run as run_mod
-    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_fetch
 
     argv = ["--episode", ep.name, "--world", SIBLING_WORLD, "--tenant", SIBLING_TENANT,
             "--no-learn"]
@@ -685,7 +685,7 @@ def run_sibling(tmp_path: Path, ep: Path, main: S.MainScript) -> S.Drive:
     try:
         # The launch-time publish, in-process.
         d.rc = run_mod.main(argv, directory=directory_for_argv(argv), lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
-                                    preflight=lambda *_a, **_k: 0, publish=in_process_publish())
+                                    preflight=lambda *_a, **_k: 0, fetch=in_process_fetch())
     except SystemExit as exit_:
         d.refusal = exit_.code if isinstance(exit_.code, str) else None
         d.rc = exit_.code if isinstance(exit_.code, int) else 1

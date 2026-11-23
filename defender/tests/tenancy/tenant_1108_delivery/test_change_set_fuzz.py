@@ -200,7 +200,7 @@ def test_derivation_keeps_its_invariant_on_random_box_output(repo, tmp_path, see
     outside = tmp_path / "host-folder"
     outside.mkdir()
     (outside / "secret.md").write_bytes(SECRET)
-    clone = repo[0].knowledge
+    clone = batch.repository.path  # #1618 K8: the batch's branch is in its delivery's private repository
     box = _Box(rng, batch, clone, outside)
     for round_ in range(ROUNDS):
         for _ in range(rng.randint(1, 4)):
@@ -228,7 +228,7 @@ def test_derivation_keeps_its_invariant_on_random_box_output(repo, tmp_path, see
                 assert {row.split()[1] for row in rows} <= {"100644", "000000"}, where
                 head = sha
         assert batch_base(clone, batch) == head, where
-        assert git(clone, "status", "--porcelain") == "", where
+        # (#1618 K8: the repository is the delivery's private bare one, with no checkout whose status could change.)
         assert files_under(outside) == {"secret.md": SECRET}, f"{where}: a link was followed"
 
         _, error, hung = bounded(batch.reset, fifos=box.fifos)

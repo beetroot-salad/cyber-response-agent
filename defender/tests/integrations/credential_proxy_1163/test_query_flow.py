@@ -7,6 +7,7 @@ import contextlib
 import inspect
 import json
 import logging
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
@@ -23,7 +24,7 @@ from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.support.shared._tls_server import chain, tls_server
-from defender.tests.tenancy.tenant_1108_p4._support import export_dir, published_tenant
+from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
 GRANT = {("identity", "r")}
 API = "/api/v2"
@@ -238,11 +239,10 @@ def test_q5_a_record_is_read_once_and_the_declaration_file_is_not_read_again(
     resolved changes the target of no call on it; a fresh record sees the edit. A5."""
     from defender.integrations.confinement import TransportCapture
     from defender.tests.integrations.credential_proxy_1163._target import ACCESS_FILE
-    from defender.tests.tenancy.tenant_1108_p4._support import export_dir
 
     with H.upstream() as old, H.upstream() as new, _published(tmp_path, data_root, old) as t:
         record = T.run_record(t)
-        (export_dir(t.tenant, t.commit) / ACCESS_FILE.format(system="identity")).write_text(
+        (Path(t.checkout) / ACCESS_FILE.format(system="identity")).write_text(
             H.declaration(new.url + API), encoding="utf-8")
         targets = []
         for rec in (record, T.run_record(t)):
@@ -553,7 +553,7 @@ def test_1391_o3_an_index_edit_after_resolve_does_not_reach_the_wire(tmp_path, d
             tmp_path / "forge", root=data_root, files=A.elastic_files(up.url)) as t:
         store = H.FakeStore({(t.tenant_id, "elastic"): T.basic_set()})
         record = T.run_record(t)
-        config = export_dir(t.tenant, t.commit) / "settings/systems/elastic/config.env"
+        config = Path(t.checkout) / "settings/systems/elastic/config.env"
         config.write_text(config.read_text(encoding="utf-8").replace(
             f'"{A.ELASTIC_EVENTS}"', '"edited-*"'), encoding="utf-8")
         with A.proxy_for(t, store) as (url, _tap):

@@ -211,3 +211,57 @@ def test_1618_k7_each_sweep_trigger_removes_a_dead_owners_repository_entry(trigg
     planted = TRIGGERS[trigger](request, tmp_path)
 
     assert not planted.exists(), f"{trigger} did not sweep the dead owner's entry"
+
+
+# --- a tick that does not end well still removes its private repository (K7: `TenantDelivery` owns it, a `with` block) ---------
+
+def _contained(_w):
+    from defender.tests.support.learning.core._tickfaults1278 import START
+
+    return START, lambda: RuntimeError("injected: a curator's fault the tick contains")
+
+
+def _stopped(_w):
+    from defender.learning_store import Stop
+    from defender.tests.support.learning.core._tickfaults1278 import AFTER_COMMIT
+
+    return AFTER_COMMIT, lambda: Stop("injected stop")
+
+
+def _refused(_w):
+    from defender.learning.author.version_control import DeliveryRefused
+    from defender.tests.support.learning.core._tickfaults1278 import AFTER_COMMIT
+
+    return AFTER_COMMIT, lambda: DeliveryRefused("injected: the forge refused the batch")
+
+
+#: How the tick ends: a stop it lets out, and a fault and a refusal it contains (it returns 0; a `SystemExit` is contained too).
+TICK_ENDS = {"stopped": _stopped, "fault-contained": _contained, "refused-contained": _refused}
+
+
+@pytest.mark.parametrize("end", list(TICK_ENDS))
+def test_1618_k7_a_tick_that_raised_was_stopped_or_was_refused_leaves_no_private_repository(world, end, caplog):  # noqa: F811
+    """However the tick ends (a stop it lets out, a fault or a refusal it contains), its delivery's private repository under `.repo-scratch/`
+    is removed by the time the tick returns: observed while the tick's outcome (and so everything its traceback holds) is still
+    referenced, so nothing but the delivery's own exit can have removed it. Control: the tick reached its batch with the
+    repository open. (K7, Model "Private repository": its lifetime is a `with` block)"""
+    from defender.tests.support.learning.core._tickfaults1278 import CURATORS
+
+    w = world
+    without_clone(w.t)
+    s = Scene(w, AUTHOR_LANE)
+    s.seed()
+    point, fault = TICK_ENDS[end](w)
+    seen: dict = {}
+
+    def hook(_batch) -> None:
+        seen["open"] = K.repo_scratch(w.t)
+        raise fault()
+
+    cast = Cast(s, hooks={(CURATORS[AUTHOR_LANE][0], point): hook})
+    outcome = s.run(cast)  # an exception the tick let out is handed back, so its traceback stays referenced
+    left = K.repo_scratch(w.t)
+    assert seen.get("open"), f"premise: the tick reached its batch with its private repository open ({outcome!r})"
+    assert left == [], f"the tick ended ({end}: {outcome!r}) leaving its private repository: {left}"
+    assert A.repos_under(K.tenant_root(w.t)) == []
+    del outcome

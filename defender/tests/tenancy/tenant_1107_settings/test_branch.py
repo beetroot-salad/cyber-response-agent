@@ -1,6 +1,7 @@
 """Branch launcher and tenant settings: box-mounted tenants-root refusal; a sibling resolves its own record."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an entry's one knowledge fetch, in-process
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import fixture_data_root
 
@@ -65,7 +66,7 @@ def _launch(src: Path, root: Path, seams: dict[str, Any]) -> tuple[Any, BaseExce
     # The tenant and the source run, by id.
     argv = ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)]
     try:
-        return branch_entry.main(argv, directory=directory_for_argv(argv), **seams), None
+        return branch_entry.main(argv, directory=directory_for_argv(argv), **{"fetch": in_process_fetch(), **seams}), None
     except SystemExit as refused:
         return None, refused
 
@@ -87,7 +88,7 @@ def _sans_paths(text: str, *paths: Path) -> str:
     return text
 
 
-def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, monkeypatch):
+def test_s7_mf13_launcher_refuses_a_tenant_folder_inside_its_box_mounted_episodes_folder(tmp_path, data_root, monkeypatch):
     monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "docker").path_value())
     src, outside, _folder, episodes = _layout(data_root, monkeypatch, marker="mf13")
 
@@ -98,7 +99,9 @@ def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, 
     assert control["preflight"].calls == [None], \
         "the control launch (tenants root outside both trees) never reached the role preflight"
 
-    episodes.symlink_to(_folder, target_is_directory=True)
+    # #1618 K8: a tenant holds no settings path (every reader reads its fetched copy), so what acceptance judges is `<T>`
+    # itself: the box-mounted episodes folder is made to hold `<T>`.
+    episodes.symlink_to(data_root / TID, target_is_directory=True)
     before = set(episodes.iterdir())
     resolved = R.resolve_tenant(fixture_data_root(outside), TID, defender_dir=S.DEFENDER,
                                dispatches_lead_zero=False)
@@ -111,7 +114,7 @@ def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, 
     assert TID in _sans_paths(text, src, outside / TID, data_root / TID), \
         f"the refusal does not name the tenant: {text!r}"
     assert "which a box mounts" in text, \
-        f"the refusal is not the box-mounted settings refusal: {text!r}"
+        f"the refusal is not the box-mounted tenant-folder refusal: {text!r}"
     assert seams["preflight"].calls == [], f"the role preflight was spent: {text!r}"
     assert seams["spawn"].launches == [], "a sibling started"
     assert seams["questioner"].prompts == [], "the questioner was asked"

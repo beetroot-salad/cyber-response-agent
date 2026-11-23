@@ -2,6 +2,8 @@
 `settings/alert-mapping.yaml` and for a legacy `systems/case-history/` folder (#1359)."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an entry's one knowledge fetch, in-process
+
 from defender.tests.support.shared._locations_1210 import location_path
 
 import contextlib
@@ -222,8 +224,8 @@ def at_branch_launch(w: World) -> Verdict:
     assert w.source_run is not None, "the world was not built launchable"
     preflight, spawn = RolePreflight(), T.FakeSpawn()
     # The launch pins the knowledge commit the source's stamp names, and the live capture
-    # stamps that pinned export, not wherever `current` has moved since (another site of this
-    # test may have republished the tenant): the fake live tree answers with the source's own.
+    # stamps that pinned commit, not wherever `main` has moved since (another site of this
+    # test may have committed again): the fake live tree answers with the source's own.
     stamp = json.loads((w.source_run / "provenance.json").read_text(encoding="utf-8"))
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 
@@ -231,7 +233,7 @@ def at_branch_launch(w: World) -> Verdict:
     argv = ["--tenant", w.planted.tenant_id, w.source_run.name, str(T.BRANCH_MESSAGE_ID)]
     try:
         S.mod("cli.learning.branch").main(
-            argv, directory=directory_for_argv(argv),
+            argv, directory=directory_for_argv(argv), fetch=in_process_fetch(),  # #1618 flow 4: the launch's one fetch
             spawn=spawn, preflight=preflight,
             live_tree=T.source_capture(knowledge=stamp["knowledge"]))
     except SystemExit as stop:
@@ -249,16 +251,16 @@ def at_sibling_resume(w: World) -> Verdict:
         lifecycles.append(kw)
         return {"output": "", "requests": 0, "truncated_by": None}
 
-    from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import in_process_fetch
 
     text = ""
     try:
-        # The in-process launch-time publish.
+        # The launch's one knowledge fetch, in-process (#1618).
         S.mod("run").main(
             ["--episode", w.episode.name, "--world", "b",
              "--tenant", w.planted.tenant_id],
             directory=w.planted.directory, lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
-            preflight=preflight, publish=in_process_publish())
+            preflight=preflight, fetch=in_process_fetch())
     except SystemExit as stop:
         text = _exit_text(stop)
     passed = bool(preflight.calls)
@@ -272,7 +274,7 @@ def at_policy_cli(w: World) -> Verdict:
     w.capsys.readouterr()
     argv = ["show", "gather", "--run-dir", str(w.tmp / "policy-run"), "--tenant", w.planted.tenant_id]
     try:
-        rc = S.mod("cli.policy_cli").main(argv, directory=directory_for_argv(argv))
+        rc = S.mod("cli.policy_cli").main(argv, directory=directory_for_argv(argv), fetch=in_process_fetch())
     except SystemExit as stop:
         return Verdict("policy-cli", True, _exit_text(stop), False)
     out = w.capsys.readouterr().out

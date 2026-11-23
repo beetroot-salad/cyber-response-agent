@@ -169,6 +169,31 @@ def advance_main(t: Any, mark: str | None = None, *, files: dict[str, Any] | Non
     return push_to_remote(t.p3, t.scratch, edit, message)
 
 
+def commit_raw_entry_on_main(t: Any, half: str, name: str, data: bytes, message: str = "human merge") -> str:
+    """Land one commit on the remote's `main` adding the blob `data` as the entry `name` directly under `half/`, written with
+    git plumbing in the bare remote (`mktree -z`), so a name `git add` would refuse (a `.GIT` in any case, a control
+    character) is held as given; return the commit."""
+    def run(*args: str, data_in: bytes | None = None) -> bytes:
+        # lint-raw-git: test-only plumbing in the fixture's bare remote; the remote is the fixture, not the code under test.
+        return subprocess.run(["git", *args], cwd=t.remote, input=data_in, capture_output=True, check=True, timeout=60).stdout
+
+    def tree_lines(tree: str) -> list[bytes]:
+        return [line for line in run("ls-tree", "-z", tree).split(b"\0") if line]
+
+    main = run("rev-parse", "refs/heads/main").decode().strip()
+    blob = run("hash-object", "-w", "--stdin", data_in=data).decode().strip()
+    half_tree = run("rev-parse", f"{main}:{half}").decode().strip()
+    lines = [*tree_lines(half_tree), f"100644 blob {blob}\t".encode() + name.encode("utf-8")]
+    new_half = run("mktree", "-z", data_in=b"\0".join(lines) + b"\0").decode().strip()
+    root = [line if not line.endswith(b"\t" + half.encode()) else f"040000 tree {new_half}\t{half}".encode()
+            for line in tree_lines(main)]
+    new_root = run("mktree", "-z", data_in=b"\0".join(root) + b"\0").decode().strip()
+    env_args = ("-c", "user.name=K1618 merge", "-c", "user.email=k1618@test.invalid")
+    commit = run(*env_args, "commit-tree", new_root, "-p", main, "-m", message).decode().strip()
+    run("update-ref", "refs/heads/main", commit, main)
+    return commit
+
+
 def half_at(t: Any, commit: str, half: str) -> dict[str, bytes]:
     """`half/`'s regular blobs at `commit`, read from the bare remote, keyed relative to `half/`."""
     return {path.removeprefix(f"{half}/"): data for path, data in committed_blobs(t.remote, commit, half).items()}

@@ -263,7 +263,7 @@ def test_922_the_drain_box_gets_exactly_the_lessons_corpus_writable(tenant, tmp_
     assert sorted(m.kind for m in request.mounts if not m.writable) == ["code", "staged"], (
         request.mounts)
     assert not [m for m in request.mounts
-                if under(m.source, t.clone) or under(t.clone, m.source)], request.mounts
+                if under(m.source, t.checkout) or under(t.checkout, m.source)], request.mounts  # #1618 K8: no host clone; the seed checkout
     for retired in RETIRED_CORPORA:
         assert B.mount_for(request, retired) is None, (
             f"{retired} is still bound into the drain box")

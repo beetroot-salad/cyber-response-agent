@@ -176,7 +176,7 @@ def test_o_warn_fresh_and_pinned_runs_pages_carry_no_stale_banner(run_dir, kind,
 @pytest.mark.parametrize("how", ["missing-with-stamp", "corrupt"])
 def test_od22_an_unreadable_host_record_shows_a_stale_operator_banner(run_dir, how):
     """Where a host record should exist (the stamp names a source) but is missing or corrupt,
-    the page claims no freshness: an operator-kind banner says the record is unreadable.
+    the page claims no freshness: a banner says the record is unreadable (#1618 K9: no longer a stale operator one).
     Control: a fresh host record shows none."""
     from defender.tests.tenancy.tenant_1108_p4.test_stale_visibility import (
         plant_unreadable_host_record,
@@ -187,8 +187,10 @@ def test_od22_an_unreadable_host_record_shows_a_stale_operator_banner(run_dir, h
 
     plant_unreadable_host_record(run_dir, how)  # the stamp says fresh
     page = _visible(_page(run_dir)).lower()
-    assert "stale" in page, f"a {how} host record left the page claiming fresh"
-    assert "operator" in page, f"the {how}-record banner is not of kind operator"
+    # #1618 K9 ("Stale retired ... A missing or garbled knowledge record reads `unreadable`"): the banner says the
+    # knowledge is unreadable, no longer a stale banner of kind operator.
+    assert "knowledge unreadable" in page, f"a {how} host record left the page claiming fresh"
+    assert "stale" not in page, f"the {how}-record banner still says stale (K9: no new answer says stale)"
     assert "knowledge record unreadable" in page, (
         f"the {how}-record banner does not say the knowledge record is unreadable")
 

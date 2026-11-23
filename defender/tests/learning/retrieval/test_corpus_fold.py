@@ -91,9 +91,12 @@ def _fixture_agent(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def export_agent(tmp_path: Path, data_root: Path) -> Path:
-    """The fixture tenant's `agent/` inside a real export: what the posture page reads."""
+    """The fixture tenant's `agent/` as its Forgejo `main` holds it (#1618: no export; a copy of the commit, what the
+    posture page is handed)."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import halves_at
+
     with published_tenant(tmp_path / "forge", root=data_root) as tenant:
-        yield tenant.export.path / "agent"
+        yield halves_at(tenant.remote, tenant.commit, tmp_path / "copy") / "agent"
 
 
 def _titles(view: dict) -> set[str]:

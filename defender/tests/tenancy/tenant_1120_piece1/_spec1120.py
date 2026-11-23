@@ -578,11 +578,11 @@ def drive_run(run_module: Any, argv: list[str], rec: RunRecorder, *, directory: 
     seam recorded: `(exit status, None)`, or `(None, the SystemExit it refused with)`. `directory`
     defaults to `directory_for(argv)`."""
     try:
-        # Plus the in-process launch-time publish.
-        from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+        # Plus the in-process launch-time fetch.
+        from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
         return run_module.main(list(argv), directory=directory if directory is not None else directory_for(argv),
-                               **with_publish(dict(rec.seams()))), None
+                               **with_fetch(dict(rec.seams()))), None
     except SystemExit as refused:
         return None, refused
 

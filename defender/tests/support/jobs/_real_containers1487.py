@@ -271,10 +271,11 @@ def seed_reach(dsn: str, tenant: str, other: str) -> Seeded:
     return Seeded(ids, "own-b/w/0/0")
 
 
-def real_child(commit: str, kind: str):
-    """A worker's `learning_argv` or `post_step_argv`: the real helper over the real docker, running `kind`'s program."""
+def real_child(commit: str, kind: str, *, remote: Path):
+    """A worker's `learning_argv` or `post_step_argv`: the real helper over the real docker, running `kind`'s program; its
+    knowledge fetch reads the tenant's bare `remote` (#1618)."""
     def argv(launch: Any) -> list[str]:
         job = ["--kind", kind, "--job", launch.job_id, "--tenant", launch.tenant_id]
         source = ["--source", launch.source_investigation_id] if kind == "learning" else []
-        return [sys.executable, str(CHILD), commit, *job, *source, "--parent-pid", str(launch.parent_pid)]
+        return [sys.executable, str(CHILD), commit, str(remote), *job, *source, "--parent-pid", str(launch.parent_pid)]
     return argv

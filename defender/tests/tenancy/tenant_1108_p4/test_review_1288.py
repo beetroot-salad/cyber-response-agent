@@ -1,10 +1,18 @@
 """#1108 P4 fixes from PR #1288's review, each pinned at the seam that now carries it.
 
 A run copy is owned from the instant its folder exists (its building name carries its owner), so
-a publish's sweep never removes it mid-build. The publish child holds one deadline over its
-network phase, and every outcome is recorded from the report line (the launcher records what only
-it sees). The stage is judged before the box-or-host choice. A run's knowledge commit comes from
-its host-held record, and a family's from the episode's knowledge pin.
+a sweep never removes it mid-build. The fetch child holds one deadline over its network phase. The stage is judged
+before the box-or-host choice. A run's knowledge commit comes from its host-held record, and a family's from the
+episode's knowledge pin.
+
+#1618 (the publish child is the fetch child, flow 1): retired here, each with its successor or reason:
+- every "records its outcome" case ("the child records running out of its budget", "the launcher records a child that
+  reports nothing valid" and its control, "a lock-busy publish records its outcome and clears an earlier refusal", "a
+  lock-busy stale publish is recorded transient"): D7, the publish status and its writers are gone; K1, no lock. The
+  deadline itself is `test_r6_launcher.py::test_1618_the_child_holds_its_own_deadline_and_reports_running_out_of_it`;
+  the failed child's line is `::test_1618_a_child_whose_line_is_not_the_fetch_vocabulary_is_a_failed_child_*`;
+- "what the child left running dies with it":
+  `test_r6_publish_stop.py::test_1618_a_child_that_reported_and_exited_takes_its_process_group_with_it`.
 """
 from __future__ import annotations
 
@@ -17,13 +25,27 @@ import pytest
 
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
+
+OID = "0123456789abcdef0123456789abcdef01234567"
 
 
-def _status(t) -> dict | None:
-    import asyncio
+class _RecordingSpawn:
+    """`launch_publish`'s spawn seam (`subprocess.Popen`'s signature): records the argv it would start its child with,
+    then starts a harmless process that prints no report line. (Local: the publish child's file is retired.)"""
 
-    return asyncio.run(t.repository.publish_status(t.tenant_id))
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv, **kw):
+        self.calls.append(list(map(str, argv)))
+        return subprocess.Popen([sys.executable, "-c", "pass"],  # noqa: S603 — a test double
+                                stdout=kw.get("stdout"), stderr=kw.get("stderr"), stdin=kw.get("stdin"))
+
+
+def _dest(tmp_path: Path) -> Path:
+    dest = tmp_path / "fetch-dest"
+    dest.mkdir(exist_ok=True)
+    return dest
 
 
 # --- a run copy is owned while it is built --------------------------------------------------------
@@ -49,11 +71,11 @@ def test_a_folder_whose_name_carries_a_dead_owner_is_dead(tmp_path):
     assert owner_alive(tmp_path / f".building-r1.owner-{pid}-{start}-0123abcd"), "control"
 
 
-def test_a_publish_sweep_keeps_a_run_copy_being_built_and_removes_a_dead_builders(p4_tenant):
+def test_a_sweep_keeps_a_run_copy_being_built_and_removes_a_dead_builders(p4_tenant):
     """The race, replayed in order: a run copy's building folder exists with no owner file yet
-    (the builder is between making it and writing its record) when a publish sweeps."""
-    from defender.learning.author.version_control.exports import sweep_dead_owners
-    from defender.tenancy._owner import owned_temporary
+    (the builder is between making it and writing its record) when a fetch sweeps (#1618 flow 8: the sweep is
+    `tenancy._owner.sweep_dead_owners`, run at every fetch's start)."""
+    from defender.tenancy._owner import owned_temporary, sweep_dead_owners
 
     copies = Path(p4_tenant.tenant.run_knowledge)
     copies.mkdir(parents=True, exist_ok=True)
@@ -61,153 +83,56 @@ def test_a_publish_sweep_keeps_a_run_copy_being_built_and_removes_a_dead_builder
     live.mkdir()
     orphan = copies / ".building-r-orphan-0123abcd"
     orphan.mkdir()
-    sweep_dead_owners(p4_tenant.tenant)
+    sweep_dead_owners(Path(p4_tenant.data_root), p4_tenant.tenant_id)
     assert live.is_dir(), "the sweep removed a run copy while its owner was building it"
     assert not orphan.exists(), "control: an unowned building folder is swept"
 
 
-# --- the publish child's one deadline ---------------------------------------------------------------
-
-@pytest.fixture
-def child_tenant(tmp_path, data_root):
-    with B.run_tenant(tmp_path, data_root) as t:
-        bind_forge(t)
-        yield t
-
-
-def test_the_child_reports_and_records_running_out_of_its_network_budget(child_tenant, tmp_path):
-    """A forge call answers slowly: well within its own 30s bound, but past the child's whole
-    budget. The child ends itself at the budget with `stale:transient` and records it, so
-    `tenant.py check` names the outage."""
-    t = child_tenant
-    t.merge(B.MERGE_FILES)
-
-    def slow(_request):
-        time.sleep(3.0)
-
-    t.forge.fault = slow
-    began = time.monotonic()
-    line = B.run_child(t, budget=1.0)
-    took = time.monotonic() - began
-    assert line.startswith("stale:transient "), line
-    assert "budget" in line, line
-    assert took < 2.5, f"the child took {took:.1f}s over a 1s budget"
-    status = _status(t)
-    assert status is not None
-    assert status.get("kind") == "transient", status
-    assert status.get("by") == "launch-time publish", status
-
+# --- the fetch child's one deadline -----------------------------------------------------------------
 
 def test_the_launcher_hands_the_child_a_budget_inside_its_own(tmp_path):
     from defender.investigation import publish_launch
-    from defender.tests.tenancy.tenant_1108_p4.test_publish_child import _RecordingSpawn
 
     spawn = _RecordingSpawn()
-    publish_launch.launch_publish("some-tenant", data_root=tmp_path, budget=60.0, spawn=spawn)
-    (argv, _env), = spawn.calls
+    publish_launch.launch_publish("some-tenant", data_root=tmp_path, dest=_dest(tmp_path), budget=60.0, spawn=spawn)
+    argv, = spawn.calls
     budget = float(argv[argv.index("--budget") + 1])
     assert 0 < budget < 60.0, argv
 
 
-# --- the launcher records what only it sees -----------------------------------------------------------
+def test_a_zero_budget_is_already_out_not_unbounded(p4_tenant, tmp_path):
+    """`setitimer(0)` disarms a timer: a budget of 0 must end the network phase at once, refused transient naming the
+    budget, the folder left empty. Control: no budget fetches. (#1618: the fetch child's deadline, was the publish's.)"""
+    from defender.learning.author import version_control as vc
+    from defender.learning.author.version_control.fetch import fetch_copy
 
-@pytest.mark.parametrize("child", [
-    "import sys; sys.exit(3)",
-    "print('not a report')",
-])
-def test_the_launcher_records_a_child_that_reports_nothing_valid(p4_tenant, child):
-    from defender.investigation import publish_launch
-
-    line = publish_launch.launch_publish(
-        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0, directory=p4_tenant.directory,
-        command=[sys.executable, "-c", child, "--"])
-    assert line.startswith("stale:operator publish child failed:"), line
-    status = _status(p4_tenant)
-    assert status is not None, "the failed child left no publish status for `check`"
-    assert status.get("kind") == "operator", status
-    assert status.get("by") == "launch-time publish", status
-    assert "publish child failed" in status.get("refused", ""), status
-
-
-def test_control_a_child_that_reports_validly_is_not_recorded_by_the_launcher(p4_tenant):
-    from defender.investigation import publish_launch
-
-    line = publish_launch.launch_publish(
-        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0, directory=p4_tenant.directory,
-        command=[sys.executable, "-c", "print('stale:transient the forge is down')", "--"])
-    assert line == "stale:transient the forge is down"
-    status = _status(p4_tenant)
-    assert status is None or "publish child failed" not in status.get("refused", ""), status
-
-
-# --- one recorder for every reported outcome --------------------------------------------------
-
-def _lock(t):
-    from defender.learning.author.version_control import tenant_lock
-
-    return tenant_lock(t.tenant)
-
-
-def test_a_lock_busy_publish_records_its_outcome_and_clears_an_earlier_refusal(
-        child_tenant, tmp_path):
-    """A refusal is recorded; then every launch overlaps a drain holding the lock while
-    `current` already names `origin/main`. Each reports `fresh`, and `check` must say so
-    rather than keep showing the old refusal."""
-    import asyncio
-
-    t = child_tenant
-    asyncio.run(t.repository.record_publish_status(
-        t.tenant_id, "stale:operator the issuer is sealed", by="launch-time publish"))
-    with _lock(t):
-        line = B.run_child(t)
-    assert line.startswith("fresh "), line
-    status = _status(t)
-    assert status is not None
-    assert status.get("published") == t.commit, status
-    assert "refused" not in status, status
-
-
-def test_a_lock_busy_stale_publish_is_recorded_transient(child_tenant, tmp_path):
-    t = child_tenant
-    t.merge(B.MERGE_FILES)
-    with _lock(t):
-        line = B.run_child(t)
-    assert line.startswith("stale:transient "), line
-    status = _status(t)
-    assert status is not None
-    assert status.get("kind") == "transient", status
-    assert "lock is busy" in status.get("refused", ""), status
-
-
-def test_a_zero_budget_is_already_out_not_unbounded(child_tenant, tmp_path):
-    """`setitimer(0)` disarms a timer: a budget of 0 must end the network phase at once."""
-    t = child_tenant
-
-    def slow(_request):
-        time.sleep(3.0)
-
-    t.forge.fault = slow
+    t = p4_tenant
+    dest = _dest(tmp_path)
     began = time.monotonic()
-    line = B.run_child(t, budget=0.0)
+    with pytest.raises(vc.DeliveryRefused, match="budget") as refused:
+        fetch_copy(t.tenant_id, dest, data_root=Path(t.data_root), directory=t.directory,
+                   identity=t.vault.identity(), budget=0.0)
     assert time.monotonic() - began < 2.0, "a zero budget let the network phase run"
-    assert line.startswith("stale:transient "), line
-    assert "budget" in line, line
+    assert "within its 0s budget" in str(refused.value), refused.value
+    assert list(dest.iterdir()) == [], "a zero budget fetch wrote into the folder"
+    control = tmp_path / "control"
+    control.mkdir()
+    assert fetch_copy(t.tenant_id, control, data_root=Path(t.data_root), directory=t.directory,
+                      identity=t.vault.identity()) == t.commit, "control"
 
 
 @pytest.mark.parametrize("budget", [0.0, -1.0])
-def test_the_launcher_refuses_a_budget_that_is_not_positive_and_records_it(p4_tenant, budget):
+def test_the_launcher_refuses_a_budget_that_is_not_positive(tmp_path, budget):
+    """No child starts with no time to run in; the launcher's own fault is the failed child's line, lasting. (#1618:
+    "and records it" retires with the publish status, D7.)"""
     from defender.investigation import publish_launch
-    from defender.tests.tenancy.tenant_1108_p4.test_publish_child import _RecordingSpawn
 
     spawn = _RecordingSpawn()
-    line = publish_launch.launch_publish(p4_tenant.tenant_id, data_root=p4_tenant.data_root,
-                                         budget=budget, spawn=spawn, directory=p4_tenant.directory)
+    line = publish_launch.launch_publish("r6-tenant", data_root=tmp_path, dest=_dest(tmp_path), budget=budget,
+                                         spawn=spawn)
     assert spawn.calls == [], "a child was started with no time to run in"
-    assert line.startswith("stale:operator publish child failed:"), line
+    assert line.startswith("refused lasting fetch child failed:"), line
     assert "positive" in line, line
-    status = _status(p4_tenant)
-    assert status is not None
-    assert status.get("kind") == "operator", status
 
 
 def test_the_launcher_and_run_start_build_one_failed_child_line():
@@ -215,8 +140,8 @@ def test_the_launcher_and_run_start_build_one_failed_child_line():
 
     line = run_knowledge.failed_line("it printed no report line")
     report = run_knowledge.read_publish_report(line)
-    assert report.kind == run_knowledge.STALE, report
-    assert report.stale_kind == "operator", report
+    assert report.kind == run_knowledge.REFUSED, report
+    assert not report.transient, report
     assert report.reason == run_knowledge.child_failed("it printed no report line").reason
 
 
@@ -307,12 +232,13 @@ def test_a_draft_that_cannot_be_removed_is_logged_not_raised(tmp_path, caplog):
     assert any("could not be removed" in r.getMessage() for r in caplog.records), caplog.text
 
 
-def test_a_missing_alert_is_refused_before_the_launch_time_publish(p4_tenant, tmp_path):
-    def publish(*_a, **_k):
-        raise AssertionError("the publish ran for a run with no alert")
+def test_a_missing_alert_is_refused_before_the_fetch(p4_tenant, tmp_path):
+    def must_not_fetch(*_a, **_k):
+        raise AssertionError("the fetch ran for a run with no alert")
 
-    out = B.launch(p4_tenant, tmp_path, publish=publish, alert_dir=tmp_path / "nowhere")
-    assert out.publish_calls == [], out.text()
+    fetch = B.Recorded(must_not_fetch)
+    out = B.launch(p4_tenant, tmp_path, fetch=fetch, alert_dir=tmp_path / "nowhere")
+    assert fetch.calls == [], out.text()
     assert out.refusal is not None, out.text()
     assert "alert not found" in out.refusal, out.text()
 
@@ -332,57 +258,20 @@ def test_an_exclusively_held_index_folder_excludes_another_process(tmp_path):
     assert free.returncode == 0, "control: the folder is free once released"
 
 
-# --- the child's word wins; one group per publish ----------------------------------------------
+# --- the child's word wins ----------------------------------------------------------------------------
 
-def test_a_child_that_finishes_after_the_stop_is_reported_as_it_said(p4_tenant):
-    """The launcher's wait runs out and it asks the child to stop; the child (on the lock, so
-    it ignores the request) finishes and reports `fresh`. That report is the outcome, and the
-    launcher records nothing over it."""
+def test_a_child_that_finishes_after_the_stop_is_reported_as_it_said(tmp_path):
+    """The launcher's wait runs out and it asks the child to stop; the child ignores the request, finishes within the
+    grace and reports `ok`. That report is the outcome. (#1618: "and the launcher records nothing over it" retires with
+    the publish status, D7.)"""
     from defender.investigation import publish_launch
 
-    commit = p4_tenant.commit
     child = ("import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-             f"time.sleep(1.5); print('fresh {commit}')")
+             f"time.sleep(1.5); print('ok {OID}')")
     line = publish_launch.launch_publish(
-        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=0.5, directory=p4_tenant.directory,
+        "r6-tenant", data_root=tmp_path, dest=_dest(tmp_path), budget=0.5,
         command=[sys.executable, "-c", child, "--"])
-    assert line == f"fresh {commit}", line
-    status = _status(p4_tenant)
-    assert status is None or "refused" not in status, (
-        f"the launcher recorded an outage over the child's own report: {status}")
-
-
-def test_what_the_child_left_running_dies_with_it(p4_tenant, tmp_path):
-    """A child that started a process in its own group (as its network git does) and exited:
-    the launcher kills the group, so nothing it started outlives the publish."""
-    import os
-
-    from defender.investigation import publish_launch
-
-    pid_file = tmp_path / "left.pid"
-    child = ("import subprocess, sys; "
-             "p = subprocess.Popen(['sleep', '30']); "
-             f"open({str(pid_file)!r}, 'w').write(str(p.pid)); "
-             "print('stale:transient the forge is down')")
-    line = publish_launch.launch_publish(
-        p4_tenant.tenant_id, data_root=p4_tenant.data_root, budget=30.0,
-        command=[sys.executable, "-c", child, "--"])
-    assert line == "stale:transient the forge is down", line
-    left = int(pid_file.read_text(encoding="utf-8"))
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        # One observation, not a chain: the process can be reaped between any two of these
-        # steps (the signal, opening its stat, reading it), and each says so its own way.
-        try:
-            os.kill(left, 0)
-            with open(f"/proc/{left}/stat", encoding="utf-8") as stat:
-                if stat.read().split(")")[-1].split()[0] == "Z":
-                    break
-        except (ProcessLookupError, FileNotFoundError):
-            break  # gone, as wanted
-        time.sleep(0.05)
-    else:
-        raise AssertionError("a process the child started outlived the publish")
+    assert line == f"ok {OID}", line
 
 
 # --- a run box is always a run copy's ----------------------------------------------------------
@@ -435,14 +324,12 @@ def test_a_runs_knowledge_commit_is_its_host_records_not_its_stamps(tmp_path):
     assert status.commit == _A, "the run's knowledge commit was taken from its box-writable stamp"
 
 
-def test_the_branch_pin_is_the_source_runs_recorded_commit(p4_tenant, tmp_path):
-    from types import SimpleNamespace
+def test_the_branch_pin_is_the_source_runs_recorded_commit(tmp_path):
+    """(#1618: the pin is `_source_pin`'s commit, fetched by id later; there is no export to resolve it to.)"""
+    from defender.learning.branch.cli import _source_pin
 
-    from defender.learning.branch.cli import _pinned_export
-
-    source = _run_with_record(tmp_path, record=p4_tenant.commit, stamp=_B)
-    pinned = _pinned_export(SimpleNamespace(tenant=p4_tenant.tenant), source)  # type: ignore[arg-type]
-    assert pinned.commit == p4_tenant.commit, "the family was pinned to the commit a box wrote"
+    source = _run_with_record(tmp_path, record=_A, stamp=_B)
+    assert _source_pin(source) == _A, "the family was pinned to the commit a box wrote"
 
 
 class _Episode:

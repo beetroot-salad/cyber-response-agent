@@ -3,7 +3,7 @@ box or bash-executor environment carries it; only the publish child is handed it
 from __future__ import annotations
 
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
-from defender.tests.tenancy.tenant_1108_p4.test_publish_child import _RecordingSpawn
+from defender.tests.tenancy.knowledge_1618._spawn_1618 import RecordingSpawn as _RecordingSpawn
 
 DSN_ENV = "DEFENDER_DATABASE_DSN"
 DSN = "postgresql://defender:o12-planted@db.test:5432/defender"
@@ -80,7 +80,7 @@ def test_the_publish_child_is_handed_the_address_the_base_lacks(monkeypatch, tmp
     monkeypatch.setenv(DSN_ENV, DSN)
     monkeypatch.setenv(ISSUER_ENV, "https://issuer.o12-planted.test")
     spawn = _RecordingSpawn()
-    publish_launch.launch_publish("some-tenant", data_root=tmp_path, budget=5.0, spawn=spawn)
+    publish_launch.launch_publish("some-tenant", data_root=tmp_path, dest=tmp_path / "dest", budget=5.0, spawn=spawn)
     (_argv, env), = spawn.calls
     assert env.get(DSN_ENV) == DSN
     assert ISSUER_ENV not in env  # the child is built from the scrubbed base plus the address, not from os.environ
@@ -92,6 +92,6 @@ def test_the_publish_child_is_not_handed_an_address_the_launcher_does_not_have(m
 
     monkeypatch.delenv(DSN_ENV, raising=False)
     spawn = _RecordingSpawn()
-    publish_launch.launch_publish("some-tenant", data_root=tmp_path, budget=5.0, spawn=spawn)
+    publish_launch.launch_publish("some-tenant", data_root=tmp_path, dest=tmp_path / "dest", budget=5.0, spawn=spawn)
     (_argv, env), = spawn.calls
     assert DSN_ENV not in env

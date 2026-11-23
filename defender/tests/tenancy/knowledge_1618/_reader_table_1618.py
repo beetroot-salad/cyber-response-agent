@@ -151,8 +151,12 @@ def _run_start(env: Env) -> contextlib.AbstractContextManager[Rig]:
 # --- the learning helper: copy.make (with and without a commit) and a sibling's copy ------------------------------------
 
 def _copy_dirs(scene: Any) -> list[Path]:
+    """Every copy the claim's scratch holds: each entry of its `shared/` folder (where a learning job's copies go, #1618
+    owner ruling) and anything beside that folder."""
     base = scene.root / ".job-scratch" / scene.claim
-    return sorted(p for p in base.iterdir() if p.name != "shared") if base.is_dir() else []
+    shared = base / "shared"
+    beside = [p for p in base.iterdir() if p.name != "shared"] if base.is_dir() else []
+    return sorted(beside + (list(shared.iterdir()) if shared.is_dir() else []))
 
 
 def _helper_seam(scene: Any, calls: list) -> Callable[..., str]:

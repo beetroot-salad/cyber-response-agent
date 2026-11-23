@@ -704,7 +704,7 @@ def _sans_paths(text: str) -> str:
     return re.sub(r"/\S*", "<path>", text)
 
 
-def test_the_launcher_refuses_a_settings_half_inside_its_episodes_folder(
+def test_the_launcher_refuses_a_tenant_folder_inside_its_episodes_folder(
         tmp_path, monkeypatch, data_root):
     est, src = _launch_scene(tmp_path, monkeypatch)
     monkeypatch.delenv(R.EPISODES_BASE_ENV, raising=False)
@@ -712,8 +712,10 @@ def test_the_launcher_refuses_a_settings_half_inside_its_episodes_folder(
     episodes = tenant_dir / "episodes"
     if episodes.is_dir() and not any(episodes.iterdir()):
         episodes.rmdir()
-    os.symlink(tenant_dir / "knowledge", episodes, target_is_directory=True)
-    knowledge_before = R.tree(tenant_dir / "knowledge")
+    # #1618 K8: a tenant holds no knowledge folder (so no settings half for the episodes folder to hold); what acceptance
+    # judges is `<T>` itself, so the box-mounted episodes folder is made to hold `<T>`.
+    os.symlink(tenant_dir, episodes, target_is_directory=True)
+    runs_before = R.tree(tenant_dir / "runs")
     listed_before = sorted(os.listdir(episodes))
     asked = P.CountingQuestioner()
     role = RolePreflight()
@@ -722,8 +724,7 @@ def test_the_launcher_refuses_a_settings_half_inside_its_episodes_folder(
     got = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, src.name), spawn=spawn,
                          questioner=asked, preflight=role)
     assert got.rc != 0, f"the launch was not refused: rc={got.rc}"
-    assert "settings" in got.message, f"not acceptance's settings refusal: {got.message!r}"
-    assert "a box mounts" in got.message, f"not acceptance's settings refusal: {got.message!r}"
+    assert "a box mounts" in got.message, f"not acceptance's box-mounted refusal: {got.message!r}"
     assert P.LAUNCH_TENANT in _sans_paths(got.message), (
         f"the refusal does not name the tenant {P.LAUNCH_TENANT!r}: {got.message!r}")
     assert R.EPISODES_BASE_ENV not in got.message, got.message
@@ -734,7 +735,7 @@ def test_the_launcher_refuses_a_settings_half_inside_its_episodes_folder(
         f"an episode folder appeared under <T>/episodes: {sorted(os.listdir(episodes))}")
     assert [n for n in os.listdir(episodes) if R.is_canonical_uuid(n)] == [], (
         "an episode folder exists under <T>/episodes")
-    assert R.tree(tenant_dir / "knowledge") == knowledge_before, "the knowledge folder changed"
+    assert R.tree(tenant_dir / "runs") == runs_before, "the tenant's runs changed"
 
     os.unlink(episodes)
     control = P.CountingQuestioner()
