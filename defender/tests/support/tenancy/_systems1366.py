@@ -245,19 +245,11 @@ def _readable(path: Path, *, folder: bool) -> bool:
 
 
 def settings_of(data_root: Path | str | None, tenant: str) -> Path | None:
-    """The `settings/` a run of `tenant` would read: the published run copy (`exports/current`) else the placed folder;
-    None when neither can be seen."""
+    """The `settings/` a run of `tenant` would read: the placed folder (what the test seeds the tenant's Forgejo `main`
+    from; #1618: there is no `exports/current`); None when it cannot be seen."""
     if data_root is None:
         return None
     base = Path(str(data_root)) / str(tenant)
-    pointer = base / "exports" / "current"
-    if _readable(pointer, folder=False):
-        try:
-            published = base / "exports" / pointer.read_text("utf-8").strip() / "settings"
-        except OSError:
-            published = None
-        if published is not None and _readable(published, folder=True):
-            return published
     placed = base / "knowledge" / "settings"
     return placed if _readable(placed, folder=True) else None
 
@@ -575,7 +567,7 @@ def run_tenant_for(tenant: Any, *, records: Any = DERIVED, settings_root: Path |
                    catalog: Any = None, **kwargs: Any) -> Any:
     """Production's `run_tenant_for(tenant, ..., records=TenantRecords, catalog=Catalog)` (the run's tenant is built from
     records, no folder read for systems, access or case; grants still come from `settings_root`). `records` defaults to
-    DERIVED over `settings_root` (else the tenant's own `settings`); `None` is a tenant not imported; a `RecordsSpec` is
+    DERIVED over `settings_root` (else the tenant's placed `<T>/knowledge/settings`, #1618 K8); `None` is a tenant not imported; a `RecordsSpec` is
     exactly that. `catalog` is the one the caller holds (#1504 O3: the builder takes the adapter's list from it); with none
     the wrapper builds one over the checkout's roster, once per call, as a run's caller does. Test support only: it passes a
     catalog, the rule that reads it is production's."""
@@ -585,7 +577,10 @@ def run_tenant_for(tenant: Any, *, records: Any = DERIVED, settings_root: Path |
     kwargs["catalog"] = catalog if catalog is not None else Catalog.of_checkout()
 
     if records is DERIVED:
-        records = derive(Path(settings_root) if settings_root is not None else Path(tenant.settings))
+        from defender.tests.support.shared._locations_1210 import location_path as _location_path
+
+        records = derive(Path(settings_root) if settings_root is not None
+                         else Path(str(_location_path(tenant.tenant_root))) / "knowledge" / "settings")
     if settings_root is not None:
         kwargs["settings_root"] = Path(settings_root)
     return production(tenant, records=value_of(records), **kwargs)

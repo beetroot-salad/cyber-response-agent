@@ -10,6 +10,7 @@ import functools
 import inspect
 import os
 import re
+import shutil
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -556,20 +557,19 @@ def _refuse_conflicting_store_seams(resume, store_factory) -> None:
 
 
 def _default_tenant(agent: Path | None = None) -> tuple[Any, Path]:
-    """The tenant a replay that names none runs as, and the PUBLISHED export the run reads
-    (`<T>/exports/<commit>/`: its `agent/` and `settings/`), never the clone's working tree.
+    """The tenant a replay that names none runs as, and a copy of the commit the run reads (its `agent/` and
+    `settings/`, taken from the tenant's Forgejo repository: #1618, knowledge lives only there), never the placed
+    folder itself.
 
     Without `agent`: the committed fixture tenant under the current data root (the test's own,
     or conftest's `session_data_root` for a module-scoped drive). With `agent` (a golden's own
     agent content): the fixture's settings with THAT tree as the agent half, under an id of its
-    own per golden. Either is republished on each drive (an unchanged folder republishes the same
-    commit), so an edit a test made to the tenant's folder is what the run reads."""
+    own per golden. What is placed is committed to the data root's served remote on each drive
+    (`_fetch_standin_1618.seed_placed`: an unchanged folder is the same commit), so an edit a test made to the tenant's
+    placed folder is what the run reads. The copy sits beside the data root, one per commit."""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
-    from defender.tests.tenancy.tenant_1108_p4._support import (
-        export_dir,
-        place_fixture,
-        publish_once,
-    )
+    from defender.tests.support.tenancy._fetch_standin_1618 import forge_scratch, halves_at, seed_placed, served_remote
+    from defender.tests.tenancy.tenant_1108_p4._support import place_fixture
 
     root = current_data_root()
     if agent is None:
@@ -578,9 +578,18 @@ def _default_tenant(agent: Path | None = None) -> tuple[Any, Path]:
         tenant_id = fixture_uuid(f"tenant:golden-agent:{Path(agent).parent.name}")
         if not (root / tenant_id / "knowledge").is_dir():
             place_fixture(root, tenant_id, agent=Path(agent))
-    published = publish_once(root.with_name(f"{root.name}-p4-forge"), root=root,
-                             tenant_id=tenant_id)
-    return published.tenant, export_dir(published.tenant, published.commit)
+    commit = seed_placed(root, tenant_id)
+    assert commit is not None, f"premise: tenant {tenant_id} is placed under {root}"
+    copy = forge_scratch(root) / "copies" / tenant_id / commit
+    if not copy.is_dir():
+        building = copy.with_name(f".{commit}.{os.getpid()}")
+        shutil.rmtree(building, ignore_errors=True)
+        halves_at(served_remote(root, tenant_id), commit, building)
+        try:
+            building.rename(copy)
+        except OSError:  # another drive made it meanwhile: the same commit's bytes
+            shutil.rmtree(building, ignore_errors=True)
+    return _tenants1106.accept(root, tenant_id), copy
 
 
 def _no_docker_daemon(argv: list[str], **_kw: Any) -> Any:

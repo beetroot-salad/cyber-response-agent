@@ -662,21 +662,30 @@ _DEFAULT_KNOWLEDGE: Any = object()
 
 
 def scene_knowledge(tenant_id: str | None = None) -> str:
-    """The knowledge commit a DEFAULT stamp names: what `exports/current` names for `tenant_id`,
-    or for the data root's one published tenant, so stamps name a commit the clone really holds.
-    Otherwise the placeholder `KNOWLEDGE_SHA`."""
+    """The knowledge commit a DEFAULT stamp names: `main` of `tenant_id`'s Forgejo repository (the data root's served
+    remote, `_fetch_standin_1618.served_remote`; #1618), or of the data root's one seeded tenant, so stamps name a
+    commit Forgejo really serves. Otherwise the placeholder `KNOWLEDGE_SHA`."""
+    import subprocess
+
+    from defender.tests.support.tenancy._fetch_standin_1618 import forge_scratch, served_remote
+
     raw = os.environ.get("DEFENDER_DATA_ROOT")
     if not raw:
         return KNOWLEDGE_SHA
     root = Path(raw)
     if tenant_id is None:
-        published = sorted(p.name for p in root.iterdir()
-                           if (p / "exports" / "current").is_file()) if root.is_dir() else []
-        if len(published) != 1:
+        remotes = forge_scratch(root) / "tenants"
+        seeded = sorted(p.name.removesuffix(".git") for p in remotes.iterdir()
+                        if (p / "HEAD").is_file()) if remotes.is_dir() else []
+        if len(seeded) != 1:
             return KNOWLEDGE_SHA
-        tenant_id = published[0]
-    pointer = root / tenant_id / "exports" / "current"
-    return pointer.read_text(encoding="utf-8").strip() if pointer.is_file() else KNOWLEDGE_SHA
+        tenant_id = seeded[0]
+    remote = served_remote(root, tenant_id)
+    if not (remote / "HEAD").is_file():
+        return KNOWLEDGE_SHA
+    done = subprocess.run(["git", "rev-parse", "refs/heads/main"], cwd=remote,  # noqa: S603, S607
+                          capture_output=True, text=True, check=False)
+    return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else KNOWLEDGE_SHA
 
 
 def provenance_record(*, commit: str | None = "deadbee", dirty: bool | None = False,

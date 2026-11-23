@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 
-from defender.tests.support.shared._locations_1210 import fixture_data_root
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy._mapping1345 import PLANTED_ALERT_MAPPING
@@ -108,14 +108,16 @@ def run_tenant(tenant: Any, *, defender_dir: Path | None = None,
     planted no systems; `_systems1366.derive`). A refusal surfaces as the readiness function's own error, as before.
     A scenario that wants other grants plants a tenant whose `verb-grants.yaml` says so.
 
-    `agent_root`/`settings_root` default to the tenant's own `agent/`/`settings/`; the replay
-    harness hands one export's halves. `defender_dir` is ignored (kept for callers' call shape):
-    the catalog never comes from the checkout."""
+    `agent_root`/`settings_root` default to the halves the test placed for the tenant (`<T>/knowledge/agent/` and
+    `settings/`: #1618 K8, a `Tenant` has no knowledge path, so a driver-level test names the folders it hands the
+    driver, here the test's own placed copy); the replay harness hands one commit's copied halves. `defender_dir` is
+    ignored (kept for callers' call shape): the catalog never comes from the checkout."""
     del defender_dir
     from defender.tests.support.tenancy import _systems1366 as R
 
-    root = Path(agent_root) if agent_root is not None else Path(tenant.agent)
-    settings = Path(settings_root) if settings_root is not None else Path(tenant.settings)
+    placed = Path(str(location_path(tenant.tenant_root))) / "knowledge"
+    root = Path(agent_root) if agent_root is not None else placed / "agent"
+    settings = Path(settings_root) if settings_root is not None else placed / "settings"
     try:
         return R.run_tenant_for(tenant, dispatches_lead_zero=dispatches_lead_zero, agent_root=root,
                                 settings_root=settings, records=R.DERIVED if records is ... else records)

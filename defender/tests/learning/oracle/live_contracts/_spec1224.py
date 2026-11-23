@@ -11,6 +11,7 @@ import importlib
 import json
 import logging
 import os
+import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -28,6 +29,7 @@ from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
 
 DEFENDER = Path(__file__).resolve().parents[4]
 
@@ -425,20 +427,26 @@ class Estate:
         """Set the tenant up under the data root (`DEFENDER_DATA_ROOT` by default) and return
         it accepted (`Tenant`).
 
-        It is a real published tenant (a git clone of the P4 fixture's `agent/` plus this
-        estate's settings, via `tenant_1108_p4._support.published_tenant`), so a branch launch
-        has a knowledge commit to materialise and pin. Publishing costs ~0.4 s, so each
-        `(tenant id, grant table, configs)` is published once per process
-        (`_published_template`) and its tenant folder copied in; nothing in it names its root.
-        `configs` (`{system: config.env text}`) is written into the published settings."""
-        root = Path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])
-        # #1618 (K8): a tenant folder holds no clone any more, so "already placed" is the folder itself (a published scene's
-        # tenant, whose knowledge is on its remote); only an absent tenant is copied in from the template.
-        if not (root / tenant_id).is_dir():
-            import shutil
+        Its knowledge lives only on its Forgejo repository (#1618 D2, K8): the P4 fixture's `agent/` plus this estate's
+        settings, committed on `main` of a bare remote served as the data root's forge
+        (`_fetch_standin_1618.served_remote`), so a branch launch's fetch (`in_process_fetch`, `launch()`'s default
+        `fetch=`) has a commit to copy and pin. Seeding costs ~0.4 s, so each `(tenant id, grant table, configs)` is
+        seeded once per process (`_published_template`) and its tenant folder and remote copied in; nothing in them
+        names the root. `configs` (`{system: config.env text}`) is written into the committed settings."""
+        import shutil
 
-            shutil.copytree(_published_template(tenant_id, self.table(), dict(configs or {})),
-                            root / tenant_id, symlinks=True)
+        from defender.tests.support.tenancy._fetch_standin_1618 import served_remote
+
+        root = Path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])
+        # "Already placed" is the folder itself (a published scene's tenant, whose knowledge is on its own remote): only
+        # an absent tenant is copied in from the template, with its remote.
+        if not (root / tenant_id).is_dir():
+            folder, remote = _published_template(tenant_id, self.table(), dict(configs or {}))
+            shutil.copytree(folder, root / tenant_id, symlinks=True)
+            served = served_remote(root, tenant_id)
+            if not served.exists():
+                served.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(remote, served, symlinks=True)
         return T6.accept(root, tenant_id)
 
     def records(self) -> Any:
@@ -525,15 +533,15 @@ class TacitEstate(Estate):
 # The estate's tenant is published for real, and the stamps name its commit.
 # --------------------------------------------------------------------------------------
 
-_TEMPLATES: dict[tuple[Any, ...], Path] = {}
+_TEMPLATES: dict[tuple[Any, ...], tuple[Path, Path]] = {}
 _TEMPLATE_HOME: list[Any] = []
 
 
-def _published_template(tenant_id: str, table: str, configs: dict[str, str] | None = None) -> Path:
-    """`<process scratch>/<n>/root/<tenant_id>`: the tenant with grant table `table`, published
-    once per process through `published_tenant` (the P4 fixture's `agent/`, the estate's settings
-    in place of the fixture's). Its origin server is closed after: a published tenant needs no
-    network to be read or materialised."""
+def _published_template(tenant_id: str, table: str, configs: dict[str, str] | None = None) -> tuple[Path, Path]:
+    """`(<process scratch>/<n>/root/<tenant_id>, its bare remote)`: the tenant with grant table `table`, seeded once per
+    process through `published_tenant` (the P4 fixture's `agent/`, the estate's settings in place of the fixture's, one
+    commit on the remote's `main`; #1618: the tenant folder holds no clone). Its origin server is closed after: the
+    remote is served again by whoever fetches from it."""
     configs = dict(configs or {})
     key = (tenant_id, table, tuple(sorted(configs.items())))
     if key in _TEMPLATES:
@@ -554,25 +562,24 @@ def _published_template(tenant_id: str, table: str, configs: dict[str, str] | No
     stale = {f"settings/{rel}": None for rel in files_under(FIXTURE_SETTINGS)
              if f"settings/{rel}" not in wanted}
     with published_tenant(home / "forge", root=home / "root", tenant_id=tenant_id,
-                          files={**stale, **wanted}):
-        pass
-    # Deleting the fixture's other system configs leaves their folders in the clone's working
-    # tree; git tracks no empty folder (the commit and its export hold none), so they go too —
-    # an empty `settings/systems/<s>/` would read as a configured-but-broken system.
-    clone_settings = home / "root" / tenant_id / "knowledge" / "settings"
-    for folder in sorted(clone_settings.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-        if folder.is_dir() and not any(folder.iterdir()):
-            folder.rmdir()
-    _TEMPLATES[key] = home / "root" / tenant_id
+                          files={**stale, **wanted}) as seeded:
+        remote = Path(seeded.remote)
+    _TEMPLATES[key] = (home / "root" / tenant_id, remote)
     return _TEMPLATES[key]
 
 
 def knowledge_commit(tenant_id: str = FIXTURE_TENANT, data_root: Path | None = None) -> str | None:
-    """The commit the tenant's `exports/current` names (read as a plain file), or `None` when
-    the tenant was not published (a tenant set up some other way)."""
+    """`main`'s commit on the tenant's served remote (the data root's forge, `_fetch_standin_1618.served_remote`), or
+    `None` when the tenant was never seeded there (a tenant set up some other way)."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import served_remote
+
     root = Path(data_root if data_root is not None else os.environ["DEFENDER_DATA_ROOT"])
-    pointer = root / tenant_id / "exports" / "current"
-    return pointer.read_text(encoding="utf-8").strip() if pointer.is_file() else None
+    remote = served_remote(root, tenant_id)
+    if not (remote / "HEAD").exists():
+        return None
+    done = subprocess.run(["git", "rev-parse", "refs/heads/main"], cwd=remote,  # noqa: S603, S607
+                          capture_output=True, text=True, check=False)
+    return done.stdout.strip() if done.returncode == 0 else None
 
 
 # --------------------------------------------------------------------------------------
@@ -1723,6 +1730,8 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None, 
     # The judge runs at the end of an accepted launch; a scenario not about it must never reach
     # a real provider, so the default is a recording double whose reply grades nothing.
     seams.setdefault("judge", quiet_judge())
+    # #1618 flow 4: the launcher's one knowledge fetch, over the tenant's served remote (`Estate.place`).
+    seams.setdefault("fetch", in_process_fetch())
     if oracle is not None:
         seams["oracle"] = oracle.model
     if verifier is not None:
