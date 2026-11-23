@@ -12,7 +12,6 @@ def upgrade_marking_tenants(dsn: str) -> None:
     """Upgrade `dsn` to head as a database whose tenants all have their records mark: up to the revision before the drop,
     a mark for every tenant not offboarded (what creating a tenant wrote since #1366), then on to head. The drop's guard
     stops an upgrade over a tenant without one; a test of something else plants the marks."""
-    from defender.migrations import upgrade
     from defender.tests.migrations.test_1214_migrations import _upgrade_to
 
     _upgrade_to(dsn, BEFORE_DROP)
