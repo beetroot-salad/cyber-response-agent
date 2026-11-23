@@ -476,7 +476,7 @@ def test_1391_o4_a_ca_context_is_built_once_per_distinct_ca_and_never_on_the_eve
             r.store.sets[(r.t.tenant_id, "crm")] = T.static_set()
             r.t.merge(H.access_files("crm", H.declaration(base, ca=pki.root.cert),
                                      env=H.http_proxy_env("crm")), "a second system, same ca")
-            r.t.publish()
+            # #1618 D7/K8: the merge is `main`, which the proxy's next read fetches; there is no publish step.
             built = []
             for system, grant in (("identity", None), ("identity", None), ("crm", crm)):
                 with counting_calls(context=ssl.SSLContext.__new__) as calls:
@@ -487,7 +487,7 @@ def test_1391_o4_a_ca_context_is_built_once_per_distinct_ca_and_never_on_the_eve
                 assert not any(on_loop), f"{system}: a context was built on the event loop"
             r.t.merge({H.ACCESS_FILE.format(system="identity"): H.declaration(
                 base, ca=other_pem)}, "another ca text")
-            r.t.publish()
+            # #1618 D7/K8: the merge is `main`, which the proxy's next read fetches; there is no publish step.
             with counting_calls(context=ssl.SSLContext.__new__) as calls:
                 answer = r.ask(url=f"{base}/users/x")
             assert answer["fault"] is None, answer
