@@ -698,13 +698,17 @@ def grade_at(episode_dir: Path, *, runs: Any = None, **kw: Any) -> Any:
     point. `runs` defaults to the repository of the tenant holding `episode_dir`
     (`episode_runs_for`). Every keyword passes through unchanged and no environment is set; the one default is `copy=`
     (#1618 K5: a post-move lesson body is read from a copy at the family's pin), the product's fetch of that commit from
-    the tenant's served remote (`_fetch_standin_1618.fetched_copy`), as the launcher's own judge copy does."""
+    the tenant's served remote (`_fetch_standin_1618.fetched_copy`), as the launcher's own judge copy does; not when the
+    job-socket environment names a helper, where the judge's own default (the helper's `copy.make`) is the path driven."""
     from defender.tests.support.tenancy._fetch_standin_1618 import fetched_copy
 
     episode_dir = Path(episode_dir)
     repository = episode_runs_for(episode_dir) if runs is None else runs
     kw.pop("runs_base", None)  # Some callers still pass it; `grade_episode` takes none.
-    kw.setdefault("copy", fetched_copy(episode_dir.parent.parent.name))
+    if not os.environ.get(mod("job_socket").SOCKET_ENV):
+        # Outside a job container (no job socket named) the judge's own default, the helper's `copy.make`, has no helper
+        # to ask: stand in the launcher's fetch. Inside one (the socket named) the default path is what the case drives.
+        kw.setdefault("copy", fetched_copy(episode_dir.parent.parent.name))
     return mod("learning.judge").grade_episode(repository, episode_dir.name, **kw)
 
 
