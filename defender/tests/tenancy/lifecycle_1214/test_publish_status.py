@@ -1,17 +1,11 @@
 # ruff: noqa: PT018, F811
-"""#1214 O6: the tenant's last publish outcome lives in `tenancy.publish_status` (not `publish-status.json`): recorded by
-host processes, readable, replaced by the next outcome and deleted at `finish` (O6, P2, Flow 2.4). Successors of #1108 P4's
-file-based assertions: a misconfiguration is recorded then cleared by a success; a transient outage and an operator
-refusal are told apart.
+"""#1214 O6, as #1618 leaves it: the tenant's last publish outcome is no longer kept anywhere (D7: "the `publish_status`
+table goes", with its writers `record.published`, `record.refusal`, `record_publish_status`); the migration that drops it
+is `tests/migrations/test_1618_publish_status_migration.py`. Retired here with it (#1618 D7, design "Retired promises"):
+the record/read/replace/clear/per-tenant cases of `record_publish_status`/`publish_status` and "finish deletes the
+publish status". What stays:
 
-GAP-Rc-2 (pinned here, not by r9): on both repositories, `await repo.record_publish_status(T, line, *, by)` stores the
-outcome a launch-time publish report `line` states (`fresh <commit>`; `stale:transient <why>`; `stale:operator <why>`;
-`misconfigured <why>`) and `await repo.publish_status(T) -> dict | None` reads it with the keys of the old file: `by`,
-`published` (the commit) or `refused` (the reason) with `kind` (`transient` | `operator`); None when none is recorded.
-Who records the first publish in prepare (the publish child or the host actor) is not pinned (GAP-Rc-3): the recording
-publish fake writes nothing, so no case asserts prepare's own write.
-
-#1214 attack-3 hole 6 (O6): after a publish nothing named `tenant.json` or `publish-status.json` exists under the data
+#1214 attack-3 hole 6 (O6): after a fetch nothing named `tenant.json` or `publish-status.json` exists under the data
 root, and no production string expression folds to either name (a concatenation is not a constant).
 
 #1214 O6: production code neither reads nor writes `tenant.json` or `publish-status.json`.
@@ -26,101 +20,18 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip('fastapi')
-
-from defender.tests.support.api._mount1161 import API  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214.test_repository_contract import (  # noqa: E402,F401
-    ABSENT,
-    T1,
-    Store,
-    store,
-)
-from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, unbind_forge
+from defender.tests.tenancy.knowledge_1618 import _support as K
 
 
-BY = "launch-time publish"
+@pytest.mark.parametrize("repository", ["memory", "postgres"])
+def test_no_tenant_repository_keeps_a_publish_outcome(repository):
+    """#1618 D7: neither tenant repository records or reads a publish outcome any more (its table is dropped)."""
+    from defender.tenancy import InMemoryTenantRepository
+    from defender.tenancy.postgres import PostgresTenantRepository
 
-
-async def _record(s: Store, line: str, tenant: str = T1) -> None:
-    await s.repo.record_publish_status(tenant, line, by=BY)
-
-
-@pytest.mark.anyio
-async def test_a_tenant_with_no_outcome_reads_none(store):
-    """Nothing recorded reads as None, also for an unknown tenant (O6)."""
-    await store.seed(T1)
-    assert await store.repo.publish_status(T1) is None
-    assert await store.repo.publish_status(ABSENT) is None
-
-
-@pytest.mark.anyio
-async def test_a_published_commit_is_recorded_and_readable(store):
-    """`fresh <commit>` reads back as published at that commit by the recorder, with no refusal (O6)."""
-    await store.seed(T1)
-    await _record(store, "fresh 0123abcd")
-    status = await store.repo.publish_status(T1)
-    assert status["published"] == "0123abcd" and status["by"] == BY
-    assert "refused" not in status
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize(("line", "kind"), [
-    ("stale:transient the forge is unreachable", "transient"),
-    ("stale:operator the history diverged", "operator"),
-    ("misconfigured no issuer config", "operator"),
-])
-async def test_a_refusal_is_recorded_with_its_kind_and_reason(store, line, kind):
-    """A transient outage and an operator refusal are told apart; a misconfiguration needs a human (O6, O-SEE)."""
-    await store.seed(T1)
-    await _record(store, "fresh 0123abcd")  # control: a published outcome is replaced, not kept beside
-    await _record(store, line)
-    status = await store.repo.publish_status(T1)
-    assert status["kind"] == kind and line.partition(" ")[2] in status["refused"]
-    assert "published" not in status
-
-
-@pytest.mark.anyio
-async def test_a_misconfiguration_is_recorded_and_a_later_success_clears_it(store):
-    """The refusal stands until a publish succeeds; then only the commit is left (O6)."""
-    await store.seed(T1)
-    await _record(store, "misconfigured the issuer config is missing")
-    assert (await store.repo.publish_status(T1))["refused"]
-    await _record(store, "fresh feedbeef")
-    status = await store.repo.publish_status(T1)
-    assert status["published"] == "feedbeef" and "refused" not in status and "kind" not in status
-
-
-@pytest.mark.anyio
-async def test_one_tenants_outcome_is_not_anothers(store):
-    """Status is keyed by tenant (O6)."""
-    await store.seed(T1)
-    await store.seed(ABSENT)
-    await _record(store, "stale:operator diverged", T1)
-    assert await store.repo.publish_status(ABSENT) is None
-    assert (await store.repo.publish_status(T1))["kind"] == "operator"
-
-
-@pytest.fixture
-def world(tmp_path, data_root):
-    w = LifecycleWorld(tmp_path, data_root)
-    yield w
-    w.close()
-
-
-@pytest.mark.anyio
-def test_finish_deletes_the_publish_status_and_nothing_earlier_does(world):
-    """The status is still there while the tenant is being torn down and gone once `finish` has run (Flow 2.4, O6)."""
-    tenant = world.active_tenant()
-    world.call(world.tenants.record_publish_status, tenant, "fresh 0123abcd", by=BY)
-    assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
-    world.drive(stop=lambda: world.item(tenant)["step"] == "finish")
-    assert world.item(tenant)["step"] == "finish"
-    assert world.call(world.tenants.publish_status, tenant)["published"] == "0123abcd", "deleted before finish"
-    world.drive()
-    assert world.item(tenant)["state"] == "offboarded"
-    assert world.call(world.tenants.publish_status, tenant) is None
+    cls = {"memory": InMemoryTenantRepository, "postgres": PostgresTenantRepository}[repository]
+    assert hasattr(cls, "forge_wiring"), "control: the repository class is the one tenant records are read through"
+    assert [name for name in ("record_publish_status", "publish_status") if hasattr(cls, name)] == []
 
 
 def _shadow_files(root: Path) -> list[str]:
@@ -135,18 +46,16 @@ def test_the_shadow_file_check_sees_a_planted_file(tmp_path):
     assert _shadow_files(tmp_path) == [f"t/{STATUS}", ROW]
 
 
-@pytest.mark.parametrize("outcome", ["fresh", "misconfigured"])
-def test_a_publish_leaves_no_row_or_status_file_under_the_data_root(tmp_path, data_root, outcome):
-    """The publish child's success and its local misconfiguration both record to the database only (O6)."""
-    with B.run_tenant(tmp_path, data_root) as t:
-        bind_forge(t)
-        if outcome == "misconfigured":
-            unbind_forge(t)
-        else:
-            t.merge(B.MERGE_FILES)
-        line = B.run_child(t, mint=outcome == "misconfigured")
-        assert B.outcome_class(line) == outcome, line
-        assert _shadow_files(Path(t.data_root)) == []
+@pytest.mark.parametrize("outcome", ["ok", "refused"])
+def test_a_fetch_leaves_no_row_or_status_file_under_the_data_root(tmp_path, data_root, outcome):
+    """The fetch child (#1618 flow 1, which replaced the publish child), answering `ok` or refused (Forgejo unreachable),
+    writes neither file under the data root (O6)."""
+    with K.scene(tmp_path, data_root) as t:
+        if outcome == "refused":
+            K.forge_down(t)
+        report = K.child_report(t, tmp_path, K.owned_dest(tmp_path / "copies"))
+        assert report.word == outcome, report
+        assert _shadow_files(Path(K.tenant_root(t)).parent) == []
 
 
 def _folded(node: ast.AST) -> str | None:

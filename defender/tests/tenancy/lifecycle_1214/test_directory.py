@@ -392,7 +392,7 @@ def _sibling_start(directory: Any = ...) -> str:
         with contextlib.redirect_stderr(err):
             run_py.main(["--tenant", TENANT, "--episode", "ep-1214", "--world", "w-1214", "--no-learn"], **given,
                         preflight=calls.hook("preflight", 0), visualize=calls.hook("visualize", None),
-                        enqueue=calls.hook("enqueue", False), publish=calls.hook("publish", ""),
+                        enqueue=calls.hook("enqueue", False), fetch=calls.hook("fetch", ""),
                         lifecycle=calls.hook("lifecycle", {"output": "", "requests": 0, "truncated_by": None}))
     except SystemExit as refused:
         return f"{refused.code}\n{err.getvalue()}"
