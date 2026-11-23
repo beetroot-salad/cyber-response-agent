@@ -43,12 +43,10 @@ from ._support import (
     MERGE_STYLES,
     ForgeHTTP,
     advance_remote,
-    bounded,
     forge_pulls,
     git,
     git_bytes,
     git_subcommand,
-    install_planting_hook,
     opened,
     push_to_remote,
     remote_refs,
@@ -264,23 +262,11 @@ def test_revert_refuses_a_lesson_the_commit_maker_never_wrote(repo, tmp_path, st
     refused_revert(repo, store, path, "human")
 
 
-def test_revert_refuses_a_commit_laid_on_its_branch_by_a_clone_hook(repo, tmp_path, store):
-    tenant, remote, _ = repo
-    wrote(repo, tmp_path, store, "learned", [{_LEARNED: b"the agent's lesson\n"}])
-    http = ForgeHTTP()
-    branches = _branches(remote)
-    marker = tmp_path / "planted"
-    install_planting_hook(tenant.knowledge, git(remote, "rev-parse", "main"), marker,
-                          "agent/lessons/raw.md", b"raw git, not the commit-maker\n")
-    _, error, hung = bounded(lambda: revert(repo, store, http, _LEARNED, "learned"))
-    assert not hung
-    if marker.exists():
-        assert isinstance(error, target().DeliveryRefused), error
-        assert _branches(remote) == branches
-        assert not http.creates
-    else:
-        assert error is None, f"the revert refused though nothing was laid on its branch: {error}"
-        assert len(http.creates) == 1
+# #1618 K8 retired "the revert refuses a commit laid on its branch by a clone hook": there is no host clone to hold a
+# hook; a delivery's private repository is made fresh at its open and its git runs with `core.hooksPath=/dev/null` and
+# no per-user configuration. Covered by `test_credential.py::test_network_git_runs_no_hook_the_configuration_names`
+# (configured hooks never run under the delivery's or the revert's git) and, for "only the commit-maker's commit is
+# pushed", by `test_only_the_commit_maker_makes_the_revert_commit_and_only_the_push_routes_it` below.
 
 
 @pytest.mark.parametrize("path", ["agent/.tenant-id", "settings/verb-grants.yaml",

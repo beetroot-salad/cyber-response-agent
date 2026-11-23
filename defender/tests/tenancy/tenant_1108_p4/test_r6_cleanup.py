@@ -1,75 +1,26 @@
-"""#1108 P4: what a failed build or command leaves behind, and a few liveness and pinning
-judgements, each case a wrong-but-green production variant."""
+"""#1108 P4: a liveness judgement, a wrong-but-green production variant.
+
+#1618 retires the rest of this file with the builders it drove (flow 1: the fetch child fills the caller's owned empty
+folder; there is no `copy_for_run`, `materialise_export`, `exports/` or `resolve_source`, K8), each with its successor:
+- "a run copy build that fails leaves no half-built folder":
+  `knowledge_1618/test_run_start_1618.py::test_a6_a_child_killed_mid_fill_leaves_nothing_and_the_run_refuses`;
+- "an export build that fails leaves no staging folder": `knowledge_1618/test_fetch_child_1618.py::test_a11_*` and
+  `::test_a19_*` (refused content leaves nothing; the private repository is gone after);
+- "a pinned commit with no export is refused when it is resolved":
+  `knowledge_1618/test_run_start_1618.py::test_a9_a_pin_forgejo_does_not_serve_refuses_naming_the_commit` and
+  `test_run_start.py::test_o_pin_a_pin_to_a_commit_forgejo_does_not_serve_refuses_before_message_zero`.
+"""
 from __future__ import annotations
 
-import os
-import shutil
 import subprocess
 import sys
-import textwrap
 import time
-import uuid
 from pathlib import Path
 
 import pytest
 
-from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.tenancy.tenant_1108_p4._support import export_dir
 
-WORKTREE = Path(__file__).resolve().parents[4]
-
-
-def _run_limited(code: str) -> subprocess.CompletedProcess:
-    """`code` in a child process whose files may not exceed 100 kB (a write beyond it fails with
-    EFBIG; Python ignores SIGXFSZ)."""
-    env = {**os.environ, "PYTHONPATH": str(WORKTREE)}
-    prelude = "import resource\nresource.setrlimit(resource.RLIMIT_FSIZE, (100_000, 100_000))\n"
-    return subprocess.run([sys.executable, "-c", prelude + code], env=env,  # noqa: S603
-                          cwd=str(WORKTREE), capture_output=True, text=True, timeout=120,
-                          check=False)
-
-
-BIG = {"agent/lessons/r6-big.md": "x" * 200_000}
-
-
-def test_r6_a_run_copy_build_that_fails_leaves_no_half_built_folder(tmp_path, data_root):
-    with B.run_tenant(tmp_path, data_root, files=BIG) as t:
-        done = _run_limited(textwrap.dedent(f"""
-            from defender.tenancy import run_knowledge
-            from defender.tenancy import _tenant
-            tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), {t.tenant_id!r})
-            source = run_knowledge.KnowledgeSource(kind="fresh", commit={t.commit!r})
-            try:
-                run_knowledge.copy_for_run(tenant, source, {str(uuid.uuid4())!r})
-            except OSError as e:
-                print("OSError", e.errno)
-            """))
-        assert "OSError" in done.stdout, (done.stdout, done.stderr[-500:])
-        assert list(B.run_copies(t).iterdir()) == [], "a failed build left a folder behind"
-
-
-def test_r6_an_export_build_that_fails_leaves_no_staging_folder(tmp_path, data_root):
-    with B.run_tenant(tmp_path, data_root, files=BIG) as t:
-        exports = export_dir(t.tenant, t.commit).parent
-        # `current` and the export go; the clone's objects remain, so materialise rebuilds.
-        shutil.rmtree(export_dir(t.tenant, t.commit))
-        done = _run_limited(textwrap.dedent(f"""
-            from defender.learning.author.version_control import materialise_export
-            from defender.tenancy import _tenant
-            tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), {t.tenant_id!r})
-            try:
-                materialise_export(tenant, {t.commit!r})
-            except BaseException as e:
-                print("failed", type(e).__name__)
-            """))
-        assert "failed" in done.stdout, (done.stdout, done.stderr[-500:])
-        assert [p.name for p in exports.iterdir() if p.name != "current"] == [], (
-            "a failed export build left its staging folder")
-
-
-# --- propose always discards its draft ---------------------------------------------------------
-
-# --- liveness and pinning ----------------------------------------------------------------------
+# --- liveness ---------------------------------------------------------------------------------
 
 def test_r6_a_zombie_is_not_a_live_owner(tmp_path):
     from defender.tenancy._owner import OWNER_FILE, owner_alive, process_start
@@ -93,13 +44,3 @@ def test_r6_a_zombie_is_not_a_live_owner(tmp_path):
         assert not owner_alive(folder)
     finally:
         proc.wait()
-
-
-def test_r6_a_pinned_commit_with_no_export_is_refused_when_it_is_resolved(tmp_path, data_root):
-    from defender.tenancy import run_knowledge
-
-    with B.run_tenant(tmp_path, data_root) as t:
-        absent = "fedcba9876543210" * 2 + "fedcba98"
-        with pytest.raises(run_knowledge.KnowledgeRefused):
-            run_knowledge.resolve_source(t.tenant, report=None, pinned=absent)
-        assert run_knowledge.resolve_source(t.tenant, report=None, pinned=t.commit).commit == t.commit

@@ -112,14 +112,16 @@ def test_tenant_and_hidden_carriers_preserve_location_roles(tmp_path):
     expected = {
         "data_root": L.DataRoot, "tenant_root": L.TenantRoot,
         "runs": L.RunsBase, "sessions": L.SessionsRoot, "episodes": L.EpisodesRoot,
-        "worktrees": L.WorktreesRoot, "scratch": L.ScratchRoot, "exports": L.ExportsRoot,
-        "drafts": L.DraftsRoot, "knowledge_lock": L.KnowledgeLock,
+        "worktrees": L.WorktreesRoot, "scratch": L.ScratchRoot,
+        "drafts": L.DraftsRoot,
         "runs_legacy": L.LegacyRunsRoot,
         "episodes_legacy": L.LegacyEpisodesRoot,
     }
     for name, kind in expected.items():
         assert isinstance(getattr(tenant, name), kind), name
     assert not hasattr(tenant, "dir")
+    # #1618 K8/K1: a tenant has no exports, no knowledge path and no knowledge lock any more.
+    assert [name for name in ("exports", "knowledge", "knowledge_lock") if hasattr(tenant, name)] == []
     sessions = RunPaths(tmp_path / "runs" / "run").session_paths()
     assert isinstance(sessions.runs_base, L.RunsBase)
     assert isinstance(sessions.store("case-alpha")[1], L.SessionTrustRoot)

@@ -1,11 +1,19 @@
-"""#1108 P4: what the real publish child entry records for `tenant.py check`, each case a
-wrong-but-green production variant."""
+"""#1108 P4: a batch reset keeps the lane folders a running box has bound, a wrong-but-green production variant.
+
+#1618 retires what this file pinned about the publish child's records for `tenant.py check` (D7: the publish status and
+its writers are gone), each with its successor:
+- "a launch-time publish records a misconfiguration and a success clears it" (D7, D11: `misconfigured` goes; a tenant
+  with no forge wiring is refused lasting, `lifecycle_1214/test_host_entry.py::test_run_start_refuses_an_active_tenant_with_no_forge_wiring`);
+- "a git fetch that cannot connect is a transient outage" (its record): the class itself is
+  `knowledge_1618/test_refusal_classes_1618.py::test_d11_forgejo_unreachable_is_refused_transient_with_a_reason`;
+- "a busy lock is not recorded as a refusal" (K1: no lock, no `LockBusy`; D7: no record).
+"""
 from __future__ import annotations
 
 import pytest
 
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, unbind_forge
+from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
 
 
 @pytest.fixture
@@ -13,55 +21,6 @@ def tenant(tmp_path, data_root):
     with B.run_tenant(tmp_path, data_root) as t:
         bind_forge(t)
         yield t
-
-
-def _status(t):
-    import asyncio
-
-    return asyncio.run(t.repository.publish_status(t.tenant_id))
-
-
-def test_r6_a_launch_time_publish_records_a_misconfiguration_and_a_success_clears_it(
-        tenant, tmp_path):
-    unbind_forge(tenant)  # Flow 4: no forge wiring is the local misconfiguration the design pins
-    line = B.run_child(tenant, mint=True)
-    assert B.outcome_class(line) == "misconfigured", line
-    refused = _status(tenant)
-    assert refused, f"a misconfiguration is invisible to check: {refused}"
-    assert refused.get("refused"), f"a misconfiguration is invisible to check: {refused}"
-
-    bind_forge(tenant)
-    merged = tenant.merge(B.MERGE_FILES)
-    line = B.run_child(tenant)
-    assert B.outcome_class(line) == "fresh", line
-    published = _status(tenant)
-    assert published, published
-    assert published.get("published") == merged, published
-    assert "refused" not in published, f"a good publish left the refusal standing: {published}"
-
-
-def test_r6_a_git_fetch_that_cannot_connect_is_a_transient_outage(tenant, tmp_path):
-    tenant.server.close()  # the origin's port now refuses connections
-    line = B.run_child(tenant)
-    assert B.outcome_class(line) == "stale:transient", line
-    recorded = _status(tenant)
-    assert recorded, recorded
-    assert recorded.get("kind") == "transient", recorded
-
-
-def test_r6_a_busy_lock_is_not_recorded_as_a_refusal_and_keeps_the_earlier_record(tenant):
-    from defender.learning.author.version_control import LockBusy, status
-
-    directory, tid = tenant.directory, tenant.tenant_id
-    status.record_refused(directory, tid, RuntimeError("a real refusal"), by="r6")
-    before = _status(tenant)
-    assert before
-    assert before["refused"] == "a real refusal"
-    status.record_refused(directory, tid, LockBusy("lock busy"), by="r6-later")
-    assert _status(tenant) == before
-    with pytest.raises(LockBusy), status.recording(directory, tid, by="r6-later"):
-        raise LockBusy("lock busy")
-    assert _status(tenant) == before
 
 
 def test_r6_batch_reset_keeps_the_lane_folders_a_running_box_has_bound(tenant):
