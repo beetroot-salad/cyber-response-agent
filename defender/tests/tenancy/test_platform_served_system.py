@@ -7,6 +7,7 @@ from defender._git import REPO_ROOT
 from defender.learning.leads.declared_systems import lane_names
 from defender.systems.catalog import Catalog, TenantSystems
 from defender.systems.verbs import ModuleVerbRegistry, read_roster
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: the tool's one fetch
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.tenancy import _tenants1106
 
@@ -100,7 +101,7 @@ def test_1390_the_workspace_map_command_lists_the_registry(tmp_path, data_root, 
         out = B.launch(t, tmp_path, publish=lambda *a, **k: B.fresh(t.commit))
         assert out.rc == 0, out.text()
         capsys.readouterr()
-        rc = workspace_map.main(["workspace_map.py", "--tenant", t.tenant_id, out.run_dir.name], directory=t.directory)
+        rc = workspace_map.main(["workspace_map.py", "--tenant", t.tenant_id, out.run_dir.name], directory=t.directory, fetch=in_process_fetch())
         text = capsys.readouterr().out
 
     assert rc == 0
@@ -128,7 +129,7 @@ def test_1390_the_workspace_map_command_lists_the_registry_whatever_today_grants
                 doc["dispositions"][SYSTEM][verb] = {"roles": [], "reason": "withheld today"}
             table.write_text(_yaml.safe_dump(doc), encoding="utf-8")
         capsys.readouterr()
-        rc = workspace_map.main(["workspace_map.py", "--tenant", t.tenant_id, out.run_dir.name], directory=t.directory)
+        rc = workspace_map.main(["workspace_map.py", "--tenant", t.tenant_id, out.run_dir.name], directory=t.directory, fetch=in_process_fetch())
         captured = capsys.readouterr()
 
     assert rc == 0, captured.err

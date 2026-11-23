@@ -39,6 +39,7 @@ import pytest
 import yaml
 
 from defender.records._layout import RunPaths
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an operator tool's one fetch
 from defender.tests.learning.oracle.live_contracts import _spec1224 as O
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
@@ -189,7 +190,7 @@ def _policy(env: Env, relation: str) -> Seen:
     argv = ["show", "gather", "--run-dir", str(run_dir), "--tenant", fixture_uuid("tenant:acme")]
     refusal: str | None = None
     try:
-        policy_cli.main(argv, directory=directory_for_argv(argv, records=records))
+        policy_cli.main(argv, fetch=in_process_fetch(), directory=directory_for_argv(argv, records=records))
     except SystemExit as stop:
         refusal = str(stop.code)
     return Seen(refusal, None, _enabled(records), _ignored(relation, granted, "cmdb"), None)

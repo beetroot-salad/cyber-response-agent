@@ -59,6 +59,7 @@ Importing this module imports no production code (collection stays clean at base
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib
 import os
 import sys
@@ -164,7 +165,17 @@ def main(argv: Sequence[str] | None = None, *, entries: Mapping[str, Callable[..
         entry = getattr(importlib.import_module(module), name)
     if ns.kind in PROGRAM_NAMES:
         entry_argv = [PROGRAM_NAMES[ns.kind], *entry_argv]
-    return int(entry(list(entry_argv), directory=directory))
+    seams: dict[str, Any] = {}
+    import inspect
+
+    with contextlib.suppress(TypeError, ValueError):
+        if "fetch" in inspect.signature(entry).parameters and not ns.dsn:
+            # #1618: an entry's one knowledge fetch, the product's own in-process over the data root's served remote (the
+            # real child needs the production database this launcher keeps out of the child's environment).
+            from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
+
+            seams["fetch"] = in_process_fetch()
+    return int(entry(list(entry_argv), directory=directory, **seams))
 
 
 if __name__ == "__main__":
