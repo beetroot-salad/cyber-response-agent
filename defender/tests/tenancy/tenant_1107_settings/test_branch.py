@@ -1,6 +1,7 @@
 """Branch launcher and tenant settings: box-mounted tenants-root refusal; a sibling resolves its own record."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an entry's one knowledge fetch, in-process
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import fixture_data_root
 
@@ -11,7 +12,10 @@ from typing import Any
 
 import pytest
 
+from defender.learning.branch import cli
+from defender.cli.learning import branch as branch_entry
 from defender.integrations import elastic_adapter
+from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.integrations.credential_proxy_1163 import _harness as credential_harness
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 from defender.tests.support.tenancy import _systems1366 as R
@@ -22,6 +26,51 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 TID = fixture_uuid("tenant:acme-t1107")
 
 
+class _Preflight:
+    """The role-model preflight seam, recording and answering `rc` (1: the tripwire)."""
+
+    def __init__(self, rc: int = 1) -> None:
+        self.rc = rc
+        self.calls: list[str | None] = []
+
+    def __call__(self, model: str | None = None, *, branching: bool = False) -> int:
+        self.calls.append(model)
+        return self.rc
+
+
+def _layout(data_root: Path, monkeypatch, *, marker: str) -> tuple[Path, Path, Path, Path]:
+    """A branchable tenant source, complete settings, and its canonical episodes folder."""
+    for name in S.BRANCH_CONFIG_VARS:
+        monkeypatch.delenv(name, raising=False)
+    episodes = data_root / TID / "episodes"
+    _base, src = H.tenant_source(data_root, TID, published=True)  # a branch launch needs a published tenant (it pins the commit)
+    folder = S.plant(data_root, TID, marker=marker)
+    return src, data_root, folder, episodes
+
+
+def _seams(**over: Any) -> dict[str, Any]:
+    """Every launcher seam faked; `questioner` holds no replies, so reaching it is an
+    AssertionError out of the fake rather than a model call."""
+    seams: dict[str, Any] = {
+        "spawn": T.FakeSpawn(), "questioner": T.FakeAgent(), "live_tree": T.source_capture(),
+        "preflight": _Preflight()}
+    seams.update(over)
+    return seams
+
+
+def _launch(src: Path, root: Path, seams: dict[str, Any]) -> tuple[Any, BaseException | None]:
+    """The real launcher over `src`, whose tenant is set up under `root` (this test's data root:
+    the launcher reads `DEFENDER_DATA_ROOT`). Returns (rc, None) or (None, the SystemExit it
+    refused with)."""
+    S._require_data_root(root)
+    # The tenant and the source run, by id.
+    argv = ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)]
+    try:
+        return branch_entry.main(argv, directory=directory_for_argv(argv), **{"fetch": in_process_fetch(), **seams}), None
+    except SystemExit as refused:
+        return None, refused
+
+
 def _resolve(root: Path) -> Any:
     """The real acceptance frame over a planted root, the run's tenant built from records (#1366)."""
 
@@ -29,10 +78,47 @@ def _resolve(root: Path) -> Any:
         fixture_data_root(Path(root)), TID, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
 
 
-# Retired by #1618 K8: `test_s7_mf13_launcher_refuses_box_mounted_tenants_root` pinned the launcher refusing a tenant whose
-# settings half lay inside the box-mounted episodes folder. A tenant holds no settings path (K8: every reader reads its own
-# fetched copy), so acceptance judges `<T>` alone; a box-mounted tree holding `<T>` is still refused
-# (`tenant_1120_piece1/test_accept_tenant.py`'s mounted-tree cells, `test_tenant_piece_entry_points.py[mounted-tree]`).
+def _sans_paths(text: str, *paths: Path) -> str:
+    """`text` with every spelling of `paths` removed — the source run and both tenant folders
+    carry the tenant id as a path component, so "names the tenant" is read off what is left."""
+    spelled = sorted({s for p in paths for s in (str(p), str(Path(p).resolve()))},
+                     key=len, reverse=True)
+    for s in spelled:
+        text = text.replace(s, "<path>")
+    return text
+
+
+def test_s7_mf13_launcher_refuses_a_tenant_folder_inside_its_box_mounted_episodes_folder(tmp_path, data_root, monkeypatch):
+    monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "docker").path_value())
+    src, outside, _folder, episodes = _layout(data_root, monkeypatch, marker="mf13")
+
+    # Positive control: the same tenant under a root outside both trees passes every check
+    # before spend.
+    control = _seams()
+    _launch(src, outside, control)
+    assert control["preflight"].calls == [None], \
+        "the control launch (tenants root outside both trees) never reached the role preflight"
+
+    # #1618 K8: a tenant holds no settings path (every reader reads its fetched copy), so what acceptance judges is `<T>`
+    # itself: the box-mounted episodes folder is made to hold `<T>`.
+    episodes.symlink_to(data_root / TID, target_is_directory=True)
+    before = set(episodes.iterdir())
+    resolved = R.resolve_tenant(fixture_data_root(outside), TID, defender_dir=S.DEFENDER,
+                               dispatches_lead_zero=False)
+    assert resolved.tenant_id == TID, "the resolver alone refuses this root"
+    seams = _seams()
+    rc, refused = _launch(src, outside, seams)
+    assert isinstance(refused, cli.LauncherRefused), \
+        f"the launcher accepted box-mounted settings (rc={rc}, {refused!r})"
+    text = H.refusal_text(refused)
+    assert TID in _sans_paths(text, src, outside / TID, data_root / TID), \
+        f"the refusal does not name the tenant: {text!r}"
+    assert "which a box mounts" in text, \
+        f"the refusal is not the box-mounted tenant-folder refusal: {text!r}"
+    assert seams["preflight"].calls == [], f"the role preflight was spent: {text!r}"
+    assert seams["spawn"].launches == [], "a sibling started"
+    assert seams["questioner"].prompts == [], "the questioner was asked"
+    assert set(episodes.iterdir()) == before, "the refused launch claimed an episode"
 
 
 def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatch):

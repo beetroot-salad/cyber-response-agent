@@ -618,7 +618,7 @@ def episode_location(episode_dir: Path) -> tuple[Path, str]:
     episode_dir = Path(episode_dir).absolute()
     container = episode_dir.parent
     tenant_dir = container.parent
-    if container.name != "episodes" or not tenant_dir.is_dir():  # #1618 K8: a set-up tenant holds no knowledge folder
+    if container.name != "episodes" or not (tenant_dir / "knowledge").is_dir():
         raise AssertionError(
             f"fixture bug: {episode_dir} is not at <data root>/<T>/episodes/<id> under a set-up "
             "tenant — build it with `_triplet_947.episode` (default root), or under "

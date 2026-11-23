@@ -697,10 +697,57 @@ class RolePreflight:
         return 0
 
 
-# Retired by #1618 K8: `test_the_launcher_refuses_a_settings_half_inside_its_episodes_folder` pinned acceptance refusing a
-# `<T>/knowledge` (its settings half) reached through `<T>/episodes`. A tenant holds no knowledge folder (K8), so there is no
-# settings half for a box-mounted episodes folder to hold; `<T>` inside a box-mounted tree is still refused
-# (`tenant_1120_piece1/test_accept_tenant.py`'s mounted-tree cells).
+def _sans_paths(text: str) -> str:
+    """Remove absolute path tokens so refusals can be compared across tenant roots."""
+    import re
+
+    return re.sub(r"/\S*", "<path>", text)
+
+
+def test_the_launcher_refuses_a_tenant_folder_inside_its_episodes_folder(
+        tmp_path, monkeypatch, data_root):
+    est, src = _launch_scene(tmp_path, monkeypatch)
+    monkeypatch.delenv(R.EPISODES_BASE_ENV, raising=False)
+    tenant_dir = R.tenant_dir(data_root, P.LAUNCH_TENANT)
+    episodes = tenant_dir / "episodes"
+    if episodes.is_dir() and not any(episodes.iterdir()):
+        episodes.rmdir()
+    # #1618 K8: a tenant holds no knowledge folder (so no settings half for the episodes folder to hold); what acceptance
+    # judges is `<T>` itself, so the box-mounted episodes folder is made to hold `<T>`.
+    os.symlink(tenant_dir, episodes, target_is_directory=True)
+    runs_before = R.tree(tenant_dir / "runs")
+    listed_before = sorted(os.listdir(episodes))
+    asked = P.CountingQuestioner()
+    role = RolePreflight()
+    spawn = J.FakeSibling(data_root=data_root, exits={})
+
+    got = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, src.name), spawn=spawn,
+                         questioner=asked, preflight=role)
+    assert got.rc != 0, f"the launch was not refused: rc={got.rc}"
+    assert "a box mounts" in got.message, f"not acceptance's box-mounted refusal: {got.message!r}"
+    assert P.LAUNCH_TENANT in _sans_paths(got.message), (
+        f"the refusal does not name the tenant {P.LAUNCH_TENANT!r}: {got.message!r}")
+    assert R.EPISODES_BASE_ENV not in got.message, got.message
+    assert role.calls == [], f"the role preflight was spent before acceptance refused: {role.calls}"
+    assert asked.calls == 0, "the questioner was called before acceptance refused"
+    assert spawn.launches == [], spawn.launches
+    assert sorted(os.listdir(episodes)) == listed_before, (
+        f"an episode folder appeared under <T>/episodes: {sorted(os.listdir(episodes))}")
+    assert [n for n in os.listdir(episodes) if R.is_canonical_uuid(n)] == [], (
+        "an episode folder exists under <T>/episodes")
+    assert R.tree(tenant_dir / "runs") == runs_before, "the tenant's runs changed"
+
+    os.unlink(episodes)
+    control = P.CountingQuestioner()
+    control_role = RolePreflight()
+    ok = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, src.name),
+                        spawn=J.FakeSibling(data_root=data_root, exits={}), questioner=control,
+                        preflight=control_role)
+    assert control_role.calls != [], f"control: the role preflight was never reached: {ok.message!r}"
+    assert control.calls > 0, f"the control launch was refused at acceptance: {ok.message!r}"
+    assert ok.rc == 0, f"the control launch did not complete: {ok.message!r} {ok.raised!r}"
+    assert len(_episodes_made(data_root)) == 1, (
+        f"control: the launch made no one episode under <T>/episodes: {_episodes_made(data_root)}")
 
 
 def test_the_judge_gate_holds_a_label_to_its_own_rule_not_its_composed_name(tmp_path):
