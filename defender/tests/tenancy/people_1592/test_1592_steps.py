@@ -222,3 +222,17 @@ async def test_a_person_whose_run_keeps_failing_is_retried_ever_less_often_and_s
     await people.steps(40)
     assert _created(people, login) == {"created", "added"}
     assert await people.open_requests() == []
+
+
+async def test_a_new_request_ends_a_failing_persons_wait(people: People):
+    """OD-9 (finalize, #1623 review): the wait is for the requests a run already failed on. A request recorded since
+    (here a sign-out, which must end sessions soon) starts a run at the next poll, wait or not."""
+    user, login = await _create(people)
+    people.forge.fail(_signatures_create(people, login)["L"], status=500)
+    await people.steps(4)  # failed at polls 1, 2 and 4: now waiting 3 polls
+    attempts = people.forge.arrived.count(_signatures_create(people, login)["A"])
+    await people.sign_out(user)
+
+    await people.step()
+
+    assert people.forge.arrived.count(_signatures_create(people, login)["A"]) == attempts + 1
