@@ -67,6 +67,32 @@ def test_a4_the_copy_is_built_in_an_owned_temporary_and_ends_owned_by_the_run_pr
     assert final["listing"] == [final["name"]], final
 
 
+def test_1618_k7_the_run_copy_holds_its_owner_record_at_the_instant_it_is_renamed_into_place(decoy, tmp_path, monkeypatch):
+    """Two-phase ownership (flow 1): the filled temporary carries its owner in its name until it is renamed to the run id, so
+    its `owner` record (this run process) is written BEFORE that rename, never after: at no instant is the run copy a folder
+    with no owner a concurrent sweep would read as dead (K7, C-K13)."""
+    t = decoy
+    real_rename = os.rename
+    renames: list[dict] = []
+
+    def spy(src, dst, *args, **kwargs):
+        dst_path = os.fspath(dst)
+        if os.path.dirname(dst_path) == os.fspath(A.run_copies(t)) and A.UUID.fullmatch(os.path.basename(dst_path)):
+            owner = os.path.join(os.fspath(src), "owner")
+            renames.append({"dst": os.path.basename(dst_path),
+                            "owner": json.loads(open(owner, encoding="utf-8").read()) if os.path.isfile(owner) else None})
+        return real_rename(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "rename", spy)
+    out = B.launch(t, tmp_path, publish=None, fetch=A.fetching(t, tmp_path))
+    monkeypatch.setattr(os, "rename", real_rename)
+    assert out.reached, out.text()
+    assert len(renames) == 1, f"premise: one rename made the run copy: {renames}"
+    assert renames[0]["dst"] == out.seen[0].run_dir.name, renames
+    assert renames[0]["owner"] is not None, "the run copy was renamed into place before its owner was recorded"
+    assert renames[0]["owner"]["pid"] == os.getpid(), renames[0]
+
+
 def test_a5_a_dead_owners_folder_at_the_run_id_is_never_replaced_the_rename_refuses(decoy, tmp_path):
     """The rename onto an existing target refuses and the run does not start; the planted folder is untouched (F1)."""
     t = decoy
