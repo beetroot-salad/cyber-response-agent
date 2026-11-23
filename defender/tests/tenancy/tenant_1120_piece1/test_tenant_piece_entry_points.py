@@ -49,11 +49,13 @@ def _assert_never_created(root: Path) -> None:
         f"a refused entry created {root.parent} inside the checkout's defender/ tree")
 
 
-def _knowledge_link(base: Path, root: Path) -> None:
-    """`<root>/<id>/knowledge` as a symlink to a complete knowledge folder elsewhere."""
-    real = H.place_knowledge(base / "elsewhere")
-    H.tenant_folder(root).mkdir(parents=True, exist_ok=True)
-    H.knowledge_dir(root).symlink_to(real, target_is_directory=True)
+def _tenant_link(base: Path, root: Path) -> None:
+    """`<root>/<id>` as a symlink to a complete tenant folder elsewhere (its placed knowledge with it). #1618 K8:
+    acceptance judges `<T>` alone, so the linked folder is the tenant's (it was a linked `<T>/knowledge`, which no
+    acceptance reads any more)."""
+    real = H.adopted(base / "elsewhere")
+    Path(root).mkdir(parents=True, exist_ok=True)
+    H.tenant_folder(root).symlink_to(real, target_is_directory=True)
 
 
 def _source_under(root: Path) -> Path:
@@ -125,7 +127,7 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
 #: The refusal cells each entry point takes. O6: there is no row, so no `no-row` cell; `tenant.py
 #: setup` and `scaffold` are retired (F-12); `tenant.py check <id>` retired with #1471 B3 (`check --folder`
 #: takes no tenant), so `tenant.check` is no longer a tenant-taking entry point (stale, updated).
-ALL_CELLS = ("bad-id", "knowledge-link", "mounted-tree")
+ALL_CELLS = ("bad-id", "tenant-link", "mounted-tree")  # #1618 K8: the link cell is `<T>`, not `<T>/knowledge`
 CELLS_OF = {
     "run.main": ALL_CELLS,
     "branch.cli.main": ALL_CELLS,
@@ -159,8 +161,8 @@ def _build_cell(entry: str, cell: str, base: Path, monkeypatch) -> _Cell:  # noq
             src = _source_under(root)
             return _Cell(root, "A", str(H.refusal(_tenant, TenantId, "A")), source=src)
         return _Cell(root, "A", _owner(root, "A"))
-    if cell == "knowledge-link":
-        _knowledge_link(base, root)
+    if cell == "tenant-link":
+        _tenant_link(base, root)
         cell_ = _Cell(root, H.TID, _owner(root))
         if launcher:
             cell_.source = _source_under(root)
@@ -272,17 +274,21 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
     assert "--tenants-root" not in child_argv
     assert str(data_root) not in " ".join(child_argv)
 
-    # The child re-accepts: its tenant lost a required settings file since the launch.
+    # The child re-accepts and reads its own copy: its tenant's knowledge lost a required settings file since the
+    # launch (#1618 K8: no acceptance reads settings; the child's fetched copy is checked by `check_run_settings`, and
+    # its refusal names the file). Control: the same child before the loss runs.
     src = _source_under(data_root)
     manifest = P.family_for(src)
+    sibling = ["--tenant", H.TID, "--episode", manifest.parent.name, "--world", "b"]
+    rc, exc = H.drive_run(run_py, sibling, H.RunRecorder(tmp_path / "sib-control"))
+    assert exc is None, f"control: the sibling refused a whole tenant: {H.exit_text(exc)}"
     (H.settings_dir(data_root) / "verb-grants.yaml").unlink()
-    expected = _owner(data_root)
-    assert "verb-grants.yaml" in expected, expected
     rec = H.RunRecorder(tmp_path / "sib")
-    rc, exc = H.drive_run(
-        run_py, ["--tenant", H.TID, "--episode", manifest.parent.name, "--world", "b"], rec)
-    assert exc is not None, f"the child accepted a tenant accept_tenant refuses (rc {rc})"
-    assert expected in H.exit_text(exc), H.exit_text(exc)
+    rc, exc = H.drive_run(run_py, sibling, rec)
+    assert exc is not None, f"the child ran over knowledge missing its grant table (rc {rc})"
+    said = H.exit_text(exc)
+    assert "a required settings file is missing" in said, said
+    assert "verb-grants.yaml" in said, said
     assert not rec.spent
 
 

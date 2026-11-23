@@ -118,16 +118,17 @@ def test_d2_only_sessions_beside_base(tmp_path, tenant_root):
     from defender.tests.support.tenancy._launch_publish_p4 import forge_scratch
     from defender.tests.tenancy.tenant_1108_p4._support import publish_once
 
-    # A run reads a PUBLISHED export, and the replay harness publishes the tenant before it
-    # drives. What publishing leaves in the tenant folder is taken up front as the baseline, so
-    # the listings below pin that materialize and the driver add only `runs/` and `sessions/`.
+    # A run reads its own copy of the tenant's Forgejo commit, and the replay harness seeds the tenant's remote before
+    # it drives. What seeding leaves in the tenant folder is taken up front as the baseline, so the listings below pin
+    # that materialize and the driver add only `runs/` and `sessions/`. #1618 K8: seeding leaves no clone, export or
+    # `current` in `<T>` (it left `knowledge/` while a clone was kept).
     publish_once(forge_scratch(tenant_root), root=tenant_root, tenant_id=T_ID)
     published = set(H.entries(tenant_root / T_ID))
-    assert "knowledge" in published, published
+    assert not published & {"knowledge", "exports"}, published
     assert H.ROW_NAME not in published, published
     assert not published & {"runs", "sessions"}, published
     run_dir = Path(_materialize(_golden_alert(tmp_path), T_ID))
-    # `knowledge/` is the operator's (placed before setup), never materialize's.
+    # Nothing of the tenant's knowledge is kept in `<T>` (K8): materialize adds `runs/` alone.
     assert H.entries(tenant_root / T_ID) == sorted(published | {"runs"}), (
         "materialize wrote beside runs/")
     _replay(run_dir)

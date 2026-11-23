@@ -54,6 +54,15 @@ def _policy_gather(tmp_path: Path, tenant_id: str) -> tuple[int | None, str]:
         return None, H.exit_text(refused)
 
 
+def _copys_table_named(text: str, data_root: Path) -> list[str]:
+    """The `.../settings/verb-grants.yaml` paths `text` names outside the running checkout and outside the folder placed for
+    the tenant under `data_root`: a tool reads the table of its own copy of the tenant's fetched knowledge (#1618 K8: no
+    host folder is read, the placed one included), so its refusal names that copy's table."""
+    named = re.findall(r"(/\S*?/settings/verb-grants\.yaml)", text)
+    hosts = (H.KNOWLEDGE_ROOT, H.DEFENDER, Path(data_root))
+    return [p for p in named if not any(Path(p).is_relative_to(h) for h in hosts)]
+
+
 def _census_lint(repo: Path) -> Any:
     return H.run_script(CENSUS_LINT, "--root", str(repo), root=None)
 
@@ -72,7 +81,9 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
     # policy_cli: the data-root table decides gather's grant.
     rc, text = _policy_gather(tmp_path, tid)
     assert rc is None, "policy_cli built gather's policy from a table that grants it no query"
-    assert str(table) in text, f"policy_cli's refusal does not name the data-root table:\n{text}"
+    # #1618 K8: the table refused is the copy's of what the tenant holds (placed here, served as its main), never a
+    # host folder; restoring the tenant's table is what makes it pass (below).
+    assert _copys_table_named(text, data_root), f"policy_cli's refusal does not name its copy's table:\n{text}"
     assert str(H.KNOWLEDGE_ROOT) not in text, f"policy_cli read the checkout's knowledge/:\n{text}"
     shutil.copyfile(H.FIXTURE / "settings" / "verb-grants.yaml", table)
     rc, text = _policy_gather(tmp_path, tid)
@@ -179,12 +190,12 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
 
     launched = _launch(_launcher_source(data_root))
     assert isinstance(launched, SystemExit), f"the launcher did not refuse: {launched!r}"
-    assert str(table) in H.exit_text(launched), (
+    assert _copys_table_named(H.exit_text(launched), data_root), (  # #1618 K8: its copy's table
         f"the launcher did not refuse the unloadable table naming it: {launched!r}")
 
     rc, text = _policy_gather(tmp_path, H.TID)
     assert rc is None, f"policy_cli built gather's policy over an unloadable table: {rc}"
-    assert str(table) in text, f"policy_cli did not refuse naming the table: {text!r}"
+    assert _copys_table_named(text, data_root), f"policy_cli did not refuse naming its copy's table: {text!r}"  # #1618 K8
 
 
 def _mount_specs(argv: list[str]) -> list[dict[str, str]]:
