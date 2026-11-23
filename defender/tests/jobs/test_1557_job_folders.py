@@ -23,6 +23,7 @@ import pytest
 from defender.tenancy import process_start
 from defender.tests.jobs import test_1344_learning_jobs as _learning
 from defender.tests.jobs.test_1344_learning_jobs import job_child, learning_worker, post_child, queued_job
+from defender.tests.support.jobs._evidence_flows1546 import committed_end
 from defender.tests.support.jobs._jobs1342 import StandInContainers, job_store, row
 from defender.tests.support.jobs._worker1342 import _child, _committed, _queued, _until, _worker
 
@@ -119,7 +120,7 @@ async def _serve_one(world: dict, containers: StandInContainers) -> str:
     """`serve()` until its first row has run (so its start is past), then SIGTERM: the row's id."""
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
-        serving = asyncio.create_task(_worker(world, store, _child(world, files=_committed()),
+        serving = asyncio.create_task(_worker(world, store, committed_end(world, _child(world, files=_committed())),
                                               containers=containers).serve())
         try:
             await _until(lambda: (row(world["dsn"], inv) or {}).get("stage") == "completed", "the first row to run")
@@ -134,7 +135,7 @@ async def _drain_one(world: dict, containers: StandInContainers) -> str:
     """`drain()` over one queued row: the row's id."""
     async with job_store(world["dsn"]) as store:
         inv = await _queued(store)
-        await _worker(world, store, _child(world, files=_committed()), containers=containers).drain()
+        await _worker(world, store, committed_end(world, _child(world, files=_committed())), containers=containers).drain()
         return inv
 
 
@@ -157,7 +158,7 @@ async def test_1557_o5_a_childs_per_claim_folders_are_gone_once_the_worker_has_h
         if kind == "investigation":
             child = _child(world, files=_committed(), **leaves)
             await _queued(store)
-            await _worker(world, store, child).drain()
+            await _worker(world, store, committed_end(world, child)).drain()
         else:
             child = (job_child(world, **leaves) if kind == "learning" else post_child(world, **leaves))
             others = post_child(world) if kind == "learning" else job_child(world)
@@ -288,7 +289,7 @@ async def test_1557_o5_a_childs_folders_stay_while_its_helper_still_runs_after_t
         async with job_store(world["dsn"]) as store:
             child = _child(world, files=_committed(**{owner: ALIVE}), **leaves)
             await _queued(store)
-            await _worker(world, store, child).drain()
+            await _worker(world, store, committed_end(world, child)).drain()
         (seen,) = child.seen_all().values()
         claim = seen["claim"]
         assert claim, "premise: the worker handed its child a claim"
@@ -325,7 +326,7 @@ async def test_1546_a_link_in_a_claims_root_inputs_or_spool_is_removed_not_follo
         child = _child(world, files=_committed())
         # the link is made by the helper stand-in, inside the claim's folder, once the worker's claim is known
         folder = {"link": f"{root}/{base}/{{claim}}/escape"}
-        await _worker(world, store, _LinkLeaver(child, folder, decoy)).drain()
+        await _worker(world, store, _LinkLeaver(committed_end(world, child), folder, decoy)).drain()
     claim = child.seen()["claim"]
     assert not os.path.lexists(root / base / claim), "the claim's folder was left"
     assert (decoy / "precious.json").is_file(), "the removal followed a link out of the claim's folder"

@@ -180,6 +180,20 @@ class Staging:
         assert self.token, "premise: the worker launched a child"
 
 
+def committed_end(world: dict, child: Callable[[Any], list[str]], *, disposition: str = "inconclusive",
+                  **staged: Any) -> Staging:
+    """`child` (an investigation's helper stand-in) behind a `Staging` that stages what a run the host committed and whose
+    tree walked clean leaves under #1546 (PR2): `started`, `knowledge`, an `outcome` whose close found `disposition` (the
+    `_committed()` files' closing record), no page, and an uploaded bundle; `staged` adds or replaces facts. The worker
+    then ends the row `completed` from rows alone; the child's files are decoys it never reads (A-O2)."""
+    from defender.tests.support.evidence._facts1546 import closing_found
+
+    facts = {"started": STARTED, "knowledge": KNOWLEDGE, "outcome": inv_outcome(closing=closing_found(disposition)),
+             "page": {"page": "none"}, **staged}
+    return Staging(world["dsn"], world["root"], "investigation", lambda launch: launch.investigation_id, child,
+                   staged=facts, objects={"bundle": b"bundle bytes (opaque to the worker)"})
+
+
 # --- the opened-paths audit, with SQLite --------------------------------------------------------------------------------
 
 _watching: list[list[tuple[str, bool]]] = []
