@@ -1,20 +1,22 @@
-"""#1108 P4: malformed inputs, each case a wrong-but-green production variant."""
+"""#1108 P4: malformed inputs, each case a wrong-but-green production variant.
+
+#1618: knowledge comes only from the fetch child (flow 1), so the clone, `materialise_export` and the publish
+vocabulary are gone (K8, D11). Ported: a commit missing one half is refused at run start (was: a clone missing one), a
+non-UTF-8 name is refused by the fetch (was: by materialise), and the run side never reads a garbage or multi-line
+line as `ok`. Retired, with their successors: "materialise takes only a full commit id"
+(`knowledge_1618/test_refusal_classes_1618.py::test_d11_a_commit_that_is_not_a_full_id_is_refused_lasting_*` and
+`test_run_start.py::test_o_pin_knowledge_commit_accepts_only_a_full_commit_id`) and "the launcher never passes on a
+garbage fresh line" (`test_r6_launcher.py::test_1618_a_child_whose_line_is_not_the_fetch_vocabulary_is_a_failed_child_*`).
+"""
 from __future__ import annotations
 
 import os
-import shutil
-import sys
 from pathlib import Path
 
 import pytest
 
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.tenancy.tenant_1108_p4._support import (
-    current_commit,
-    export_dir,
-    git,
-    push_to_remote,
-)
+from defender.tests.tenancy.tenant_1108_p4._support import git, push_to_remote
 
 OID = "0123456789abcdef0123456789abcdef01234567"
 
@@ -47,72 +49,51 @@ def test_r6_a_draft_file_with_a_whitespace_led_name_refuses_the_whole_change_set
         batch.change_set()
 
 
-# --- a clone with only one half of the working tree is still judged --------------------------
+# --- a commit with only one half of the tree is still judged ---------------------------------------------------------
 
 @pytest.mark.parametrize("half", ["settings", "agent"])
-def test_r6_a_clone_missing_one_half_of_its_tree_is_refused_at_run_start(
-        tmp_path, data_root, half):
+def test_r6_a_commit_missing_one_half_of_its_tree_is_refused_at_run_start(tmp_path, data_root, half):
+    """`main` loses `agent/` or `settings/` in a merge: run start refuses rather than run on half a tree. Control: the
+    same tenant's run before the merge reaches its box. (#1618: was "a clone missing one half".)"""
     with B.run_tenant(tmp_path, data_root) as t:
-        control = B.launch(t, tmp_path / "control", publish=lambda *a, **k: B.fresh(t.commit))
+        control = B.launch(t, tmp_path / "control", fetch=B.fetching(t))
         assert control.reached, control.text()
         assert control.rc == 0, control.text()
-        shutil.rmtree(Path(t.clone) / half)
-        out = B.launch(t, tmp_path / "broken", publish=lambda *a, **k: B.fresh(t.commit))
-        assert not out.reached, f"a run started over a clone with no {half}/: {out.text()}"
+
+        def drop(w: Path) -> None:
+            git(w, "rm", "-r", "-q", half)
+
+        push_to_remote(t.p3, t.scratch, drop, f"drop {half}/", stage=False)
+        out = B.launch(t, tmp_path / "broken", fetch=B.fetching(t))
+        assert not out.reached, f"a run started over a commit with no {half}/: {out.text()}"
+        assert out.raised is None, out.text()
 
 
-# --- materialise takes only a full lowercase commit id -----------------------------------------
+# --- garbage and multi-line reports are never ok ----------------------------------------------------------------------
 
-@pytest.mark.parametrize("commit", ["../drafts", "..", "a/b", "abcd", "abcdef0123456789",
-                                    "A" * 40, "0" * 41, "0" * 63, "0" * 65, ""])
-def test_r6_materialise_refuses_anything_but_a_full_commit_id(p4_tenant, commit):
-    exports = export_dir(p4_tenant.tenant, p4_tenant.commit).parent
-    before = sorted(os.listdir(exports))
-    with pytest.raises(_vc().DeliveryRefused, match="not a full commit id"):
-        _vc().materialise_export(p4_tenant.tenant, commit)
-    assert sorted(os.listdir(exports)) == before
-    assert current_commit(p4_tenant.tenant) == p4_tenant.commit
-
-
-# --- garbage and multi-line reports are never fresh -------------------------------------------
-
-@pytest.mark.parametrize("line", ["fresh notanoid", "fresh abc123", f"fresh {OID.upper()}",
-                                  f"fresh {OID}0", f"fresh {OID} extra", "fresh",
-                                  f"fresh {OID}\nfresh {OID}", f"fresh {OID}\rmore",
-                                  "stale:transient a\nstale:operator b", "misconfigured a\nb"])
-def test_r6_read_publish_report_never_reads_garbage_or_multiple_lines_as_fresh(line):
-    from defender.tenancy.run_knowledge import FRESH, read_publish_report
+@pytest.mark.parametrize("line", ["ok notanoid", "ok abc123", f"ok {OID.upper()}", f"ok {OID}0", f"ok {OID} extra",
+                                  "ok", f"ok {OID}\nok {OID}", f"ok {OID}\rmore",
+                                  "refused transient a\nrefused lasting b", "refused a",
+                                  f"fresh {OID}", "stale:transient a", "misconfigured a"])
+def test_r6_read_publish_report_never_reads_garbage_or_multiple_lines_as_ok(line):
+    """The run side re-reads the line (it may come from any seam): a garbage, multi-line or retired-vocabulary line (K9:
+    `fresh`, `stale:*`, `misconfigured`) is the failed child, a lasting refusal with no commit. Control: `ok <oid>`."""
+    from defender.tenancy.run_knowledge import OK, REFUSED, read_publish_report
 
     report = read_publish_report(line)
-    assert report.kind != FRESH, report
+    assert report.kind == REFUSED, report
+    assert report.kind != OK
     assert report.commit is None
-    if "\n" in line or "\r" in line or line.startswith("fresh"):
-        assert (report.kind, report.stale_kind) == ("stale", "operator"), report
-        assert "publish child failed" in (report.reason or ""), report
-    assert read_publish_report(f"fresh {OID}").commit == OID, "control"
+    assert not report.transient, report
+    assert "fetch child failed" in (report.reason or ""), report
+    assert read_publish_report(f"ok {OID}").commit == OID, "control"
 
 
-@pytest.mark.parametrize("said", ["fresh notanoid", "fresh abc123", f"fresh {OID.upper()}",
-                                  f"fresh {OID} extra", "fresh"])
-def test_r6_the_launcher_never_passes_on_a_garbage_fresh_line(tenant_id_only, said):
-    """A child that exits 0 printing `said` is a failed child, `stale:operator`, from the launcher
-    itself (the run side re-validates, so only the launcher's own line shows this)."""
-    from defender.investigation.publish_launch import launch_publish
+# --- a non-UTF-8 name in a merged tree is refused, not merged ---------------------------------------------------------
 
-    tenant_id, root = tenant_id_only
-    line = launch_publish(tenant_id, data_root=root, budget=30.0,
-                          command=[sys.executable, "-c", f"print({said!r})"])
-    assert line.startswith("stale:operator publish child failed"), line
-
-
-@pytest.fixture
-def tenant_id_only(tmp_path):
-    return "r6-tenant", tmp_path
-
-
-# --- a non-UTF-8 name in a published tree is refused, not merged ------------------------------
-
-def test_r6_a_commit_holding_a_non_utf8_name_is_refused_by_materialise(p4_tenant):
+def test_r6_a_commit_holding_a_non_utf8_name_is_refused_by_the_fetch(p4_tenant, tmp_path):
+    """Two names a lossy decode would merge: the fetch refuses the commit as lasting, leaving its folder empty.
+    Control: the earlier good commit fetches by id. (#1618: was "refused by materialise".)"""
     t = p4_tenant
 
     def edit(w: Path) -> None:
@@ -123,8 +104,12 @@ def test_r6_a_commit_holding_a_non_utf8_name_is_refused_by_materialise(p4_tenant
         git(w, "add", "-A")
 
     commit = push_to_remote(t.p3, t.scratch, edit, "a merged non-UTF-8 name", stage=False)
-    git(t.clone, "fetch", str(t.remote), "+refs/heads/main:refs/remotes/origin/main")
-    with pytest.raises(_vc().DeliveryRefused):
-        _vc().materialise_export(t.tenant, commit)
-    assert not export_dir(t.tenant, commit).exists()
-    assert current_commit(t.tenant) == t.commit
+    fetch = B.fetching(t)
+    dest = tmp_path / "copy"
+    dest.mkdir()
+    line = fetch(t.tenant_id, dest, data_root=t.data_root, commit=commit)
+    assert line.startswith("refused lasting "), line
+    assert sorted(os.listdir(dest)) == [], "refused content was left in the folder"
+    good = tmp_path / "good"
+    good.mkdir()
+    assert fetch(t.tenant_id, good, data_root=t.data_root, commit=t.commit) == f"ok {t.commit}", "control"
