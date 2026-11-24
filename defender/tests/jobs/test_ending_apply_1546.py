@@ -357,16 +357,23 @@ async def test_apply_for_another_tenant_is_refused_and_leaves_the_row(migrated_d
 
 async def test_a_learning_job_expired_in_the_queue_and_one_offboarded_end_with_no_evidence(migrated_database):
     """Queue expiry (`skipped/expired`) and offboarding (`skipped/tenant_offboarded`) leave `none`, so the schema's
-    terminal-has-a-state check holds for the claim's own sweep. (A-O4, rule 1)"""
+    terminal-has-a-state check holds for the claim's own sweep; queue age is read on the DATABASE clock (owner, D10): a job a
+    day older than the database's now() is expired and one queued at now() is claimed, though the store's injected clock
+    (`NOW`, weeks earlier) would call neither old. (A-O4, rule 1)"""
     dsn = migrated_database
     register_tenant(dsn, T1)
     register_tenant(dsn, T2)
-    async with job_store(dsn, learning_max_age=60) as store:
+    async with job_store(dsn, learning_max_age=3600) as store:
         alert, source = await plant_complete_source(dsn, store, T1)
         old = await queue_learning_job(dsn, T1, alert.alert_id, source, key="k-old")
-        execute(dsn, "UPDATE jobs.learning_jobs SET created_at = %s WHERE id = %s",  # aged by the store's clock, which wrote it
-                (NOW - dt.timedelta(days=1), old))
-        assert await store.claim_learning_job() is None
+        execute(dsn, "UPDATE jobs.learning_jobs SET created_at = now() - interval '1 day' WHERE id = %s", (old,))
+        fresh = await queue_learning_job(dsn, T1, alert.alert_id, source, key="k-fresh")  # created at the database's now()
+        [(db_now,)] = execute(dsn, "SELECT now()")
+        assert db_now - dt.timedelta(days=1) > NOW, "premise: the injected clock calls the day-old job young"
+        claimed = await store.claim_learning_job()
+        assert claimed is not None, "the job queued at the database's now() was not claimed"
+        assert str(claimed.record.learning_job_id) == fresh, "the claim took another job than the one queued at now()"
+        assert learn_row(dsn, fresh, "status")["status"] == "running"
         alert2, source2 = await plant_complete_source(dsn, store, T2)
         waiting = await queue_learning_job(dsn, T2, alert2.alert_id, source2, key="k-wait")
         await store.offboard_tenant(T2, actor="u-1")

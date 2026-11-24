@@ -12,7 +12,6 @@ non-terminal insert and a renewal's non-terminal columns are exempt (G3a)."""
 from __future__ import annotations
 
 import ast
-import datetime as dt
 import re
 import textwrap
 from pathlib import Path
@@ -28,7 +27,7 @@ from defender.tests.support.jobs._ending1546 import (
     queue_learning_job,
     host_row,
 )
-from defender.tests.support.jobs._jobs1342 import NOW, T1, lapse_lease, register_tenant
+from defender.tests.support.jobs._jobs1342 import T1, lapse_lease, register_tenant
 from defender.tests.support.jobs._worker1342 import _queued
 from defender.tests.support.shared._postgres1339 import execute
 
@@ -248,8 +247,8 @@ async def _enders(store, dsn):
     execute(dsn, "UPDATE jobs.learning_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = %s", (job,))
     scenes["takeover-learning"] = (store.take_over, lambda: learn_row(dsn, job, "status")["status"])
     old = await queue_learning_job(dsn, T1, alert.alert_id, source, key="k-old")
-    execute(dsn, "UPDATE jobs.learning_jobs SET created_at = %s WHERE id = %s",  # aged by the store's clock, which wrote it
-            (NOW - dt.timedelta(days=2), old))
+    execute(dsn, "UPDATE jobs.learning_jobs SET created_at = now() - interval '2 days' WHERE id = %s",  # the DB clock (D10)
+            (old,))
     scenes["expiry"] = (store.claim_learning_job, lambda: learn_row(dsn, old, "status")["status"])
     rec, _ = await store.create_readiness(T1, actor="u-1")
     await store.claim_host_request()
