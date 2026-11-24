@@ -225,7 +225,7 @@ def test_the_fork_candidates_of_the_old_run_are_its_one_admitted_gather(tmp_path
 
 
 def _family_child(tmp_path: Path) -> tuple[Old, dict | None, subprocess.CompletedProcess]:
-    """The real learning job entry (`_flow_entry1344.py family`: scripted questioner, oracle, verifier, judge; siblings as
+    """The real learning job entry (`_flow_entry1344.py family-standin`: scripted questioner, oracle, verifier, judge; siblings as
     `run.main`) over the old run planted in a tenant's runs repository. Returns the end record it sent, if it sent one:
     #1546 (A-O2, PR2) the end is the one `outcome` the entry sends on its job socket (the stand-in helper keeps each in
     `<marks>/family/outcomes.jsonl`), never a `learning-end.json` beside the runs; the source reaches the job as its bundle
@@ -243,7 +243,7 @@ def _family_child(tmp_path: Path) -> tuple[Old, dict | None, subprocess.Complete
         job = "9f1c2d3e-0000-4000-8000-000000001344"
         marks = tmp_path / "marks"
         done = subprocess.run(
-            [sys.executable, str(entry), "family", tenant.commit, str(marks / "family"), str(tenant.remote), "--job", job, "--tenant",
+            [sys.executable, str(entry), "family-standin", tenant.commit, str(marks / "family"), str(tenant.remote), "--job", job, "--tenant",
              tenant.tenant_id, "--source", old.name, "--parent-pid", str(os.getpid())],
             env={**os.environ, "DEFENDER_DATA_ROOT": str(root), "PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, text=True, timeout=600, check=False)
         assert not (runs / f"{job}.learning-end.json").exists(), "the entry wrote an end record to a folder (A-O2)"

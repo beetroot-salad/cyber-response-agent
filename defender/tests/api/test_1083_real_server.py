@@ -845,6 +845,8 @@ PERMISSION_OF = {
     ("POST", f"{TENANT}/systems/{{}}/check"): "config.write",
     ("GET", f"{TENANT}/alert-mapping"): "config.read",
     ("PUT", f"{TENANT}/alert-mapping"): "config.write",
+    ("GET", f"{TENANT}/evidence-retention"): "config.read",  # #1546 A-O7 (as test_programs_1307_roles)
+    ("PUT", f"{TENANT}/evidence-retention"): "config.write",
     ("POST", f"{TENANT}/readiness"): "config.write",  # #1471 R1 (stale, copied from test_programs_1307_roles)
     ("GET", f"{TENANT}/readiness/{{}}"): "config.read",  # #1471 R2
     ("POST", f"{TENANT}/systems/{{}}/adoptions"): "config.write",  # #1471 A1

@@ -641,7 +641,16 @@ async def test_o6_a_learning_job_carries_the_stores_fields_by_name(store, adapte
     """Every wire field equals the store record's field of the same name. (O6)"""
     from defender.api.models import LearningJob
 
+    from sqlalchemy import update
+
+    from defender.jobs.models import LearningJobRow
+
     investigation_id = await _ended(store, adapter, await _alert(store, A, "T-1"), disposition="benign", cost_usd=1.0)
+    # #1546 (code-record owner decision D10): the auto job's `created_at` is the database's clock, not the store's; it is
+    # stamped at `AT` here (as `RealBackend.learning_jobs` does), so the wire's `created_at` is judged against a known value.
+    async with store._tx() as session:
+        await session.execute(update(LearningJobRow).where(LearningJobRow.investigation_id == investigation_id)
+                              .values(created_at=AT))
     [stored] = await store.list_learning_jobs(A, investigation_id=investigation_id, after=None, limit=5)  # FC-13
     wire = await adapter.get_learning_job(A, stored.learning_job_id)
     for name in LearningJob.model_fields:

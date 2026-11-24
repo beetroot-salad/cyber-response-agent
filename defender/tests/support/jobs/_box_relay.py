@@ -180,8 +180,13 @@ OTHER_HELPER = textwrap.dedent("""\
         return 0
 
     docker = ContainerStandIn(job, exec_writer=[sys.executable, "-c", "import os; os.write(1, " + repr(R.OK_FRAME) + ")"])
+    seams = {}
+    if cfg.get("store"):  # #1546: the real store and the tenant's key login, as `_job_helper._DRIVER` hands them
+        from defender import evidence
+        seams["evidence"] = evidence.BlobStore(**cfg["store"]["blob"])
+        seams["evidence_keys"] = evidence.EvidenceKeys(**cfg["store"]["login"])
     rc = job_host.main(cfg["argv"], docker=docker, signer=A.MarkedSigner(),
-                       fetch=in_process_fetch(cfg["remote"]))
+                       fetch=in_process_fetch(cfg["remote"]), **seams)
     (state / "rc").write_text(str(rc))
     (state / "box-stops").write_text(json.dumps([c for c in docker.calls if c[1] in ("stop", "rm", "kill")]))
 """)

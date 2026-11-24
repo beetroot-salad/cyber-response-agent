@@ -13,7 +13,11 @@ job runs it (the job image is built there, `defender-job:latest`).
   given (another tenant's, another lane's lapsed and working ones, `end_review` on the lapsed lead batch included)
   beside the controls.
 
-Every program leaves one JSON file in the tenant's own folder, `obs1487/<name>.json`, read here. Container processes are
+Every program leaves one JSON file in its container's tenant folder, `$DEFENDER_DATA_ROOT/<T>/obs1487/<name>.json`, read
+here from the host's `<data root>/<T>/obs1487/`. A post-step's container binds the host's tenant folder itself; a
+learning container binds only its claim's own root (#1546 A-O9), so the helper's docker (`ObservingDocker`, in
+`_real_container_child1487.py`) carries the host's folder into that root before the start and the program's file back
+out once the container has exited, before the helper removes the root (A-O1). Container processes are
 observed through `/proc` (every process's command line and environment, the connection table); the host judges them
 (`database_held`). The database's address is given to each program in a file of its own (`db-target-<name>.json`),
 which it reads and deletes at once (a connect needs it): the containers of one flow (the learning job's, then the
@@ -164,8 +168,9 @@ def compiled() -> None:
 
 def prepare(root: Path, tenant: str, dsn: str, *, rows: list[dict[str, Any]] | None = None,
             ids: dict[str, str] | None = None) -> Path:
-    """The tenant's `obs1487` folder (written by the container's user: it is under the tenant's own folder), holding the
-    database address each program dials (`db-target-<program>.json`, one per program), the learning job's rows and the
+    """The host tenant's `obs1487` folder (written by the container's user: a post-step's container binds the tenant's
+    folder, a learning container is handed a copy in its own root, `ObservingDocker`), holding the database address each
+    program dials (`db-target-<program>.json`, one per program), the learning job's rows and the
     batch ids a reach program names."""
     folder = root / tenant / OBS
     folder.mkdir(parents=True, exist_ok=True)
@@ -181,6 +186,69 @@ def prepare(root: Path, tenant: str, dsn: str, *, rows: list[dict[str, Any]] | N
     for name in folder.iterdir():
         name.chmod(0o666)
     return folder
+
+
+def _container_data_root(argv: list[str]) -> Path | None:
+    """The `DEFENDER_DATA_ROOT` a job container's `docker run` hands it (`--env NAME=value`), None for any other command."""
+    if argv[:2] != ["docker", "run"]:
+        return None
+    for flag, value in zip(argv, argv[1:], strict=False):
+        if flag == "--env" and value.startswith("DEFENDER_DATA_ROOT="):
+            return Path(value.partition("=")[2])
+    return None
+
+
+class _Carried:
+    """The started container's process, as the helper holds it: the first time it reads as exited, the program's
+    observation is carried from the container's root back to the host's `obs1487` folder, before the helper removes
+    that root (A-O1). Everything else is the real process's."""
+
+    def __init__(self, proc: Any, inside: Path, host: Path, name: str) -> None:
+        self._proc, self._inside, self._host, self._name, self._carried = proc, inside, host, name, False
+
+    def poll(self) -> int | None:
+        rc = self._proc.poll()
+        if rc is not None and not self._carried:
+            self._carried = True
+            left = self._inside / f"{self._name}.json"
+            if left.is_file():
+                (self._host / left.name).write_bytes(left.read_bytes())
+        return rc
+
+    def __getattr__(self, attr: str) -> Any:
+        return getattr(self._proc, attr)
+
+
+class ObservingDocker:
+    """The helper's REAL docker (`run_docker`, every command passed through unchanged) with one addition at its edge,
+    for a kind whose container is handed its own root, not the tenant's folder (#1546 A-O9: a learning job's container
+    binds `.job-roots/<claim>/` and never the host's tenant folder): just before the job container's attached start, the
+    host's `obs1487` folder (`prepare`) is copied into `<its root>/<T>/obs1487/` (made fresh, writable by the container's
+    user), the program's own database target moved there (the host keeps no copy: the program reads and deletes it, as
+    for a tenant-bound kind); once the container has exited, the program's `<name>.json` is carried back to the host's
+    folder (`_Carried`), where `observed` reads it. A container whose root is the data root itself (the post-step: it
+    binds the tenant's folder) is started as is. The program, the helper and the container see nothing of this."""
+
+    def __init__(self, docker: Any, *, host_root: Path, tenant: str, name: str) -> None:
+        self._docker, self._host, self._tenant, self._name = docker, host_root / tenant / OBS, tenant, name
+
+    def __call__(self, argv: list[str], **kwargs: Any) -> Any:
+        return self._docker(argv, **kwargs)
+
+    def popen(self, argv: list[str], **kwargs: Any) -> Any:
+        root = _container_data_root(argv)
+        if root is None or root.resolve() == self._host.parent.parent.resolve():
+            return self._docker.popen(argv, **kwargs)
+        inside = root / self._tenant / OBS
+        inside.mkdir(parents=True, exist_ok=True)
+        inside.chmod(0o777)
+        target = f"db-target-{self._name}.json"
+        for path in sorted(self._host.iterdir()) if self._host.is_dir() else []:
+            if path.is_file() and (path.name == target or not path.name.startswith("db-target-")):
+                (inside / path.name).write_bytes(path.read_bytes())
+                (inside / path.name).chmod(0o666)
+        (self._host / target).unlink(missing_ok=True)
+        return _Carried(self._docker.popen(argv, **kwargs), inside, self._host, self._name)
 
 
 def observed(root: Path, tenant: str, name: str) -> dict[str, Any]:

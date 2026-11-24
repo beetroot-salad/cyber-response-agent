@@ -4,6 +4,7 @@ through the real `job_host.main` over a published tenant, as `test_job_helper.py
 are picks, see `support/jobs/_box_relay.py`."""
 from __future__ import annotations
 
+import dataclasses
 import gc
 import json
 import os
@@ -371,10 +372,15 @@ def test_o10_a_box_past_the_limit_ends_only_its_own_job_and_another_helpers_rela
     state.mkdir()
     other_inv = str(uuid.uuid4())
     scene.plant(other_inv)
+    other_argv = scene.argv("investigation", other_inv, parent=os.getpid())
+    # #1546 (design: Claim, "inserted in the claim's own transaction for every launched child"): the other job is claimed on
+    # its own, as the worker claims each job, and its helper is configured with the real store as any investigation helper.
+    other = dataclasses.replace(scene, claim=uuid.uuid4().hex)
+    J.claim_for(other, other_argv)
     cfg = {"state": str(state), "inv": other_inv, "commit": scene.t.commit, "remote": str(scene.t.remote),
-           "argv": scene.argv("investigation", other_inv, parent=os.getpid())}
+           "argv": other_argv, "store": J._process_store(other)}
     checkout = str(WORKTREE)
-    env = {**os.environ, box.CLAIM_ENV: uuid.uuid4().hex,
+    env = {**os.environ, box.CLAIM_ENV: other.claim,
            "PYTHONPATH": os.pathsep.join(p for p in (checkout, os.environ.get("PYTHONPATH")) if p)}
     proc = subprocess.Popen([sys.executable, "-c", R.OTHER_HELPER, json.dumps(cfg)], env=env, stdin=subprocess.DEVNULL,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)

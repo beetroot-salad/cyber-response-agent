@@ -591,7 +591,9 @@ def test_o15_the_default_post_step_command_hands_the_post_step_no_list_of_jobs(s
         runs = data_root / t.tenant_id / "runs"
         runs.mkdir(exist_ok=True)
         earlier = _job_of(db, _queue_investigation(db, "J-1", complete=True, tenant=t.tenant_id))
-        execute(db, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'done', "
+        # #1546 (ck_learning_jobs_ended_has_evidence): an ended row carries its evidence state; this one has no claim or
+        # upload, so `none`, as `test_1344_amend_wake` plants an ended job.
+        execute(db, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'done', evidence_state = 'none', "
                     "started_at = now(), finished_at = now(), lease_expires_at = NULL WHERE id = %s", (earlier,))
         new = _job_of(db, _queue_investigation(db, "J-2", complete=True, tenant=t.tenant_id))
         watch = W.ChildWatch()
