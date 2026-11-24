@@ -1175,8 +1175,9 @@ async def test_o6_a_worker_error_ending_whose_write_fails_as_an_outage_is_retrie
                                           bad, ConnectionError("dropped"), fails=4)
         await _worker(world, used, child).drain()
 
-    expect_cost = 0.0 if path == "worker-fault" else None
-    assert used.tries(bad) == [("failed", "worker_error", expect_cost)] * 5
+    # UPDATED (#1546 PR9: `ended_by` is a closed type, and a fault before any helper ran is `not_launched`): both seams fault
+    # before the launch, so nothing was spent and the cost is exactly 0, unmarked (was: the catch-all's unknown, None).
+    assert used.tries(bad) == [("failed", "worker_error", 0.0)] * 5
     assert [kw["cost_is_lower_limit"] for i, kw in used.finishes if i == bad] == [False] * 5, "a worker error carried a mark"
     stored = row(world["dsn"], bad)
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
