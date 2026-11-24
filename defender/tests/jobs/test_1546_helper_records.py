@@ -92,7 +92,7 @@ def _send_record(c, verb: str, record):
 
 @pytest.mark.parametrize("case", sorted(VALID))
 def test_a_valid_record_of_each_kind_is_staged_as_the_closed_shape_it_was(request, scene, evidence_store, case):
-    """The control of every malformed-record case: a valid outcome/page/arms/arm/result/knowledge record of its kind, sent on
+    """The control of every malformed-record case: a valid outcome/page/arms/arm/result record of its kind, sent on
     its verb, is staged whole under its name, and no `refused/` fact exists. (PR2)"""
     kind, verb, record, name, want = VALID[case]
     _base_files_for(request, kind)
@@ -124,17 +124,15 @@ def test_the_helper_stages_started_and_the_served_knowledge_itself(scene, eviden
 
 # --- PR2: whole-class malformed records ------------------------------------------------------------------------------------
 
-#: Keys of a record that are nullable (their absence is not a malformed record), by case.
-NULLABLE = {"readiness-knowledge": {"reason", "stale_kind"}}
 #: The kinds' `decide` input (a host request's three kinds are one).
 DECIDE_KIND = {"investigation": "investigation", "learning": "learning", "readiness": "host_request",
                "adoption": "host_request", "drain": "host_request"}
 
 
 def _is_still_valid(case: str, valid: dict, bad) -> bool:
-    """`bad` is the valid record less only nullable keys: the one mutant that is no malformed record."""
-    return (isinstance(bad, dict) and set(bad) <= set(valid) and set(valid) - set(bad) <= NULLABLE.get(case, set())
-            and all(valid[k] == v for k, v in bad.items()))
+    """`bad` is the valid record itself: the one mutant that is no malformed record. (r10 (f): the nullable keys were the
+    readiness `knowledge` record's, whose verb is gone.)"""
+    return bad == valid
 
 
 def _malformed_cases():
@@ -156,7 +154,7 @@ def _malformed_cases():
 @pytest.mark.parametrize(("case", "bad"), _malformed_cases())
 def test_a_malformed_record_of_any_kind_and_name_is_staged_refused_and_a_refused_outcome_or_result_reads_bad_record(
         request, scene, evidence_store, case, bad):
-    """Whole class, every kind by every record name (outcome, page, arms, arm, result, readiness knowledge): a malformed
+    """Whole class, every kind by every record name (outcome, page, arms, arm, result): a malformed
     record is staged `refused/<name>{reason}`, never `<name>`, and owes nothing; a refused `outcome` or `result` reads
     `bad_record` in the ending. (PR2, PR9, "Done when": every kind)"""
     kind, verb, _record, name, _staged = VALID[case]
@@ -179,6 +177,46 @@ def test_a_malformed_record_of_any_kind_and_name_is_staged_refused_and_a_refused
     if name in ("outcome", "result"):
         end = decide(DECIDE_KIND[kind], staged, {}, "exited")
         assert (end.stage, end.failure_reason) == ("failed", "bad_record"), (end.stage, end.failure_reason)
+
+
+@pytest.mark.parametrize("kind", ["readiness", "investigation", "learning", "adoption", "drain"])
+def test_a_knowledge_request_is_an_unknown_verb_for_every_kind_and_the_staged_knowledge_stays_the_helpers_own(
+        request, scene, evidence_store, kind):
+    """r10 (c) U-3: the readiness `knowledge` verb is dropped (PR4: trusted code never reads job-written bytes it can know
+    itself), so a `knowledge` request carrying a record that names another commit is refused as an unknown verb by every
+    kind, and stages nothing: no `knowledge` and no `refused/knowledge` fact of the job's. Where the helper stages the
+    knowledge itself (readiness, investigation), it is the source it settled, never the job's commit. Control: the job's
+    own verb on the same channel (`progress` for an investigation or learning job, `result` for a host request) is still
+    answered."""
+    from defender.tests.support.evidence._facts1546 import KNOWLEDGE_RECORD, KNOWLEDGE_VERB_GONE, VALID as RECORDS
+
+    _base_files_for(request, kind)
+    planted = plant(scene, kind)
+    other = "e" * 40
+    assert other != scene.t.commit, "premise: the job's record names another commit"
+    got: dict = {}
+
+    def job(c) -> int:
+        got["refusal"] = send(c, KNOWLEDGE_VERB_GONE, record={**KNOWLEDGE_RECORD, "commit": other})
+        if kind in ("investigation", "learning"):
+            got["own"] = send(c, "progress", record=INV_PROGRESS if kind == "investigation" else LEARNING_PROGRESS)
+        else:
+            _k, verb, record, _n, _s = RECORDS[f"{kind}-result"]
+            got["own"] = send(c, verb, record=record)
+        return 0
+
+    drive(scene, planted, job, **evidence_store.seams)
+    from defender import job_host
+
+    assert isinstance(got["refusal"], job_host.Refused), f"a {kind} job's `knowledge` request was answered: {got['refusal']!r}"
+    assert got["refusal"].code == "unknown-request", got["refusal"].code
+    assert not isinstance(got["own"], job_host.Refused), f"control: the {kind} job's own verb was refused: {got['own']!r}"
+    staged = facts(scene.dsn, scene.claim)
+    assert "refused/knowledge" not in staged, staged.get("refused/knowledge")
+    known = staged.get("knowledge")
+    assert known is None or known.get("commit") != other, f"the job's knowledge record was staged: {known!r}"
+    if kind in ("readiness", "investigation"):
+        assert known == staged_knowledge(scene.t.commit), f"the helper's own knowledge was not staged: {known!r}"
 
 
 def test_a_record_missing_altogether_is_staged_refused(scene, evidence_store):
