@@ -25,6 +25,7 @@ from __future__ import annotations
 from defender.tests.support.sandbox import _box_check1469 as _check1469
 
 import contextlib
+import dataclasses
 import ctypes
 import hashlib
 import json
@@ -712,7 +713,7 @@ class ComponentSwap:
 def swap_every_component(scene: HelperScene, c: Container, docker: ContainerStandIn,
                          fields: dict[str, Any]) -> tuple[list[Path], list[ComponentSwap]]:
     """H10's sweep, run by the job: `box.start(**fields)` once on the untouched folders (the control, then stopped), the
-    bind sources under `<T>/` read off that box's `docker create`, then each folder on the way from `<T>/` down to a
+    bind sources under `<T>/`, the claim's root or its inputs (#1546) read off that box's `docker create`, then each folder on the way from `<T>/` down to a
     source (the source itself included) in turn moved aside and replaced by a link to a folder of the other tenant that
     mirrors what lay below it (so the resolved path exists and is a real folder there), `box.start(**fields)` asked again,
     and the folder put back. Returns `(sources, arms)`."""
@@ -722,11 +723,17 @@ def swap_every_component(scene: HelperScene, c: Container, docker: ContainerStan
     sources_create = docker.creates()[-1]
     with contextlib.suppress(job_host.Refused):
         c.request("box.stop", handle=first["handle"])
-    tenant = scene.root / scene.tenant
+    # #1546 (design "The job's folders", helper-side bind judging covers the root and inputs): a bind source lies under the
+    # tenant folder, the claim's root or its inputs; every folder below that base down to the source is swapped.
+    bases = (scene.root / scene.tenant, scene.root / ".job-roots" / scene.claim, scene.root / ".job-inputs" / scene.claim)
+
+    def base_of(path: Path) -> Path | None:
+        return next((b for b in bases if path.is_relative_to(b) and path != b), None)
+
     sources = sorted({Path(m["source"]) for m in parse_mounts(sources_create)
-                      if m["source"] and Path(m["source"]).is_relative_to(tenant) and Path(m["source"]) != tenant})
-    components = sorted({tenant.joinpath(*s.relative_to(tenant).parts[:i + 1])
-                         for s in sources for i in range(len(s.relative_to(tenant).parts))},
+                      if m["source"] and base_of(Path(m["source"])) is not None})
+    components = sorted({base_of(s).joinpath(*s.relative_to(base_of(s)).parts[:i + 1])
+                         for s in sources for i in range(len(s.relative_to(base_of(s)).parts))},
                         key=lambda p: (len(p.parts), str(p)))
     arms = []
     for n, component in enumerate(components):
@@ -764,7 +771,7 @@ def after_the_signal(scene: HelperScene, kind: str, request: str, fields: dict) 
     tenant_folder = scene.root / scene.tenant
 
     def state():
-        return (len(signer.payloads), len(docker.creates()), listing(tenant_folder / "run-knowledge"),
+        return (len(signer.payloads), len(docker.creates()), listing(run_copies(scene)),  # #1546: copies in the inputs
                 listing(tenant_folder / "drafts"))
 
     def job(c) -> int:
@@ -783,6 +790,30 @@ def after_the_signal(scene: HelperScene, kind: str, request: str, fields: dict) 
     assert ran.raised is None, ran.raised
     assert docker.job_error is None, docker.job_error
     return got
+
+
+def job_runs(scene: HelperScene, claim: str | None = None) -> Path:
+    """#1546 (design "The job's folders"): the runs folder of the job's tenant folder in its root,
+    `<data root>/.job-roots/<claim>/<T>/runs/`, where the helper makes the run folder and writes its copies of the launch facts
+    and alert; the host's `<T>/runs/` holds none of the job's."""
+    return scene.root / ".job-roots" / (claim or scene.claim) / scene.tenant / "runs"
+
+
+def run_copies(scene: HelperScene, claim: str | None = None) -> Path:
+    """#1546: where the helper makes a run's knowledge copy, in the claim's inputs folder (read-only to the job):
+    `<data root>/.job-inputs/<claim>/run-knowledge/` (the helper's own `launch` names it `run_copy`)."""
+    return scene.root / ".job-inputs" / (claim or scene.claim) / "run-knowledge"
+
+
+def next_claim(scene: HelperScene, monkeypatch: Any) -> HelperScene:
+    """#1546 (design: "a row is claimed at most once; retries are new rows"): the scene under a claim of its own for a further
+    job in the same test (the worker hands each child its claim, `CLAIM_ENV`), so a second helper run is not served the first
+    job's claim row."""
+    from defender.box import CLAIM_ENV
+
+    claim = uuid.uuid4().hex
+    monkeypatch.setenv(CLAIM_ENV, claim)
+    return dataclasses.replace(scene, claim=claim)
 
 
 def _worker_file(path: Path) -> bytes | None:
@@ -990,7 +1021,12 @@ _DRIVER = textwrap.dedent("""\
         return real_answer(self, session, name, fields)
 
     S.Registry.answer = answer
-    sys.exit(job_host.main(cfg["argv"], signer=A.MarkedSigner(), publish=lambda *a, **k: B.fresh(cfg["commit"])))
+    seams = {}
+    if cfg.get("store"):  # #1546: the real store and the tenant's key login, as `drive_helper` hands them
+        from defender import evidence
+        seams = {"evidence": evidence.BlobStore(**cfg["store"]["blob"]),
+                 "evidence_keys": evidence.EvidenceKeys(**cfg["store"]["login"])}
+    sys.exit(job_host.main(cfg["argv"], signer=A.MarkedSigner(), publish=lambda *a, **k: B.fresh(cfg["commit"]), **seams))
 """)
 
 
@@ -1004,6 +1040,23 @@ _PARENT = textwrap.dedent("""\
     with open(cfg["exit"], "w") as out:
         out.write(str(status))
 """)
+
+
+def _process_store(scene: HelperScene) -> dict[str, Any] | None:
+    """#1546 (design Flows: an unconfigured store or key login is refused at helper setup): the store and key-login values a
+    helper process is configured with, as `drive_helper` configures one in-process (None in a module without the fixtures)."""
+    if not _REQUEST:
+        return None
+    from defender.tests.support.jobs._helper_evidence1546 import evidence_login, store_for
+
+    try:
+        store = store_for(_REQUEST[0], scene)
+    except pytest.FixtureLookupError:
+        return None
+    g = store.garage
+    return {"blob": {"endpoint": g.endpoint, "bucket": g.bucket, "access_key": g.access_key, "secret_key": g.secret_key,
+                     "region": g.region},
+            "login": {"addr": store.openbao.addr, **evidence_login(store.openbao, scene.tenant)}}
 
 
 class ProcessHelper:
@@ -1023,8 +1076,12 @@ class ProcessHelper:
         shim.write_text(_SHIM.replace("PYTHON", sys.executable).replace("STATE", str(self.state)), encoding="utf-8")
         shim.chmod(0o755)
         env = child_env({**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"})
+        investigation = (flag_values(argv, "--kind") or [""])[0] == "investigation"
+        if investigation:  # #1546: the worker's claim transaction precedes the helper (design: Claim)
+            claim_for(scene, argv)
         cfg = json.dumps({"argv": argv, "commit": scene.t.commit, "requests": str(self.state / "requests.log"),
-                          "exit": str(self.state / "helper-exit")})
+                          "exit": str(self.state / "helper-exit"),
+                          "store": _process_store(scene) if investigation else None})
         command = [sys.executable, "-c", _PARENT, cfg, _DRIVER] if worker else [sys.executable, "-c", _DRIVER, cfg]
         self.proc = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE)

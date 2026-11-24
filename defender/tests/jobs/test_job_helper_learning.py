@@ -9,6 +9,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 import pytest
 from defender.tests.support.jobs._job_helper import (
@@ -23,11 +24,9 @@ from defender.tests.support.jobs._job_helper import (
 )
 from defender.tests.support.jobs import _job_helper as J
 from defender.tests.support.jobs._job_helper_learning import (
+    PlantedEpisode,
     clear_publish_status,
-    learning_end,
     listing,
-    plant_decoy,
-    plant_siblings,
     publish_status,
     run_kind,
 )
@@ -53,7 +52,7 @@ POST_STEPS = pytest.mark.parametrize("family_less", [False, True], ids=["post-st
 def _job_state(scene, signer, forge, docker):
     """What a refused request must leave alone: passes signed, forge tokens asked, status row, copies, drafts, boxes."""
     tenant = scene.root / scene.tenant
-    return (len(signer.payloads), len(forge.asked), publish_status(scene), listing(tenant / "run-knowledge"),
+    return (len(signer.payloads), len(forge.asked), publish_status(scene), listing(J.run_copies(scene)),
             listing(tenant / "drafts"), len(docker.creates()))
 
 
@@ -104,6 +103,14 @@ def test_requests_are_refused_by_job_kind(scene, kind, request_name, fields):
     assert got["after"] == got["before"], "a refused request signed, minted, wrote, published or created something"
 
 
+def _inodes(folder: Path) -> dict[str, tuple[int, int]] | None:
+    """Every entry under `folder` (links not followed) by its inode and modification time, or None when it is absent: a
+    folder left as it was, not one written again with the same bytes."""
+    if not folder.exists():
+        return None
+    return {str(p.relative_to(folder)): (p.lstat().st_ino, p.lstat().st_mtime_ns) for p in sorted(folder.rglob("*"))}
+
+
 #: A full commit id the tenant's clone does not hold.
 _ABSENT_COMMIT = "fedcba9876543210" * 2 + "fedcba98"
 
@@ -137,6 +144,7 @@ def test_c32_export_materialise_answers_the_pin_for_a_learning_job_and_refuses_e
             got["refused"] = c.refused("export.materialise", commit=later).code
         return 0
 
+    published = _inodes(export_dir(t.tenant, t.commit))
     run_kind(scene, kind, job, family_less=kind == "post-step")
 
     assert not export_dir(t.tenant, later).exists(), f"a {kind} job materialised an export"
@@ -149,7 +157,9 @@ def test_c32_export_materialise_answers_the_pin_for_a_learning_job_and_refuses_e
     assert got["settings"] == agent_blobs(t.clone, t.commit, prefix="settings")
     assert got["later"], "a commit other than the pin was materialised"
     assert got["absent"]
-    assert not export_dir(t.tenant, t.commit).exists(), "the export was also written under the tenant folder"
+    # The tenant folder's own published export of the pin (the fixture's launch-time publish made it before the job) is left
+    # as it was; the job's export is the one in its inputs, above.
+    assert _inodes(export_dir(t.tenant, t.commit)) == published, "the export was also written under the tenant folder"
     assert not export_dir(t.tenant, _ABSENT_COMMIT).exists()
 
 
@@ -227,44 +237,100 @@ def test_a6_a_learning_job_is_passed_and_boxed_only_for_ids_the_helper_holds_for
     assert got["after"] == got["state"], "an id the helper does not hold signed a pass or created a box"
 
 
+def _facts(scene) -> dict[str, Any]:
+    from defender.tests.support.jobs._helper_evidence1546 import facts
+
+    return facts(scene.dsn, scene.claim)
+
+
+def _staged_end(scene) -> Any:
+    """#1546 (A-O2, PR2): the learning job's end as the helper staged it, the `outcome` fact under the scene's claim (no
+    learning-end file is written beside the run), its `status`, `reason` and `message` as attributes; None when none was
+    staged (a `refused/outcome` is no end)."""
+    from types import SimpleNamespace
+
+    from defender.tests.support.jobs._helper_evidence1546 import facts
+
+    body = facts(scene.dsn, scene.claim).get("outcome")
+    return None if body is None else SimpleNamespace(**body)
+
+
+def _episode(scene, c, job_id: str, source: str, *, episode_id: str | None = None, fresh_worlds: bool = False,
+             stage: bool = True) -> PlantedEpisode:
+    """#1546 (design "Learning job": the job pulls its source into its own root and its pre-flight makes the episode there;
+    census "helper arm roster from job-written files -> `arms` and `arm/<id>` facts"): what the job's pre-flight leaves, made
+    from inside the container: the source's run folder and the episode `<root>/<T>/episodes/<episode_id or job id>` (job id =
+    episode id), a canonical run id minted per world, and (`stage`) the roster sent as the `arms` record before any arm.
+    `fresh_worlds`: world identities of its own (another launch's)."""
+    from defender.tests.storage.ids_1187 import _spec1187 as S
+    from defender.tests.support.evidence._facts1546 import sent_arms
+    from defender.tests.support.learning.branch import _triplet_947 as T
+
+    tenant = J.host_path(c.mounts, str(J.job_runs(scene).parent))  # the job's tenant folder in its own root
+    (tenant / "runs" / source).mkdir(parents=True, exist_ok=True)
+    ep_id = episode_id or job_id
+    doc = T.family_doc(episode_id=ep_id, source_run_dir=str(tenant / "runs" / source), source_run_id=source)
+    if fresh_worlds:
+        doc["worlds"] = [{**w, "world_id": str(uuid.uuid4())} if "world_id" in w else w for w in doc["worlds"]]
+    ep = T.episode(scene.root, doc=doc, root=tenant / "episodes", episode_id=ep_id)
+    worlds = {w: T.world_id(ep, w) for w in T.WORLDS}
+    roster = {worlds[w]: S.new_id() for w in T.WORLDS}
+    if stage:
+        c.request("arms", record=sent_arms(*[(run, world) for world, run in roster.items()]))
+    return PlantedEpisode(ep, source, job_id, worlds, roster)
+
+
+def _ids() -> tuple[str, str]:
+    """A learning job's id and its source run's (the claim names both, `_job_helper.claim_for`)."""
+    return str(uuid.uuid4()), str(uuid.uuid4())
+
+
 # --- the learning job: siblings -----------------------------------------------------------------------------------------
 
 def test_a6_a_sibling_gets_its_worlds_roster_id_a_folder_in_the_episode_and_an_owned_copy_and_a_pass_and_box_for_that_id_only(
         scene):
-    """`copy.make(world=)` for a world of the job's episode answers that world's canonical roster id, makes
-    `<episode>/runs/<run>/` (not one under `<T>/runs/`) and an owned `<T>/run-knowledge/<run>/`; `pass` and `box.start` for
-    it are answered (a read pass for the run, #1449); afterwards the copy is gone and the run's output stays. (A6, C20, C23,
-    O5; `test_triplet_sibling::test_947_sibling_run_id...`)"""
+    """`copy.make(world=)` for a world of the job's staged roster answers that world's roster id, makes
+    `<episode>/runs/<run>/` in the job's root (not one under a `runs/` folder) and an owned copy in the claim's inputs
+    (`.job-inputs/<claim>/run-knowledge/<run>/`); `pass` and `box.start` for it are answered (a read pass for the run, #1449);
+    nothing of it is under the host's tenant folder, and afterwards the copy is gone. (A6, C20, C23, O5;
+    `test_triplet_sibling::test_947_sibling_run_id...`; #1546: the roster is the staged `arms` fact, the episode is the job's
+    own in its root, the copy is in its inputs, design "The job's folders")"""
     from defender.box import TENANT_LABEL
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
     from defender.tests.tenancy.tenant_1108_p4._drain_support import owner_record
 
-    planted = plant_siblings(scene)
-    job_id = planted.job_id
+    job_id, source = _ids()
     labels = ("b", "c")
     signer, got = make_signer(), {}
-    knowledge = scene.root / scene.tenant / "run-knowledge"
+    copies = J.run_copies(scene)
 
     def job(c) -> int:
+        ep = got["ep"] = _episode(scene, c, job_id, source)
         got["asked_at"] = time.time()
-        got["copies"] = [c.request("copy.make", world=planted.worlds[w]) for w in labels]
-        got["seen"] = [(planted.dir / "runs" / x["run"]).is_dir() for x in got["copies"]]
+        got["copies"] = [c.request("copy.make", world=ep.worlds[w]) for w in labels]
+        got["seen"] = [(ep.dir / "runs" / x["run"]).is_dir() for x in got["copies"]]
         got["owners"] = [owner_record(Path(x["path"]))["pid"] for x in got["copies"]]
         got["tokens"] = [c.request("pass", id=x["run"])["token"] for x in got["copies"]]
         got["boxes"] = [c.request("box.start", kind="shell", id=x["run"]) for x in got["copies"]]
-        (planted.dir / "runs" / got["copies"][0]["run"] / "report.md").write_text("sibling output", encoding="utf-8")
+        (ep.dir / "runs" / got["copies"][0]["run"] / "report.md").write_text("sibling output", encoding="utf-8")
+        runs = ep.dir / "runs"
+        got["folders"] = sorted(p.name for p in runs.iterdir() if p.is_dir())
+        got["beside"] = sorted(p.name for p in runs.iterdir() if not p.is_dir())
+        got["output"] = (runs / got["copies"][0]["run"] / "report.md").read_text(encoding="utf-8")  # lint-report-file: ok — an arbitrary file the stand-in job wrote
         return 0
 
     docker = ContainerStandIn(job)
-    run_kind(scene, "learning", None, job_id=planted.job_id, source=planted.source, signer=signer, docker=docker)
+    run_kind(scene, "learning", None, job_id=job_id, source=source, signer=signer, docker=docker)
 
-    assert [x["run"] for x in got["copies"]] == [planted.run_id(w) for w in labels], "not the worlds' roster ids"
+    ep = got["ep"]
+    assert [x["run"] for x in got["copies"]] == [ep.run_id(w) for w in labels], "not the worlds' roster ids"
     assert job_id not in [x["run"] for x in got["copies"]]
     for copy in got["copies"]:
         path = Path(copy["path"])
-        assert path.parent == knowledge, path
+        assert path.parent == copies, path
         assert path.name == copy["run"]
         assert not (scene.runs / copy["run"]).exists(), "a sibling's folder was made under <T>/runs"
+        assert not (scene.root / scene.tenant / "run-knowledge" / copy["run"]).exists(), "a copy under the tenant folder"
     assert got["seen"] == [True, True]
     assert got["owners"] == [os.getpid()] * 2, "a run copy's owner is not the helper"
     for copy, token in zip(got["copies"], got["tokens"], strict=True):
@@ -278,46 +344,50 @@ def test_a6_a_sibling_gets_its_worlds_roster_id_a_folder_in_the_episode_and_an_o
     sibling_creates = docker.creates()
     assert len(sibling_creates) == 2
     assert all(parse_labels(c)[TENANT_LABEL] == scene.tenant for c in sibling_creates)
-    assert listing(knowledge) == [], "the helper left a sibling's run copy or a temporary behind"
+    assert not copies.exists(), "the helper left a sibling's run copy or a temporary behind"
     made = sorted(x["run"] for x in got["copies"])
-    # Each sibling's folder, and beside it only the host-held knowledge-source record of that run (U12).
-    assert [p.name for p in sorted((planted.dir / "runs").iterdir()) if p.is_dir()] == made
-    # Beside each sibling's run: its knowledge-source record and (#1366 O6) its record of the versions the job read.
-    assert [p.name for p in sorted((planted.dir / "runs").iterdir()) if not p.is_dir()] == \
-        sorted(f"{run}{suffix}" for run in made for suffix in (".knowledge-source.json", ".record-versions.json"))
-    assert (planted.dir / "runs" / got["copies"][0]["run"] / "report.md").read_text(encoding="utf-8") == "sibling output"  # lint-report-file: ok — an arbitrary file the stand-in job wrote
+    # Each sibling's folder, and beside it only the host-held knowledge-source record of that run (U12) and (#1366 O6) its
+    # record of the versions the job read.
+    assert got["folders"] == made
+    assert got["beside"] == sorted(f"{run}{suffix}" for run in made
+                                   for suffix in (".knowledge-source.json", ".record-versions.json"))
+    assert got["output"] == "sibling output"
 
 
 def test_a6_a_sibling_that_names_a_run_id_is_answered_its_worlds_roster_id_all_the_same(scene):
     """`copy.make(world=)` carrying an id of the job's choosing is refused or answers the world's roster id; the named
-    folder is never made, in the episode or under `<T>/runs/`. (A6: the id is the roster's)"""
+    folder is never made, in the episode, under the job's `runs/` or as a copy. (A6: the id is the roster's; #1546: the
+    roster is the staged `arms` fact)"""
     from defender import job_host
 
     named = str(uuid.uuid4())
-    planted = plant_siblings(scene)
+    job_id, source = _ids()
     got: dict = {}
 
     def job(c) -> int:
+        ep = got["ep"] = _episode(scene, c, job_id, source)
         try:
-            got["answer"] = c.request("copy.make", world=planted.worlds["b"], run=named, id=named)
+            got["answer"] = c.request("copy.make", world=ep.worlds["b"], run=named, id=named)
         except job_host.Refused:
             got["answer"] = None
-        got["control"] = c.request("copy.make", world=planted.worlds["c"])
+        got["control"] = c.request("copy.make", world=ep.worlds["c"])
+        got["made"] = [p.exists() for p in (ep.dir / "runs" / named, J.job_runs(scene) / named, J.run_copies(scene) / named)]
         return 0
 
-    run_kind(scene, "learning", job, job_id=planted.job_id, source=planted.source)
+    run_kind(scene, "learning", job, job_id=job_id, source=source)
 
-    assert got["control"]["run"] == planted.run_id("c"), "control: the world's roster id was not answered"
+    ep = got["ep"]
+    assert got["control"]["run"] == ep.run_id("c"), "control: the world's roster id was not answered"
     if got["answer"] is not None:
-        assert got["answer"]["run"] == planted.run_id("b")
-    assert not (planted.dir / "runs" / named).exists()
+        assert got["answer"]["run"] == ep.run_id("b")
+    assert got["made"] == [False, False, False], "the named folder was made"
     assert not (scene.runs / named).exists()
     assert not (scene.root / scene.tenant / "run-knowledge" / named).exists()
 
 
 def _link_out_of_the_episode(planted, decoy, *, whole_folder):
     """After the control, a link that sends the roster entry's folder (or the episode's `runs/`) out of the episode, to
-    `decoy` under `<T>/`."""
+    `decoy` under the job's tenant folder."""
     runs = planted.dir / "runs"
     if whole_folder:
         runs.rename(planted.dir / "runs-real")
@@ -326,98 +396,146 @@ def _link_out_of_the_episode(planted, decoy, *, whole_folder):
         (runs / planted.run_id("b")).symlink_to(decoy, target_is_directory=True)
 
 
-@pytest.mark.parametrize("case", ["outside-world", "roster-id-not-canonical", "entry-folder-link", "runs-folder-link"])
+#: Roster ids that are not canonical run ids (each staged in a roster of its own: `arms` is create-once).
+_NOT_CANONICAL = ("dot-dot-other-tenant", "upper", "no-dashes", "not-a-run-id", "a-host-path", "dot-dot-suffix")
+
+
+def _bad_id(scene, good: str, how: str) -> str:
+    return {"dot-dot-other-tenant": "../" + OTHER_TENANT, "upper": good.upper(), "no-dashes": good.replace("-", ""),
+            "not-a-run-id": "not-a-run-id", "a-host-path": str(scene.root / OTHER_TENANT / "runs"),
+            "dot-dot-suffix": f"{good}/../{uuid.uuid4()}"}[how]
+
+
+@pytest.mark.parametrize("case", ["outside-world", "entry-folder-link", "runs-folder-link"])
 def test_a6_h10_a_sibling_for_a_world_outside_the_episode_or_a_bad_or_linked_roster_entry_is_refused_and_nothing_is_made(
         scene, case):
-    """`copy.make(world=)` for a world the job's episode does not hold, for a roster id that is not canonical, and for an
-    entry whose folder would resolve outside the episode under `<T>/` (an entry link, the `runs/` link) is refused: no
-    folder or copy is made, and the id is not answered for `pass` or `box.start`; on the same channel another world of the
-    episode is answered (control). (A6, H10)"""
-    from defender.tests.storage.ids_1187 import _spec1187 as S
-
-    planted = plant_siblings(scene)
-    other = plant_decoy(scene, planted)
-    tenant = scene.root / scene.tenant
-    decoy = tenant / "decoy-folder"
-    decoy.mkdir()
-    world, good = planted.worlds["b"], planted.run_id("b")
-    #: (world asked, id the roster holds for it or None: the roster is left alone)
-    asks = {
-        "outside-world": [(str(uuid.uuid4()), None), (other.worlds["b"], None)],
-        "roster-id-not-canonical": [(world, bad) for bad in (
-            "../" + OTHER_TENANT, good.upper(), good.replace("-", ""), "not-a-run-id",
-            str(scene.root / OTHER_TENANT / "runs"), f"{good}/../{uuid.uuid4()}")],
-    }.get(case, [(world, None)])
+    """`copy.make(world=)` for a world the job's staged roster does not hold (a stranger, another episode's), and for an
+    entry whose folder would resolve outside the episode (an entry link, the `runs/` link) is refused: no folder or copy is
+    made, and the id is not answered for `pass` or `box.start`; on the same channel another world of the roster is answered
+    (control). (A6, H10; #1546: the roster is the staged `arms` fact, the episode lies in the job's root; a roster id that
+    is not canonical is the next test's)"""
+    job_id, source = _ids()
     got: dict = {"refusals": []}
 
-    def folders():
-        return listing(planted.dir / ("runs-real" if case == "runs-folder-link" else "runs"))
-
-    def state():
-        return (len(signer.payloads), len(docker.creates()), listing(tenant / "run-knowledge"), listing(decoy),
-                listing(scene.runs), folders(), listing(other.dir / "runs"))
-
     def job(c) -> int:
+        planted = got["ep"] = _episode(scene, c, job_id, source)
+        other = _episode(scene, c, job_id, source, episode_id=str(uuid.uuid4()), fresh_worlds=True, stage=False)
+        tenant = J.job_runs(scene).parent
+        decoy = tenant / "decoy-folder"
+        decoy.mkdir()
+        good = planted.run_id("b")
+        asks = {"outside-world": [str(uuid.uuid4()), other.worlds["b"]]}.get(case, [planted.worlds["b"]])
+
+        def state():
+            return (len(signer.payloads), len(docker.creates()), listing(J.run_copies(scene)), listing(decoy),
+                    listing(tenant / "runs"), listing(planted.dir / ("runs-real" if case == "runs-folder-link" else "runs")),
+                    listing(other.dir / "runs"))
+
         got["control"] = c.request("copy.make", world=planted.worlds["c"])
         if case.endswith("link"):
             _link_out_of_the_episode(planted, decoy, whole_folder=case == "runs-folder-link")
         got["before"] = state()
-        for asked, roster_id in asks:
-            if roster_id is not None:
-                S.write_roster(planted.dir, {**planted.roster, world: roster_id})
-            ident = roster_id or good
+        for asked in asks:
             got["refusals"].append(c.refused("copy.make", world=asked))
-            got["refusals"] += [c.refused(r, kind="shell", id=ident) for r in ("pass", "box.start")]
+            got["refusals"] += [c.refused(r, kind="shell", id=good) for r in ("pass", "box.start")]
         got["after"] = state()
+        got["decoy"] = listing(decoy)
+        got["asks"] = len(asks)
         return 0
 
     signer, docker = make_signer(), ContainerStandIn(job)
-    run_kind(scene, "learning", None, job_id=planted.job_id, source=planted.source, signer=signer, docker=docker)
+    run_kind(scene, "learning", None, job_id=job_id, source=source, signer=signer, docker=docker)
 
-    assert got["control"]["run"] == planted.run_id("c"), "control: a world of the episode was refused"
-    assert len(got["refusals"]) == 3 * len(asks)
+    assert got["control"]["run"] == got["ep"].run_id("c"), "control: a world of the roster was refused"
+    assert len(got["refusals"]) == 3 * got["asks"]
     assert got["after"] == got["before"], "a refused sibling signed, created, copied or made a folder"
-    assert listing(decoy) == [], "the helper wrote through a link"
-    assert not (scene.runs / good).exists()
+    assert got["decoy"] == [], "the helper wrote through a link"
+
+
+@pytest.mark.parametrize("how", ["control", *_NOT_CANONICAL])
+def test_a6_h10_a_roster_naming_a_run_id_that_is_not_canonical_answers_no_sibling(scene, how):
+    """#1546 (census: the helper's arm roster from job-written files became the staged `arms` fact, parsed on receipt, PR2):
+    a roster whose entry for a world names a run id that is not canonical (another tenant's path, upper case, no dashes, not
+    an id, a host path, a `..` suffix) is not staged as `arms`; `copy.make` for that world is refused, and `pass` and
+    `box.start` for the id are refused; no copy, folder or box is made, nothing signed. Control: the same roster with
+    canonical ids is staged and its world answered. (A6, H10; was the roster-file case of the test above)"""
+    from defender.tests.storage.ids_1187 import _spec1187 as S
+    from defender.tests.support.evidence._facts1546 import sent_arms
+    from defender.tests.support.jobs._helper_evidence1546 import facts, send
+
+    job_id, source = _ids()
+    got: dict = {}
+
+    def job(c) -> int:
+        ep = _episode(scene, c, job_id, source, stage=False)
+        good = S.new_id()
+        ident = good if how == "control" else _bad_id(scene, good, how)
+        roster = {**ep.roster, ep.worlds["b"]: ident}
+        before = (len(signer.payloads), len(docker.creates()), listing(J.run_copies(scene)), listing(ep.dir / "runs"))
+        send(c, "arms", record=sent_arms(*[(run, world) for world, run in roster.items()]))
+        if how == "control":
+            got["answer"] = c.request("copy.make", world=ep.worlds["b"])
+            got["ident"] = ident
+            return 0
+        got["refusals"] = [c.refused("copy.make", world=ep.worlds["b"]),
+                           *[c.refused(r, kind="shell", id=ident) for r in ("pass", "box.start")]]
+        got["same"] = before == (len(signer.payloads), len(docker.creates()), listing(J.run_copies(scene)),
+                                 listing(ep.dir / "runs"))
+        return 0
+
+    signer, docker = make_signer(), ContainerStandIn(job)
+    run_kind(scene, "learning", None, job_id=job_id, source=source, signer=signer, docker=docker)
+
+    staged = facts(scene.dsn, scene.claim)
+    if how == "control":
+        assert got["answer"]["run"] == got["ident"], "control: the canonical roster's world was not answered"
+        assert "arms" in staged
+        return
+    assert "arms" not in staged, f"a roster naming {how} was staged: {staged.get('arms')}"
+    assert all(r is not None for r in got["refusals"])
+    assert got["same"], "a sibling was signed, boxed, copied or given a folder for a roster id that is not canonical"
 
 
 def test_a6_a_decoy_episode_sharing_the_jobs_source_has_its_worlds_refused_and_the_jobs_own_answered(scene):
-    """The episode is found from the claim (job id = episode id), not from `--source`: a second episode of the tenant made
-    from the same source has every world refused for `copy.make`, `pass` and `box.start`, and gets no folder or copy;
-    the job's own world on the same channel is answered. (A6, r4.1)"""
-    planted = plant_siblings(scene)
-    decoy = plant_decoy(scene, planted)
-    tenant = scene.root / scene.tenant
-    assert decoy.source == planted.source
-    assert decoy.job_id != planted.job_id
+    """The episode is the claim's (job id = episode id) and the worlds answered are its staged roster's: a second episode in
+    the job's root made from the same source, its worlds its own, has every world refused for `copy.make`, `pass` and
+    `box.start`, and gets no folder or copy; the job's own world on the same channel is answered. (A6, r4.1; #1546: the
+    roster is the staged `arms` fact)"""
+    job_id, source = _ids()
     got: dict = {"refusals": []}
 
-    def state():
-        return (len(signer.payloads), len(docker.creates()), listing(tenant / "run-knowledge"),
-                listing(decoy.dir / "runs"), listing(planted.dir / "runs"), listing(scene.runs))
-
     def job(c) -> int:
+        planted = got["ep"] = _episode(scene, c, job_id, source)
+        decoy = got["decoy"] = _episode(scene, c, job_id, source, episode_id=str(uuid.uuid4()), fresh_worlds=True,
+                                        stage=False)
+        assert not set(decoy.worlds.values()) & set(planted.worlds.values()), "premise: the decoy shares no world"
+
+        def state():
+            return (len(signer.payloads), len(docker.creates()), listing(J.run_copies(scene)),
+                    listing(decoy.dir / "runs"), listing(planted.dir / "runs"), listing(J.job_runs(scene)))
+
         got["before"] = state()
         for label in ("b", "c"):
             got["refusals"].append(c.refused("copy.make", world=decoy.worlds[label]))
             got["refusals"] += [c.refused(r, kind="shell", id=decoy.run_id(label)) for r in ("pass", "box.start")]
         got["after"] = state()
         got["control"] = c.request("copy.make", world=planted.worlds["b"])
+        got["decoy_runs"] = listing(decoy.dir / "runs")
         return 0
 
     signer, docker = make_signer(), ContainerStandIn(job)
-    run_kind(scene, "learning", None, job_id=planted.job_id, source=planted.source, signer=signer, docker=docker)
+    run_kind(scene, "learning", None, job_id=job_id, source=source, signer=signer, docker=docker)
 
-    assert got["control"]["run"] == planted.run_id("b"), "control: the job's own world was refused"
+    assert got["control"]["run"] == got["ep"].run_id("b"), "control: the job's own world was refused"
     assert len(got["refusals"]) == 6
     assert got["after"] == got["before"], "a decoy episode's world was copied, passed or boxed"
-    assert listing(decoy.dir / "runs") == []
+    assert got["decoy_runs"] == []
 
 
 def test_p_c_a_learning_jobs_siblings_add_no_holder_and_run_no_admission_inside_the_container(scene):
     """While the helper serves a sibling's `copy.make`, `pass` and `box.start`, the only process recorded under the
     tenant's host lock is the helper, and no lock is taken and no admission run beyond the helper's own, made before the
-    container. (In-box entries; P-C: nothing in a container writes a host process record)"""
+    container. (In-box entries; P-C: nothing in a container writes a host process record; #1546: the roster is staged)"""
     from defender.systems import run_tenant
     from defender.tenancy import host_lock
     from defender.tests.support.tenancy._host1214 import (
@@ -426,12 +544,13 @@ def test_p_c_a_learning_jobs_siblings_add_no_holder_and_run_no_admission_inside_
         this_process,
     )
 
-    planted = plant_siblings(scene)
+    job_id, source = _ids()
     got: dict = {}
 
     def job(c) -> int:
+        ep = _episode(scene, c, job_id, source)
         got["start"] = dict(calls.counts)
-        run = c.request("copy.make", world=planted.worlds["b"])["run"]
+        run = c.request("copy.make", world=ep.worlds["b"])["run"]
         c.request("pass", id=run)
         c.request("box.start", kind="shell", id=run)
         got["holders"] = recorded(scene.root, scene.tenant)
@@ -440,7 +559,7 @@ def test_p_c_a_learning_jobs_siblings_add_no_holder_and_run_no_admission_inside_
 
     with counting_calls(host_tenant=run_tenant.host_tenant, acquire=host_lock.acquire,
                         hold_shared=host_lock.hold_shared) as calls:
-        run_kind(scene, "learning", job, job_id=planted.job_id, source=planted.source)
+        run_kind(scene, "learning", job, job_id=job_id, source=source)
 
     assert got["start"]["acquire"] + got["start"]["hold_shared"] >= 1, "premise: the helper took the lock before the container"
     assert got["end"] == got["start"], "a sibling's requests took a lock or ran an admission"
@@ -455,8 +574,10 @@ def test_c21_an_oracle_boxs_bind_sources_are_in_a_folder_per_claim_under_the_dat
     from defender.box import CLAIM_ENV, TENANT_LABEL
 
     sources = []
-    for claim in (scene.claim, uuid.uuid4().hex):
-        monkeypatch.setenv(CLAIM_ENV, claim)
+    for n in range(2):
+        # #1546: each job is claimed on its own (a row is claimed at most once), the claim the worker hands its child
+        s = scene if n == 0 else J.next_claim(scene, monkeypatch)
+        monkeypatch.setenv(CLAIM_ENV, s.claim)
         job_id = str(uuid.uuid4())
         got: dict = {}
 
@@ -466,7 +587,7 @@ def test_c21_an_oracle_boxs_bind_sources_are_in_a_folder_per_claim_under_the_dat
             return 0
 
         docker = ContainerStandIn(job)
-        run_kind(scene, "learning", None, job_id=job_id, docker=docker)
+        run_kind(s, "learning", None, job_id=job_id, docker=docker)
         (create,) = docker.creates()
         assert got["answer"], "control: the oracle box was not started"
         assert parse_labels(create)[TENANT_LABEL] == scene.tenant
@@ -554,18 +675,18 @@ def test_h10_every_folder_from_the_tenant_down_to_each_bind_source_of_a_learning
     helper's registry per case (a sibling's `shell`, the learning job's `oracle`, the post-step's `batch`): each folder on the way from `<T>/` to each bind source under `<T>/`, swapped in turn for a link into a folder
     of the other tenant holding what lay below it, gets `box.start` refused as `confinement`, no further box and the other
     tenant's folder unchanged; an id the helper did not mint is refused as `unknown-id` for that box kind and creates
-    nothing. Control: the untouched folders start the box. (H10, A6, O9, C21)"""
+    nothing. Control: the untouched folders start the box. (H10, A6, O9, C21; #1546: a sibling's sources lie under the
+    claim's root and inputs, judged from each, design "The job's folders")"""
     from defender.tests.support.jobs._job_helper import swap_every_component
 
-    planted = plant_siblings(scene) if box == "sibling-shell" else None
     kind = {"batch": "post-step"}.get(box, "learning")
     box_kind = {"sibling-shell": "shell"}.get(box, box)
-    job_id = planted.job_id if planted is not None else str(uuid.uuid4())
+    job_id, source = _ids()
     got: dict = {}
 
     def job(c) -> int:
-        if box == "sibling-shell":
-            ident = c.request("copy.make", world=planted.worlds["b"])["run"]
+        if box == "sibling-shell":  # #1546: the episode is the job's own, in its root, its roster staged
+            ident = c.request("copy.make", world=_episode(scene, c, job_id, source).worlds["b"])["run"]
         elif box == "batch":
             ident = c.request("batch.start", lanes=["lessons"])["batch"]
         else:
@@ -578,10 +699,10 @@ def test_h10_every_folder_from_the_tenant_down_to_each_bind_source_of_a_learning
 
     docker = ContainerStandIn(job)
     run_kind(scene, kind, None, job_id=None if kind == "post-step" else job_id, docker=docker,
-             family_less=kind == "post-step", source=planted.source if planted is not None else None)
+             family_less=kind == "post-step", source=source if kind == "learning" else None)
 
-    if box != "oracle":  # the oracle's folders are the claim's, outside `<T>/` (C21): it has the unminted arm only
-        assert got["sources"], f"control: the {box} box binds nothing under the tenant's folder"
+    if box != "oracle":  # the oracle's folders are the claim's scratch (C21): it has the unminted arm only
+        assert got["sources"], f"control: the {box} box binds nothing under the tenant's folder, root or inputs"
         assert got["arms"], f"control: no folder on the way to the {box} box's sources was swapped"
     for arm in got["arms"]:
         assert arm.code == "confinement", f"{arm.component} swapped for a link: {arm.code}"
@@ -618,7 +739,7 @@ def test_a3_a_learning_helper_waits_30_seconds_for_a_busy_lock_then_writes_stopp
     waited = time.monotonic() - started
 
     assert 29 <= waited <= 45, waited
-    end = learning_end(scene, job_id)
+    end = _staged_end(scene)
     assert end is not None
     assert end.status == LEARNING_STOPPED, end
     assert not docker.boxes, "a container was started without the lock"
@@ -646,7 +767,7 @@ def test_a3_a_learning_helper_that_gets_the_lock_within_the_wait_runs_the_job(sc
 
     assert time.monotonic() - started >= 1.4, "premise: the helper did not wait for the lock"
     assert docker.job_ran
-    assert learning_end(scene, job_id) is None
+    assert _staged_end(scene) is None
 
 
 # --- the post-step and the family-less check -----------------------------------------------------------------------------
@@ -861,14 +982,15 @@ def test_a1_once_a_learning_helper_is_signalled_it_refuses_a_siblings_copy_and_m
     same request, making no copy and no run folder. (A1, O8)"""
     import signal
 
-    planted = plant_siblings(scene)
-    tenant = scene.root / scene.tenant
+    job_id, source = _ids()
     got: dict = {}
 
-    def state():
-        return (listing(tenant / "run-knowledge"), listing(planted.dir / "runs"), listing(scene.runs))
-
     def job(c) -> int:
+        planted = got["ep"] = _episode(scene, c, job_id, source)  # #1546: the job's own episode, its roster staged
+
+        def state():
+            return (listing(J.run_copies(scene)), listing(planted.dir / "runs"), listing(J.job_runs(scene)))
+
         got["control"] = c.request("copy.make", world=planted.worlds["b"])
         got["before"] = state()
         os.kill(os.getpid(), signal.SIGTERM)
@@ -877,9 +999,9 @@ def test_a1_once_a_learning_helper_is_signalled_it_refuses_a_siblings_copy_and_m
         got["after"] = state()
         return 143
 
-    run_kind(scene, "learning", job, job_id=planted.job_id, source=planted.source)
+    run_kind(scene, "learning", job, job_id=job_id, source=source)
 
-    assert got["control"]["run"] == planted.run_id("b"), "control: the request was answered before the signal"
+    assert got["control"]["run"] == got["ep"].run_id("b"), "control: the request was answered before the signal"
     assert got["refusal"] is not None
     assert got["after"] == got["before"], "a copy or folder was made after the signal"
 
@@ -900,11 +1022,13 @@ def test_a3_o11_a_learning_kind_whose_container_cannot_start_runs_nowhere_else_a
     assert not docker.job_ran
     assert len(docker.creates()) == 0
     if kind == "learning":
-        end = learning_end(scene, job_id)
+        end = _staged_end(scene)
         assert end is not None, "the helper wrote no end record for a learning job that could not start"
         assert (end.status, end.reason) == (LEARNING_FAILED, ENTRY_ERROR), end
         assert end.message, "a failed end names why"
     assert list(scene.runs.glob("*.post-step.json")) == [], "the helper wrote the post-step's record"
+    if kind == "post-step":  # #1546 (A-O2): nor staged one; a post-step's answer is its exit status
+        assert not {"outcome", "result"} & set(_facts(scene)), sorted(_facts(scene))
 
 
 @pytest.mark.parametrize("cause", ["admission", "sign"])
@@ -914,23 +1038,27 @@ def test_a3_a_learning_setup_the_helper_refuses_is_written_in_the_learning_entry
     word above differs)"""
     from defender.records.job_lane import LAUNCH_REFUSED, LEARNING_FAILED
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
-    from defender.tests.support.jobs._jobs1342 import restate_tenant
+    from defender.tests.support.jobs._jobs1342 import move_tenant
 
-    job_id = str(uuid.uuid4())
+    job_id, source = _ids()
     signer = make_signer()
     if cause == "admission":
-        restate_tenant(scene.dsn, scene.tenant, state="offboarding", data_root=scene.root)
+        # #1546 (design: Claim): the worker's claim precedes the offboard (an offboarding tenant takes no new job), then the
+        # tenant's record moves on in place.
+        J.claim_for(scene, scene.argv("learning", job_id, source=source))
+        move_tenant(scene.dsn, scene.tenant, state="offboarding")
     else:
         signer = A.RaisingSigner(RuntimeError("openbao is sealed"))
     docker = ContainerStandIn(lambda c: 0)
-    run_kind(scene, "learning", None, job_id=job_id, signer=signer, docker=docker)
+    run_kind(scene, "learning", None, job_id=job_id, source=source, signer=signer, docker=docker)
 
     assert docker.boxes == [], "a container was started for a job that setup refused"
-    end = learning_end(scene, job_id)
+    end = _staged_end(scene)
     assert end is not None, "no end record for a refused learning job"
     assert (end.status, end.reason) == (LEARNING_FAILED, LAUNCH_REFUSED), end
     assert end.message
     assert not list(scene.runs.glob(f"{job_id}.job-end.json")), "a JobEnd record was written for a learning job"
+    assert not hasattr(end, "setup"), f"the staged learning end is a JobEnd-shaped record: {vars(end)}"
 
 
 
@@ -958,6 +1086,6 @@ def test_a1_a_learning_helper_signalled_before_it_starts_the_container_starts_no
     assert signer.sent or sent, "premise: the signal was sent"
     assert docker.boxes == [], "a container was started after the signal"
     assert docker.creates() == []
-    end = learning_end(scene, job_id)
+    end = _staged_end(scene)
     assert end is not None, "no end record for a learning job signalled before its container"
     assert (end.status, end.reason) == (LEARNING_STOPPED, None), end

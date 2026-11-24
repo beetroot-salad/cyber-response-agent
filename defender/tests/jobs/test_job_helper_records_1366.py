@@ -92,6 +92,9 @@ def test_1366_the_helper_hands_its_container_the_records_it_read_and_writes_the_
 
     def job(c) -> int:
         got["launch"] = c.request("launch")
+        # #1546 (A-O1, design "The job's folders"): the run folder is in the job's root, gone with it once the job ends; the
+        # job reads the record beside it while it runs, as the job's own code does.
+        got["versions"] = RunPaths(Path(got["launch"]["run_dir"])).record_versions.read_text(encoding="utf-8")
         return 0
 
     docker = ContainerStandIn(job)
@@ -102,7 +105,7 @@ def test_1366_the_helper_hands_its_container_the_records_it_read_and_writes_the_
     held = entry_directory(None).current_records(requested_tenant_id(scene.tenant))
     assert held.systems, "premise: the scene's tenant has records"
     assert TenantRecords.from_wire(got["launch"]["records"]) == held
-    versions = json.loads(RunPaths(Path(got["launch"]["run_dir"])).record_versions.read_text(encoding="utf-8"))
+    versions = json.loads(got["versions"])
     assert versions == {"systems": {s: r.version for s, r in held.systems.items()},
                         "case": None if held.case is None else held.case.version}
 
@@ -119,7 +122,12 @@ def test_1366_a_tenant_that_is_not_active_is_refused_by_the_helper_and_no_contai
     from defender.records.job_lane import JobEnd
     from defender.tests.support.jobs._jobs1342 import move_tenant
 
+    from defender.tests.support.jobs._job_helper import claim_for
+
     inv, argv = _investigation(scene)
+    # #1546 (design: Claim): the worker's claim precedes the offboard (an offboarding tenant takes no new job, so its claim is
+    # planted while it is active, as a real worker's claim is), then the tenant moves on.
+    claim_for(scene, argv)
     move_tenant(scene.dsn, scene.tenant, state="offboarding")
     docker = ContainerStandIn(lambda c: 0)
     ran = drive_helper(scene, argv, docker=docker, signer=make_signer())
