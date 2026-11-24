@@ -331,6 +331,59 @@ def test_a6_a_sibling_in_the_container_takes_no_lock_runs_no_admission_and_signs
     _no_database_login(seen, scene)
 
 
+def test_1546_r10_a_siblings_run_and_its_start_records_are_made_in_the_container_at_the_answered_run_id(scene):
+    """D-2 (owner decision; design r10 (a) "The container materialises the run"): on `copy.make(world=)` the helper makes
+    the sibling's run copy and only the episode's `runs/` folder; the sibling, in the container, makes its run
+    (`run_common.materialize_run` at the roster's id: the folder with its alert and stamp) and writes its knowledge record
+    (naming the launch facts' `knowledge_commit`) and its versions record. The helper writes none of them, so each is
+    counted on the container's thread and never on the helper's. WRITE-TESTS CHOICE (r10 "Open for write-tests: the
+    versions record's source"): the launch facts already carry `records` (#1366 O6), so the container writes the versions
+    record from them and `copy.make(world=)`'s answer adds nothing; the oracle is the launch facts' own versions, read from
+    the wire here, not through the writer. Control: the lifecycle ran at that run (the sibling started at all)."""
+    from pathlib import Path
+
+    from defender import run as run_py
+    from defender import run_common
+    from defender.records import RunPaths
+
+    job_id, source = str(uuid.uuid4()), str(uuid.uuid4())
+    got: dict[str, Any] = {}
+
+    def lifecycle(**kw):
+        run_dir = Path(kw["run"].run_dir)
+        paths = RunPaths(run_dir)
+        got["run_dir"] = run_dir
+        got["made"] = {"alert": paths.alert.is_file(), "stamp": paths.provenance.is_file()}
+        got["knowledge"] = json.loads(paths.knowledge_source().read_text(encoding="utf-8"))
+        got["versions"] = json.loads(paths.record_versions.read_text(encoding="utf-8"))
+        return {"output": "done", "requests": 1, "truncated_by": None}
+
+    def entry(c, seen):
+        got["ep"], got["roster_id"] = _episode_in_the_job_root(scene, c, job_id, source)
+        got["launch"] = c.request("launch")
+        with in_container_environment(c.env):
+            return run_py.main(["--tenant", scene.tenant, "--episode", job_id, "--world", "b"], environ=c.env,
+                               lifecycle=lifecycle, visualize=lambda *a, **k: None, preflight=lambda *a, **k: 0)
+
+    watched = {"materialize": run_common.materialize_run, "knowledge_record": run_common.write_knowledge_record,
+               "versions_record": run_common.write_versions_record}
+    with ThreadCalls(watched) as calls:
+        seen = seen_in_container(scene, "learning", entry, job_id=job_id, source=source)
+
+    _clean(seen)
+    assert got.get("run_dir") == got["ep"] / "runs" / got["roster_id"], "control: the sibling did not run at its roster id"
+    for label in watched:
+        assert calls.helper(label) == 0, f"the helper ran `{label}` for the sibling (D-2: the container's)"
+        assert calls.container(label) == 1, f"the sibling's container did not run `{label}` once: {calls.by_thread[label]}"
+    assert got["made"] == {"alert": True, "stamp": True}, got["made"]
+    launch = got["launch"]
+    assert got["knowledge"].get("commit") == launch["knowledge_commit"], (got["knowledge"], launch["knowledge_commit"])
+    handed = launch["records"]
+    expected = {"systems": {sid: rec["version"] for sid, rec in sorted(handed["systems"].items())},
+                "case": None if handed.get("case") is None else handed["case"]["version"]}
+    assert got["versions"] == expected, f"the versions record is not the launch facts' records: {got['versions']}"
+
+
 def test_o2_a_sibling_in_the_container_has_its_oracle_box_started_by_its_helper(scene, tmp_path, monkeypatch):
     """In the container, the box a sibling's oracle runs its python in is started by the job's helper over the job
     socket, for the sibling's own run id, as pre-flight's is: the sibling never starts a box itself (the job image has
