@@ -235,7 +235,11 @@ def _serving_requests(seeded: Any) -> list[tuple[tuple[str, str], str, dict[str,
     from defender.tests.support.api._server1083 import A, person
 
     fill = {"tenant_id": A, "key": "report.md", "system_id": "tix"}
-    bodies = {**BODIES, ("POST", API + "/admin/tenants/{}/invitations"): {"email": "new@a.example"}}
+    from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
+
+    bodies = {**BODIES, ("POST", API + "/admin/tenants/{}/invitations"): {"email": "new@a.example"},
+              # #1546 r9/D16: a tenant create carries both retention values (`test_admin_tenants`)
+              ("POST", API + "/admin/tenants"): dict(CREATE_RETENTION)}
     query = {("GET", API + "/auth/callback"): {"code": "c", "state": "s" * 43},  # #1566: our shape, so the lookup runs
              # #1470: a record delete names the version it replaces
              ("DELETE", API + "/tenants/{tenant_id}/case-record"): {"replaces": 1},

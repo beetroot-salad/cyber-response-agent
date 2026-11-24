@@ -603,9 +603,12 @@ def test_1534_the_refused_jobs_message_carries_the_kinds_wording_and_no_path(tmp
 
 @pytest.mark.parametrize("knowledge", [T.NO_KNOWLEDGE_KEY, "unversioned"], ids=["not recorded", "unversioned"])
 def test_knowledge_no_commit_proves_ends_failed_launch_refused(tmp_path, knowledge):
-    """A source whose stamp records no knowledge commit, or says unversioned: refused before any spend. (r5 table)"""
+    """A source whose stamp records no knowledge commit, or says unversioned: refused before any spend. (r5 table) #1546 r10
+    (a): the store pins the claim from the source row's `knowledge.commit`, which such a run never recorded, so the launch
+    facts carry no `knowledge_commit` (the helper refuses that claim at setup, `test_1546_r10_learning_helper.py`); the
+    launcher takes the pin from the launch facts only, and refuses a launch that names none."""
     ran = run_entry(tmp_path, fix_source=lambda src: T.source_stamp(src, tenant_id=S.FIXTURE_TENANT,
-                                                                    knowledge=knowledge))
+                                                                    knowledge=knowledge), claim_pin=None)
     assert _failed_with(ran, "failed", "launch_refused")
     assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
 
@@ -730,13 +733,14 @@ def test_a_fault_no_one_listed_ends_failed_entry_error_and_the_runs_text_never_r
 
 
 def test_a_progress_record_that_cannot_be_written_ends_failed_entry_error_before_the_questioner(tmp_path):
-    """The fork pick must be durable before any spend: a non-file where the progress record goes makes that write fail,
-    and the job ends `failed: entry_error` with no questioner call and no sibling. (O3)"""
-    def blocked(src: Path) -> None:
-        runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / src.parent.parent.name / "runs"
-        (runs / f"{JOB}.learning-progress.json").mkdir()
+    """The fork pick must be durable before any spend: a progress record that cannot be written makes the job end `failed:
+    entry_error` with no questioner call and no sibling. (O3) #1546 (PR2, A-O2): the progress record is a typed record on
+    the job socket, staged by the helper, not a file beside the runs; it cannot be written when the socket fails on it (the
+    helper drops the connection with no answer)."""
+    def socket_fails(_fields: dict) -> dict:
+        raise ConnectionAbortedError("the helper's socket failed on the progress record")
 
-    ran = run_entry(tmp_path, fix_source=blocked)
+    ran = run_entry(tmp_path, answers_over={"progress": socket_fails})
     _failed_with(ran, "failed", "entry_error")
     assert (ran.questioner.calls, ran.spawn.launches) == (0, [])
 
@@ -893,16 +897,24 @@ _LATE_STOP = textwrap.dedent("""
         _armed.append(True)
         return graded
 
+    # #1546 (A-O2, PR2): the end record is the `outcome` the entry sends on its job socket; the stand-in helper writes each
+    # one it receives to a file at once (`sys.argv[3]`, one JSON line each), so the test reads it even if the late signal
+    # ends this wrapper before it reports.
+    def outcome_to_disk(fields):
+        with open(sys.argv[3], "a", encoding="utf-8") as out:
+            print(json.dumps(fields.get("record")), file=out)
+        return {}
+
     # A signal landing once the entry has returned must be harmless to this wrapper: ignored (so `run_entry` restores
     # SIG_IGN, not SIG_DFL), and whatever it raises in the gap before that is swallowed. The record is read from disk.
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     try:
-        run_entry(Path(sys.argv[1]), grade=graded_then_a_late_stop)
+        run_entry(Path(sys.argv[1]), grade=graded_then_a_late_stop, answers_over={"outcome": outcome_to_disk})
     except BaseException as late:
         print(repr(late), file=sys.stderr)
     threading.Event().wait(0.5)
-    records = sorted(Path(os.environ["DEFENDER_DATA_ROOT"]).glob("*/runs/*.learning-end.json"))
-    ended = json.loads(records[0].read_text(encoding="utf-8")) if len(records) == 1 else None
+    sent = Path(sys.argv[3]).read_text(encoding="utf-8").splitlines() if Path(sys.argv[3]).exists() else []
+    ended = json.loads(sent[0]) if len(sent) == 1 else None
     Path(sys.argv[2]).write_text(json.dumps(ended), encoding="utf-8")
 """)
 
@@ -910,15 +922,15 @@ _LATE_STOP = textwrap.dedent("""
 def test_a_sigterm_after_the_judge_returned_is_still_completed(tmp_path):
     """A real SIGTERM landing just after the judge seam returned (at the entry's first read after it, inside the
     findings count), in a child over the real entry, is not a stop. (End record, r5)"""
-    out = tmp_path / "end.json"
-    done = subprocess.run([sys.executable, "-c", _LATE_STOP, str(tmp_path / "entry"), str(out)],
+    out, outcomes = tmp_path / "end.json", tmp_path / "outcomes.jsonl"
+    done = subprocess.run([sys.executable, "-c", _LATE_STOP, str(tmp_path / "entry"), str(out), str(outcomes)],
                           capture_output=True, text=True, timeout=300, check=False,
                           env=child_env())
     # Read here, not from the wrapper: an entry may legally leave SIGTERM at its default, and the late signal
-    # then ends the wrapper before it reports.
-    records = sorted(Path(child_env()["DEFENDER_DATA_ROOT"]).glob("*/runs/*.learning-end.json"))
-    assert len(records) == 1, f"premise: the entry left one end record, not {records}: {done.stderr[-2000:]}"
-    ended = json.loads(records[0].read_text(encoding="utf-8"))
+    # then ends the wrapper before it reports. #1546 (A-O2): the records are the outcomes the job socket received.
+    records = outcomes.read_text(encoding="utf-8").splitlines() if outcomes.exists() else []
+    assert len(records) == 1, f"premise: the entry sent one end record, not {records}: {done.stderr[-2000:]}"
+    ended = json.loads(records[0])
     assert (ended["status"], ended["reason"]) == ("completed", None), ended
 
 

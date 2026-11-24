@@ -8,6 +8,7 @@ import dataclasses
 import errno
 import json
 import os
+import re
 import shutil
 import uuid
 from collections.abc import Iterator
@@ -58,6 +59,12 @@ PAST = L + (1 << 20)
 ONE_TIB = 1 << 40
 
 EXEC_TIMEOUT = 60.0
+
+#: #1546 (design "The box": "Run lane binds the run folder read-only"): the investigation box's one writable place is its
+#: `/tmp` tmpfs, so its live files are made there (`_AgentExec`). The case gives that tmpfs room for every file below with
+#: plenty to spare (each in-cap file is L/2, a refused one at most L), so a full filesystem is never what refuses a step.
+AGENT_SCRATCH = Path("/tmp/t1188")
+AGENT_TMPFS = "512m"
 
 
 # ---- argv readers --------------------------------------------------------------------------
@@ -225,15 +232,20 @@ class _Ran:
 
 @dataclasses.dataclass(frozen=True)
 class _AgentExec:
-    """The investigation box, reached the way the agent's commands reach it (`run_parsed`)."""
+    """The investigation box, reached the way the agent's commands reach it (`run_parsed`). Its files are made in the box's
+    `/tmp` (`tree`, a path in the box: the run folder is bound read-only, #1546 D4), which the host cannot see, so their
+    sizes and contents are read in the box (`size`, `holds_pattern`) and the filesystem's own room and writability are its
+    control (`control_room`)."""
 
     box: box_mod.BoxExecutor
-    tree: Path
+    run_dir: Path
+    tree: Path = AGENT_SCRATCH
     inside: Path = Path(MODEL_RUN)
+    host_visible = False
 
-    def at(self, host: Path) -> str:
-        """`host`, a path under `tree`, as a command in the box names it."""
-        return str(self.inside / host.relative_to(self.tree))
+    def at(self, path: Path) -> str:
+        """`path`, already a path in the box (under `tree`)."""
+        return str(path)
 
     def sh(self, command: str) -> _Ran:
         res = self.box.run_parsed(bash_exec.parse(command), command=command, cwd=self.inside,
@@ -242,11 +254,26 @@ class _AgentExec:
                     res.err.decode("utf-8", "replace"))
 
     def probe(self, *args: str) -> _Ran:
-        # From a file on the tree: the agent's path takes a command line, not a program.
-        script = self.tree / "_probe_1188.py"
+        # From a file the host puts in the run folder (read-only in the box, readable): the agent's path takes a command
+        # line, not a program.
+        script = self.run_dir / "_probe_1188.py"
         if not script.exists():
             script.write_text(_PROBE, encoding="utf-8")
-        return self.sh(" ".join(["python3", self.at(script), *args]))
+        return self.sh(" ".join(["python3", str(self.inside / script.relative_to(self.run_dir)), *args]))
+
+    def size(self, path: Path) -> int:
+        return _probe(self, "stat", path, 0)["size"]
+
+    def holds_pattern(self, path: Path, size: int) -> None:
+        seen = _probe(self, "pattern", path, size)
+        assert seen == {"seen": size, "ok": True}, f"control: the in-cap write did not land byte for byte: {seen}"
+
+    def control_room(self) -> None:
+        """The box's `/tmp` is writable and has room past the cap, so a refusal below is the file-size limit, never a
+        read-only or full filesystem."""
+        room = _probe(self, "room", self.tree, 0)
+        assert room["readonly"] is False, f"control: the box's scratch is read-only: {room}"
+        assert room["free"] >= 4 * PAST, f"control: the box's scratch has no room past the cap: {room}"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -272,6 +299,17 @@ class _DockerExec:
     def probe(self, *args: str) -> _Ran:
         return self._run("python3", "-c", _PROBE, *args)
 
+    host_visible = True
+
+    def size(self, path: Path) -> int:
+        return _host_size(path)
+
+    def holds_pattern(self, path: Path, size: int) -> None:
+        _assert_holds_the_pattern(path, size)
+
+    def control_room(self) -> None:
+        """The lane's writable tree is the host's: the host-side controls of each step stand for it."""
+
 
 _Exec = _AgentExec | _DockerExec
 
@@ -282,7 +320,7 @@ def _investigation_box(base: Path, runtime: str) -> Iterator[_AgentExec]:
     run_dir = _run_dir(base)
     agent = _tenant_agent(base)
     box = box_mod.start_box(
-        run_dir, DEFENDER, spec=box_mod.BoxSpec(runtime=runtime),
+        run_dir, DEFENDER, spec=box_mod.BoxSpec(runtime=runtime, tmpfs_size=AGENT_TMPFS),
         tenant_agent=agent, staged_token=agent.parent / "token", docker=box_mod.run_docker,
         tenant_id=TEST_TENANT, data_root=current_data_root(),
     )
@@ -290,7 +328,10 @@ def _investigation_box(base: Path, runtime: str) -> Iterator[_AgentExec]:
         # A startup fault under DEFENDER_ALLOW_UNSANDBOXED=1 degrades to the host executor,
         # where every negative below would be measuring the host instead of the box.
         assert box.sandboxed, "start_box returned the unsandboxed host fallback, not a box"
-        yield _AgentExec(box, run_dir)
+        x = _AgentExec(box, run_dir)
+        made = x.sh(f"mkdir -p {AGENT_SCRATCH}")
+        assert made.rc == 0, f"premise: the box's /tmp takes a folder: {made.err!r}"
+        yield x
     finally:
         box_mod.stop_box(box)
 
@@ -375,6 +416,21 @@ elif mode == "write":
         err = e.errno
     os.close(fd)
     out["written"], out["errno"] = written, err
+elif mode == "stat":
+    try:
+        out["size"] = os.lstat(path).st_size
+    except FileNotFoundError:
+        out["size"] = 0
+elif mode == "pattern":
+    seen, ok = 0, True
+    with open(path, "rb") as fh:
+        while chunk := fh.read(len(BLOCK)):
+            ok = ok and chunk == BLOCK[:len(chunk)]
+            seen += len(chunk)
+    out["seen"], out["ok"] = seen, ok and seen == n
+elif mode == "room":
+    st = os.statvfs(path)
+    out["free"], out["readonly"] = st.f_bavail * st.f_frsize, bool(st.f_flag & os.ST_RDONLY)
 elif mode == "lift":
     hard = resource.getrlimit(FSIZE)[1]
     out["before"] = list(resource.getrlimit(FSIZE))
@@ -433,32 +489,39 @@ def _assert_host_takes_a_sparse_tib(tree: Path) -> None:
         probe.unlink(missing_ok=True)
 
 
+#: A refusal by the filesystem itself (#1546 D4's read-only run folder, a full tmpfs), never the file-size limit's.
+_FS_REFUSAL = re.compile(r"Read-only file system|No space left on device")
+
+
 def _assert_sparse_extension_is_bounded(x: _Exec) -> None:
     """`truncate` and `ftruncate` cannot size a file past the cap; under it they can."""
     tree = x.tree
-    _assert_host_takes_a_sparse_tib(tree)
+    if x.host_visible:
+        _assert_host_takes_a_sparse_tib(tree)
+    x.control_room()
 
     big, small = tree / "sparse-big", tree / "sparse-small"
     refused = x.sh(f"truncate -s 1T {x.at(big)}")
     assert refused.rc != 0, "`truncate -s 1T` succeeded inside the box"
-    assert _host_size(big) <= L, (
-        f"the host sees a {_host_size(big)}-byte file the box truncated to 1 TiB (cap {L})"
+    assert not _FS_REFUSAL.search(refused.err), f"the filesystem refused, not the file-size limit: {refused.err!r}"
+    assert x.size(big) <= L, (
+        f"the host sees a {x.size(big)}-byte file the box truncated to 1 TiB (cap {L})"
     )
     allowed = x.sh(f"truncate -s {L // 2} {x.at(small)}")
     assert allowed.rc == 0, (
         f"control: `truncate` under the cap failed (rc={allowed.rc}): {allowed.err!r}"
     )
-    assert _host_size(small) == L // 2, "control: the in-cap truncate did not land"
+    assert x.size(small) == L // 2, "control: the in-cap truncate did not land"
 
     big_fd, small_fd = tree / "ftruncate-big", tree / "ftruncate-small"
     over = _probe(x, "ftruncate", big_fd, ONE_TIB)
     assert over["ftruncate"] == f"OSError:{errno.EFBIG}", (
         f"os.ftruncate(fd, 1 << 40) in the box: {over['ftruncate']} (expected EFBIG)"
     )
-    assert _host_size(big_fd) <= L, f"the host sees {_host_size(big_fd)} bytes"
+    assert x.size(big_fd) <= L, f"the host sees {x.size(big_fd)} bytes"
     under = _probe(x, "ftruncate", small_fd, L // 2)
     assert under["ftruncate"] == "ok", f"control: in-cap ftruncate refused: {under}"
-    assert _host_size(small_fd) == L // 2, "control: the in-cap ftruncate did not land"
+    assert x.size(small_fd) == L // 2, "control: the in-cap ftruncate did not land"
 
 
 def _assert_host_takes_an_allocation_past_the_cap(tree: Path) -> None:
@@ -476,21 +539,25 @@ def _assert_host_takes_an_allocation_past_the_cap(tree: Path) -> None:
 def _assert_allocation_is_bounded(x: _Exec) -> None:
     """`fallocate` and `posix_fallocate` cannot allocate past the cap; under it they can."""
     tree = x.tree
-    _assert_host_takes_an_allocation_past_the_cap(tree)
+    if x.host_visible:
+        _assert_host_takes_an_allocation_past_the_cap(tree)
+    x.control_room()
 
     for size, name in ((PAST, "fallocate-past"), (ONE_TIB, "fallocate-tib")):
         refused = x.sh(f"fallocate -l {size} {x.at(tree / name)}")
         assert refused.rc != 127, f"there is no `fallocate` in the box image: {refused.err!r}"
         assert refused.rc != 0, f"`fallocate -l {size}` succeeded inside the box"
-        assert _host_size(tree / name) <= L, (
-            f"the host sees a {_host_size(tree / name)}-byte file the box allocated (cap {L})"
+        if size == PAST:  # past the cap with room to spare (`control_room`): only the limit can refuse it
+            assert not _FS_REFUSAL.search(refused.err), f"the filesystem refused, not the limit: {refused.err!r}"
+        assert x.size(tree / name) <= L, (
+            f"the host sees a {x.size(tree / name)}-byte file the box allocated (cap {L})"
         )
     small = tree / "fallocate-small"
     allowed = x.sh(f"fallocate -l {L // 2} {x.at(small)}")
     assert allowed.rc == 0, (
         f"control: `fallocate` under the cap failed (rc={allowed.rc}): {allowed.err!r}"
     )
-    assert _host_size(small) == L // 2, "control: the in-cap fallocate did not land"
+    assert x.size(small) == L // 2, "control: the in-cap fallocate did not land"
 
     for size, name in ((PAST, "posix-fallocate-past"), (ONE_TIB, "posix-fallocate-tib")):
         over = _probe(x, "posix_fallocate", tree / name, size)
@@ -498,11 +565,11 @@ def _assert_allocation_is_bounded(x: _Exec) -> None:
             f"os.posix_fallocate(fd, 0, {size}) in the box: {over['posix_fallocate']} "
             "(expected EFBIG)"
         )
-        assert _host_size(tree / name) <= L, f"the host sees {_host_size(tree / name)} bytes"
+        assert x.size(tree / name) <= L, f"the host sees {x.size(tree / name)} bytes"
     small = tree / "posix-fallocate-small"
     under = _probe(x, "posix_fallocate", small, L // 2)
     assert under["posix_fallocate"] == "ok", f"control: in-cap posix_fallocate refused: {under}"
-    assert _host_size(small) == L // 2, "control: the in-cap posix_fallocate did not land"
+    assert x.size(small) == L // 2, "control: the in-cap posix_fallocate did not land"
 
 
 #: The probe's write pattern, restated host-side: the probe writes it from the start of the
@@ -528,12 +595,12 @@ def _assert_real_write_stops_at_the_cap(x: _Exec) -> None:
     over = _probe(x, "write", past, PAST)
     assert over["errno"] == errno.EFBIG, f"a write past the cap was not refused: {over}"
     assert over["written"] <= L, f"the box wrote {over['written']} bytes (cap {L})"
-    assert _host_size(past) <= L, f"the host sees {_host_size(past)} bytes (cap {L})"
+    assert x.size(past) <= L, f"the host sees {x.size(past)} bytes (cap {L})"
 
     within = x.tree / "write-within"
     under = _probe(x, "write", within, L // 2)
     assert under == {"written": L // 2, "errno": None}, f"control: {under}"
-    _assert_holds_the_pattern(within, L // 2)
+    x.holds_pattern(within, L // 2)
 
 
 def _assert_the_box_cannot_lift_it(x: _Exec) -> None:

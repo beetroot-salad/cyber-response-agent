@@ -33,6 +33,7 @@ from defender.tests.e2e._replay_harness import committed_record, golden_disposit
 from defender.tests.support.evidence._evidence1546 import evidence_keys, garage, new_sse_key  # noqa: F401 — fixtures
 from defender.tests.support.evidence._facts1546 import RUN_PAGE, evidence_env
 from defender.tests.support.jobs._evidence_flows1546 import INPUTS, ROOTS, SPOOL, accepted, claim_of, owner, sha
+from defender.tests.support.jobs._helper_evidence1546 import evidence_login
 from defender.tests.support.jobs._job_helper import ensure_job_network, no_proxy_records
 from defender.tests.support.jobs._jobs1342 import StandInContainers, an_alert, job_store, make_worker, register_tenant
 from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
@@ -125,6 +126,10 @@ async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_moun
             (root / t.tenant_id / "runs").mkdir(exist_ok=True)
             evidence_keys.make(t.tenant_id)
             garage.tenant_prefix(t.tenant_id)
+            # the tenant's key login, an AppRole holding the policy the lifecycle writes for it, handed to the helper child
+            # (`_helper_child1546.py`: the helper's `evidence_keys` seam; `register_tenant` records no evidence login)
+            monkeypatch.setenv("DEFENDER_TEST_EVIDENCE_LOGIN",
+                               json.dumps({"addr": openbao.addr, **evidence_login(openbao, t.tenant_id)}))
 
             def child(launch) -> list[str]:
                 from defender.worker import run_argv

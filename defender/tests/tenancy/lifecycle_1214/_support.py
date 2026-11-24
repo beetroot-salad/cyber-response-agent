@@ -69,6 +69,18 @@ def people_settings(settings: Any, sessions_dsn: str = FORGE_SESSIONS_DSN) -> li
             (settings.FORGE_PUBLIC_URL_ENV, FORGE_PUBLIC_URL)]
 
 
+def evidence_settings() -> list[tuple[str, str]]:
+    """The evidence store's settings #1546 makes required of the lifecycle (A-O5: `LifecycleConfig.from_env` refuses
+    without `DEFENDER_EVIDENCE_{ENDPOINT,BUCKET,ACCESS_KEY,SECRET_KEY}`), as the environment variables a process-entry case
+    sets (names from `_facts1546`). The endpoint is unreachable: a case that starts the real `_serve` and never runs an
+    offboarding pass needs no more."""
+    from defender.tests.support.evidence._facts1546 import EVIDENCE_ENV_NAMES, EVIDENCE_ENV_PREFIX
+
+    values = {"ENDPOINT": "http://evidence-unreached.test:3900", "BUCKET": "evidence-unreached",
+              "ACCESS_KEY": "unreached-access-key", "SECRET_KEY": "unreached-secret-key", "REGION": "garage"}
+    return [(f"{EVIDENCE_ENV_PREFIX}{name}", values[name]) for name in EVIDENCE_ENV_NAMES]
+
+
 def lifecycle_config(tmp_path: Path, data_root: Path, **overrides: Any) -> Any:
     """The one `LifecycleConfig` of the tests (DC-13): https issuer, forge and OpenBao addresses of the fakes,
     the real template directory, a per-test secrets directory OUTSIDE `<data root>/<T>/`, a short poll, and the two

@@ -534,10 +534,11 @@ def test_o8_the_summary_gains_a_key_only_when_the_teardown_of_a_box_ending_fault
 
 @pytest.mark.parametrize("word", [*run_end.TRUNCATED_BY_VALUES, None])
 def test_o8_every_run_end_word_reaches_the_job_fact_and_only_the_two_box_words_swallow_a_teardown_fault(tmp_path, word):
-    """The job fact is the driver's word whole; a faulting teardown is swallowed and flagged for 'box-lost' and 'box-output-limit' alone, and the worker names the word. (O8, O9)"""
+    """The job fact is the driver's word whole; a faulting teardown is swallowed and flagged for 'box-lost' and 'box-output-limit' alone, and the worker names the word. (O8, O9)
+    #1546 (design "The ending": `decide`'s own fallbacks are today's `_ending_from` rules, over the staged facts): the
+    worker's half reads the job fact as the helper stages it, the `outcome` with this `cut_short`, through `decide`."""
     from defender import run as run_py
-    from defender.records import job_facts, job_lane
-    from defender.worker._worker import _ending_from
+    from defender.tests.support.jobs._ending1546 import BUNDLE, KNOWLEDGE, STARTED, decide, inv_outcome, up
 
     box_words = {"box-lost", "box-output-limit"}
     rec = BoxLifecycleRecorder()
@@ -560,11 +561,13 @@ def test_o8_every_run_end_word_reaches_the_job_fact_and_only_the_two_box_words_s
         with pytest.raises(BoxFault):
             drive()
     assert held.cut_short == word
-    end = job_lane.JobEnd(setup=job_facts.SETUP_DONE, box=job_facts.BOX_STARTED, report_committed=False,
-                          scrub_verified=False, cut_short=word)
-    ending = _ending_from(end, lambda: None)
+    # the job's outcome as `held` sends it (no report committed, the scrub not run: the teardown faulted or the box stood)
+    staged = {"started": STARTED, "knowledge": KNOWLEDGE,
+              "outcome": inv_outcome(report_committed=False, closing=None, scrub="not_run", cut_short=word)}
+    ending = decide("investigation", staged, {BUNDLE: up()}, "exited")
     assert word is None or word in ending.failure_message
-    assert ending.decided_by_run is False
+    # not the run's verdict (today's `decided_by_run is False`): a failed end with no disposition
+    assert (ending.stage, ending.failure_reason, ending.disposition) == ("failed", "no_report", None), ending
 
 
 def test_no_consumer_runs_when_the_scrub_raises(tmp_path):

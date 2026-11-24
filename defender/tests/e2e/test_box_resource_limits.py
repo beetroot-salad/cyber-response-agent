@@ -41,17 +41,27 @@ HOG_MOST_MIB = 600
 #: Well into the cap: below this, the hog failed for some other reason than memory.
 HOG_LEAST_MIB = 256
 
-#: Touches every page, so the memory is really held. Records its progress on the run tree, which
-#: outlives the box, so the host can read how far it got even if the kill takes the whole box.
+#: Touches every page, so the memory is really held. Prints its progress, one line per step, on its stdout.
 MEMORY_HOG = f"""\
-import os
+import sys
 held = []
 while len(held) < {HOG_CEILING_MIB // 16}:
     held.append(bytearray(b"x") * (16 << 20))
-    with open("hog.progress", "w") as out:
-        out.write(str(len(held) * 16))
-        out.flush()
-        os.fsync(out.fileno())
+    sys.stdout.write(str(len(held) * 16) + "\\n")
+    sys.stdout.flush()
+"""
+
+#: The hog under a small watcher in the same box, which keeps the hog's last progress line and prints it with how the hog
+#: ended. #1546 (design "The box": "Run lane binds the run folder read-only") left the run box no tree the host can read
+#: back (its `/tmp` is the box's own), and a command killed on a signal answers no output (O6), so the watcher, which the
+#: memory kill does not pick (the hog is the cgroup's largest process), carries the measurement out.
+HOG_WATCH = f"""\
+import json, subprocess, sys
+hog = subprocess.Popen([sys.executable, "-c", {MEMORY_HOG!r}], stdout=subprocess.PIPE, text=True)
+last = None
+for line in hog.stdout:
+    last = int(line)
+print(json.dumps({{"held": last, "rc": hog.wait()}}))
 """
 
 #: Children outlive the parent, so they end as orphans the box's PID 1 must reap.
@@ -384,20 +394,30 @@ def test_a_process_past_the_memory_cap_is_stopped_at_the_cap(boxed, base, runtim
     box carries on. runsc holds every process's memory in one host process, so the kill may take
     the whole box."""
     box = boxed(memory=HOG_CAP)
-    res = None
+    if runtime == "runc":
+        # The hog alone: the kernel's kill of the one process, with the reason line (O6), and the box carries on.
+        killed = _program(box, base, "hog.py", MEMORY_HOG)
+        assert killed.rc == -9, f"expected the kernel's kill: {killed}"
+        assert "memory" in killed.err.decode().lower(), f"no reason line naming the cap (O6): {killed}"
+        assert _sh(box, "echo alive").rc == 0
     try:
-        res = _program(box, base, "hog.py", MEMORY_HOG)
+        res = _program(box, base, "hog_watch.py", HOG_WATCH)
     except box_mod.BoxFault:
         assert runtime == "runsc", "under runc the kill must take the process, not the box"
-    progress = next(base.glob("run-limits-*")) / "hog.progress"
-    assert progress.exists(), f"the hog never held its first step, so it proves nothing: {res}"
-    held = int(progress.read_text(encoding="utf-8"))
+        # The kill took the whole box, watcher and all: how far the hog got is not readable from the host since the run
+        # folder became read-only (#1546 D4). What stays checkable is that the box is gone, not answering.
+        with pytest.raises(box_mod.BoxFault):
+            _sh(box, "echo alive")
+        return
+    assert res.rc == 0, f"the watcher itself did not finish: {res}"
+    seen = json.loads(res.out.decode("utf-8").strip().splitlines()[-1])
+    assert seen["held"] is not None, f"the hog never held its first step, so it proves nothing: {res}"
+    held = seen["held"]
     assert held >= HOG_LEAST_MIB, f"stopped at {held} MiB, well short of the cap: {res}"
     assert held <= HOG_MOST_MIB, f"held {held} MiB in a box capped at {HOG_CAP}: {res}"
+    assert seen["rc"] != 0, f"the hog ran to its ceiling: {seen}"
     if runtime == "runc":
-        assert res is not None
-        assert res.rc == -9, f"expected the kernel's kill: {res}"
-        assert "memory" in res.err.decode().lower(), f"no reason line naming the cap (O6): {res}"
+        assert seen["rc"] == -9, f"the hog was not stopped by the kernel's kill: {seen}"
         assert _sh(box, "echo alive").rc == 0
 
 

@@ -300,24 +300,22 @@ def test_1363_d6_a_sibling_exiting_proxy_access_did_not_finish_at_the_launcher(
 
 
 def test_1363_b6_a_job_whose_run_was_cut_short_by_proxy_access_ends_failed_no_report_naming_it() -> None:
-    """The job-end record carries `proxy-access` as `cut_short` and the worker ends the job `failed`
+    """The job's end facts carry `proxy-access` as `cut_short` and the worker ends the job `failed`
     (`no_report`) saying the run was cut short (proxy-access); control: `provider-down` reads alike.
-    #1363 B6. Postgres-gated worker rows are not run locally."""
-    from defender.records import job_facts, job_lane
-    from defender.worker._worker import _ending_from
+    #1363 B6. #1546 (design "The ending": `decide`'s own fallbacks are today's `_ending_from` rules, over the staged
+    facts): the end facts are the helper's staged `outcome` and the worker's ending is `decide`'s; that the helper stages
+    an outcome carrying either word as sent is `test_1546_helper_records::test_an_investigation_outcome_carries_each_run_end_word_as_cut_short_through_staged`."""
+    from defender.tests.support.jobs._ending1546 import BUNDLE, KNOWLEDGE, STARTED, decide, inv_outcome, up
 
     def ending(word: str) -> Any:
-        end = job_lane.JobEnd(setup=job_facts.SETUP_DONE, box=job_facts.BOX_STARTED, report_committed=False,
-                              scrub_verified=False, cut_short=word)
-        parsed = job_lane.JobEnd.parse(end.text())
-        assert parsed is not None, f"the job-end record refuses {word!r}"
-        assert parsed.cut_short == word, f"the job-end record refuses {word!r}"
-        return _ending_from(parsed, lambda: None)
+        staged = {"started": STARTED, "knowledge": KNOWLEDGE,
+                  "outcome": inv_outcome(report_committed=False, closing=None, scrub="not_run", cut_short=word)}
+        return decide("investigation", staged, {BUNDLE: up()}, "exited")
 
     got = ending(PROXY_ACCESS)
     assert got.failure_reason == "no_report"
     assert "cut short (proxy-access)" in got.failure_message, got.failure_message
-    assert got.decided_by_run is False
+    assert (got.stage, got.disposition) == ("failed", None), "not the run's verdict (today's `decided_by_run is False`)"
     assert "cut short (provider-down)" in ending("provider-down").failure_message, "control"
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import signal
 import subprocess
 import sys
@@ -115,24 +116,40 @@ def _unexpected_sigterm(_signum, _frame):
     raise AssertionError("SIGTERM reached the test process: the entry installed no handler of its own")
 
 
+#: `run_entry(claim_pin=)`'s default: the commit the source was stamped with as it ran.
+_FROM_SOURCE = object()
+
+
 def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
         tmp_path, *, candidates=None, spawn=None, judge=None, questioner=None, live_tree=None,
         oracle=None, fix_source=None, job=JOB, grade=None, preflight=None, after_source=None,
-        estate=None, calls=None, source_closing=None, source_fault=None, source_record=None, **extra) -> Ran:
+        estate=None, calls=None, source_closing=None, source_fault=None, source_record=None, claim_pin=_FROM_SOURCE,
+        answers_over=None, **extra) -> Ran:
     """The job entry in-process over `_spec1224`'s fixture tenant (or `estate`, made at `tmp_path`), the source run
     holding `calls` (default: `_calls()`); every paid seam a recording double. `extra` seams (the launcher's
     `proxy_url`, `issuer_transport`, `directory`, ...) are handed as given, over the defaults. `source_closing` and
     `source_fault` plant the source's closing record and a fault on its lookup (`_triplet_947.runs_base`, #1534).
     `source_record` (text): the source's host knowledge record (`RunPaths.knowledge_source()`, beside its run folder) as
-    its pulled bundle carries it (#1546 r10 (a): the launcher ignores it)."""
+    its pulled bundle carries it (#1546 r10 (a): the launcher ignores it). `claim_pin`: the claim's `knowledge_commit` in
+    the launch facts; by default the commit the source run's stamp names (r10 (a): the store writes the pin from the source
+    row's knowledge commit, recorded as the run ran): the one `fix_source` re-stamps it with, when it names a full commit id
+    (a source that ran at that commit), else the one it named before `fix_source` (which damages or removes the run after it
+    ended); None: the source row recorded no commit, so the launch facts carry none. `answers_over`: socket answers in place of the stand-in helper's own (a
+    `progress` the helper's socket fails on, say)."""
     from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, handed_records
     from defender.tests.support.jobs._socket_standin1170 import passes as helper_passes
 
     est = estate(tmp_path) if estate is not None else S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls, after_source=after_source,
                               source_closing=source_closing, source_fault=source_fault)
+    stamped = _stamped_commit(src)
     if fix_source is not None:
         fix_source(src)
+    if claim_pin is _FROM_SOURCE:
+        restamped = _stamped_commit(src)
+        pin = restamped if restamped is not None and re.fullmatch(r"[0-9a-f]{40}", restamped) else stamped
+    else:
+        pin = claim_pin
     tenant = src.parent.parent.name
     authored = S.questioner_for()
     asking = questioner if questioner is not None else Watch(*authored.replies)
@@ -156,7 +173,8 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
             signer=extra.pop("signer", None), transport=extra.pop("issuer_transport", None))
     seams.update(extra)
     launch["records"] = handed_records(seams["directory"], tenant)
-    sent = _1546_helper_side(tmp_path, tenant, src, launch, answers, source_record=source_record)
+    sent = _1546_helper_side(tmp_path, tenant, src, launch, answers, source_record=source_record, pin=pin)
+    answers.update(answers_over or {})
 
     def progress_so_far() -> dict | None:
         return sent["progress"][-1] if sent["progress"] else None
@@ -191,8 +209,20 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
                tenant=tenant, exit=outcome, asked=asked, launch=launch)
 
 
-def _1546_helper_side(tmp_path: Path, tenant: str, src: Path, launch: dict[str, Any],
-                      answers: dict[str, Any], *, source_record: str | None = None) -> dict[str, list[Any]]:
+def _stamped_commit(src: Path) -> str | None:
+    """The knowledge commit the source run's stamp names, None when it names none (the commit the store pins the claim to:
+    the source row's `knowledge.commit`, recorded as the run ran)."""
+    try:
+        knowledge = json.loads((src / "provenance.json").read_text(encoding="utf-8")).get("knowledge")
+    except (OSError, ValueError, AttributeError):
+        return None
+    commit = knowledge.get("commit") if isinstance(knowledge, dict) else None
+    return commit if isinstance(commit, str) else None
+
+
+def _1546_helper_side(tmp_path: Path, tenant: str, src: Path, launch: dict[str, Any],  # noqa: PLR0913
+                      answers: dict[str, Any], *, source_record: str | None = None,
+                      pin: Any = _FROM_SOURCE) -> dict[str, list[Any]]:
     """#1546: what the real helper gives a learning container besides #1170's facts (its own answers are pinned over the real
     helper in `test_1546_job_tenant.py` and `test_1546_helper_folders.py`): the claim's inputs folder (r10 (a): it holds no
     export; a sibling's run copy lands there), the pin (the claim's `knowledge_commit`, the source's stamped commit as the
@@ -209,16 +239,18 @@ def _1546_helper_side(tmp_path: Path, tenant: str, src: Path, launch: dict[str, 
     from defender.tests.support.jobs._socket_standin1170 import copy_make
 
     tenant_dir = src.parent.parent
-    pin = json.loads((src / "provenance.json").read_text(encoding="utf-8"))["knowledge"]["commit"]
+    pin = _stamped_commit(src) if pin is _FROM_SOURCE else pin
     inputs = tmp_path / ".job-inputs" / "c-1344"
     inputs.mkdir(parents=True, exist_ok=True)
-    answers.setdefault("copy.make", copy_make(tenant, pin=pin))
-    launch.update({LAUNCH_INPUTS: str(inputs), "knowledge_commit": pin, "export_commit": pin})
+    if pin is not None:  # a source row with no commit: the claim pins none, and no copy is made for it (r10 (a), No pin)
+        answers.setdefault("copy.make", copy_make(tenant, pin=pin))
+        launch.update({"knowledge_commit": pin, "export_commit": pin})
+    launch[LAUNCH_INPUTS] = str(inputs)
     files = _1546_source_files(tenant_dir, src)
     if source_record is not None:
         files[str(RunPaths(src).knowledge_source().relative_to(tenant_dir))] = source_record.encode()
     bundle = pack(files)
-    shutil.rmtree(src)
+    shutil.rmtree(src, ignore_errors=True)  # a case may have removed the run folder already (the source is then gone)
     shutil.rmtree(tenant_dir / "sessions", ignore_errors=True)
     sent: dict[str, list[Any]] = {name: [] for name in ("outcome", "progress", "arms", "arm", "put")}
     parts: dict[str, list[bytes]] = {}

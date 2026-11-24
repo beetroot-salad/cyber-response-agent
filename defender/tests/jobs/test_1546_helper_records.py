@@ -113,6 +113,22 @@ def test_an_investigation_outcome_carries_each_closing_lookup_result_through_sta
     assert facts(scene.dsn, scene.claim)["outcome"] == outcome
 
 
+@pytest.mark.parametrize("word", ["proxy-access", "provider-down", "box-lost"])
+def test_an_investigation_outcome_carries_each_run_end_word_as_cut_short_through_staged(scene, evidence_store, word):
+    """A run cut short sends its run-end word (`run_end.TRUNCATED_BY_VALUES`) as `cut_short`: the helper stages the outcome
+    as sent, word whole, and refuses nothing (#1363 B6's record half, moved from the job-end file to the staged fact;
+    the worker's reading of it is `test_proxy_access_run_end::test_1363_b6_*`). (PR2)"""
+    from defender.records import run_end
+
+    assert word in run_end.TRUNCATED_BY_VALUES, "premise: a run-end word"
+    planted = plant(scene, "investigation")
+    outcome = inv_outcome(report_committed=False, closing=None, scrub="not_run", cut_short=word)
+    drive(scene, planted, lambda c: send(c, "outcome", record=outcome) and 0, **evidence_store.seams)
+    staged = facts(scene.dsn, scene.claim)
+    assert staged["outcome"] == outcome
+    assert not [n for n in staged if n.startswith("refused/")], staged
+
+
 def test_the_helper_stages_started_and_the_served_knowledge_itself(scene, evidence_store):
     """`started` and `knowledge` are the helper's own facts of an investigation, not the job's: staged with no job record. (PR2)"""
     planted = plant(scene, "investigation")

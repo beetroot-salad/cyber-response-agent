@@ -188,23 +188,33 @@ async def end_row(store: Any, dsn: str, *, kind: str, tenant: str, owner: str, t
     return decision, await store.apply(tenant, owner, decision)
 
 
-async def end_through_the_store(store: Any, tenant: str, investigation_id: str, *, stage: str = "completed",
-                                disposition: str | None = "malicious", cost_usd: float = 0.0) -> Any:
+async def end_through_the_store(store: Any, tenant: str, investigation_id: str, *, stage: str = "completed",  # noqa: PLR0913
+                                disposition: str | None = "malicious", cost_usd: float = 0.0,
+                                cost_is_lower_limit: bool = False) -> Any:
     """A running investigation ended as a #1546 normal end leaves it, through the store's own session (no DSN needed): its
     claim, the helper's facts (`started`, `knowledge`, an `outcome` with a clean scrub whose close found `disposition`, no
     page) and an uploaded bundle, then `decide` and `apply`. A `completed` stage reads `complete`, so its follow-ons run as
-    today's finish did (the auto learning job, the alert outcome, the check clock). Returns `apply`'s record."""
+    today's finish did (the auto learning job, the alert outcome, the check clock; design Flows "Investigation end" 5: "A
+    learning job is queued from an investigation only when its state is `complete`"). Returns `apply`'s record.
+
+    The claim is the one the store minted when it claimed the row (`JobStore.claim` writes it in the claim's own
+    transaction; a row is claimed at most once, `claims_one_per_investigation_id`), else one planted here for a row a test
+    planted `running` itself. The bundle's upload row names no stored bytes: a row-level end, for a test whose source is
+    never pulled (a launched learning job pulls a real one, `_helper_evidence1546.Store.plant_source_bundle`)."""
     from sqlalchemy import text
 
-    token = uuid.uuid4().hex
     closing = closing_found(disposition) if disposition is not None else {"found": "never_closed"}
     facts = {"started": STARTED, "knowledge": KNOWLEDGE, "page": {"page": "none"},
-             "outcome": staged_inv_outcome(closing=closing, cost_usd=cost_usd,
+             "outcome": staged_inv_outcome(closing=closing, cost_usd=cost_usd, cost_is_lower_limit=cost_is_lower_limit,
                                            report_committed=stage == "completed", scrub="clean")}
     async with store._tx() as s:
-        await s.execute(text("INSERT INTO jobs.claims (token, tenant_id, kind, investigation_id, inputs) "
-                             "VALUES (:t, :tenant, 'investigation', :inv, '[]'::jsonb)"),
-                        {"t": token, "tenant": tenant, "inv": str(investigation_id)})
+        held = (await s.execute(text("SELECT token FROM jobs.claims WHERE investigation_id = :inv"),
+                                {"inv": str(investigation_id)})).first()
+        token = str(held[0]) if held is not None else uuid.uuid4().hex
+        if held is None:
+            await s.execute(text("INSERT INTO jobs.claims (token, tenant_id, kind, investigation_id, inputs) "
+                                 "VALUES (:t, :tenant, 'investigation', :inv, '[]'::jsonb)"),
+                            {"t": token, "tenant": tenant, "inv": str(investigation_id)})
         for name, body in facts.items():
             await s.execute(text("INSERT INTO jobs.staged_facts (token, name, body, staged_at) "
                                  "VALUES (:t, :n, CAST(:b AS jsonb), now())"), {"t": token, "n": name, "b": json.dumps(body)})
@@ -213,3 +223,13 @@ async def end_through_the_store(store: Any, tenant: str, investigation_id: str, 
                         {"t": token, "sha": "0" * 64})
     decision = decide("investigation", facts, {"bundle": up()}, "exited")
     return await store.apply(tenant, str(investigation_id), decision)
+
+
+async def complete_through_the_store(store: Any, tenant: str, investigation_id: str, *, disposition: str = "benign",
+                                     cost_usd: float = 0.0, cost_is_lower_limit: bool = False) -> Any:
+    """The #1546 successor of the older suites' `store.finish(tenant, id, stage="completed", disposition=..., cost_usd=...)`
+    for a test that needs the end's follow-ons (an auto learning job, an explicit one allowed): the same end through `decide`
+    and `apply` with complete evidence (`end_through_the_store`). A row that changed under it (the fence) answers None, as
+    `finish` did."""
+    return await end_through_the_store(store, tenant, investigation_id, stage="completed", disposition=disposition,
+                                       cost_usd=cost_usd, cost_is_lower_limit=cost_is_lower_limit)

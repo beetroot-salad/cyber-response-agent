@@ -121,14 +121,14 @@ def investigate(scene: HelperScene, *, signer: Any = None, docker: ContainerStan
                 **seams: Any) -> Investigated:
     """The helper for a planted investigation of the scene's tenant (`inv`: one `plant_premise` planted already, else
     planted now). Green at the base: a premise, never the subject."""
-    inv = inv if inv is not None else plant_premise(scene)
+    job = inv if inv is not None else plant_premise(scene)
     docker = docker if docker is not None else ContainerStandIn(lambda c: 0)  # lint-default: ok — a test seam resolving its own default
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
-        ran = drive_helper(scene, scene.argv("investigation", inv), docker=docker,
+        ran = drive_helper(scene, scene.argv("investigation", job), docker=docker,
                            signer=signer if signer is not None else make_signer(), **seams)
     assert ran.raised is None, ran.raised
-    return Investigated(inv, ran, docker, err.getvalue(), scene.end(inv))
+    return Investigated(job, ran, docker, err.getvalue(), scene.end(job))
 
 
 # --- the subject: readiness ---------------------------------------------------------------------------------------
