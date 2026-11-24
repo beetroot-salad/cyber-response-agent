@@ -114,11 +114,16 @@ def _counted(name: str, then=None):
 
 
 def _session_database() -> Path:
+    """The run's session database, as its pointer names it: #1546 (design r9 "Session pointer") recorded relative to the
+    run's folder and joined back by the one resolver (`session_store.run_store_path`)."""
     import json
 
+    from defender.records.session_store import run_store_path
+
     job, tenant = argv[argv.index("--job") + 1], argv[argv.index("--tenant") + 1]
-    pointer = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs" / f"{job}.session-pointer.json"
-    return Path(json.loads(pointer.read_text(encoding="utf-8"))["store_path"])
+    runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
+    pointer = runs / f"{job}.session-pointer.json"
+    return run_store_path(runs / job, json.loads(pointer.read_text(encoding="utf-8"))["store_path"])
 
 
 def _ledger_trigger(sql: str):

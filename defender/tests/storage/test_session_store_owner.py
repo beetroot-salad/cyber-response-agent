@@ -166,7 +166,8 @@ def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error
     root, run_dir = source_run
     pointer_file = RunPaths(run_dir).session_pointer()
     pointer = json.loads(pointer_file.read_text(encoding="utf-8"))
-    case_id, recorded = pointer["case_id"], Path(pointer["store_path"])
+    # #1546 (design r9 "Session pointer"): recorded relative to the run's folder, read through the one resolver.
+    case_id, recorded = pointer["case_id"], session_store.run_store_path(run_dir, pointer["store_path"])
     assert case_id == case_id.casefold(), f"the run minted a case-unstable id: {case_id!r}"
     # ONE letter flipped, not the whole id upper-cased: a check that only spots all-upper or
     # title-case ids must not pass this.

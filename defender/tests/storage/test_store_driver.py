@@ -132,8 +132,11 @@ def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(
     assert not (run_dir / "session_store_pointer.json").exists(), (
         "the case pointer is still written inside the box-writable run dir")
 
+    # #1546 (design r9 "Session pointer"): the database is recorded relative to the run's folder, and the one resolver
+    # joins it back to the database the run wrote.
+    assert not Path(body["store_path"]).is_absolute(), body
     resolved = ss.resolve_store_path(_run_handle_1165(run_dir))
-    assert Path(resolved) == Path(body["store_path"]) == Path(result["store_path"])
+    assert Path(resolved) == ss.run_store_path(run_dir, body["store_path"]) == Path(result["store_path"]).absolute()
 
 
 # the capability and its seam

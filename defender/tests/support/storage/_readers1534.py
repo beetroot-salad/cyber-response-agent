@@ -111,7 +111,12 @@ def fault_run(run_dir: Path, fault: str | None, *, invalid_as: str | None = None
 
             os.symlink("elsewhere", Path(run_dir) / _LEGACY_LINK_NAME)
     else:
-        break_database(Path(json.loads(pointer.read_result().text)["store_path"]), Path(run_dir).name, fault, invalid_as=invalid_as,
+        # #1546 (design r9 "Session pointer"): the database is recorded relative to the run's folder; the one resolver
+        # names the file the run's readers open.
+        from defender.records.session_store import run_store_path
+
+        recorded = json.loads(pointer.read_result().text)["store_path"]
+        break_database(run_store_path(Path(run_dir), recorded), Path(run_dir).name, fault, invalid_as=invalid_as,
                        at_query=at_query, pointer=Path(pointer.path))
 
 

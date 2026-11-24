@@ -1223,8 +1223,8 @@ def _ledger_after(scene: Scene, run_id: str) -> Any:
     named = Path(pointer["store_path"])
     if named.is_absolute():  # a path under the gone root's tenant folder names the same file in the kept copy
         named = kept.parent / named.relative_to(scene.job_root_runs(run_id).parent)
-    else:  # design "Session pointer: `store_path` relative to the run"
-        named = next((c for c in (scene.run_dir(run_id) / named, kept / named) if c.exists()), named)
+    else:  # design r9 "Session pointer": relative to the run's folder, here the kept copy's (the one resolver)
+        named = ss.run_store_path(kept / run_id, pointer["store_path"])
     with ss.open_store_for_read(named) as store:
         return ss.read_ledger(store, run_id)
 
