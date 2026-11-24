@@ -161,7 +161,10 @@ async def test_o5_a_row_moved_while_its_child_runs_keeps_every_column_and_the_ho
         drained = asyncio.create_task(_worker(world, store, child, **_FAST).drain())
         try:
             await _until(lambda: len(child.seen_all()) == 2, "the children to start")
-            execute(world["dsn"], f"UPDATE jobs.investigations SET {sql} WHERE id = %s", (NOW, fenced))  # noqa: S608
+            # Off the loop: the worker's drain runs on this loop, and a transaction of its own parked mid-way (a renewal's)
+            # may hold the row's lock; a blocking write here would wait for a commit the parked loop can never make.
+            await asyncio.to_thread(execute, world["dsn"], f"UPDATE jobs.investigations SET {sql} WHERE id = %s",  # noqa: S608
+                                    (NOW, fenced))
             snapshot = row(world["dsn"], fenced)
             await _until(lambda: Path(str(mark).replace("{id}", fenced)).exists(), "the moved row's child to be ended", timeout=5)
             await asyncio.sleep(1.0)  # its child is gone: time for a write the fence forbids
@@ -1692,7 +1695,8 @@ async def test_r7_1_a_tenant_restated_between_two_claims_fails_the_second_row(wo
         async def claim(self):
             if not moved and any(e[0] == "end" for e in child.events()):
                 moved.append(T1)
-                move_tenant(world["dsn"], T1, state="offboarding")
+                # Off the loop: a transaction of the worker's parked on this loop may hold the tenant's row lock.
+                await asyncio.to_thread(move_tenant, world["dsn"], T1, state="offboarding")
             return await self._inner.claim()
 
     async with job_store(world["dsn"]) as store:
@@ -2150,7 +2154,8 @@ async def test_r7_1_a_tenant_that_was_creating_at_one_claim_and_is_active_at_a_l
         async def claim(self):
             self.calls += 1
             if self.calls == 2:
-                move_tenant(world["dsn"], T1, state="active")
+                # Off the loop: a transaction of the worker's parked on this loop may hold the tenant's row lock.
+                await asyncio.to_thread(move_tenant, world["dsn"], T1, state="active")
             return await self._inner.claim()
 
     child = _child(world, files=_committed())

@@ -63,6 +63,16 @@ def after_the_gather() -> list:
     return main_script()[2:]
 
 
+def _proxy_reply() -> bytes:
+    """What the credential proxy stand-in answers every read with: an empty search result, ended."""
+    from defender.integrations.elastic_adapter import search_envelope
+    from defender.tests.e2e._lead_zero_808 import EVENTS_INDEX
+    from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
+
+    return W.fmt().encode_body(json.dumps(search_envelope(EVENTS_INDEX, [], 0, False, "desc")).encode()) \
+        + W.fmt().encode_final(W.final_record())
+
+
 def _unboxed(*_a, start_token=None, **_k):
     from defender import box as box_mod
 
@@ -128,9 +138,55 @@ def helper_in_front() -> int:
                                *_in_container_argv()],
                               env=env, cwd=str(root), stdin=subprocess.DEVNULL, check=False).returncode
 
-    return job_host.main(helper_argv, docker=ContainerStandIn(entry), signer=A.MarkedSigner(), fetch=in_process_fetch(remote),
-                         evidence_keys=evidence.EvidenceKeys(addr=login["addr"], role_id=login["role_id"],
-                                                             secret_id=login["secret_id"], mount=login["mount"]))
+    def helper() -> int:
+        return job_host.main(helper_argv, docker=ContainerStandIn(entry), signer=A.MarkedSigner(),
+                             fetch=in_process_fetch(remote),
+                             evidence_keys=evidence.EvidenceKeys(addr=login["addr"], role_id=login["role_id"],
+                                                                 secret_id=login["secret_id"], mount=login["mount"]))
+
+    if kind != "learning":
+        return helper()
+    if os.environ.get("FLOW_DAMAGE") == "store-version":  # L5, before the helper starts (the test's event loop is not here)
+        _a_source_of_another_store_version(tenant, helper_argv[helper_argv.index("--source") + 1], login)
+    # A learning job's siblings run in its container and dial the proxy address the helper hands in its launch facts (the
+    # helper's own proxy setting, `DEFENDER_CREDENTIAL_PROXY_URL`; `run._sibling_set_up` reads no seam for it). A stand-in
+    # proxy, in this process for the whole job, answers every read with an empty result, as the siblings' reads in these
+    # replays were answered before #1546 (a failed call the run goes on from).
+    from defender.kit.access import PROXY_URL_ENV
+    from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
+
+    with W.fake_proxy(_proxy_reply(), ended=True) as proxy_url:
+        os.environ[PROXY_URL_ENV] = proxy_url
+        return helper()
+
+
+def _a_source_of_another_store_version(tenant: str, source: str, login: dict) -> None:
+    """L5's source: its stored bundle replaced by the same bundle whose session database is as a store of another format
+    version leaves it (`_store_version1546.of_another_version`). The source exists only in the store (#1546 r10, A-O1), so
+    the damage is in the bytes the learning job's pull is served: re-put under the same key and data key (unwrapped with
+    the tenant's key login, as the helper's own pull unwraps it), and the upload row's size and digest moved to the new
+    bytes, so the pull hands the job exactly these (it checks them against the row)."""
+    import tempfile
+
+    from defender import evidence
+    from defender.tests.support.jobs import _store_version1546 as V
+    from defender.tests.support.jobs._evidence_flows1546 import claim_of, sha
+    from defender.tests.support.shared._postgres1339 import execute
+
+    dsn = os.environ["DEFENDER_DATABASE_DSN"]
+    token = claim_of(dsn, "investigation", source)
+    [(wrapped,)] = execute(dsn, "SELECT wrapped_key FROM jobs.uploads WHERE token = %s AND object = 'bundle' "
+                                "AND status = 'uploaded'", (token,))
+    env = {name: os.environ[f"DEFENDER_EVIDENCE_{name.upper()}"] for name in ("endpoint", "bucket", "access_key", "secret_key")}
+    store = evidence.BlobStore(**env, region=os.environ.get("DEFENDER_EVIDENCE_REGION") or "garage")
+    data_key = evidence.EvidenceKeys(addr=login["addr"], role_id=login["role_id"], secret_id=login["secret_id"],
+                                     mount=login["mount"]).unwrap(tenant, wrapped)
+    key = f"t/{tenant}/investigation/{source}/{token}/bundle"
+    with tempfile.TemporaryDirectory() as work:
+        damaged = V.of_another_version(store.get(key, data_key=data_key), source, Path(work) / "tenant")
+    store.put(key, damaged, data_key=data_key, sha256=sha(damaged))
+    execute(dsn, "UPDATE jobs.uploads SET size = %s, sha256 = %s WHERE token = %s AND object = 'bundle'",
+            (len(damaged), sha(damaged), token))
 
 
 def in_container(entry):
@@ -164,11 +220,7 @@ def _family_seams(tenant: str, *, live_tree=None) -> dict:
     from defender.tests.support.learning.branch import _triplet_947 as T
     from defender.tests.support.learning.judge import _judge_921 as J
 
-    from defender.integrations.elastic_adapter import search_envelope
-    from defender.tests.e2e._lead_zero_808 import EVENTS_INDEX
-
-    PROXY_REPLY = W.fmt().encode_body(json.dumps(search_envelope(EVENTS_INDEX, [], 0, False, "desc")).encode()) \
-        + W.fmt().encode_final(W.final_record())
+    PROXY_REPLY = _proxy_reply()
 
     def sibling(sibling_argv, *, env=None, **_kw) -> int:
         """A real sibling's `run.py --tenant T --episode E --world W`, in this process, MAIN continuing the script."""
