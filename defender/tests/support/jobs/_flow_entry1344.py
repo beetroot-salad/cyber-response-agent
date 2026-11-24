@@ -13,13 +13,15 @@
   equivalent (`_1255_twin.run_main`) in the container's process (its job socket set: the in-container sibling, whose run
   copy the helper makes, `copy.make(world=)`), continuing MAIN's script after the fork. Args: `--job <id> --tenant <T>
   --source <investigation id> [--parent-pid <pid>]`.
+- `family-standin`: the same entry in this process over a source planted on the host, behind the learning helper's
+  socket stand-in (`family_standin`), for a case whose subject is the entry, not the store.
 - `post-step`: the real post-step inside its job container, with a recording drain gate (`<marks>/gate`, holding the
   queue's size when it ran).
 
 #1546: every helper in front of a job that pushes evidence (`investigate*`, `family`) is configured with the real store
 (`DEFENDER_EVIDENCE_*` in the worker's environment, the tenant's key login in `LOGIN_ENV`), and the learning job reads its
-source only as the investigation's accepted bundle (r10: nothing of the source stays on the host). The post-step's job
-socket is a stand-in (`_socket_standin1170.SocketStandIn`: the helper's `launch` facts): its gate is the subject here,
+source only as the investigation's accepted bundle (r10: nothing of the source stays on the host). The post-step's (and
+`family-standin`'s) job socket is a stand-in (`_socket_standin1170.SocketStandIn`: the helper's `launch` facts): its gate is the subject here,
 and the post-step helper's own work is `tests/jobs/test_job_helper_learning.py`'s."""
 from __future__ import annotations
 
@@ -149,9 +151,10 @@ def _socket(tenant: str, *, signing: dict | None = None, answers: dict | None = 
     return SocketStandIn(tenant, launch=launch, answers=answers)
 
 
-def family() -> int:
+def _family_seams(tenant: str) -> dict:
+    """The family step's seams over this process's data root (`DEFENDER_DATA_ROOT`): scripted questioner, oracle,
+    verifier and judge, and the siblings as `run.main` in this process."""
     from defender import box as box_mod
-    from defender.learning.branch import job_entry
     from defender.tests.e2e import _1255_twin as TWIN
     from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
     from defender.tests.integrations.credential_proxy_1163._harness import FakeSigner
@@ -165,9 +168,6 @@ def family() -> int:
 
     PROXY_REPLY = W.fmt().encode_body(json.dumps(search_envelope(EVENTS_INDEX, [], 0, False, "desc")).encode()) \
         + W.fmt().encode_final(W.final_record())
-    tenant = argv[argv.index("--tenant") + 1]
-    # The container's own data root (#1546 A-O9: the claim's root, never the host's tenant folder).
-    runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
 
     def sibling(sibling_argv, *, env=None, **_kw) -> int:
         """A real sibling's `run.py --tenant T --episode E --world W`, in this process, MAIN continuing the script."""
@@ -206,10 +206,20 @@ def family() -> int:
     # token: the tenant's records hold a live generation with a sign login, as the siblings' and the investigation's
     # do (`directory_for_argv`), the signature is a stand-in's, and the proxy's address is one nothing answers at
     # (`PROXY_URL`). Every call the source made is in its capture, so pre-flight reads nothing live through it.
-    seams = dict(questioner=S.questioner_for(), preflight=S.no_preflight, live_tree=T.source_capture(),
-                 judge=judge, oracle=S.oracle(then=S.submit()).model,
-                 verifier=S.passing_verifier().model, directory=directory_for_argv(argv), spawn=sibling,
-                 signer=FakeSigner("flow1344"), proxy_url=PROXY_URL)
+    return dict(questioner=S.questioner_for(), preflight=S.no_preflight, live_tree=T.source_capture(),
+                judge=judge, oracle=S.oracle(then=S.submit()).model,
+                verifier=S.passing_verifier().model, directory=directory_for_argv(argv), spawn=sibling,
+                signer=FakeSigner("flow1344"), proxy_url=PROXY_URL)
+
+
+def family() -> int:
+    """The learning job entry in its job container, behind the real learning helper (`helper_in_front`)."""
+    from defender.learning.branch import job_entry
+
+    tenant = argv[argv.index("--tenant") + 1]
+    seams = _family_seams(tenant)
+    # The container's own data root (#1546 A-O9: the claim's root, never the host's tenant folder).
+    runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
     (marks / "runs").write_text(str(runs), encoding="utf-8")  # the family step started, in its container's own root
     try:
         # #1546: the real learning helper is in front (`helper_in_front`): it pins the claim's commit, serves the source as
@@ -218,6 +228,43 @@ def family() -> int:
         return job_entry.main(_in_container_argv(), environ=os.environ, **seams)
     except SystemExit as stop:
         return stop.code if isinstance(stop.code, int) else 1
+
+
+def family_standin() -> int:
+    """`family-standin`: the learning job entry in this process over a source planted in the host's runs folder, behind
+    the learning helper's stand-in socket (`test_1344_job_lane._1546_helper_side`: the claim's pin (the source's stamped
+    commit, as the store writes it, r10 (a)) and inputs folder in the launch facts, `copy.make` of the pin only, the
+    source served as the accepted bundle `evidence.pull` returns (its host folder then gone, A-O1), the pushes taken),
+    for a case whose subject is the entry over a planted run, not the store (`e2e/test_1344_old_history.py`). The
+    `outcome` records sent are written to `<marks>/outcomes.jsonl` (one JSON line each) whatever way the entry ends."""
+    from defender.learning.branch import job_entry
+    from defender.tests.learning.branch.test_1344_job_lane import _1546_helper_side, _stamped_commit
+    from defender.tests.support.jobs._socket_standin1170 import copy_make, handed_records
+
+    tenant, source = argv[argv.index("--tenant") + 1], argv[argv.index("--source") + 1]
+    seams = _family_seams(tenant)
+    runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
+    (marks / "runs").write_text(str(runs), encoding="utf-8")
+    src = runs / source
+    assert src.is_dir(), f"premise: the source run is planted on this host, to be served as its bundle: {src}"
+    pin = _stamped_commit(src)
+    assert pin is not None, f"premise: the source's stamp names a knowledge commit (the claim's pin): {src}"
+    launch = {"kind": "learning", "job": argv[argv.index("--job") + 1],
+              "records": handed_records(seams["directory"], tenant)}
+    answers = {"copy.make": copy_make(tenant, remote, pin=pin)}
+    sent = _1546_helper_side(marks / "helper-side", tenant, src, launch, answers, pin=pin)
+    try:
+        # Pre-flight signs its pass up front (#1363): the helper signs it, over the tenant's one proxied system.
+        signing = dict(reads=("elastic",), directory=seams["directory"], proxy_url=PROXY_URL, signer=seams["signer"])
+        with _socket(tenant, signing=signing, answers=answers, **launch) as helper:
+            job_entry.main(_in_container_argv(), environ=helper.environ(), **seams)
+    except SystemExit as stop:
+        return stop.code if isinstance(stop.code, int) else 1
+    finally:
+        with (marks / "outcomes.jsonl").open("w", encoding="utf-8") as out:
+            for record in sent["outcome"]:
+                print(json.dumps(record), file=out)
+    return 0
 
 
 def _captured(runs: Path, source: str) -> object:
@@ -255,4 +302,4 @@ def post_step() -> int:
 
 sys.exit({"investigate": in_container(investigate),
           "investigate-no-gather": in_container(functools.partial(investigate, gathers=False)),
-          "family": in_container(family), "post-step": post_step}[mode]())
+          "family": in_container(family), "family-standin": family_standin, "post-step": post_step}[mode]())

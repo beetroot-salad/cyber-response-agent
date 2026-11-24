@@ -150,8 +150,9 @@ def _a_source_of_another_store_version(lane, investigation: str, work: Path) -> 
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # into the database file itself: the bundle holds that file
     finally:
         conn.close()
-    names = members(body)  # the bundle's own members, each with its bytes now (no file sqlite left beside them)
-    damaged = pack({name: (tenant_dir / name).read_bytes() for name in names})
+    # The bundle's own members, each with its bytes now; a member sqlite folded into the database file on close (a
+    # write-ahead log) is gone, and the database file holds what it held.
+    damaged = pack({name: (tenant_dir / name).read_bytes() for name in members(body) if (tenant_dir / name).is_file()})
     key = f"t/{lane.tenant}/investigation/{investigation}/{token}/bundle"
     lane.garage.put(key, damaged, sse_key=lane.keys.unwrap(lane.tenant, wrapped))
     execute(lane.dsn, "UPDATE jobs.uploads SET size = %s, sha256 = %s WHERE token = %s AND object = 'bundle'",
