@@ -36,6 +36,8 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
     critical_text,
     author_drain,
     own_store,
+    remote_branches,
+    without_clone,
 )
 from defender.tests.tenancy.tenant_1108_p4.test_1278_feedback import (
     STOP_BOUND,
@@ -241,3 +243,18 @@ def test_replacement_the_generation_ceiling_holds_the_items(world, caplog):
     assert _replacements(w, chain[-1]) == []
     assert w.statuses() == {"f1": "held"}
     assert len(w.t.forge.creates) == 4
+
+
+def test_1618_f7_a_closed_prs_feedback_is_authored_into_a_replacement_with_no_clone_on_the_host(world, caplog):
+    """With no clone, the tick that finds feedback on a closed PR authors, pushes and opens its replacement from a private repository. (F7, F6)"""
+    w = world
+    old_id, _number = _due(w, caplog, comment="cite the alert rule, not the host")
+    without_clone(w.t)
+    curator = FeedbackCurator(_files("f1"))
+
+    tick(w, curator)
+
+    assert curator.served, critical_text(caplog)
+    [replacement] = _replacements(w, old_id)
+    assert [pr["head"]["ref"] for pr in w.t.forge.prs if pr["state"] == "open"] == [replacement.branch]
+    assert replacement.branch in dict(remote_branches(w.t.remote))

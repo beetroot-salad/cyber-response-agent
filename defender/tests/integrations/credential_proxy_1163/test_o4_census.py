@@ -21,7 +21,7 @@ from defender.tests.integrations.credential_proxy_1163 import _harness as H  # n
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T  # noqa: E402
 from defender.tests.integrations.credential_proxy_1163._target import proxy  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T6  # noqa: E402
-from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish  # noqa: E402
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_fetch  # noqa: E402
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -102,7 +102,7 @@ def test_o4_no_canary_reaches_any_channel_of_a_real_run(tmp_path, data_root, mon
                     sign_secret="secret-1163-census")]),
                 preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
                 enqueue=lambda *_a, **_k: False,
-                roster=read_roster(adapters_under(S.DEFENDER)), publish=in_process_publish(),
+                roster=read_roster(adapters_under(S.DEFENDER)), fetch=in_process_fetch(),
                 signer=signer, proxy_url=proxy_url)
 
     assert rc == 0

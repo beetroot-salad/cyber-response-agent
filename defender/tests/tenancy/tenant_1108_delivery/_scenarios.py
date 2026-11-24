@@ -6,6 +6,7 @@ from defender.tests.support.shared._locations_1210 import location_path
 import json
 
 import os
+from pathlib import Path
 
 import shutil
 
@@ -64,10 +65,11 @@ def _write(path, text):
 
 
 def _clone_state(clone):
-    """What the commit-maker never touches: the clone's `HEAD`, `main`, index entries and
-    status."""
+    """What the commit-maker never touches: the repository's `HEAD`, `main`, and (a non-bare one's) index entries and
+    status. Since #1618 (K8) a batch's repository is its delivery's private bare one: no index or checkout exists."""
+    bare = git(clone, "rev-parse", "--is-bare-repository") == "true"
     return (git(clone, "rev-parse", "HEAD"), git(clone, "rev-parse", "refs/heads/main"),
-            git(clone, "ls-files", "-s"), git(clone, "status", "--porcelain"))
+            None if bare else git(clone, "ls-files", "-s"), None if bare else git(clone, "status", "--porcelain"))
 
 
 def _drafts(tenant):
@@ -170,7 +172,7 @@ _REFUSED_BASE = {
 
 
 def _gitdir_file(lane, clone):
-    _write(lane / ".git", f"gitdir: {clone / '.git'}\n")
+    _write(lane / ".git", f"gitdir: {(Path(clone) / git(clone, 'rev-parse', '--git-dir')).resolve()}\n")
 
 
 def _nested_repository(lane, clone):
@@ -208,13 +210,13 @@ import json, os, resource, signal, sys
 from pathlib import Path
 from defender.tests.support.tenancy import _tenants1106 as tenants
 from defender.tests.tenancy.tenant_1108_delivery._support import (
-    DEFENDER, LANES, ForgeHTTP, configured_origin, target, fixture_identity)
-root, tenant_id, remote, batch_id, cap, mode = (Path(sys.argv[1]), sys.argv[2], sys.argv[3],
-                                                sys.argv[4], int(sys.argv[5]), sys.argv[6])
+    DEFENDER, LANES, ForgeHTTP, target, fixture_identity)
+root, tenant_id, remote, batch_id, cap, mode, origin = (Path(sys.argv[1]), sys.argv[2], sys.argv[3],
+                                                        sys.argv[4], int(sys.argv[5]), sys.argv[6], sys.argv[7])
 mod = target()
 tenant = tenants.accept(root, tenant_id)
-http = ForgeHTTP(remote=remote, origin=configured_origin(tenant.knowledge))
-d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
+http = ForgeHTTP(remote=remote, origin=origin)
+d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)), origin=origin)
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 if mode == "crash":
     d.start_batch(batch_id, lanes=LANES)
@@ -277,20 +279,19 @@ def _build_elsewhere(repo, tmp_path, batch_id, mode):
     the process instead; `crash` kills the process right after `start_batch` returned."""
     tenant = repo[0]
     proc = subprocess.run([sys.executable, "-c", _BUILD, str(location_path(tenant.data_root)), str(tenant.id),
-                           str(repo[1]), batch_id, str(_CAP), mode], capture_output=True,
+                           str(repo[1]), batch_id, str(_CAP), mode, repo.origin], capture_output=True,
                           text=True, timeout=300, check=False,
                           env=fresh_process_env(tenant, tmp_path / f"build-{mode}"))
     lines = proc.stdout.strip().splitlines()
     return proc.returncode, json.loads(lines[-1]) if lines else {}, proc.stderr
 
 
-def _publish_big_lesson(repo, tmp_path, d):
-    """A human merge of the big lesson, published here: a later build copies it into its
-    draft, and no later publish writes it again."""
-    push_to_remote(repo, tmp_path, lambda c: (c / "agent/lessons/big.md").write_bytes(_BIG_LESSON))
-    export = d.publish()
-    assert (export.path / "agent/lessons/big.md").read_bytes() == _BIG_LESSON
-    return export
+def _publish_big_lesson(repo, tmp_path):
+    """A human merge of the big lesson on the remote's `main` (#1618: nothing is published; a delivery opened after it
+    fetches it, and a later build copies it into its draft). Returns the merge commit."""
+    merged = push_to_remote(repo, tmp_path, lambda c: (c / "agent/lessons/big.md").write_bytes(_BIG_LESSON))
+    assert git(repo[1], "cat-file", "-t", f"{merged}:agent/lessons/big.md") == "blob", "premise: the big lesson is on main"
+    return merged
 
 
 def _lay_pr(repo, http, row):

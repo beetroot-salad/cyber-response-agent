@@ -161,7 +161,8 @@ def test_a6_the_entry_opens_no_database_makes_no_copy_runs_no_publish_and_takes_
     scene.plant(inv)
     watched = {"repository": postgres.PostgresTenantRepository.__init__, "admission": run_tenant.host_tenant,
                "hold_shared": host_lock.hold_shared, "acquire": host_lock.acquire,
-               "copy": run_knowledge.copy_for_run, "publish": publish_launch.launch_publish,
+               "copy": run_knowledge.adopt_copy, "fetch": run_knowledge.fetch_report,
+               "publish": publish_launch.launch_publish,
                "request_signer": _launcher.request_signer, "signing_access": _launcher.signing_access,
                "mint": _tokens.mint_request_token}
     signer = A.MarkedSigner()
@@ -183,13 +184,13 @@ def test_a6_the_entry_opens_no_database_makes_no_copy_runs_no_publish_and_takes_
 @pytest.mark.parametrize("lane", ["job", "operator"])
 def test_a6_the_host_half_and_the_run_half_each_run_once_in_a_job_and_in_the_operator_command(
         scene, tmp_path, lane):
-    """One admission, one launch-time publish, one run copy and one lifecycle per run, for a job (helper then container) and for `run.py <alert>` unchanged. (A6, #1342 M3)"""
+    """One admission, one knowledge fetch (#1618: the former launch-time publish), one run copy and one lifecycle per run, for a job (helper then container) and for `run.py <alert>` unchanged. (A6, #1342 M3)"""
     from defender.systems import run_tenant
     from defender.tenancy import run_knowledge
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     ran = {"lifecycle": 0}
-    count = {"admission": run_tenant.host_tenant, "copy": run_knowledge.copy_for_run}
+    count = {"admission": run_tenant.host_tenant, "copy": run_knowledge.adopt_copy}
     with ThreadCalls(count) as calls:
         if lane == "job":
             inv = str(uuid.uuid4())
@@ -201,11 +202,13 @@ def test_a6_the_host_half_and_the_run_half_each_run_once_in_a_job_and_in_the_ope
             publishes = got.helper.publishes
             _clean(got)
         else:
-            publishes = []
-            out = B.launch(scene.t, tmp_path, publish=lambda *a, **k: publishes.append(1) or B.fresh(scene.t.commit),
+            from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
+
+            fetch = in_process_fetch(scene.t.remote)
+            out = B.launch(scene.t, tmp_path, publish=None, fetch=fetch,
                            lifecycle=lambda **kw: ran.__setitem__("lifecycle", ran["lifecycle"] + 1) or
                            {"output": "x", "requests": 0, "truncated_by": None})
-            publishes = len(publishes)
+            publishes = len(fetch.calls)
             assert out.raised is None, out.text()
             assert out.rc == 0, out.text()
     assert (len(calls.by_thread["admission"]), len(calls.by_thread["copy"]), publishes, ran["lifecycle"]) == (1, 1, 1, 1), \

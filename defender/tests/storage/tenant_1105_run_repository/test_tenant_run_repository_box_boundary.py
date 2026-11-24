@@ -142,8 +142,10 @@ def _session(root: Path, runtime: str) -> dict[str, Any]:
     script.write_text(_PROBE, encoding="utf-8")
     command = f"python3 /runs/current/{script.name} /runs/current {runs} {SIBLING_ID}"
     from defender.tests.support.tenancy._run_copy_stage import staged_agent
+    from defender.tests.support.tenancy._tenants1106 import placed_half
 
-    agent, token = staged_agent(Path(t.agent), run_dir.parent.parent / "run-copies")
+    # #1618 K8: a `Tenant` names no knowledge path; the run copy is staged from the agent half the spec placed.
+    agent, token = staged_agent(placed_half(t, "agent"), run_dir.parent.parent / "run-copies")
     box = start_box(run_dir, H.DEFENDER, spec=BoxSpec(runtime=runtime),
                     tenant_agent=agent, tenant_id=t.id, staged_token=token, data_root=current_data_root())
     sandboxed, name = box.sandboxed, box.name

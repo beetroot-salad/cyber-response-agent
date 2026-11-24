@@ -1,4 +1,5 @@
-"""#1344 e2e children, started by the real worker: `python _flow_entry1344.py <mode> <commit> <marks> <args...>`.
+"""#1344 e2e children, started by the real worker: `python _flow_entry1344.py <mode> <commit> <marks> <remote> <args...>`
+(`<remote>`: the tenant's bare Forgejo repository, which the knowledge fetch reads: #1618, `_fetch_standin_1618`).
 
 - `investigate`: the real per-job host helper (`job_host.main`, #1170) in front of the real job entry (`run.job_main`) over
   the replay driver, as `_helper_child1170.py` runs it: the helper's docker is the stand-in (`ContainerStandIn`) whose job
@@ -13,7 +14,7 @@
   queue's size when it ran).
 
 The learning kinds' job socket is a stand-in (`_socket_standin1170.SocketStandIn`: the helper's `launch` facts, the
-export it materialises and, for `family`, the passes it signs): the learning helper's own work is `tests/jobs/test_job_helper_learning.py`'s. The siblings run
+copies it makes (`copy.make`, #1618) and, for `family`, the passes it signs): the learning helper's own work is `tests/jobs/test_job_helper_learning.py`'s. The siblings run
 in this process as the operator's (no job socket in this process's own environment), as they did before #1170."""
 from __future__ import annotations
 
@@ -31,7 +32,7 @@ from defender.tests.e2e import _replay_harness as RH
 from defender.tests.e2e._lead_zero_808 import VerbRecorder, answer_hits, elastic_backend, hit
 from defender.tests.support.runtime.state import _1255_snapshot as R
 
-mode, commit, marks, argv = sys.argv[1], sys.argv[2], Path(sys.argv[3]), sys.argv[4:]
+mode, commit, marks, remote, argv = sys.argv[1], sys.argv[2], Path(sys.argv[3]), sys.argv[4], sys.argv[5:]
 marks.mkdir(parents=True, exist_ok=True)
 
 LEAD = "l-001"
@@ -91,7 +92,7 @@ def helper_in_front() -> int:
     from defender import job_host
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
     from defender.tests.support.jobs._job_helper import ContainerStandIn
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+    from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
 
     root = Path(__file__).resolve().parents[4]
     job, tenant = argv[argv.index("--job") + 1], argv[argv.index("--tenant") + 1]
@@ -99,7 +100,7 @@ def helper_in_front() -> int:
     def entry(container) -> int:
         env = {k: v for k, v in container.env.items() if v is not None}
         env.update(PATH=os.environ["PATH"], PYTHONPATH=f"{root}{os.pathsep}{os.environ.get('PYTHONPATH', '')}")
-        return subprocess.run([sys.executable, str(Path(__file__).resolve()), mode, commit, str(marks),  # noqa: S603
+        return subprocess.run([sys.executable, str(Path(__file__).resolve()), mode, commit, str(marks), remote,  # noqa: S603
                                "--job", job, "--tenant", tenant],
                               env=env, cwd=str(root), stdin=subprocess.DEVNULL, check=False).returncode
 
@@ -107,7 +108,7 @@ def helper_in_front() -> int:
                           "--parent-pid", argv[argv.index("--parent-pid") + 1],
                           "--alert-digest", argv[argv.index("--alert-digest") + 1]],  # C-1: as the worker handed it
                          docker=ContainerStandIn(entry), signer=A.MarkedSigner(),
-                         publish=lambda *a, **k: B.fresh(commit))
+                         fetch=in_process_fetch(remote))
 
 
 def in_container(entry):
@@ -120,9 +121,9 @@ def in_container(entry):
 def _socket(tenant: str, *, signing: dict | None = None, **launch):
     """The learning kinds' job socket stand-in (module doc); with `signing` (`passes`' keywords), it signs the job's
     passes as the helper does."""
-    from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, materialise, passes
+    from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, copy_make, passes
 
-    answers = {"export.materialise": materialise(tenant)}
+    answers = {"copy.make": copy_make(tenant, remote)}
     if signing is not None:
         launch["proxy_url"], answers["pass"] = passes(tenant, **signing)
     return SocketStandIn(tenant, launch=launch, answers=answers)

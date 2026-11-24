@@ -475,7 +475,6 @@ class Tick:
 
     def __post_init__(self) -> None:
         assert self.paths.tenant is not None, "a tick is a tenant's"
-        self._fetched = False
         self._counted: set[str] = set()
 
     # -- what there is to do -----------------------------------------------------------------------
@@ -578,11 +577,6 @@ class Tick:
         with contextlib.suppress(Exception):
             if b.phase != "working":
                 self.store.note_check(str(b.id), reset_refusals=False)
-
-    def _fetch(self, delivery: TenantDelivery) -> None:
-        if not self._fetched:
-            delivery.repository.fetch()
-            self._fetched = True
 
     # -- reconcile (no holder: compare-and-set on the phase, D7) -----------------------------------------
 
@@ -692,13 +686,8 @@ class Tick:
                 self._fault(b, RuntimeError(f"merged PR #{number} names no merge commit"), "reading the merge")
                 return None
             try:
-                self._fetch(delivery)
-                if not repository.holds_commit(merge):
-                    raise RuntimeError(f"the merge commit {merge} of PR #{number} is not in the clone")
-                commits = record.commits_of(str(b.id))
-                tip = pr.head_sha if pr.head_sha and repository.holds_commit(pr.head_sha) else None
-                if tip is None:
-                    tip = next((r.commit for r in reversed(record.rows) if r.commit in commits), None)
+                repository.require_commit(merge)  # a merge that landed after this tick opened: fetched once, by id (K12)
+                tip: str | None = None
                 changed = record.changed_paths(str(b.id))
                 # Each corpus folder is read once per merge, whatever the number of members citing into it.
                 in_merge: dict[str, set[str]] = {}
@@ -712,9 +701,10 @@ class Tick:
                     if i.key in in_merge[folder]:
                         published.append((i.kind, i.key))
                         continue
-                    if tip is not None and folder not in at_tip:
+                    if folder not in at_tip:
+                        tip = tip or _pr_tip(repository, pr, int(number))
                         at_tip[folder] = cited_in_paths(repository, tip, changed, folder, CITE_FIELD)
-                    if tip is not None and i.key in at_tip[folder]:
+                    if i.key in at_tip[folder]:
                         held.append((i.kind, i.key))
             except _forge_faults() + (RuntimeError,) as fault:
                 self._fault(b, fault, "reading the merge commit")
@@ -807,7 +797,7 @@ class Tick:
 
     def _recover(  # noqa: C901 — the takeover's lookups in the order D6 settles them, kept whole
             self, delivery: TenantDelivery, b: Any, record: Any) -> None:
-        from defender.learning.author.version_control.store_delivery import remote_tip, tip_commits_recorded
+        from defender.learning.author.version_control.store_delivery import tip_commits_recorded
         from defender.learning_store import LeaseLost, NotLapsed
 
         repository = delivery.repository
@@ -816,45 +806,31 @@ class Tick:
         try:
             pr = find_pr(forge, b.branch, mine)
             number = pr.number if pr is not None else None
-            self._fetch(delivery)
-            remote = remote_tip(repository, b.branch)
-            local = repository.branch_tip(b.branch)
+            tip = repository.branch_tip(b.branch)  # this tick's fetch: the remote's tip, the only one there is
         except _forge_faults() as fault:
             self._fault(b, fault, "looking up its branch and PR")
             return
-        push: str | None = None
         if number is None:
             base = b.base
-            usable = [tip for tip in (local, remote) if tip is not None and base is not None
-                      and tip_commits_recorded(repository, base, tip, mine)]
-            if local is None and remote is None:
+            if tip is None:
                 try:
                     self.store.abandon(str(b.id))
-                    _logger.warning(f"{self.label}: batch {b.id}'s holder was lost with nothing on any branch: "
+                    _logger.warning(f"{self.label}: batch {b.id}'s holder was lost with nothing on its branch: "
                                     "abandoned, its items wait again")
                 except NotLapsed:
                     pass
                 return
-            if remote is not None and remote not in usable:
+            if base is None or not tip_commits_recorded(repository, base, tip, mine):
                 self.store.needs_person(str(b.id), Why.batch(
                     "foreign_commits_remote", f"the branch {b.branch} on the forge holds "
-                    f"commits the commit-maker did not make for batch {b.id} (tip {remote})"))
+                    f"commits the commit-maker did not make for batch {b.id} (tip {tip})"))
                 _logger.error(f"{self.label}: batch {b.id}'s branch holds a foreign tip: a person must look")
                 return
-            if not usable:
-                self.store.needs_person(str(b.id), Why.batch(
-                    "foreign_commits_local", f"the local branch {b.branch} holds commits "
-                    f"outside batch {b.id}'s record"))
-                return
-            tip = local if local in usable else remote
-            push = tip if tip != remote else None
         try:
             held = self.store.take_over(str(b.id))
         except NotLapsed:
             return
         try:
-            if push is not None:
-                repository.push(push, b.branch)
             number = self._find_or_open_pr(delivery, held, record)
             if number is None:
                 return
@@ -877,10 +853,6 @@ class Tick:
         if held.lane == LEAD_LANE:
             return {}
         tip = delivery.repository.branch_tip(held.branch)
-        if tip is None:
-            from defender.learning.author.version_control.store_delivery import remote_tip
-
-            tip = remote_tip(delivery.repository, held.branch)
         changed = record.changed_paths(str(held.batch_id))
         out: dict[tuple[str, str], Any] = {}
         cited: dict[str, set[str]] = {}  # each corpus folder read once, whatever the number of items
@@ -934,9 +906,7 @@ class Tick:
             return int(found.number)
         tip_message = None
         if held.kind == "registry":
-            from defender.learning.author.version_control.store_delivery import remote_tip
-
-            tip = repository.branch_tip(held.branch) or remote_tip(repository, held.branch)
+            tip = repository.branch_tip(held.branch)
             if tip is None:
                 raise RuntimeError(f"registry batch {held.batch_id} has no tip to describe its PR by")
             tip_message = repository.commit_message(tip)
@@ -1073,7 +1043,8 @@ class Tick:
                     self._stopped(delivery, held, hold, "cancel")
                 except _forge_faults() as fault:
                     _logger.error(f"{self.label}: batch {held.batch_id} could not be delivered "
-                                  f"({one_line(str(fault))}): its commits stay on its branch for a takeover")
+                                  f"({one_line(str(fault))}): a takeover delivers what its branch on the forge "
+                                  "holds, else abandons it")
                     with contextlib.suppress(Exception):
                         hold.ending(self.store.expire_own, held)
                 return 0
@@ -1087,9 +1058,10 @@ class Tick:
                 raise
             except BaseException:
                 # A fault the tick does not contain is a crash of the holder. With commits on the branch the batch is
-                # left for a takeover (its own lease expired, so it need not wait), which delivers them and never runs
-                # the curator again. With none, its items go back as a recovery abandon returns them: the attempt
-                # charged, and held for a person at the ceiling, never dead.
+                # left for a takeover (its own lease expired, so it need not wait), which delivers what the forge's
+                # branch holds and never runs the curator again; with nothing pushed it abandons the batch (D4: the
+                # unpushed work is redone). With none, its items go back as a recovery abandon returns them: the
+                # attempt charged, and held for a person at the ceiling, never dead.
                 with contextlib.suppress(Exception):
                     if repository.branch_tip(held.branch) is None:
                         hold.ending(self.store.abandon_crashed, held)
@@ -1103,8 +1075,9 @@ class Tick:
     def _stopped(self, delivery: TenantDelivery, held: Any, hold: Holding, why: str) -> None:
         """The stop path (D4): a lost lease does nothing more; otherwise no commits ends the batch at once
         (the attempt forgiven), and commits are pushed within the stop budget with the holder's own lease
-        expired, so a takeover delivers them at once. The lease's renewer is halted first, whichever path
-        stopped: renewing a lease this path expires would signal a second stop into its push."""
+        expired, so a takeover delivers them at once (a push that did not land leaves it nothing: it abandons).
+        The lease's renewer is halted first, whichever path stopped: renewing a lease this path expires would
+        signal a second stop into its push."""
         from dataclasses import replace
 
         from defender.learning_store import LeaseLost
@@ -1127,9 +1100,28 @@ class Tick:
             replace(repository, network_timeout=STOP_PUSH_SECONDS).push(tip, held.branch)
             _logger.warning(f"{self.label}: batch {held.batch_id} stopped ({why}): its commits were pushed, a "
                             "takeover opens its PR")
-        except Exception as unpushed:  # noqa: BLE001 — the stop must end; the takeover pushes the local branch
+        except Exception as unpushed:  # noqa: BLE001 — the stop must end; the takeover reads the forge's branch
             _logger.warning(f"{self.label}: batch {held.batch_id} stopped ({why}); its push did not finish "
-                            f"({one_line(str(unpushed))}): a takeover delivers it")
+                            f"({one_line(str(unpushed))}): a takeover delivers what landed, else abandons it")
+
+
+def _pr_tip(repository: Any, pr: Any, number: int) -> str:
+    """The merged PR's branch tip, read only from what this tick fetches for it (K12): `refs/pull/<n>/head`, which the
+    forge keeps after the branch is deleted (C-F5), else the PR's head commit by id; refused, naming it, when the forge
+    serves neither (never the record's own commits)."""
+    tip = repository.pull_head(number)
+    if tip is not None:
+        return tip
+    head = getattr(pr, "head_sha", None)
+    if not head:
+        raise RuntimeError(f"merged PR #{number} has no pull ref and names no head commit")
+    try:
+        repository.require_commit(head)
+    except Exception as unserved:
+        _logger.error(f"merged PR #{number}: its tip {head} is on no ref the forge serves and cannot be fetched "
+                      f"by id ({one_line(str(unserved))}): the merge is not settled from a tip this tick never held")
+        raise
+    return str(head)
 
 
 def _recorder(store: Any, held: Any) -> Callable[[Any], None]:

@@ -27,6 +27,7 @@ from defender.box import _scrub as scrub_mod
 from defender.tests.support.learning.core import _state1135 as S
 from defender.tests.support.learning.core._store1278 import DSN_ENV, call, migrated_database  # noqa: F401 — fixture
 from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.tenancy._fetch_standin_1618 import fetched_copy
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,
     TailStep,
@@ -133,7 +134,10 @@ def test_e3_a_store_that_cannot_take_the_findings_leaves_the_launch_unaffected(
     model = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
 
     caplog.set_level(logging.INFO)
-    escaped = _caught(lambda: branch_cli._grade(J.episode_runs_for(ep), episode_id=ep.name, judge=model))
+    # #1618 K5: the launcher hands its host judge a copy seam over its own fetch (`_judge_copy`); this case hands the same
+    # shape (`fetched_copy`), so what fails here is the store, never the knowledge read.
+    escaped = _caught(lambda: branch_cli._grade(J.episode_runs_for(ep), episode_id=ep.name, judge=model,
+                                                copy=fetched_copy(tenant_id)))
 
     assert escaped is None, f"_grade raised {escaped!r} into the launch"
     after = _tree_snapshot(ep)
@@ -154,7 +158,7 @@ def test_e3_a_store_that_cannot_take_the_findings_leaves_the_launch_unaffected(
     _register(migrated_database, control_tenant)
     caplog.clear()
     assert _caught(lambda: branch_cli._grade(J.episode_runs_for(control), episode_id=control.name, judge=J.FakeJudge(
-        default=J.as_reply_text(J.reply_doc())))) is None
+        default=J.as_reply_text(J.reply_doc())), copy=fetched_copy(control_tenant))) is None
     assert not [r for r in _warnings(caplog) if r.exc_info], f"the control's grade failed: {[r.getMessage() for r in _warnings(caplog)]}"
     queued = [i for i in call(migrated_database, "work", control_tenant) if i.kind in ("finding", "questioner_finding")]
     assert queued, "the control's grade queued no rows"

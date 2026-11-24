@@ -6,16 +6,16 @@ The upgrade stops, changing nothing, while any tenant that is not offboarded (`c
 naming each. The table is new in this upgrade, so in practice every such tenant lacks one: recreate the development
 database, or offboard those tenants first (`defender/CLAUDE.md`, "Upgrade from before #1546").
 
-Revision ID: 0030_retention_required
-Revises: 0029_evidence_retention
+Revision ID: 0031_retention_required
+Revises: 0030_evidence_retention
 
 There is no downgrade.
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0030_retention_required"
-down_revision = "0029_evidence_retention"
+revision = "0031_retention_required"
+down_revision = "0030_evidence_retention"
 
 
 def upgrade() -> None:

@@ -22,7 +22,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from defender.tenancy import JobTenant, Tenant, accept_tenant, clone_halves
+from defender.tenancy import JobTenant, Tenant, accept_tenant
 from defender.records.formats import TenantId, TenantRefused
 from defender.tenancy import RecordsUnreachable
 from defender.systems.verb_dispositions import DispositionError, RunGrants, require_gather_query, run_grants
@@ -89,17 +89,16 @@ class RunTenant:
     #: held for the run (D-18); `None` for a tenant with none; a record #1359's
     #: rules now refuse is kept as its error.
     case_record: CaseRecordSettings | CaseTicketError | None
+    #: The run's knowledge, one commit (#1108 P4, O-B; #1618 K8: a tenant has no knowledge folder of its own): the agent
+    #: root the run reads (its copy's `stage/agent/`) and the settings it was resolved from (the copy's `settings/`).
+    agent_root: Path
+    settings_root: Path
     #: One entry per enabled system record (#1391 P1, #1366 K4), its stored declaration parsed
     #: ONCE here: the `AccessDeclaration`, or the `ConfigFault` for why there is none (#1163).
     #: Adapters, the ticket writer and the run-start settings check read this; the proxy reads
     #: the current record per call.
     access: Mapping[str, AccessDeclaration | ConfigFault] = dataclasses.field(
         default_factory=lambda: MappingProxyType({}))
-    #: The run's knowledge, one export commit (#1108 P4, O-B): the agent root the run reads (its
-    #: run copy's `stage/agent/`) and the settings it was resolved from (the copy's `settings/`).
-    #: `None` only for a record resolved over the tenant's own folder (`clone_halves`).
-    agent_root: Path | None = None
-    settings_root: Path | None = None
     #: The startup token run start staged beside `agent_root` (U9: the copy's `stage/<token>`),
     #: which the run's box reads back to prove its bind; `None` when nothing was staged.
     stage_token: Path | None = None
@@ -114,23 +113,16 @@ class RunTenant:
 
     @property
     def settings(self) -> Path:
-        return self.settings_root if self.settings_root is not None else _clone_halves(self.tenant)[1]
+        return self.settings_root
 
     @property
     def agent(self) -> Path:
-        return self.agent_root if self.agent_root is not None else _clone_halves(self.tenant)[0]
+        return self.agent_root
 
     @property
     def table_pointer(self) -> str:
         """This tenant's table as the model is told of it (`table_pointer`)."""
         return table_pointer(self.tenant_id)
-
-
-def _clone_halves(tenant: Tenant | JobTenant) -> tuple[Path, Path]:
-    """The accepted tenant's own `(agent/, settings/)`; a job tenant holds no clone, so a caller over one names its roots."""
-    if isinstance(tenant, JobTenant):
-        raise TenantRefused("a job tenant holds no knowledge clone: its run copy's or its export's roots are named")
-    return clone_halves(tenant)
 
 
 def correlation_dispatch(settings: Path, grant: VerbGrant) -> CorrelationDispatch:
@@ -151,47 +143,20 @@ def refusals() -> tuple[type[Exception], ...]:
     return (DispositionError, GrantError)
 
 
-def resolve_tenant(  # noqa: PLR0913 — the request, the folder rules' inputs and the records seam
-    data_root: DataRoot, tenant_id: str, *, defender_dir: Path, dispatches_lead_zero: bool, catalog: Catalog,
-    box_mounted: tuple[Path | RunsBase | EpisodesRoot, ...] = (),
-    directory: TenantDirectory | None = None,
-) -> RunTenant:
-    """`tenant_id` under `data_root`, accepted and ready, or `TenantRefused` — its grants resolved
-    over the tenant's own folder (`clone_halves`), for a caller that names no export, and its
-    systems, access and case from its current records (#1366 R10), read through `directory`
-    (else the one `DEFENDER_DATABASE_DSN` names, `entry_directory`). No folder read for them.
-
-    The acceptance is `_tenant.accept_tenant` (the one frame every entry point shares; the
-    settings half outside `defender_dir` and every `box_mounted` tree, e.g. the runs base),
-    then run start's readiness function over the accepted tenant's settings. A tenant whose records
-    are not known (not `active`, #1470 O8) is refused by the read itself (`TenantRefused`)."""
-    tenant = accept_tenant(
-        data_root, tenant_id, defender_dir=defender_dir, box_mounted=box_mounted)
-    records = entry_directory(directory).current_records(tenant.id)
-    return run_tenant_for(tenant, dispatches_lead_zero=dispatches_lead_zero, records=records, catalog=catalog)
-
-
 def run_tenant_for(  # noqa: PLR0913 — the tenant, its records, its two roots, the staged token, the flag
     tenant: Tenant | JobTenant, *, dispatches_lead_zero: bool, records: TenantRecords, catalog: Catalog,
-    agent_root: Path | None = None, settings_root: Path | None = None,
-    stage_token: Path | None = None, defender_dir: Path | None = None,
+    agent_root: Path, settings_root: Path, stage_token: Path | None = None, defender_dir: Path | None = None,
 ) -> RunTenant:
     """An accepted tenant, ready to run — or `TenantRefused` carrying run start's refusal.
 
     Its systems, their access and the case record are built from `records`, the tenant's current
     records (#1366 R10, O6; DC7: no folder read for them); its grants and lead-zero dispatch from
-    `settings_root`'s table. `agent_root`/`settings_root` are the two halves of the one export
-    the run reads (#1108 P4, O-B: run start hands its run copy's); each defaults to the tenant's
-    own folder (`clone_halves`; a `JobTenant` holds no clone, so a caller over one names both). `catalog` is the one the caller holds over the run's single roster read: the adapter's
+    `settings_root`'s table. `agent_root`/`settings_root` are the two halves of the one commit
+    the run reads (#1108 P4, O-B: the caller's copy's; required, #1618 K8). `catalog` is the one the caller holds over the run's single roster read: the adapter's
     list of non-GET reads a record's access is judged against (#1504 O3), never a read of its own. `defender_dir` is accepted for callers that still pass it and is
     not read. Which of its records are its systems is the catalog's (`tenant_systems`)."""
     del defender_dir
-    if agent_root is not None and settings_root is not None:
-        agent, settings = Path(agent_root), Path(settings_root)
-    else:
-        clone_agent, clone_settings = _clone_halves(tenant)
-        settings = Path(settings_root) if settings_root is not None else clone_settings
-        agent = Path(agent_root) if agent_root is not None else clone_agent
+    settings, agent = Path(settings_root), Path(agent_root)
     ready = resolve_run_tenant_or_refuse(
         settings, tenant_id=tenant.id, dispatches_lead_zero=dispatches_lead_zero)
     return RunTenant(tenant=tenant, grants=ready.grants, correlation=ready.correlation,
@@ -402,7 +367,6 @@ class Admitted:
 def host_tenant(  # noqa: PLR0913 — the request (root, id), the records seam and the folder rules' inputs
     data_root: DataRoot, raw_id: object, *, directory: TenantDirectory | None = None,
     defender_dir: Path | None = None, box_mounted: Iterable[Path | RunsBase | EpisodesRoot] = (),
-    clone_tree: bool = True,
 ) -> Admitted:
     """The one host acceptance (r10 A1): the only way a host entry point gets its tenant.
 
@@ -440,7 +404,7 @@ def host_tenant(  # noqa: PLR0913 — the request (root, id), the records seam a
         wiring = tenancy.admit_tenant(records, tenant_id)
         tenant = accept_tenant(data_root, tenant_id,
                                defender_dir=defender_dir if defender_dir is not None else process_defender_dir(),
-                               box_mounted=box_mounted, clone_tree=clone_tree)
+                               box_mounted=box_mounted)
     except BaseException:
         held.close()
         raise
@@ -475,7 +439,6 @@ __all__ = [
     "RunTenant",
     "SystemConfig",
     "TenantRefused",
-    "resolve_tenant",
     "correlation_dispatch",
     "Admitted",
     "entry_directory",

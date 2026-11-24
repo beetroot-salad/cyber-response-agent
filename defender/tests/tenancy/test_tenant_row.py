@@ -247,25 +247,42 @@ FOLDER_SHAPES: dict[str, FolderShape] = {
     "dangling-linked-T": FolderShape(_linked(False), _repair_linked_dir),
     "file-at-T": FolderShape(_file_at_dir, _repair_with_knowledge),
     "absent-T": FolderShape(lambda w: w.root.mkdir(parents=True), _repair_with_knowledge),
-    "T-without-knowledge": FolderShape(lambda w: w.dir.mkdir(parents=True), _repair_with_knowledge),
-    "T-holding-only-a-row": FolderShape(_only_a_row, _repair_with_knowledge),
+}
+#: `<T>` real but holding no knowledge folder: refused naming `<T>/knowledge` before #1618; under K8 ("a tenant holds no
+#: knowledge folder": acceptance judges `<T>` alone, what a run reads is its own fetched copy) these are accepted.
+NO_KNOWLEDGE_SHAPES: dict[str, Callable[[Where], None]] = {
+    "T-without-knowledge": lambda w: w.dir.mkdir(parents=True),
+    "T-holding-only-a-row": _only_a_row,
 }
 
 
 @pytest.mark.parametrize("shape", sorted(FOLDER_SHAPES))
-def test_a_tenant_folder_that_is_not_a_real_one_with_knowledge_is_refused_naming_the_knowledge_folder(
-        tmp_path, shape):
-    """A link or file at `<T>`, or no knowledge folder, is refused naming `<T>/knowledge` and changes nothing;
-    the repaired address is accepted (Flow 4 'folder checks as today')."""
+def test_a_tenant_folder_that_is_not_a_real_one_is_refused_naming_the_tenant_folder(tmp_path, shape):
+    """A link or file at `<T>`, or no `<T>`, is refused naming `<T>` and changes nothing; the repaired address is
+    accepted (Flow 4 'folder checks as today'). #1618 K8: the refusal names the tenant folder, which is all acceptance
+    judges (it named `<T>/knowledge` while acceptance judged the clone)."""
     w = _where(tmp_path)
     case = FOLDER_SHAPES[shape]
     case.plant(w)
     before = _tree_state(tmp_path)
     message = _refused(w)
-    assert str(w.dir / "knowledge") in message, f"the refusal names no knowledge folder: {message!r}"
+    assert str(w.dir) in message, f"the refusal names no tenant folder: {message!r}"
+    assert str(w.dir / "knowledge") not in message, f"the refusal names a knowledge folder (K8): {message!r}"
     assert _tree_state(tmp_path) == before, f"refusing the {shape} tenant changed the tree"
     case.repair(w)
     assert _served(w).id == TID, "the positive control"
+
+
+@pytest.mark.parametrize("shape", sorted(NO_KNOWLEDGE_SHAPES))
+def test_1618_k8_a_real_tenant_folder_without_a_knowledge_folder_is_accepted_and_left_as_it_was(tmp_path, shape):
+    """A real `<T>` with no knowledge folder is accepted: a tenant holds no knowledge folder (K8), so acceptance does
+    not look for one, and makes none. (Retires the refusal half of the pre-#1618 case for these two shapes.)"""
+    w = _where(tmp_path)
+    NO_KNOWLEDGE_SHAPES[shape](w)
+    before = _tree_state(tmp_path)
+    assert _served(w).id == TID
+    assert _tree_state(tmp_path) == before, f"accepting the {shape} tenant changed the tree"
+    assert not (w.dir / "knowledge").exists(), "acceptance made a knowledge folder"
 
 
 # --- #1214 O7: the one-tenant guard is gone (slice C's cells, kept) -----------------------------------

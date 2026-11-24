@@ -261,9 +261,12 @@ RESIDUE = {
     # (removed by name through `tenancy._exports.remove_entry`); and the host-held
     # knowledge-source record beside the run dir (U12). None is a run-dir record, so each is
     # non-record I/O.
-    ("tenancy.run_knowledge", "copy_for_run", "hold_new"): (1, "nonrecord", ('copies',)),
-    ("tenancy.run_knowledge", "copy_for_run", ".mkdir"): (1, "nonrecord", ('held',)),
-    ("tenancy.run_knowledge", "copy_for_run", "os.rename"): (1, "nonrecord", ('copies / temporary',)),
+    ("tenancy.run_knowledge", "make_owned_empty", "hold_new"): (1, "nonrecord", ('parent',)),
+    ("tenancy.run_knowledge", "place", "hold"): (1, "nonrecord", ('temporary',)),
+    ("tenancy.run_knowledge", "place", ".mkdir"): (1, "nonrecord", ('held',)),
+    ("tenancy.run_knowledge", "place", "os.rename"): (2, "nonrecord", ('temporary / AGENT_HALF', 'temporary')),
+    # #1618: an operator's temporary copy (`temporary_copy`) is removed whole when its `with` ends.
+    ("tenancy.run_knowledge", "temporary_copy", "shutil.rmtree"): (1, "nonrecord", ('dest',)),
     ("tenancy.run_knowledge", "write_host_record", "write_guarded"): (1, "nonrecord", ('path',)),
     # #1366 O6: the host-held record of the system and case versions a run read at its start, in the same
     # container as the knowledge-source record (beside the run dir, never in it): non-record I/O like it.

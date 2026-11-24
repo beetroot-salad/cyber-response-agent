@@ -13,7 +13,7 @@ import pytest
 
 from defender import _log
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.tenancy._launch_publish_p4 import RunWithPublish
+from defender.tests.support.tenancy._launch_publish_p4 import RunWithFetch
 from defender.records import RunPaths
 
 
@@ -294,7 +294,7 @@ def test_run_main_binds_the_run_id_and_tenant_for_the_whole_run(tmp_path, monkey
         (kw["run"].run_dir / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
         return {"output": "done", "requests": 1, "truncated_by": None}
 
-    RunWithPublish(T.mod("run")).main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
+    RunWithFetch(T.mod("run")).main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
                       lifecycle=lifecycle, visualize=lambda p, **kw: None, preflight=T.no_preflight)
     # The run's tenant is the request's `--tenant`, whose `<data root>/<T>/runs` holds it.
     tenant = base.parent.name
@@ -313,7 +313,7 @@ def test_a_run_s_crash_is_logged_while_the_run_is_still_bound(tmp_path, monkeypa
 
     capsys.readouterr()
     with pytest.raises(RuntimeError, match="lifecycle blew up"):
-        RunWithPublish(T.mod("run")).main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
+        RunWithFetch(T.mod("run")).main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
                           lifecycle=lifecycle, visualize=lambda p, **kw: None,
                           preflight=T.no_preflight)
     tenant = base.parent.name  # the request's `--tenant`
@@ -337,7 +337,7 @@ def test_an_operator_run_whose_box_did_not_start_ends_in_one_logged_line_naming_
                                     "registered: install gVisor")
 
     capsys.readouterr()
-    rc = RunWithPublish(T.mod("run")).main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
+    rc = RunWithFetch(T.mod("run")).main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
                                            lifecycle=lifecycle, visualize=lambda p, **kw: None,
                                            preflight=T.no_preflight)
     assert rc == 1

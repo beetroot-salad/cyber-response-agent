@@ -1,16 +1,26 @@
-"""#1108 P4 run start, parent side: what `run.main` does with the launch-time publish's outcome,
-which export it copies, and what it stamps.
+"""#1108 P4 run start, parent side, as #1618 leaves it: what `run.main` does with the fetch child's line, which commit
+the run reads (through its own copy) and what it stamps.
 
-Entry: the real `run.main` with the real `materialize` (resolve the export, copy it, stamp the
-run), a recording `lifecycle` that snapshots the run's tenant and copy while live, and the
-`publish=` seam returning the child's report line. The tenant is `_s_b_support.run_tenant`: the
-fixture with revision marks in one lesson and one settings file (a plain file beside the grants:
-a system's settings are records, not an export folder, R10).
+Entry: the real `run.main` with the real `materialize` (fetch into an owned folder, rename it into the run copy, stamp
+the run), a recording `lifecycle` that snapshots the run's tenant and copy while live, and the `fetch=` seam
+(`B.fetching`: the product's in-process fetch of the tenant's served Forgejo remote; `B.refusing`: a refusal line). The
+tenant is `_s_b_support.run_tenant`: the fixture with revision marks in one lesson and one settings file (a plain file
+beside the grants: a system's settings are records, not a folder, R10).
+
+Retired here (#1618 design "Retired promises"), each with its successor:
+- O-B "the stamp is the export copied, never the clone's HEAD" and "a broken tenant clone does not stop the run" (K8: no
+  clone, no exports, no `current`): `knowledge_1618/test_run_start_1618.py::test_a1_*` (the stamp is the commit the
+  run's own fetch saw) and `::test_a14_*` (no clone, exports, current or lock after the upgrade);
+- O-STALE "every publish outcome with a snapshot runs and records its knowledge source" (stale kinds), O-A's control
+  "the same stale outcome with a `current` runs" and O9 "a misconfigured publish refuses even with a snapshot" (K9 stale
+  retired, D3 no stale fallback, D11 misconfigured gone): `test_o_a_a_refused_fetch_refuses_before_message_zero` below;
+  the fresh arm survives in `test_o11_*` below (the host record says fresh at the commit read);
+- "a copied commit descending from the reported one is fresh at the copy" (the export `current` could fast-forward
+  past the child's report; there is no `current` now): `knowledge_1618/test_run_start_1618.py::test_a1_*`.
 """
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -18,12 +28,7 @@ import pytest
 
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.tenancy.tenant_1108_p4._support import (
-    current_commit,
-    export_dir,
-    git,
-    published_tenant,
-)
+from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
 pytestmark = pytest.mark.e2e
 
@@ -38,17 +43,19 @@ def _under(path: Path, root: Path) -> bool:
     return Path(path).resolve().is_relative_to(Path(root).resolve())
 
 
-# --- O11 + O-B: the run reads one export, through its own copy ---------------------------------
+# --- O11 + O-B: the run reads one commit, through its own copy -------------------------------------------------------
 
-def test_o11_o_b_an_unpinned_launch_publishes_once_and_the_run_reads_settings_and_knowledge_from_its_copy_of_current(
+def test_o11_o_b_an_unpinned_launch_fetches_once_and_the_run_reads_settings_and_knowledge_from_its_copy_of_main(
         tenant, tmp_path):
-    """The run's `agent/` and `settings/` come from its copy under `<T>/run-knowledge/<run_id>/`,
-    byte-equal to the export `current` names, and the settings it resolves are that export's."""
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit))
+    """The run's `agent/` and `settings/` come from its copy under `<T>/run-knowledge/<run_id>/`, byte-equal to `main`
+    on the tenant's Forgejo remote, and the settings it resolves are that commit's; the host record says fresh at it."""
+    fetch = B.fetching(tenant)
+    out = B.launch(tenant, tmp_path, fetch=fetch)
 
     assert out.reached, f"the run never reached its lifecycle: {out.text()}"
     assert out.rc == 0, out.text()
-    assert len(out.publish_calls) == 1, f"the launch published {len(out.publish_calls)} times"
+    assert len(fetch.calls) == 1, f"the launch fetched {len(fetch.calls)} times"
+    assert fetch.lines == [f"ok {tenant.commit}"], fetch.lines
     seen = out.seen[0]
     copy_root = B.copy_root(tenant, seen.run_dir)
     assert _under(seen.agent, copy_root), (
@@ -61,157 +68,16 @@ def test_o11_o_b_an_unpinned_launch_publishes_once_and_the_run_reads_settings_an
     assert Path(seen.settings).resolve() == (copy_root / "settings").resolve(), (
         f"the run's settings half is not the copy's `settings/` (beside `stage/`): "
         f"{seen.settings}")
-    assert seen.agent_files == B.export_half(tenant, tenant.commit, "agent"), (
-        "the run copy's agent/ is not byte-equal to the export `current` names")
-    assert seen.settings_files == B.export_half(tenant, tenant.commit, "settings")
-    # A system's settings are the tenant's records (R10, DC7), not a folder of the export; what the
-    # run still resolves from the settings half are its grants, read from this very copy.
+    assert seen.agent_files == B.committed_half(tenant, tenant.commit, "agent"), (
+        "the run copy's agent/ is not byte-equal to main's on the remote")
+    assert seen.settings_files == B.committed_half(tenant, tenant.commit, "settings")
+    # A system's settings are the tenant's records (R10, DC7), not a folder; what the run still resolves from the
+    # settings half are its grants, read from this very copy.
     assert B.mark_text(B.SEEDED_MARK) == B.settings_read(seen), (
-        "the run's settings half is not the revision `current` names")
-
-
-def test_o_b_the_stamp_is_the_export_copied_never_the_clones_head(tenant, tmp_path):
-    """The clone moved past `current` with an unpublished local commit; the run reads, resolves
-    and stamps the export `current` names, nothing of the clone."""
-    clone = B.clone_dir(tenant)
-    (clone / B.LESSON).write_text(B.lesson_text(B.CLONE_ONLY_MARK), encoding="utf-8")
-    (clone / B.MARK_FILE).write_text(B.mark_text(B.CLONE_ONLY_MARK), encoding="utf-8")
-    git(clone, "commit", "-am", "local, never published")
-    head = git(clone, "rev-parse", "HEAD")
-    assert head != tenant.commit
-    assert current_commit(tenant.tenant) == tenant.commit
-
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit))
-
-    assert out.reached, out.text()
-    seen = out.seen[0]
-    assert B.CLONE_ONLY_MARK not in seen.agent_files[B.LESSON_REL].decode(), (
-        "the run read the clone's HEAD, not the export")
-    assert B.SEEDED_MARK in seen.agent_files[B.LESSON_REL].decode()
-    assert B.settings_read(seen) == B.mark_text(B.SEEDED_MARK)
-    assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}, (
-        f"the run's knowledge stamp is not the export it copied ({tenant.commit}); the "
-        f"clone's HEAD is {head}: {B.stamped_commit(out.stamp_after)!r}")
-    assert B.knowledge_source(out)["commit"] == tenant.commit
-
-
-def _gitfile_nowhere(clone: Path) -> None:
-    shutil.rmtree(clone / ".git")
-    (clone / ".git").write_text("gitdir: /nonexistent/1108-p4/broken-clone.git\n", encoding="utf-8")
-
-
-def _git_removed(clone: Path) -> None:
-    shutil.rmtree(clone / ".git")
-
-
-def _uncommitted_edit(clone: Path) -> None:
-    (clone / B.LESSON).write_text(B.lesson_text(B.CLONE_ONLY_MARK), encoding="utf-8")
-    (clone / B.MARK_FILE).write_text(B.mark_text(B.CLONE_ONLY_MARK), encoding="utf-8")
-
-
-# Behavioural complement to the census: the run never reads the clone's working tree.
-def _working_tree_removed(clone: Path) -> None:
-    for half in ("agent", "settings"):
-        shutil.rmtree(clone / half)
-
-
-@pytest.mark.parametrize("breakage", [_gitfile_nowhere, _git_removed, _uncommitted_edit,
-                                      _working_tree_removed],
-                         ids=["gitfile-pointing-nowhere", "dot-git-removed", "uncommitted-edit",
-                              "working-tree-removed"])
-def test_o_b_a_broken_tenant_clone_does_not_stop_the_run_or_reach_its_stamp(
-        tenant, tmp_path, breakage):
-    """Run start never reads the clone: a broken `.git`, an uncommitted edit, or a working tree
-    gone altogether (git objects kept) each leave the run starting on `current`'s export, with
-    its bytes and its commit stamped."""
-    clone = B.clone_dir(tenant)
-    breakage(clone)
-    assert current_commit(tenant.tenant) == tenant.commit
-
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit))
-
-    assert out.reached, f"a broken clone stopped the run: {out.text()}"
-    assert out.rc == 0, out.text()
-    seen = out.seen[0]
-    assert seen.agent_files == B.export_half(tenant, tenant.commit, "agent"), (
-        "the run's agent half is not the export `current` names")
-    assert seen.settings_files == B.export_half(tenant, tenant.commit, "settings")
-    assert B.CLONE_ONLY_MARK not in seen.agent_files[B.LESSON_REL].decode(), (
-        "the run read the clone's working tree")
-    assert B.settings_read(seen) == B.mark_text(B.SEEDED_MARK)
-    assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}, (
-        f"the stamp is not the export copied ({tenant.commit}): "
-        f"{B.stamped_commit(out.stamp_after)!r}")
+        "the run's settings half is not the revision main names")
+    assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}, B.stamped_commit(out.stamp_after)
     source = B.knowledge_source(out)
-    assert (source["kind"], source["commit"]) == ("fresh", tenant.commit), source
-
-
-# --- O-STALE: the run record and continuing on a snapshot -------------------------------------
-
-@pytest.mark.parametrize("report", ["fresh", "stale:transient", "stale:operator"])
-def test_o_stale_every_publish_outcome_with_a_snapshot_runs_and_records_its_knowledge_source(
-        tenant, tmp_path, report):
-    """Fresh and both stale kinds run to the end on `current`; the host record names the kind,
-    the commit copied and (stale) the stale kind and the child's reason. No box-readable file
-    (the run dir, the copy's `stage/`) holds the raw reason while the run is live, nor any
-    run-dir file after it but the saved run page, an operator surface written after the box
-    stops (OD21)."""
-    reason = "issuer unreachable: s-b reason text 4c1e"
-    line = (B.fresh(tenant.commit) if report == "fresh"
-            else B.stale(report.split(":")[1], reason))
-
-    def box_readable_hits(seen: B.Seen) -> dict[str, list[str]]:
-        return {"run dir": B.files_holding(seen.run_dir, reason),
-                "stage": B.files_holding(B.copy_stage(tenant, seen.run_dir), reason)}
-
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: line, during=box_readable_hits)
-
-    assert out.reached, out.text()
-    assert out.rc == 0, (
-        f"a {report} launch with a snapshot must run: {out.text()}")
-    source = B.knowledge_source(out)
-    assert source.get("commit") == tenant.commit, source
-    assert out.seen[0].during == {"run dir": [], "stage": []}, (
-        f"the raw publish reason is in a box-readable file: {out.seen[0].during}")
-    # Only the saved run page may show the raw reason (OD21).
-    after = [rel for rel in B.files_holding(out.run_dir, reason) if rel != "runtime.html"]
-    assert after == [], (
-        f"the raw publish reason was written into a run-dir file other than the saved "
-        f"page after the lifecycle: {after}")
-    if report == "fresh":
-        assert source.get("kind") == "fresh", source
-        assert source.get("stale_kind") is None, source
-    else:
-        assert source.get("kind") == "stale", source
-        assert source.get("stale_kind") == report.split(":")[1], source
-        assert isinstance(source.get("reason"), str), source
-        assert reason in source["reason"], (
-            f"the host record does not carry the child's reason ({reason!r}): {source}")
-        # Positive control for the box-readable scan: the same text IS in the host file.
-        assert reason in B.host_record_path(out.run_dir).read_text(encoding="utf-8")
-
-
-def test_a_mismatch_a_copied_commit_descending_from_the_reported_one_is_fresh_at_the_copy(
-        tenant, tmp_path):
-    """The child reports `fresh <S>` but `current` has since fast-forwarded to a descendant M
-    (another launch's publish): the run copies M and records fresh at M, keeping the reported S
-    in any other field. Every writer of `current` fast-forwards it under the tenant lock, so the
-    copy descends from the reported commit by construction; the run has no git to check it."""
-    merged = tenant.merge(B.MERGE_FILES)
-    tenant.publish()
-    assert current_commit(tenant.tenant) == merged
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit))
-
-    assert out.reached, out.text()
-    assert out.rc == 0, out.text()
-    assert B.MERGED_MARK in out.seen[0].agent_files[B.LESSON_REL].decode()
-    assert B.stamped_commit(out.stamp_after) == {"commit": merged}
-    source = B.knowledge_source(out)
-    assert (source.get("kind"), source.get("commit")) == ("fresh", merged), source
-    others = B.flat_values({k: v for k, v in source.items() if k != "commit"})
-    assert any(tenant.commit in str(v) for v in others), (
-        f"the record does not keep the child's reported commit {tenant.commit}: "
-        f"{source}")
+    assert (source.get("kind"), source.get("commit"), source.get("stale_kind")) == ("fresh", tenant.commit, None), source
 
 
 def test_o_stale_knowledge_source_is_informational_in_branch_preflights_stamp_table():
@@ -223,115 +89,94 @@ def test_o_stale_knowledge_source_is_informational_in_branch_preflights_stamp_ta
         preflight.STAMP_FIELD_CLASSES)
 
 
-# --- O-A / misconfiguration: refusals before message 0 ----------------------------------------
+# --- O-A: a refused fetch refuses before message 0 (D3: no stale fallback) -------------------------------------------
 
-@pytest.mark.parametrize("kind", ["transient", "operator"])
-def test_o_a_no_current_and_a_failed_publish_refuses_before_message_zero(tenant, tmp_path, kind):
-    """With no `current` there is no snapshot to fall back on, so a stale outcome refuses the
-    run before its lifecycle (no box, no model)."""
-    pointer = export_dir(tenant.tenant, tenant.commit).parent / "current"
-    pointer.unlink()
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.stale(kind, "forge down"))
+@pytest.mark.parametrize("word", ["transient", "lasting"])
+def test_o_a_a_refused_fetch_refuses_before_message_zero(tenant, tmp_path, word):
+    """There is no snapshot to fall back on (#1618 D3; was: "with no `current`"), so a refused fetch, of either class,
+    refuses the run before its lifecycle (no box, no model), by a refusal naming the child's reason, not a crash, and
+    leaves no run copy. Control: the same tenant with a fetch that answers `ok` runs."""
+    reason = f"S-B-FETCH-REFUSED-{word}"
+    out = B.launch(tenant, tmp_path, fetch=B.refusing(word, reason))
 
-    assert not out.reached, "a run with no snapshot and a failed publish reached its box"
+    assert not out.reached, "a run whose fetch was refused reached its box"
+    assert out.raised is None, f"refused by a crash, not a refusal: {out.raised!r}"
     assert out.rc not in (0, None) or out.refusal is not None, out.text()
-    assert out.raised is None, f"refused by a crash, not a refusal: {out.raised!r}"
-
-
-def test_o_a_control_the_same_stale_outcome_with_a_current_runs(tenant, tmp_path):
-    """Positive control for the no-`current` refusal: same outcome, `current` present."""
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.stale("transient", "forge down"))
-    assert out.reached, out.text()
-    assert out.rc == 0, out.text()
-
-
-def test_o9_a_misconfigured_publish_refuses_the_run_even_with_a_snapshot(tenant, tmp_path):
-    """Misconfiguration refuses the run before any model call, naming why: unlike a stale
-    outcome, a snapshot does not save it."""
-    reason = "the tenant row names no forge binding (S-B-MISCONFIG-REASON)"
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.misconfigured(reason))
-
-    assert not out.reached, "a misconfigured launch reached its box"
-    assert out.raised is None, f"refused by a crash, not a refusal: {out.raised!r}"
-    assert out.refusal is not None, out.text()
-    assert "S-B-MISCONFIG-REASON" in out.refusal, out.text()
+    assert reason in (out.refusal or ""), out.text()
+    _no_copy_left(tenant)
+    assert B.launch(tenant, tmp_path / "control", fetch=B.fetching(tenant)).reached, "control: an ok fetch runs"
 
 
 # --- O-PIN: a pinned launch -------------------------------------------------------------------
 
-def test_o_pin_a_pinned_launch_reads_that_export_skips_publish_and_records_pinned(
-        tenant, tmp_path):
-    """With a merge published (`current` and the clone's HEAD both at it), a launch pinned to
-    the seeded commit reads that export, never calls `publish`, and stamps and records it as
-    pinned."""
+def test_o_pin_a_pinned_launch_reads_that_commit_and_records_pinned(tenant, tmp_path):
+    """With a merge on `main`, a launch pinned to the seeded commit asks the fetch for that commit by id (not `main`),
+    reads its bytes, and stamps and records it as pinned. (#1618: the fetch is asked for the pin, A8; was "reads that
+    export and skips publish".)"""
     merged = tenant.merge(B.MERGE_FILES)
-    tenant.publish()
-    assert current_commit(tenant.tenant) == merged
-    assert git(B.clone_dir(tenant), "rev-parse", "HEAD") == merged
-
-    def must_not_publish(*a: Any, **k: Any) -> str:
-        raise AssertionError("O-PIN: a pinned launch ran the launch-time publish")
-
-    out = B.launch(tenant, tmp_path, publish=must_not_publish,
-                   argv_extra=("--knowledge-commit", tenant.commit))
+    assert tenant.origin_main() == merged
+    fetch = B.fetching(tenant)
+    out = B.launch(tenant, tmp_path, fetch=fetch, argv_extra=("--knowledge-commit", tenant.commit))
 
     assert out.reached, out.text()
     assert out.rc == 0, out.text()
-    assert out.publish_calls == []
+    assert [kw.get("commit") for _a, kw in fetch.calls] == [tenant.commit], fetch.calls
     seen = out.seen[0]
-    assert seen.agent_files == B.export_half(tenant, tenant.commit, "agent")
+    assert seen.agent_files == B.committed_half(tenant, tenant.commit, "agent")
     assert B.settings_read(seen) == B.mark_text(B.SEEDED_MARK)
     assert B.stamped_commit(out.stamp_after) == {"commit": tenant.commit}, (
-        "a pinned run's stamp is not the pinned export (it read the clone's HEAD?)")
+        "a pinned run's stamp is not the pinned commit (it read main?)")
     source = B.knowledge_source(out)
     assert source.get("kind") == "pinned", source
     assert source.get("commit") == tenant.commit, source
     assert source.get("stale_kind") is None, source
 
 
-def test_o_pin_a_pin_to_a_commit_with_no_export_refuses_before_message_zero(tenant, tmp_path):
-    """The run process has no git and cannot materialise, so a pin naming a commit with no
-    export (merged on origin, never exported) refuses before the box. Control: the pinned
-    launch above."""
-    merged = tenant.merge(B.MERGE_FILES)
-    assert not export_dir(tenant.tenant, merged).exists()
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
-                   argv_extra=("--knowledge-commit", merged))
-    assert not out.reached, "a pin to an unexported commit reached the box"
+def test_o_pin_a_pin_to_a_commit_forgejo_does_not_serve_refuses_before_message_zero(tenant, tmp_path):
+    """A pin naming a full commit id the remote does not hold refuses before the box, naming the commit, by the
+    run's refusal (not argparse's). Control: the pinned launch above. (#1618: was "a commit with no export".)"""
+    absent = "0123456789abcdef0123456789abcdef01234567"
+    out = B.launch(tenant, tmp_path, fetch=B.fetching(tenant), argv_extra=("--knowledge-commit", absent))
+    assert not out.reached, "a pin to a commit Forgejo does not serve reached the box"
     assert out.raised is None, f"refused by a crash, not a refusal: {out.raised!r}"
     assert out.refusal is not None, out.text()
     assert "usage:" not in out.refusal, f"argparse refused the flag, not the run: {out.refusal}"
-    assert merged[:7] in out.refusal, out.text()
+    assert absent[:7] in out.refusal, out.text()
     _no_copy_left(tenant)
 
 
 # --- O2, as #1503 left it: the step-zero lead needs no saved query --------------------------
 
-def test_o2_an_export_without_a_saved_correlation_query_still_starts(tmp_path, data_root):
-    """The step-zero lead binds no saved query (#1503), so an export whose catalog lacks the
+def test_o2_a_commit_without_a_saved_correlation_query_still_starts(tmp_path, data_root):
+    """The step-zero lead binds no saved query (#1503), so knowledge whose catalog lacks the
     correlation query starts as any other does."""
     with published_tenant(tmp_path / "forge", root=data_root,
                           files={**B.SEED_FILES, B.CORRELATE_PATH: None}) as t:
-        out = B.launch(t, tmp_path, publish=lambda *a, **k: B.fresh(t.commit))
+        out = B.launch(t, tmp_path, fetch=B.fetching(t))
     assert out.reached, out.text()
     assert out.refusal is None, out.text()
 
 
 # --- O8 parent half ---------------------------------------------------------------------------
 
-def test_o8_the_run_process_hands_the_publish_child_identifiers_only_and_holds_no_login(
-        tenant, tmp_path):
-    """The publish seam is handed only the tenant id and data root, and the run process's
-    environment carries no issuer-named variable."""
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit))
+def test_o8_the_run_process_hands_the_fetch_child_identifiers_only_and_holds_no_login(tenant, tmp_path):
+    """The fetch seam is handed only the tenant id, the owned empty folder it fills (under `<T>/run-knowledge/`, D5)
+    and the data root, with no commit for an unpinned run; the run process's environment carries no issuer-named
+    variable. (#1618 flow 1: the destination folder is the one value added to the publish child's identifiers.)"""
+    fetch = B.fetching(tenant)
+    out = B.launch(tenant, tmp_path, fetch=fetch)
     assert out.reached, out.text()
-    ((args, kwargs),) = out.publish_calls
-    leaves = B.flat_values([args, kwargs])
+    ((args, kwargs),) = fetch.calls
+    assert kwargs.get("commit") is None, kwargs
+    rest = {k: v for k, v in kwargs.items() if k != "commit"}
+    leaves = B.flat_values([args, rest])
     spelled = sorted(str(location_path(leaf)) for leaf in leaves
-                     if not isinstance(leaf, str) or leaf not in kwargs)
-    assert spelled == sorted([tenant.tenant_id, str(Path(tenant.data_root))]), (
-        f"the run process handed the publish child more (or less) than the tenant id and the "
-        f"data root: {args!r} {kwargs!r}")
+                     if not isinstance(leaf, str) or leaf not in rest)
+    [dest] = [leaf for leaf in spelled if leaf not in (tenant.tenant_id, str(Path(tenant.data_root)))]
+    assert sorted(spelled) == sorted([tenant.tenant_id, str(Path(tenant.data_root)), dest]), (
+        f"the run process handed the fetch child more (or less) than the tenant id, its folder and the data root: "
+        f"{args!r} {kwargs!r}")
+    assert _under(Path(dest), B.run_copies(tenant)), f"the fetch's folder is not the run's own, under <T>: {dest}"
     assert not [k for k in out.seen[0].environ if B.ISSUER_ENV.search(k)], (
         "issuer material in the run process's environment")
 
@@ -352,7 +197,7 @@ def test_r_s4_a_raise_after_the_lifecycle_still_removes_the_run_copy(tenant, tmp
     def boom(*_a: Any, **_k: Any) -> None:
         raise Boom("visualize")
 
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit), visualize=boom)
+    out = B.launch(tenant, tmp_path, fetch=B.fetching(tenant), visualize=boom)
     assert out.reached, out.text()
     assert isinstance(out.raised, Boom), out.text()
     _no_copy_left(tenant)
@@ -360,14 +205,15 @@ def test_r_s4_a_raise_after_the_lifecycle_still_removes_the_run_copy(tenant, tmp
 
 @pytest.mark.parametrize("value", ["../current", "current", "SHORT"])
 def test_o_pin_knowledge_commit_accepts_only_a_full_commit_id(tenant, tmp_path, value):
-    """`--knowledge-commit` names an export by its full commit id; `../current`,
-    `current` and a short id are refused before the box (never resolved as a path)."""
+    """`--knowledge-commit` names a commit by its full id; `../current`, `current` and a short id are refused before the
+    box (never resolved as a path) and before any fetch."""
     pin = tenant.commit[:7] if value == "SHORT" else value
-    out = B.launch(tenant, tmp_path, publish=lambda *a, **k: B.fresh(tenant.commit),
-                   argv_extra=("--knowledge-commit", pin))
+    fetch = B.fetching(tenant)
+    out = B.launch(tenant, tmp_path, fetch=fetch, argv_extra=("--knowledge-commit", pin))
     assert not out.reached, f"--knowledge-commit {pin!r} reached the box"
     assert out.raised is None, out.text()
     assert out.refusal is not None, out.text()
     assert "unrecognized arguments" not in out.refusal, (
         f"argparse does not know --knowledge-commit: {out.refusal}")
+    assert fetch.calls == [], f"a malformed pin was handed to the fetch: {fetch.calls}"
     _no_copy_left(tenant)

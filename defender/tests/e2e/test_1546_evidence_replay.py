@@ -130,7 +130,7 @@ async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_moun
                 from defender.worker import run_argv
 
                 helper = run_argv(launch)  # [python, -m, defender.job_host, --kind, investigation, <rest>]
-                return [sys.executable, str(HELPER_CHILD), t.commit, *helper[helper.index("--job"):]]
+                return [sys.executable, str(HELPER_CHILD), t.commit, str(t.remote), *helper[helper.index("--job"):]]
 
             async with job_store(migrated_database) as store:
                 alert = await an_alert(store, t.tenant_id, raw=(GOLDEN / "alert.json").read_bytes())

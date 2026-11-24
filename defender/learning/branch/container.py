@@ -11,8 +11,6 @@ answers the rest over the job socket (`job_socket`). This module is that side's 
   investigation entry's too): asked afresh within the reuse margin (O5, O6: no single long pass), and a refusal or a
   helper that is gone the asking call's `AdapterFault`;
 - `JobContainer.box(kind, id)`: a box the helper starts (O9: the request names a kind and an id, never a path);
-- `JobContainer.materialised_export(commit)`: the export of a commit, materialised by the helper (the container
-  writes no export and takes no knowledge lock, P-A);
 - `JobContainer.tick_store()`: the author tick's store, each verb a request the helper answers (#1487 Flow 2);
 - `JobContainer.records()` / `.forge_credential()`: the post-step's drain's tenant records (its publish outcomes
   written by the helper, `record.*`) and forge credential (tokens minted by the helper, `forge.token`), so the drain
@@ -113,15 +111,6 @@ class JobContainer:
 
         return box.relay_start(self.ask, kind, str(ident))
 
-    def materialised_export(self, commit: str) -> Mapping[str, Any]:
-        """`<T>/exports/<commit>/` made by the helper if absent (`export.materialise`, P-A: the container writes no
-        export and takes no knowledge lock): the helper's answer, `{commit, path}`. A refusal is the helper's
-        `job_socket.Refused`; a helper that cannot be reached, its `OSError`."""
-        answer = self.ask("export.materialise", commit=commit)
-        if not isinstance(answer, Mapping):
-            raise ValueError("the helper's answer to export.materialise is not a mapping")
-        return answer
-
     def box_factory(self, kind: str, ident: str) -> Callable[[], Any]:
         return lambda: self.box(kind, ident)
 
@@ -171,8 +160,7 @@ class _Tenant:
 
 class _SocketRecords:
     """The few tenant-record calls the drain makes, answered from the `launch` facts or over the socket (the
-    `TenantDirectory` repository's shape): the forge wiring and state the helper admitted, and the publish outcome
-    written by the helper (`record.published`, `record.refusal`)."""
+    `TenantDirectory` repository's shape): the forge wiring and state the helper admitted."""
 
     def __init__(self, container: JobContainer) -> None:
         self._container = container
@@ -186,18 +174,6 @@ class _SocketRecords:
         del tenant_id
         state = self._container.launch.get("tenant_state")
         return None if state is None else _Tenant(str(state))
-
-    async def record_publish_status(self, tenant_id: Any, line: str, *, by: str) -> None:
-        del tenant_id, by
-        from defender.tenancy import FRESH, OPERATOR, STALE_TRANSIENT, TRANSIENT
-
-        word, _, rest = str(line).partition(" ")
-        if word == FRESH:
-            self._container.ask("record.published", commit=rest.strip())
-        else:
-            # `stale:transient` may pass by itself; `stale:operator` and `misconfigured` need a human.
-            kind = TRANSIENT if word == STALE_TRANSIENT else OPERATOR
-            self._container.ask("record.refusal", kind=kind, reason=rest or word)
 
     async def close(self) -> None:
         return None

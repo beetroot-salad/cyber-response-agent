@@ -5,6 +5,7 @@ from __future__ import annotations
 from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
 
 import asyncio
 import contextlib
@@ -1460,8 +1461,8 @@ class Drive:
     stores: list = field(default_factory=list)
     raised: BaseException | None = None
     run_state: Any = None
-    #: The tenant as published before `run.main` (a `PublishedTenant`: its `export`, `commit`),
-    #: or None with `publish_refusal` naming why the publish refused.
+    #: The tenant as its Forgejo `main` held it before `run.main` (`Seeded`: its `commit`), or None when it was never
+    #: placed; `publish_refusal` is kept for the callers' shape (#1618: nothing publishes, so it is always None).
     published: Any = None
     publish_refusal: str | None = None
 
@@ -1632,36 +1633,29 @@ def operator_input(tmp_path: Path) -> Path:
     return Path(tmp_path) / "operator-input" / "alert.json"
 
 
-def publish_planted(tmp_path: Path, planted: Planted) -> tuple[Any, str | None]:
-    """Publish the planted tenant's folder as it is now, for real (`publish_once`), so the run
-    has an export to read. Returns `(PublishedTenant, None)`; `(None, refusal)` when acceptance
-    or the publish refuses the folder (a tenant broken on purpose); `(None, None)` when the
-    tenant was never placed (no knowledge folder)."""
-    from defender.learning.author.version_control import DeliveryRefused, LockBusy
-    from defender.records._tenant_id import TenantRefused
-    from defender.tests.tenancy.tenant_1108_p4._support import publish_once
+@dataclass(frozen=True)
+class Seeded:
+    """The planted tenant as its Forgejo repository holds it (#1618: knowledge lives only there): `commit` is `main`."""
 
+    tenant_id: str
+    commit: str
+    remote: Path
+
+
+def publish_planted(tmp_path: Path, planted: Planted) -> tuple[Any, str | None]:
+    """Commit the planted tenant's folder as it is now to `main` of its Forgejo repository (the data root's served
+    remote, `_fetch_standin_1618.seed_placed`), so the run's fetch has a commit to copy. Returns `(Seeded, None)`;
+    `(None, None)` when the tenant was never placed (no knowledge folder). Nothing is validated here: a tenant broken on
+    purpose is refused by the product's own fetch (K6) and run start, as production's would be. `tmp_path` is kept for
+    the callers' call shape. The placed folder is left as it is, so `planted`'s paths stay the test's to read."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import seed_placed, served_remote
+
+    del tmp_path
     if not (Path(planted.root) / planted.tenant_id / "knowledge").is_dir():
         return None, None
-    try:
-        return publish_once(Path(tmp_path) / "p4-forge", root=planted.root,
-                            tenant_id=planted.tenant_id), None
-    except (DeliveryRefused, LockBusy, TenantRefused) as refused:
-        return None, str(refused)
-
-
-def publish_double(published: Any) -> Callable[..., str]:
-    """`run.main(publish=)` for an in-process caller (only the CLI binds the real publish
-    child). It replays what already happened: `fresh <commit>` for a real publish, or a
-    `stale:operator` line for a refused one (so, with no export, `run.main` reaches its own
-    refusal). It decides nothing else."""
-    report = (f"fresh {published.commit}" if published is not None
-              else "stale:operator planted tenant refused")
-
-    def publish(*_args: Any, **_kwargs: Any) -> str:
-        return report
-
-    return publish
+    commit = seed_placed(planted.root, planted.tenant_id)
+    assert commit is not None, planted
+    return Seeded(planted.tenant_id, commit, served_remote(planted.root, planted.tenant_id)), None
 
 
 def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defaulted
@@ -1748,7 +1742,7 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     else:
         lifecycle_fn = lifecycle
 
-    d.published, d.publish_refusal = publish_planted(tmp_path, planted)
+    d.published, d.publish_refusal = publish_planted(tmp_path, planted)  # what Forgejo holds before the run
 
     def record_enqueue(*args: Any, **kw: Any) -> bool:
         # Recorded and forwarded exactly as received: the enqueue's call shape is production's
@@ -1766,7 +1760,9 @@ def run_alert(  # noqa: C901, PLR0913 — one scenario's every input, each defau
     seams: dict[str, Any] = {} if roster is None else {"roster": roster}
     if materialize is not None:
         seams["materialize"] = materialize  # run.main's setup seam (faults planted in setup)
-    seams["publish"] = publish_double(d.published)
+    # #1618 flow 1: the launch's one fetch, the product's own over the served remote, seeded from the placed folder as
+    # it stands at the call.
+    seams["fetch"] = in_process_fetch()
     seams["directory"] = directory if directory is not None else planted.directory  # #1345 slice B: a test-held directory
     R.assert_records_within_roster(seams["directory"], planted.tenant_id, roster, removed=removed_adapters)  # the roster stands for the catalog
     if isinstance(writer, _WriterOverTheProxy):

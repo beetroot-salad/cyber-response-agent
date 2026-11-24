@@ -19,6 +19,7 @@ from defender._clock import now_iso, parse_iso_utc
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.presentation import _episode_1025 as E
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
 #: The five steps, in the order the launcher runs them — the names a reader of the record keys on.
@@ -159,6 +160,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, calls=None, oracle=None, verifi
     seams.setdefault("preflight", S.no_preflight)
     seams.setdefault("live_tree", T.source_capture())
     seams.setdefault("roster", est.roster())
+    seams.setdefault("fetch", in_process_fetch())  # #1618 flow 4 (K8): the launch's one fetch, over the scene's served remote
     before = now_iso()
     # The tenant and the source run, by id.
     rc = _entry().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],

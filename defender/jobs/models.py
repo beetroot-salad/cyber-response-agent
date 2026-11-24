@@ -3,7 +3,7 @@ defaults). The alerts and investigations tables carry exactly the lean constrain
 design; the migration `0004_jobs` creates them and `0005_uuid_ids` makes their ids `uuid` (#1382).
 The learning jobs and learning checks tables (#1344) are `0008_learning_jobs`'s; the host requests table (#1471) is
 `0026_host_requests`'s. The claims, staged facts and uploads (#1546), and the owners' evidence columns, are
-`0028_run_evidence`'s; the investigations' foreign key to their tenant's retention row is `0030_retention_required`'s."""
+`0029_run_evidence`'s; the investigations' foreign key to their tenant's retention row is `0031_retention_required`'s."""
 
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ class InvestigationRow(Base, kw_only=True):
         CheckConstraint(f"(stage IN ({_quoted(LIVE)})) = (evidence_state IS NULL) "
                         f"AND (stage IN ({_quoted(LIVE)})) = (scrub IS NULL)", name="ended_has_evidence"),
         # #1546 r9 (D16): every new investigation names its tenant's retention row, `NOT VALID` (an offboarded tenant may
-        # keep investigations and have no row): `0030_retention_required`'s.
+        # keep investigations and have no row): `0031_retention_required`'s.
         ForeignKeyConstraint(["tenant_id"], [f"{TENANCY_SCHEMA}.evidence_retention.tenant_id"], use_alter=True,
                              postgresql_not_valid=True),
         Index("investigations_one_live_per_alert", "tenant_id", "alert_id", unique=True,
@@ -203,7 +203,7 @@ class LearningJobRow(Base, kw_only=True):
     #: `EVIDENCE_STATES` once ended (#1546 A-O4), null while live.
     evidence_state: Mapped[str | None] = mapped_column(Text, default=None)
     #: The sibling cost is only a lower limit (#1546 D15): after an offboard or a take-over it is the last staged progress.
-    #: No server default (#1339 P4): every insert supplies it; `0028_run_evidence` filled the existing rows with false.
+    #: No server default (#1339 P4): every insert supplies it; `0029_run_evidence` filled the existing rows with false.
     sibling_cost_is_lower_limit: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
@@ -306,7 +306,7 @@ class ClaimRow(Base, kw_only=True):
     labels and every staged fact and upload name it), its tenant, its kind and exactly that kind's lease reference, the
     launch facts and the `(owner, object)` input set it may pull (never null; empty for every kind but a learning job and a
     drain). Only the claim names its reference: a row is claimed at most once (one claim per owner or request row, an
-    index); a post-step hold is one reused row, its claims told apart by the hold's `holder`. `0028_run_evidence`."""
+    index); a post-step hold is one reused row, its claims told apart by the hold's `holder`. `0029_run_evidence`."""
 
     __tablename__ = "claims"
     __table_args__ = (

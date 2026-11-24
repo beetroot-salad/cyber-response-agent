@@ -14,11 +14,14 @@ import importlib
 import json
 import os
 import shlex
+import shutil
 import stat
 import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
+from enum import StrEnum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -648,34 +651,60 @@ class ForgeHTTP:
 # Real tenant repositories
 # ---------------------------------------------------------------------------------------
 
+class BuiltTenant(tuple):
+    """`(tenant, bare remote, legacy credential sentinel)`, as every case unpacks it, plus `.origin` (the served URL of
+    the remote, what a recorded forge wiring names), `.seed` (the seed commit) and `.checkout` (the test's own working
+    checkout of the remote, outside the data root: a human's copy the code under test never reads)."""
+
+    origin: str
+    seed: str
+    checkout: Path
+    server: GitHTTP
+
+
+def _seed_repository(tmp_path, root, tenant_id, *, object_format, repo_name, served):
+    """Place `tenant_id` under `root` and seed its bare remote `<served>/tenants/<repo_name>.git` by git plumbing alone
+    (#1618 r5: no clone on the host; knowledge lives only in Forgejo): the placed `<T>/knowledge` (plus
+    `agent/lessons/seed.md`) is committed in a checkout outside the data root and pushed; `<T>` keeps no `knowledge/`.
+    Returns `(tenant, remote, checkout, seed commit)`."""
+    placed = Path(tenants.place_tenant(root, tenant_id))
+    (placed / "agent" / "lessons").mkdir()
+    (placed / "agent" / "lessons" / "seed.md").write_text("seed\n", encoding="utf-8")
+    checkout = tmp_path / "seeds" / repo_name
+    checkout.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(placed), str(checkout))
+    tenant = tenants.accept(root, tenant_id)
+    git(checkout, "init", "-b", "main", f"--object-format={object_format}")
+    git(checkout, "config", "user.name", "P3")
+    git(checkout, "config", "user.email", "p3@test.invalid")
+    git(checkout, "add", ".")
+    git(checkout, "commit", "-m", "seed")
+    remote = Path(served) / "tenants" / f"{repo_name}.git"
+    remote.parent.mkdir(parents=True, exist_ok=True)
+    git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, checkout, remote)
+    return tenant, remote, checkout, git(remote, "rev-parse", "refs/heads/main")
+
+
 @contextlib.contextmanager
 def build_tenant(tmp_path, tenant_id=_TENANT_BLUE, *, root=None, object_format="sha1", repo_name="blue"):
-    """An accepted tenant with a real HTTP remote. Yields its tenant, bare repository and
-    ignored legacy credential sentinel; the server lives until the context exits."""
+    """An accepted tenant with a real HTTP remote seeded by git plumbing (`_seed_repository`). Yields a `BuiltTenant`:
+    its tenant, bare repository and ignored legacy credential sentinel, plus `.origin`/`.seed`/`.checkout`; the server
+    lives until the context exits."""
     root = root if root is not None else tmp_path / "data"
-    tenants.place_tenant(root, tenant_id)
-    tenant = tenants.accept(root, tenant_id)
-    clone = tenant.knowledge
-    (tenant.agent / "lessons").mkdir()
-    (tenant.agent / "lessons" / "seed.md").write_text("seed\n", encoding="utf-8")
-    git(clone, "init", "-b", "main", f"--object-format={object_format}")
-    git(clone, "config", "user.name", "P3")
-    git(clone, "config", "user.email", "p3@test.invalid")
-    git(clone, "add", ".")
-    git(clone, "commit", "-m", "seed")
-    remote = tmp_path / "tenants" / f"{repo_name}.git"
-    remote.parent.mkdir(exist_ok=True)
-    git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, clone, remote)
+    tenant, remote, checkout, seed = _seed_repository(tmp_path, root, tenant_id, object_format=object_format,
+                                                      repo_name=repo_name, served=tmp_path)
     server = GitHTTP(tmp_path, token=fixture_identity(tenant_id).token())
     try:
         origin = f"{server.url}/tenants/{repo_name}.git"
-        git(clone, "remote", "add", "origin", origin)
-        git(clone, "fetch", remote, "+refs/heads/*:refs/remotes/origin/*")
+        git(checkout, "remote", "add", "origin", origin)
+        git(checkout, "fetch", remote, "+refs/heads/*:refs/remotes/origin/*")
         credentials = location_path(tenant.tenant_root) / "forge" / "git-credentials"
         credentials.parent.mkdir()
         credentials.write_text("ignored legacy credential\n", encoding="utf-8")
         credentials.chmod(0o600)
-        yield tenant, remote, credentials
+        built = BuiltTenant((tenant, remote, credentials))
+        built.origin, built.seed, built.checkout, built.server = origin, seed, checkout, server
+        yield built
     finally:
         server.close()
 
@@ -686,14 +715,20 @@ def repo(tmp_path):
         yield built
 
 
+def origin_of(repo):
+    """The origin `repo`'s remote is served at (a `BuiltTenant`'s `.origin`), else `None`."""
+    return getattr(repo, "origin", None)
+
+
 def delivery(repo, http, **options):
     """`TenantDelivery.open` on `repo`'s tenant, its forge double backed by `repo`'s remote and
-    answering at the address of the clone's configured origin (unless given one)."""
+    answering at the address of `repo`'s origin (unless given one). The delivery owns a private
+    repository (#1618): close it, or use it as a context manager."""
     if http.remote is None:
         http.remote = repo[1]
-    origin = configured_origin(repo[0].knowledge)
+    origin = origin_of(repo)
     if http.address is None and origin is not None:
-        http.serve(origin)
+        http.serve(origin)  # the forge fake answers at the served origin's address, whatever `origin=` a case hands the open
     options.setdefault("identity", fixture_identity(str(repo[0].id)))
     options.setdefault("origin", origin)
     return target().TenantDelivery.open(repo[0], defender_dir=DEFENDER, client=http.client, **options)
@@ -757,21 +792,37 @@ def merge_on_remote(repo, tmp_path, branch, style="merge", *, delete_branch=Fals
     return head
 
 
+def push_and_open(batch, *, title="learning", body=""):
+    """#1618: what the deleted test-only `TenantDelivery.finish` did for a case that only needs its batch on the forge:
+    the batch's tip pushed from its private repository (`GitRepository.push`, the tick's end push) and its PR opened
+    (`store_delivery.open_pr_on`, as the tick opens it). Not the tick's policy (no reconcile, no existing-PR lookup): a
+    case about `finish`'s own semantics is retired with it. Returns `Delivered(opened, url)`."""
+    from defender.learning.author.version_control.store_delivery import open_pr_on
+
+    tip = batch.repository.branch_tip(batch.branch)
+    assert tip is not None, "premise: the batch has a commit to deliver"
+    batch.repository.push(tip, batch.branch)
+    _number, url = open_pr_on(batch.repository, branch=batch.branch, title=title, body=body)
+    return Delivered(DeliveryStatus.OPENED, url)
+
+
 def merged_agent_lesson(repo, tmp_path, batch_id, path, content, style="merge"):
     """A lesson the commit-maker wrote and a human merged: one batch whose claim writes
-    `content` at `path` (repo-relative; `None` deletes it), finished as a PR by its own
-    delivery object, then merged on the remote in `style`. Returns the commit-maker's
-    commit."""
-    writer = delivery(repo, ForgeHTTP())
-    batch = writer.start_batch(batch_id, lanes=LANES)
-    draft_file = batch.draft_root / path
-    if content is None:
-        draft_file.unlink()
-    else:
-        draft_file.parent.mkdir(parents=True, exist_ok=True)
-        draft_file.write_bytes(content)
-    sha = batch.commit(batch.change_set(), f"learning {batch_id}")
-    writer.finish(batch)
+    `content` at `path` (repo-relative; `None` deletes it), its branch pushed from the delivery's
+    private repository and a PR row added on the forge fake (#1618: `finish` is deleted, test-only),
+    then merged on the remote in `style`. Returns the commit-maker's commit."""
+    http = ForgeHTTP()
+    with delivery(repo, http) as writer:
+        batch = writer.start_batch(batch_id, lanes=LANES)
+        draft_file = batch.draft_root / path
+        if content is None:
+            draft_file.unlink()
+        else:
+            draft_file.parent.mkdir(parents=True, exist_ok=True)
+            draft_file.write_bytes(content)
+        sha = batch.commit(batch.change_set(), f"learning {batch_id}")
+        git(batch.repository.path, "push", "-q", repo[1], f"{sha}:refs/heads/{batch.branch}")
+        http.add_pr(pr_row(len(http.prs) + 1, batch.branch, sha=sha))
     merge_on_remote(repo, tmp_path, batch.branch, style)
     return sha
 
@@ -791,9 +842,52 @@ def agent_blobs(cwd, rev, prefix="agent"):
 
 
 def batch_base(clone, batch):
-    """The commit a batch's draft is judged against: its branch's tip, or the export commit
+    """The commit a batch's draft is judged against: its branch's tip in `clone` (the delivery's private repository,
+    `batch.repository.path`, while it is open: the only place an unpushed batch branch lives), or `batch.base_commit`
     before its first commit."""
-    return branch_tip(clone, batch.branch) or batch.export.commit
+    return branch_tip(clone, batch.branch) or batch.base_commit
+
+
+def deliver(d, batch):
+    """Deliver `batch` over its delivery `d` the way the drain tick does (#1618 census: `TenantDelivery.finish` and
+    `_deliver` were test-only code and are deleted; the production path is `store_tick`'s end of a batch): the
+    branch's tip in the private repository (none: `nothing to deliver`), pushed (`GitRepository.push`, the branch
+    only), then the batch's one PR found by its branch or a commit past the base (`store_tick.find_pr`: `open`,
+    `merged` or `closed` as the forge lists it, never opened again), else opened (`store_delivery.open_pr_on`:
+    `opened`). Composes production verbs only; the store's record of the batch is not involved (its cases are the
+    tick's)."""
+    from defender.learning.author.version_control.store_delivery import open_pr_on
+    from defender.learning.core.store_tick import find_pr
+
+    repository = d.repository
+    tip = repository.branch_tip(batch.branch)
+    if tip is None:
+        return Delivered(DeliveryStatus.NOTHING)
+    repository.push(tip, batch.branch)
+    found = find_pr(repository.forge, batch.branch, frozenset(repository.commits_since(batch.base_commit, tip)))
+    if found is not None:
+        return Delivered(DeliveryStatus(found.status), found.url)
+    _number, url = open_pr_on(repository, branch=batch.branch, title=f"learning: tenant knowledge batch {batch.id}",
+                              body=f"Tenant agent knowledge batch `{batch.branch}`.")
+    return Delivered(DeliveryStatus.OPENED, url)
+
+
+class DeliveryStatus(StrEnum):
+    """Where a stand-in delivery (`deliver`, `push_and_open`) left a batch: test-only since #1618 deleted `finish`."""
+
+    OPENED = "opened"
+    OPEN = "open"
+    MERGED = "merged"
+    CLOSED = "closed"
+    NOTHING = "nothing to deliver"
+
+
+@dataclass(frozen=True)
+class Delivered:
+    """A stand-in delivery's answer: `status`, and the PR's `url` when there is one."""
+
+    status: DeliveryStatus
+    url: str | None = None
 
 
 def opened(result, number=7):
@@ -819,10 +913,10 @@ def remote_refs(remote):
             if not line.startswith("refs/pull/")]
 
 
-def push_object(repo, sha, ref):
-    """Put `sha` (a commit of the tenant clone) on the remote under `ref`, as the forge holds a
-    PR's head under `refs/pull/N/head`, whatever pushed it there."""
-    git(repo[0].knowledge, "push", "-q", repo[1], f"{sha}:{ref}")
+def push_object(repo, sha, ref, *, source=None):
+    """Put `sha` (a commit of `source`: a delivery's private repository, default the test's seed checkout) on the
+    remote under `ref`, as the forge holds a PR's head under `refs/pull/N/head`, whatever pushed it there."""
+    git(source if source is not None else repo.checkout, "push", "-q", repo[1], f"{sha}:{ref}")
 
 
 def index_entry(checkout, mode, path, *, blob=None, data=None):
@@ -867,7 +961,8 @@ def plant_raw_commit(clone, ref, path, content, *, amend=False, base=None):
         clone, "for-each-ref", "--format=%(refname) %(objectname)", ref).splitlines())
     existing = listed.get(ref)
     tip = existing or git(clone, "rev-parse", base)
-    index = Path(clone) / ".git" / f"p3-plant-{os.getpid()}.index"
+    # The repository's own git dir (a bare one, as a delivery's private repository is since #1618, or a checkout's `.git`).
+    index = (Path(clone) / git(clone, "rev-parse", "--git-dir")).resolve() / f"p3-plant-{os.getpid()}.index"
     env = {"GIT_INDEX_FILE": str(index)}
     git(clone, "read-tree", tip, env=env)
     blob = git_bytes(clone, "hash-object", "-w", "--stdin", data=content).decode().strip()
@@ -1017,6 +1112,13 @@ class GitHTTP:
         self.authorizations: list[str | None] = []
         self._fired: set[str] = set()
         self._lock = threading.Lock()
+        #: #1618 K10: how the next pushes (`git-receive-pack` POSTs) end, see `fail_push`.
+        self._push_faults: list[dict] = []
+        #: Per push served: `"landed"`, `"landed-reply-lost"` or `"refused"`.
+        self.pushes: list[str] = []
+        #: #1618 D9: the forge API on the same host, as Forgejo serves it beside git (`ForgeHTTP.reply`), so a process of
+        #: its own (the fetch child) reaches the scene's forge fake over HTTP. `/api/` requests go to it, never into `seen`.
+        self.api = None
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -1054,8 +1156,28 @@ class GitHTTP:
                 handler.rfile.readline()
         return handler.rfile.read(int(handler.headers.get("Content-Length") or 0))
 
-    def _serve(self, handler):
+    def _serve_api(self, handler, body):
+        request = httpx.Request(handler.command, f"{self.url}{handler.path}", headers=dict(handler.headers.items()),
+                                content=body)
+        try:
+            response = self.api(request)
+        except httpx.HTTPError:
+            handler.close_connection = True
+            return
+        payload = response.read()
+        handler.send_response(response.status_code)
+        for name, value in response.headers.items():
+            if name.lower() not in ("content-length", "transfer-encoding", "content-encoding"):
+                handler.send_header(name, value)
+        handler.send_header("Content-Length", str(len(payload)))
+        handler.end_headers()
+        handler.wfile.write(payload)
+
+    def _serve(self, handler):  # noqa: C901 — one request path; #1618 added the scripted push faults
         parts = urlsplit(handler.path)
+        if self.api is not None and parts.path.startswith("/api/"):
+            self._serve_api(handler, self._body(handler))
+            return
         service = parse_qs(parts.query).get("service", [""])[0] or parts.path.rsplit("/", 1)[-1]
         body = self._body(handler)
         expected = "Bearer " + self.token
@@ -1076,6 +1198,10 @@ class GitHTTP:
         if fire and isinstance(answer := self.on_service(service), Trickle):
             answer.send(handler)
             return
+        fault = self._push_fault(service, handler)
+        if fault == "refuse":
+            self._refuse_push(handler)
+            return
         env = {"PATH": os.environ.get("PATH", ""), "GIT_PROJECT_ROOT": str(self.project_root),
                "GIT_HTTP_EXPORT_ALL": "1", "GIT_CONFIG_NOSYSTEM": "1",
                "HOME": str(self.project_root), "PATH_INFO": parts.path,
@@ -1091,6 +1217,8 @@ class GitHTTP:
         # lint-raw-git: test-only smart-HTTP server; the CGI is the remote, not the code under test.
         proc = subprocess.run(["git", "http-backend"], input=body, env=env, capture_output=True,
                               check=False)
+        if self._push_applied(service, handler, fault):
+            return
         head, _, payload = proc.stdout.partition(b"\r\n\r\n")
         status, headers = 200, []
         for line in head.split(b"\r\n"):
@@ -1107,6 +1235,45 @@ class GitHTTP:
         handler.send_header("Content-Length", str(len(payload)))
         handler.end_headers()
         handler.wfile.write(payload)
+
+    def fail_push(self, how, *, times=1, after=0):
+        """#1618 K10: end the next `times` pushes (after letting `after` through) as `how` says. `"lose_reply"`: the server
+        APPLIES the push (the ref moves on the remote) and drops the connection, so the client sees a failure for a
+        push that landed. `"refuse"`: the server answers 403 and applies nothing."""
+        assert how in ("lose_reply", "refuse"), how
+        with self._lock:
+            self._push_faults.append({"how": how, "left": times, "skip": after})
+
+    def _push_fault(self, service, handler):
+        """The fault to apply to this request, if it is a push's POST and one is scripted."""
+        if service != "git-receive-pack" or handler.command != "POST":
+            return None
+        with self._lock:
+            for fault in self._push_faults:
+                if fault["skip"] > 0:
+                    fault["skip"] -= 1
+                    return None
+                if fault["left"] > 0:
+                    fault["left"] -= 1
+                    return fault["how"]
+        return None
+
+    def _refuse_push(self, handler):
+        with self._lock:
+            self.pushes.append("refused")
+        handler.send_response(403)
+        handler.send_header("Content-Length", "0")
+        handler.end_headers()
+
+    def _push_applied(self, service, handler, fault):
+        """Record a push the backend applied; True when its reply must be dropped (`lose_reply`)."""
+        if service == "git-receive-pack" and handler.command == "POST":
+            with self._lock:
+                self.pushes.append("landed-reply-lost" if fault == "lose_reply" else "landed")
+        if fault == "lose_reply":
+            handler.close_connection = True
+            return True
+        return False
 
     def rearm(self):
         """Let `on_service` fire again, once per service, from the next request on."""
@@ -1161,35 +1328,27 @@ def http_repo(tmp_path, monkeypatch):
     the credential entry names that remote. Git's per-user and system configuration point at
     empty files under the test's folder (`git_config_home`), so a wrong implementation can
     reach only what a test installs there, never a developer's own credential helper.
-    Yields `(tenant, bare remote, credentials, server)`."""
+    Yields a `BuiltTenant` `(tenant, bare remote, credentials, server)` (seeded by `_seed_repository`)."""
     for name, value in git_config_home(tmp_path).create().env().items():
         monkeypatch.setenv(name, value)
     monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
     root = tmp_path / "data"
-    tenants.place_tenant(root, fixture_uuid("tenant:blue"))
-    tenant = tenants.accept(root, fixture_uuid("tenant:blue"))
-    clone = tenant.knowledge
-    (tenant.agent / "lessons").mkdir()
-    (tenant.agent / "lessons" / "seed.md").write_text("seed\n", encoding="utf-8")
-    git(clone, "init", "-b", "main")
-    git(clone, "config", "user.name", "P3")
-    git(clone, "config", "user.email", "p3@test.invalid")
-    git(clone, "add", ".")
-    git(clone, "commit", "-m", "seed")
     served = tmp_path / "served"
-    remote = served / "tenants" / "blue.git"
-    remote.parent.mkdir(parents=True)
-    git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, clone, remote)
+    tenant, remote, checkout, seed = _seed_repository(tmp_path, root, fixture_uuid("tenant:blue"), object_format="sha1",
+                                                      repo_name="blue", served=served)
     server = GitHTTP(served)
     try:
-        git(clone, "remote", "add", "origin", f"{server.url}/tenants/blue.git")
-        git(clone, "fetch", remote, "+refs/heads/*:refs/remotes/origin/*")
+        origin = f"{server.url}/tenants/blue.git"
+        git(checkout, "remote", "add", "origin", origin)
+        git(checkout, "fetch", remote, "+refs/heads/*:refs/remotes/origin/*")
         credentials = location_path(tenant.tenant_root) / "forge" / "git-credentials"
         credentials.parent.mkdir()
         credentials.write_text(f"http://bot:ignored-legacy-secret@127.0.0.1:{server.server.server_address[1]}\n",
                                encoding="utf-8")
         credentials.chmod(0o600)
-        yield tenant, remote, credentials, server
+        built = BuiltTenant((tenant, remote, credentials, server))
+        built.origin, built.seed, built.checkout, built.server = origin, seed, checkout, server
+        yield built
     finally:
         server.close()
 
@@ -1205,19 +1364,19 @@ _FRESH_SCRIPT = """
 import json, sys
 from pathlib import Path
 from defender.tests.support.tenancy import _tenants1106 as tenants
-from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, LANES, ForgeHTTP, configured_origin, target, fixture_identity
-root, tenant_id, remote, batch_id = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, LANES, ForgeHTTP, deliver, target, fixture_identity
+root, tenant_id, remote, batch_id, origin = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 mod = target()
 tenant = tenants.accept(root, tenant_id)
-http = ForgeHTTP(remote=remote, origin=configured_origin(tenant.knowledge))
+http = ForgeHTTP(remote=remote, origin=origin)
 out = {}
 try:
-    d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
+    d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=http.client, identity=fixture_identity(str(tenant.id)), origin=origin)
     batch = d.start_batch(batch_id, lanes=LANES)
     (batch.draft_root / "agent/lessons" / (batch_id + ".md")).write_bytes(b"a lesson\\n")
     out["commit"] = batch.commit(batch.change_set(), "claim")
     out["branch"] = batch.branch
-    result = d.finish(batch)
+    result = deliver(d, batch)
     status = result.status
     out["status"] = status if isinstance(status, str) else repr(status)
     out["url"] = getattr(result, "url", None)
@@ -1247,60 +1406,26 @@ def fresh_process_env(tenant, scratch: Path):
 def in_a_fresh_process_finishing(repo, batch_id, *, python_prelude=""):
     """A batch started, committed with one lesson and finished on a `TenantDelivery` opened for `repo`'s tenant in
     another, freshly started process with its own forge double (backed by the same remote, as the real forge is) and
-    a fresh environment: nothing of this process's objects, memory or environment reaches it. Returns
+    a fresh environment: nothing of this process's objects, memory or environment reaches it. The origin it is handed
+    is `repo.origin` (#1618 K8: the tenant has no clone whose configured origin it could read). Returns
     `{"status", "url", "commit", "branch"}` or `{"refused": ...}`, with `"creates"`, the PR requests it sent."""
     tenant, remote = repo[0], repo[1]
     scratch = Path(location_path(tenant.data_root)).parent / f"later-{len(list(Path(location_path(tenant.data_root)).parent.glob('later-*')))}"
     proc = subprocess.run([sys.executable, "-c", python_prelude + "\n" + _FRESH_SCRIPT, str(location_path(tenant.data_root)), str(tenant.id),
-                           str(remote), batch_id], capture_output=True, text=True,
+                           str(remote), batch_id, str(repo.origin)], capture_output=True, text=True,
                           env=fresh_process_env(tenant, scratch), timeout=300, check=False)
     assert proc.returncode == 0, f"the fresh process crashed: {proc.stderr}"
     return json.loads(proc.stdout.strip().splitlines()[-1])
 
 
 # ---------------------------------------------------------------------------------------
-# The per-tenant lock, observed from another process
+# The per-tenant lock (retired, #1618 K1)
 # ---------------------------------------------------------------------------------------
 
-_LOCK_SCRIPT = """
-import json, sys, time
-from pathlib import Path
-from defender.tests.support.tenancy import _tenants1106 as tenants
-from defender.tests.tenancy.tenant_1108_delivery._support import target
-root, tenant_id, mode = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
-mod = target()
-tenant = tenants.accept(root, tenant_id)
-started = time.monotonic()
-try:
-    with mod.tenant_lock(tenant):
-        if mode == "hold":
-            Path(sys.argv[4]).write_text("held", encoding="utf-8")
-            release = Path(sys.argv[5])
-            while not release.exists() and time.monotonic() - started < 120:
-                time.sleep(0.02)
-except mod.LockBusy as busy:
-    print(json.dumps({"busy": str(busy), "seconds": time.monotonic() - started}))
-else:
-    print(json.dumps({"free": True, "seconds": time.monotonic() - started}))
-"""
-
-
-def _lock_argv(tenant, mode, *extra):
-    return [sys.executable, "-c", _LOCK_SCRIPT, str(location_path(tenant.data_root)), str(tenant.id), mode,
-            *map(str, extra)]
-
-
-def _probe_env():
-    return {**os.environ, "PYTHONPATH": str(IMPORT_ROOT)}
-
-
 def lock_probe(tenant):
-    """Try the tenant's lock from another process (a lock's same-process semantics differ by
-    primitive) and give it straight back: `{"free": True}` or `{"busy": <refusal>}`."""
-    proc = subprocess.run(_lock_argv(tenant, "try"), capture_output=True, text=True,
-                          env=_probe_env(), timeout=120, check=False)
-    assert proc.returncode == 0, f"lock probe crashed: {proc.stderr}"
-    return json.loads(proc.stdout.strip().splitlines()[-1])
+    """Retired with the per-tenant lock (#1618 design r5, K1: no knowledge lock remains; `test_no_lock_1618`): the name
+    is kept for its importers, and a call fails naming why rather than probing a lock that no longer exists."""
+    pytest.fail(f"#1618 K1: there is no per-tenant knowledge lock to probe for {tenant.id}")
 
 
 _GIT_OPTION_VALUES = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
@@ -1362,35 +1487,18 @@ class LockAudit:
 
 
 class LockHolder:
-    """Holds the tenant's lock in another process, through the production lock, until exit."""
+    """Retired with the per-tenant lock (#1618 design r5, K1: no knowledge lock remains; `test_no_lock_1618`): kept for
+    its importers; entering it fails naming why rather than holding a lock that no longer exists."""
 
     def __init__(self, tenant, scratch: Path):
         self.tenant = tenant
-        scratch.mkdir(parents=True, exist_ok=True)
-        self.ready, self.release = scratch / "held", scratch / "release"
         self.proc = None
 
     def __enter__(self):
-        self.proc = subprocess.Popen(_lock_argv(self.tenant, "hold", self.ready, self.release),
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                     env=_probe_env())
-        deadline = time.monotonic() + 60
-        while not self.ready.exists():
-            if self.proc.poll() is not None or time.monotonic() > deadline:
-                out, err = self.proc.communicate(timeout=10)
-                raise AssertionError(f"the lock holder never held the lock: {out} {err}")
-            time.sleep(0.02)
-        return self
-
-    @property
-    def pid(self):
-        return self.proc.pid
+        pytest.fail(f"#1618 K1: there is no per-tenant knowledge lock to hold for {self.tenant.id}")
 
     def __exit__(self, *exc):
-        self.release.write_text("go", encoding="utf-8")
-        out, err = self.proc.communicate(timeout=60)
-        assert self.proc.returncode == 0, err
-        assert json.loads(out.strip().splitlines()[-1]).get("free") is True, out
+        return False
 
 
 def bounded(fn, *, seconds=30.0, fifos=()):
@@ -1420,16 +1528,19 @@ def bounded(fn, *, seconds=30.0, fifos=()):
 
 @pytest.fixture
 def rewritten(http_repo, tmp_path):
-    """The clone's `url.<other>.insteadOf` sends origin's git traffic to another smart-HTTP
-    server (another port), so the one helper, scoped to the parsed forge address, has no
-    answer and git reaches its prompt path. Yields that other server."""
+    """A `url.<other>.insteadOf` sends origin's git traffic to another smart-HTTP server (another port), so the one
+    helper, scoped to the parsed forge address, has no answer and git reaches its prompt path. Yields that other
+    server. #1618 K8: there is no host clone to configure, and a delivery's private repository is made at its open,
+    after this fixture: the rewrite is the isolated per-user configuration's (`git_config_home`), which every git the
+    product runs could see."""
     tenant, remote, _credentials, server = http_repo
     other_root = tmp_path / "other-served"
     (other_root / "tenants").mkdir(parents=True)
     git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, remote, other_root / "tenants" / "blue.git")
     other = GitHTTP(other_root)
     try:
-        git(tenant.knowledge, "config", f"url.{other.url}/.insteadOf", f"{server.url}/")
+        git(tmp_path, "config", "--file", str(git_config_home(tmp_path).global_config),
+            f"url.{other.url}/.insteadOf", f"{server.url}/")
         yield other
     finally:
         other.close()

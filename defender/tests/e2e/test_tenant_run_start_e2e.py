@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from defender.tests.support.tenancy import _tenants1106 as T
+from defender.tests.support.tenancy._fetch_standin_1618 import halves_at, in_process_fetch
 
 pytestmark = pytest.mark.e2e
 
@@ -68,7 +69,7 @@ def world(tmp_path, monkeypatch):
 
     def publish_tenant(tenant_id: str, files: dict[str, str | None]) -> Any:
         """The tenant published for real with `files` (repo-relative, `None` deletes) over the
-        committed fixture, so the run has an export and its own refusal fires (not "no `current`")."""
+        committed fixture on its Forgejo `main`, so the run fetches a copy and its own refusal fires."""
         from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
 
         published[tenant_id] = stack.enter_context(published_tenant(
@@ -107,10 +108,9 @@ def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
     text = ""
     try:
         own = world["published"].get(world["chosen"]["tenant"])
-        # A published tenant's launch reports its export fresh; a tenant refused at acceptance
-        # never reaches the publish.
-        seams = ({} if own is None
-                 else {"publish": lambda *a, own=own, **k: f"fresh {own.commit}"})
+        # Every launch fetches the tenant's Forgejo `main` through its one seam (#1618 flow 2): a published tenant's own
+        # remote, else the data root's served remote, which holds only what the scenario placed (nothing, for a ghost).
+        seams = {"fetch": in_process_fetch(own.remote if own is not None else None)}
         # #1214 Flow 4: the tenant is active in the directory whether or not its folder is placed.
         directory = (own.directory if own is not None
                      else tenant_directory(world["root"], world["chosen"]["tenant"]))
@@ -132,26 +132,30 @@ def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
     return text, start
 
 
-def test_a_run_for_a_tenant_with_no_folder_refuses_before_the_box_naming_it(world, capsys):
+def test_a_run_for_a_tenant_whose_forgejo_serves_no_knowledge_refuses_before_the_box_naming_it(world, capsys):
+    """A tenant active in the directory whose Forgejo holds no knowledge (another tenant's is placed) refuses before the
+    box, its refusal naming the tenant and that its knowledge could not be fetched. (#1618 K8: a tenant has no knowledge
+    folder for acceptance to find missing, so the refusal is the fetch's; was `..._with_no_folder_...`, which named
+    `<root>/<T>`.)"""
     T.place_tenant(world["root"], fixture_uuid("tenant:acme"))
     world["runs_base"](fixture_uuid("tenant:ghost"))
     text, _ = _refusal(world, capsys)
-    assert _names(text, world["root"] / fixture_uuid("tenant:ghost")), text
+    assert f"tenant {fixture_uuid('tenant:ghost')}'s knowledge could not be fetched" in text, text
+    assert "did not serve main" in text, text
 
 
 #: An operator edits the tenant repo's `settings/...`, so a refusal names it repo-relative; the
-#: clone, export and run-copy spellings of the path all contain it.
+#: run-copy spelling of the path contains it.
 def _settings_named(text: str, rel: str) -> bool:
     return f"settings/{rel}" in text
 
 
 def _published_without(world: dict, tenant_id: str, rel: str) -> Any:
-    """A published tenant whose `current` export lacks `settings/<rel>`: published whole (its
+    """A published tenant whose `main` lacks `settings/<rel>`: published whole (its
     setup accepts only a complete tenant), then a merged commit deleting the file, published —
-    the state an operator reaches by merging the deletion."""
+    the state an operator reaches by merging the deletion (#1618: `main` is what a run fetches; nothing publishes)."""
     t = world["publish_tenant"](tenant_id, {})
     t.merge({f"settings/{rel}": None}, message=f"delete settings/{rel}")
-    t.publish()
     return t
 
 
@@ -172,16 +176,19 @@ def test_a_tenant_with_no_case_record_is_not_refused_and_reaches_the_box(world):
     with pytest.raises(_StartBoxReached):
         _run().main(argv, directory=directory, lifecycle=_lifecycle(start),
                     visualize=lambda p, **kw: None, preflight=lambda m: 0,
-                    publish=lambda *a, own=own, **k: f"fresh {own.commit}")
+                    fetch=in_process_fetch(own.remote))
     assert len(start.calls) == 1, start.calls
 
 
 def test_a_tenant_missing_its_grant_table_refuses_before_the_box(world, capsys):
-    """The table is the settings half's only file (#1503), so an export without it has no
-    `settings/` at all (git keeps no empty folder): the refusal names the missing half."""
+    """The table is the settings half's only file (#1503), so a commit without it has no
+    `settings/` at all (git keeps no empty folder): the run's copy is refused before the box, naming the missing table
+    (#1618 K8: the copy is held to `check_run_settings`; the "no settings/ half" wording was the retired clone's
+    acceptance, now only `check_knowledge_folder`'s)."""
     _published_without(world, fixture_uuid("tenant:acme"), "verb-grants.yaml")
     text, _ = _refusal(world, capsys)
-    assert "no settings/ half" in text, text
+    assert "a required settings file is missing" in text, text
+    assert _settings_named(text, "verb-grants.yaml"), text
 
 
 def test_a_tenant_copied_from_the_template_refuses_at_start_naming_its_table(world, capsys):
@@ -202,11 +209,9 @@ dispositions:
 
 
 def test_a_tenant_whose_gather_grant_is_health_checks_alone_refuses_at_start(world, capsys):
-    from defender.tests.tenancy.tenant_1108_p4._support import export_dir
-
     t = world["publish_tenant"](fixture_uuid("tenant:probe"),
                                 {"settings/verb-grants.yaml": TABLE_HEALTH_CHECK_ONLY})
-    grants = T.run_grants(export_dir(t.tenant, t.commit) / "settings")
+    grants = T.run_grants(halves_at(t.remote, t.commit, world["root"].parent / "probe-copy") / "settings")
     assert {(s, v) for s, v, _ in grants.gather.entries} == {("cmdb", "health-check")}, \
         "the fixture must grant gather a health check and nothing else"
     text, _ = _refusal(world, capsys)
@@ -234,7 +239,7 @@ def _grant_of(call: tuple[tuple, dict]) -> Any:
 
 def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tenant(world, capsys):
     """Each run reads its own RUN COPY (`<T>/run-knowledge/<run_id>/`): the box gets its `agent/`,
-    the driver its `settings/`; never the clone, the other tenant, or the
+    the driver its `settings/`; never the seed checkout, the other tenant, or the
     checkout's committed copy."""
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
     from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
@@ -265,7 +270,7 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
                 argv, directory=own.directory,
                 lifecycle=_lifecycle(start, investigate=investigate), visualize=lambda p, **kw: None,
                 preflight=lambda m: 0,
-                publish=lambda *a, own=own, **k: B.fresh(own.commit))
+                fetch=in_process_fetch(own.remote))
             assert rc == 0, capsys.readouterr().err
             assert len(driven) == 1
             copy_root = B.run_copies(own) / Path(driven[0]["run"].run_dir).name
@@ -282,7 +287,7 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
             handed = [(a, {k: v for k, v in kw.items() if k != "data_root"}) for a, kw in start.calls]
             assert T.reaches(handed, copy_root / "stage" / "agent"), start.calls
             assert not T.exposes(handed, own_settings), start.calls
-            assert not T.exposes(handed, B.clone_dir(own)), start.calls
+            assert not T.exposes(handed, own.checkout), start.calls  # the tenant's other copy (#1618: no host clone)
             assert not T.reaches(start.calls, root / other)
             assert not T.exposes(handed, root / other), start.calls
 
@@ -295,6 +300,6 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
             for seam, payload in (("driver", driven[0]),):
                 assert payload, seam
                 assert T.reaches(payload, own_settings), f"{seam} was not handed {own_settings}"
-                assert not T.reaches(payload, B.clone_dir(own) / "settings"), f"{seam} got the clone's"
+                assert not T.reaches(payload, own.checkout / "settings"), f"{seam} got the seed checkout's"
                 assert not T.reaches(payload, root / other), f"{seam} was handed {other}'s folder"
                 assert not T.reaches(payload, T.FIXTURE_SETTINGS), f"{seam} got the checkout's"

@@ -562,7 +562,7 @@ def author_drain(  # noqa: PLR0913 — the stage's seams: the author step, the f
     reconcile every batch in review (every lane, D9; the feedback lane's registry batches too, A4), recover a
     lapsed batch of the lane, then claim and
     author (`store_tick.Tick`). `container`, the post-step's job container (#1170,
-    `learning.branch.container.JobContainer`): the tenant records, the forge credential, the batch's publish, draft
+    `learning.branch.container.JobContainer`): the tenant records, the forge credential, the batch's draft
     and box are then the per-job host helper's, asked over the job socket (no forge login here, O3, O4, C23).
     `directory` is the tenant records (else the ones `DEFENDER_DATABASE_DSN`
     names); `client` the forge's HTTP client; `identity` the tenant's delivery credential, else minted

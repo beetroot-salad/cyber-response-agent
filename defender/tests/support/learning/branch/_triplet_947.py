@@ -467,9 +467,15 @@ def current_tenant() -> Any:
     an accepted `Tenant`; set up from the committed fixture when the root has none yet."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
+    from defender.tests.support.tenancy._fetch_standin_1618 import served_remote
+
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
-    existing = sorted(p.name for p in root.iterdir()
-                      if (p / "knowledge").is_dir()) if root.is_dir() else []
+    # Set up: its knowledge placed at `<T>/knowledge` (taken first, as before), else (#1618 K8: knowledge lives only in
+    # Forgejo; `_spec1224.Estate.place`) its folder beside a seeded served remote.
+    placed = sorted(p.name for p in root.iterdir() if (p / "knowledge").is_dir()) if root.is_dir() else []
+    seeded = sorted(p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")
+                    and (served_remote(root, p.name) / "HEAD").is_file()) if root.is_dir() else []
+    existing = placed or seeded
     return set_up_tenant(root, existing[0] if existing else SOURCE_TENANT)
 
 
@@ -662,21 +668,30 @@ _DEFAULT_KNOWLEDGE: Any = object()
 
 
 def scene_knowledge(tenant_id: str | None = None) -> str:
-    """The knowledge commit a DEFAULT stamp names: what `exports/current` names for `tenant_id`,
-    or for the data root's one published tenant, so stamps name a commit the clone really holds.
-    Otherwise the placeholder `KNOWLEDGE_SHA`."""
+    """The knowledge commit a DEFAULT stamp names: `main` of `tenant_id`'s Forgejo repository (the data root's served
+    remote, `_fetch_standin_1618.served_remote`; #1618), or of the data root's one seeded tenant, so stamps name a
+    commit Forgejo really serves. Otherwise the placeholder `KNOWLEDGE_SHA`."""
+    import subprocess
+
+    from defender.tests.support.tenancy._fetch_standin_1618 import forge_scratch, served_remote
+
     raw = os.environ.get("DEFENDER_DATA_ROOT")
     if not raw:
         return KNOWLEDGE_SHA
     root = Path(raw)
     if tenant_id is None:
-        published = sorted(p.name for p in root.iterdir()
-                           if (p / "exports" / "current").is_file()) if root.is_dir() else []
-        if len(published) != 1:
+        remotes = forge_scratch(root) / "tenants"
+        seeded = sorted(p.name.removesuffix(".git") for p in remotes.iterdir()
+                        if (p / "HEAD").is_file()) if remotes.is_dir() else []
+        if len(seeded) != 1:
             return KNOWLEDGE_SHA
-        tenant_id = published[0]
-    pointer = root / tenant_id / "exports" / "current"
-    return pointer.read_text(encoding="utf-8").strip() if pointer.is_file() else KNOWLEDGE_SHA
+        tenant_id = seeded[0]
+    remote = served_remote(root, tenant_id)
+    if not (remote / "HEAD").is_file():
+        return KNOWLEDGE_SHA
+    done = subprocess.run(["git", "rev-parse", "refs/heads/main"], cwd=remote,  # noqa: S603, S607
+                          capture_output=True, text=True, check=False)
+    return done.stdout.strip() if done.returncode == 0 and done.stdout.strip() else KNOWLEDGE_SHA
 
 
 def provenance_record(*, commit: str | None = "deadbee", dirty: bool | None = False,
@@ -793,9 +808,15 @@ def archived_world(episode_dir: Path, label: str, *, disposition: str = "malicio
     (w / "gather_raw").mkdir(parents=True, exist_ok=True)
     (w / "investigation.md").write_text(f"# world {label}\n", encoding="utf-8")
     (w / "executed_queries.jsonl").write_text("", encoding="utf-8")
-    (w / "provenance.json").write_text(
-        json.dumps(provenance_record(commit=commit, dirty=dirty, unavailable=unavailable)),
-        encoding="utf-8")
+    # The knowledge commit a world's stamp names is its OWN tenant's `main` (`<root>/<T>/episodes/<id>`): the judge reads a
+    # world's bodies from a copy of that tenant's commit (#1618 K5, `_judge_921.grade_at`'s `fetched_copy` of the episode's
+    # tenant), so a stamp naming another tenant's `main` (the data root's one seeded tenant) is a pin Forgejo does not
+    # serve for it. An episode outside a tenant's `episodes/` keeps the default.
+    episode_dir = Path(episode_dir)
+    owner = episode_dir.parent.parent.name if episode_dir.parent.name == "episodes" else None
+    stamp = provenance_record(commit=commit, dirty=dirty, unavailable=unavailable,
+                              **({"knowledge": {"commit": scene_knowledge(owner)}} if owner else {}))
+    (w / "provenance.json").write_text(json.dumps(stamp), encoding="utf-8")
     (w / "scrub_verdict.json").write_text(json.dumps({"ran": scrub_ran}), encoding="utf-8")
     return w
 

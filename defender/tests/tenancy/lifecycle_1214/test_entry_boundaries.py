@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import inspect
 import io
 import logging
 import os
@@ -21,18 +22,58 @@ import pytest
 
 from defender.tests.support.tenancy import _host1214 as H
 from defender.tests.support.tenancy._active1214 import active_directory
+from defender.tests.tenancy.lifecycle_1214._served_ret1618 import served_fetch
 from defender.tests.tenancy.lifecycle_1214.test_host_entry import (
     NOT_A_REFUSAL_OF_STATE,
     TENANT,
+    StoreReached,
     _Calls,
     _Logged,
-    _the_learning_store_is_reached_not_used,  # noqa: F401 — autouse fixture
     _no_state_refusal,
     _production,
     _reaching,
     _tenant_placed,  # noqa: F401 — autouse fixture
     place_complete,
 )
+
+#: Each time an admitted entry first asks the stand-in learning store for anything: `(what it asked, recorded as this
+#: process under the tenant's host lock, the lock held)`. #1618 (K8): the drain and the revert read nothing of the
+#: tenant's folder any more (no clone; their private repository is under `.repo-scratch/`), so reaching their store is
+#: where they first work on the tenant, and the hold is sampled there.
+STORE_REACHES: list[tuple[str, bool, bool]] = []
+
+
+@pytest.fixture(autouse=True)
+def _the_learning_store_is_reached_not_used(monkeypatch, data_root) -> None:
+    """`test_host_entry`'s stand-in store (its first use raises `StoreReached`), which also records each reach and the
+    hold it was reached under (`STORE_REACHES`)."""
+    from defender.learning.core import store_tick
+
+    STORE_REACHES.clear()
+
+    class Unreached:
+        def __getattr__(self, name: str) -> Any:
+            STORE_REACHES.append((name, H.recorded(data_root, TENANT) == H.this_process(), H.lock_held(data_root, TENANT)))
+            raise StoreReached(f"the learning store was reached ({name}); this case stands none up")
+
+    @contextlib.contextmanager
+    def opened_store():
+        yield Unreached()
+
+    monkeypatch.setattr(store_tick, "opened_store", opened_store)  # lint-monkeypatch: ok — as `test_host_entry`'s fixture: the host entry and the drain open their store through this module-level door; no seam carries a stand-in store to it
+
+
+@pytest.fixture(autouse=True)
+def _served(tmp_path):
+    """#1618 (flow 4): `TENANT`'s knowledge on a served remote, read by an admitted entry through the real fetch child
+    (`fetch=`), never from its folder."""
+    with served_fetch(tmp_path / "served", TENANT) as fetch:
+        _SERVED[:] = [fetch]
+        yield fetch
+    _SERVED.clear()
+
+
+_SERVED: list[Any] = []
 
 
 @pytest.fixture(autouse=True)
@@ -98,7 +139,7 @@ def _entries(tmp_path: Path) -> dict[str, Entry]:
     def run_seams() -> dict[str, Any]:
         calls = _Calls()
         return dict(preflight=calls.hook("preflight", 0), visualize=calls.hook("visualize", None),
-                    enqueue=calls.hook("enqueue", False), publish=calls.hook("publish", ""),
+                    enqueue=calls.hook("enqueue", False), fetch=calls.hook("fetch", ""),
                     lifecycle=calls.hook("lifecycle", {"output": "", "requests": 0, "truncated_by": None}))
 
     entries: dict[str, Entry] = {
@@ -114,7 +155,10 @@ def _entries(tmp_path: Path) -> dict[str, Entry]:
             preflight=_Calls().hook("preflight", 0), render_page=_Calls().hook("render_page", None))),
     }
     for name, (_module, argv) in H.COMMANDS.items():
-        entries[name] = lambda d, name=name, argv=argv: _invoke(lambda: H.command_main(name)(argv(TENANT), directory=d))
+        # #1618 (flow 4): a command that reads knowledge reads a fetched copy; its `fetch=` is the served remote's
+        seams = {"fetch": _SERVED[0]} if "fetch" in inspect.signature(H.command_main(name)).parameters else {}
+        entries[name] = lambda d, name=name, argv=argv, seams=seams: _invoke(
+            lambda: H.command_main(name)(argv(TENANT), directory=d, **seams))
     return entries
 
 
@@ -169,9 +213,13 @@ def test_an_entry_point_refuses_a_tenant_that_may_not_be_worked_for_before_touch
     with H.watch_folder(data_root, TENANT) as control_touches:
         admitted = entry(active)
     assert _no_state_refusal(admitted.everything), f"control: an active tenant was refused: {admitted.everything}"
-    assert control_touches, "control: an admitted entry reads the tenant's folder, so the watch can see a read"
+    # #1618 (K8): an entry that reads nothing of the folder (the drain, the revert) shows it got to work by reaching its store
+    assert control_touches or STORE_REACHES, \
+        "control: an admitted entry reads the tenant's folder or its store, so the watch can see the work"
+    STORE_REACHES.clear()
     with H.watch_folder(data_root, TENANT) as touches, H.acceptance_calls() as calls:
         refused = entry(directory)
+    assert STORE_REACHES == [], f"the store was reached before the state was judged: {STORE_REACHES}"
     assert refused.raised is None, f"a refusal must exit or return, not raise: {refused.everything}"
     assert refused.exited_non_zero, f"a refusal must exit non-zero, exited {refused.code!r}: {refused.everything}"
     assert TENANT in refused.operator_text, f"the tenant is not on the error stream: {refused.everything}"
@@ -202,9 +250,11 @@ def test_an_entry_point_stays_recorded_and_locked_for_every_read_of_the_tenants_
     with H.watch_folder(data_root, TENANT) as touches:
         outcome = _entries(tmp_path)[name](directory)
     assert _no_state_refusal(outcome.everything), f"control: {outcome.everything}"
-    assert touches, "control: the entry read the tenant's folder"
-    unheld = [(event, path) for event, path, held in touches if held != (True, True)]
-    assert unheld == [], f"the entry read the tenant's folder without holding its lock: {unheld[:3]}"
+    # #1618 (K8): the drain and the revert read nothing of the folder; their store reach is where they work on the tenant
+    reads = [(event, path, held) for event, path, held in touches] + [("store", what, (rec, lock)) for what, rec, lock in STORE_REACHES]
+    assert reads, "control: the entry read the tenant's folder or reached its store"
+    unheld = [(event, path) for event, path, held in reads if held != (True, True)]
+    assert unheld == [], f"the entry read the tenant's folder or store without holding its lock: {unheld[:3]}"
     assert H.recorded(data_root, TENANT) == []
     assert H.exclusive_free(data_root, TENANT)
 
@@ -242,7 +292,10 @@ def test_the_folder_watch_sees_every_kind_of_touch_by_path_or_by_descriptor_and_
 
 
 #: A fault of the tenant's folder, by name: what it takes away (each leaves the rest of the folder as prepare made it).
-FAULTS = ("settings half missing", "agent half missing", "folder not a directory", "folder absent")
+#: #1618 (K8, "`Tenant` has no knowledge path"): "settings half missing" and "agent half missing" are retired with the
+#: tenant's knowledge folder: acceptance judges `<T>` itself, and a missing half of a fetched copy is the fetch child's
+#: validation (K6, `knowledge_1618/test_fetch_child_1618.py::test_a11_*`).
+FAULTS = ("folder not a directory", "folder absent")
 
 
 def _faulted(data_root: Path, fault: str) -> None:
@@ -252,14 +305,9 @@ def _faulted(data_root: Path, fault: str) -> None:
         folder.unlink()
     shutil.rmtree(folder, ignore_errors=True)
     place_complete(data_root, TENANT)
-    if fault == "settings half missing":
-        shutil.rmtree(folder / "knowledge" / "settings")
-    elif fault == "agent half missing":
-        shutil.rmtree(folder / "knowledge" / "agent")
-    else:
-        shutil.rmtree(folder)
-        if fault == "folder not a directory":
-            folder.write_text("not a folder\n", encoding="utf-8")
+    shutil.rmtree(folder)
+    if fault == "folder not a directory":
+        folder.write_text("not a folder\n", encoding="utf-8")
 
 
 @pytest.mark.parametrize("fault", FAULTS)

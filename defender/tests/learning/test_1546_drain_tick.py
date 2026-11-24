@@ -1,8 +1,10 @@
-"""#1546 (design r8, D7) the drain tick over its input set, three items in ONE tick: the run in the set (pulled by the helper
-into the drain root's `<T>/runs/<run id>`, seen through the `runs=` seam) is served; a run that is expired or not `clean` ends `dead("artifact-missing")`; a
+"""#1546 (design r8, D7) the drain tick over its input set, three items in ONE tick: the run in the set (pulled and unpacked by
+the drain container into the drain root's `<T>/runs/<run id>`, r10 (c) H3, seen through the `runs=` seam) is served; a run that is expired or not `clean` ends `dead("artifact-missing")`; a
 `clean` run outside the set (its request filed after the claim fixed the set) WAITS though it is absent from the root, as the
 dead ones are. Today every absent run is dead, so only the third separates design from today. Nothing is written into a
-source run. Obligations: D7, PR6, A-O6."""
+source run. Obligations: D7, PR6, A-O6. The pull and unpack that leave the run in the root (served by `evidence.pull`,
+unpacked by the container, never the helper) are `jobs/test_1546_r10_container.py`'s; here the root is laid out as that
+unpack leaves it."""
 from __future__ import annotations
 
 import asyncio
@@ -86,7 +88,7 @@ def test_a_drain_tick_serves_the_run_in_its_set_kills_the_expired_and_tainted_an
 
     host_runs = Path(location_path(world.t.tenant.tenant_root)) / "runs"
     root = world.scratch / "drain-root"
-    pulled = make_run_dir(root / tenant / "runs", name=in_set, disposition="benign")  # as the helper unpacks the pulled bundle
+    pulled = make_run_dir(root / tenant / "runs", name=in_set, disposition="benign")  # as the container unpacks the pulled bundle
     assert not (host_runs / in_set).exists(), "premise: the host tenant folder does not hold the run; only the drain root does"
     inputs_dir = world.scratch / "drain-inputs"  # the claim's inputs folder (not the set); the set is what the root holds
     inputs_dir.mkdir()

@@ -35,6 +35,12 @@ def _tenant(tmp_path: Path, table: str, marker: str):
     return T.accept(root, T.PLAYGROUND_ID)
 
 
+def _placed_settings(tenant) -> Path:
+    """The settings half this test placed for `tenant` (#1618 K8: a `Tenant` names no knowledge path), the one the
+    harness hands the driver for a named tenant."""
+    return (Path(location_path(tenant.tenant_root)) / "knowledge" / "settings").resolve()
+
+
 def _run(tmp_path: Path, *, tenant, verbs, system: str, gather_turns: list[Turn],
          run_id: str) -> tuple[Path, ReplayFn, ReplayFn]:
     """(run dir, MAIN's replay, gather's replay) — each replay's `.seen` is what that model
@@ -84,7 +90,7 @@ def test_a_query_verb_is_handed_the_runs_tenant_record(tmp_path):
              DONE,
          ])
     call = rec.only()
-    assert Path(call.ctx.tenant.settings).resolve() == tenant.settings
+    assert Path(call.ctx.tenant.settings).resolve() == _placed_settings(tenant)
     assert Path(call.ctx.tenant.settings).resolve() != T.FIXTURE_SETTINGS.resolve()
     # Read THROUGH what the verb was handed: the adapter's config is the run tenant's.
     transport = T.mod("kit.transport")
@@ -97,7 +103,7 @@ def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_hos
     """The settings half is host-only: MAIN is told why cmdb is down by its record's locator (`system cmdb settings`,
     #1366 DC6: not a file), and no model view or run-dir table holds the data root."""
     tenant = _tenant(tmp_path, T.TABLE_A, "fault")
-    (tenant.settings / "systems" / "cmdb" / "config.env").unlink()
+    (_placed_settings(tenant) / "systems" / "cmdb" / "config.env").unlink()
     transport = T.mod("kit.transport")
     rec = VerbRecorder()
 

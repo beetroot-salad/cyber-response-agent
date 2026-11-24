@@ -15,6 +15,7 @@ import sys
 import textwrap
 import time
 from dataclasses import dataclass, field
+from unittest import mock
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any
@@ -104,6 +105,10 @@ class Ran:
     src: Path
     tenant: str
     exit: object
+    #: Every request the job sent its socket, in order (`SocketStandIn.asked`: `(name, fields)`).
+    asked: list = field(default_factory=list)
+    #: The launch facts the job was handed.
+    launch: dict = field(default_factory=dict)
 
 
 def _unexpected_sigterm(_signum, _frame):
@@ -113,13 +118,14 @@ def _unexpected_sigterm(_signum, _frame):
 def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
         tmp_path, *, candidates=None, spawn=None, judge=None, questioner=None, live_tree=None,
         oracle=None, fix_source=None, job=JOB, grade=None, preflight=None, after_source=None,
-        estate=None, calls=None, source_closing=None, source_fault=None, **extra) -> Ran:
+        estate=None, calls=None, source_closing=None, source_fault=None, source_record=None, **extra) -> Ran:
     """The job entry in-process over `_spec1224`'s fixture tenant (or `estate`, made at `tmp_path`), the source run
     holding `calls` (default: `_calls()`); every paid seam a recording double. `extra` seams (the launcher's
     `proxy_url`, `issuer_transport`, `directory`, ...) are handed as given, over the defaults. `source_closing` and
-    `source_fault` plant the source's closing record and a fault on its lookup (`_triplet_947.runs_base`, #1534)."""
+    `source_fault` plant the source's closing record and a fault on its lookup (`_triplet_947.runs_base`, #1534).
+    `source_record` (text): the source's host knowledge record (`RunPaths.knowledge_source()`, beside its run folder) as
+    its pulled bundle carries it (#1546 r10 (a): the launcher ignores it)."""
     from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, handed_records
-    from defender.tests.support.jobs._socket_standin1170 import materialise as materialise_export
     from defender.tests.support.jobs._socket_standin1170 import passes as helper_passes
 
     est = estate(tmp_path) if estate is not None else S.estate(tmp_path)
@@ -142,7 +148,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     if grade is not None:
         seams["grade"] = grade
     launch: dict[str, Any] = {"kind": "learning", "job": job}
-    answers: dict[str, Any] = {"export.materialise": materialise_export(tenant)}
+    answers: dict[str, Any] = {}
     if "proxy_url" in extra:
         # The helper signs the job's passes (#1170 O5): the launcher's signing seams become the stand-in helper's.
         launch["proxy_url"], answers["pass"] = helper_passes(
@@ -150,7 +156,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
             signer=extra.pop("signer", None), transport=extra.pop("issuer_transport", None))
     seams.update(extra)
     launch["records"] = handed_records(seams["directory"], tenant)
-    sent = _1546_helper_side(tmp_path, tenant, src, launch, answers)
+    sent = _1546_helper_side(tmp_path, tenant, src, launch, answers, source_record=source_record)
 
     def progress_so_far() -> dict | None:
         return sent["progress"][-1] if sent["progress"] else None
@@ -159,46 +165,59 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     if isinstance(grading, WatchJudge):
         grading.record = progress_so_far
     # In its job container (#1170 A6): no `--parent-pid`, and a job socket answering the helper's `launch` facts and the
-    # export it materialises; the helper's own answers are `tests/jobs/test_job_helper_learning.py`'s.
+    # copies it makes (`copy.make`, #1618); the helper's own answers are `tests/jobs/test_job_helper_learning.py`'s.
     argv = ["--job", job, "--tenant", tenant, "--source", src.name]
     from defender.learning.branch import job_entry
     previous = signal.signal(signal.SIGTERM, _unexpected_sigterm)
     outcome: object = None
+    asked: list = []
     try:
-        with SocketStandIn(tenant, launch=launch, answers=answers) as helper:
+        # The job socket is named in this process's environment too, as it is in the job container's whole process: the
+        # judge's default copy path (`learning.judge.knowledge.helper_copy`, #1618 F3) reads it there, as the post-step's
+        # in-process driver does (`test_1344_post_step.py`).
+        with SocketStandIn(tenant, launch=launch, answers=answers) as helper, \
+                mock.patch.dict(os.environ, helper.environ_delta()):
             try:
                 outcome = job_entry.main(argv, environ=helper.environ(), **seams)
             except SystemExit as stop:
                 outcome = stop.code
+            asked = list(helper.asked)
     finally:
         signal.signal(signal.SIGTERM, previous)
     # #1546 (A-O2, PR2): the end and the progress are typed records on the socket, not files in the job's folder.
     return Ran(end=sent["outcome"][-1] if sent["outcome"] else None,
                progress=sent["progress"][-1] if sent["progress"] else None, questioner=asking, spawn=siblings,
                judge=grading, ep=Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "episodes" / job, src=src,
-               tenant=tenant, exit=outcome)
+               tenant=tenant, exit=outcome, asked=asked, launch=launch)
 
 
 def _1546_helper_side(tmp_path: Path, tenant: str, src: Path, launch: dict[str, Any],
-                      answers: dict[str, Any]) -> dict[str, list[Any]]:
+                      answers: dict[str, Any], *, source_record: str | None = None) -> dict[str, list[Any]]:
     """#1546: what the real helper gives a learning container besides #1170's facts (its own answers are pinned over the real
-    helper in `test_1546_job_tenant.py`): the claim's inputs folder holding the pinned export, the pin, the source as the
-    accepted bundle a pull returns (its host folder and session store then gone, A-O1), and the record verbs and pushes
-    taken and kept by name. Decides nothing the entry's tests are about."""
+    helper in `test_1546_job_tenant.py` and `test_1546_helper_folders.py`): the claim's inputs folder (r10 (a): it holds no
+    export; a sibling's run copy lands there), the pin (the claim's `knowledge_commit`, the source's stamped commit as the
+    store writes it), `copy.make` answering the pin and `main` only (r10 H1: any other `commit=` refused `not-for-kind`),
+    the source as the accepted bundle a pull returns (its host folder and session store then gone, A-O1; with
+    `source_record` its knowledge record beside the run folder), and the record verbs and pushes taken and kept by name.
+    Decides nothing the entry's tests are about."""
     import shutil
 
     from defender import job_socket
+    from defender.records import RunPaths
     from defender.tests.support.evidence._facts1546 import LAUNCH_INPUTS
     from defender.tests.support.jobs._evidence_flows1546 import pack, sha
-    from defender.tests.support.jobs._socket_standin1170 import pinned_materialise, placed_inputs
+    from defender.tests.support.jobs._socket_standin1170 import copy_make
 
     tenant_dir = src.parent.parent
     pin = json.loads((src / "provenance.json").read_text(encoding="utf-8"))["knowledge"]["commit"]
     inputs = tmp_path / ".job-inputs" / "c-1344"
     inputs.mkdir(parents=True, exist_ok=True)
-    answers["export.materialise"] = pinned_materialise(pin, placed_inputs(tenant, inputs, pin))
+    answers.setdefault("copy.make", copy_make(tenant, pin=pin))
     launch.update({LAUNCH_INPUTS: str(inputs), "knowledge_commit": pin, "export_commit": pin})
-    bundle = pack(_1546_source_files(tenant_dir, src))
+    files = _1546_source_files(tenant_dir, src)
+    if source_record is not None:
+        files[str(RunPaths(src).knowledge_source().relative_to(tenant_dir))] = source_record.encode()
+    bundle = pack(files)
     shutil.rmtree(src)
     shutil.rmtree(tenant_dir / "sessions", ignore_errors=True)
     sent: dict[str, list[Any]] = {name: [] for name in ("outcome", "progress", "arms", "arm", "put")}
@@ -922,13 +941,11 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
     from defender import job_socket
     from defender.tests.support.evidence._facts1546 import arm_page
     from defender.tests.support.jobs._evidence_flows1546 import EPISODE_PAGE, members, pack, sha
-    from defender.learning.branch import job_entry
+    from defender.cli.learning import job as learning_job_command
     L = sys.modules[__name__]
     from defender.tests.learning.branch.test_triplet_launcher import _calls
     from defender.tests.learning.oracle.live_contracts import _spec1224 as S
-    from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, handed_records
-    from defender.tests.support.jobs._socket_standin1170 import materialise as materialise_export
-    from defender.tests.support.jobs._socket_standin1170 import pinned_materialise, placed_inputs
+    from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, copy_make, handed_records
     from defender.tests.support.evidence._facts1546 import LAUNCH_INPUTS
     from defender.tests.support.learning.branch import _triplet_947 as T
     from defender.tests.support.learning.judge import _judge_921 as J
@@ -970,7 +987,19 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
     def spawned(argv, **kw):
         if "--world" in argv:
             order.append("spawn")
-        return sibling(argv, **kw)
+        code = sibling(argv, **kw)
+        if "--world" in argv and sibling.episode_dir is not None:
+            # A sibling that RAN leaves its session database where its driver opens it (`RunPaths.session_paths()` of its
+            # run, the episode's `sessions/`); `FakeSibling` writes the run folder only (repair-brief D12). The case id
+            # names the arm, so the premise below finds it by run id.
+            from defender.records import RunPaths
+
+            made = sorted((sibling.episode_dir / "runs").iterdir(), key=lambda d: d.stat().st_mtime_ns)
+            if made:
+                db = RunPaths(made[-1]).session_paths().session_db(f"case-{made[-1].name}")
+                db.parent.mkdir(parents=True, exist_ok=True)
+                db.write_bytes(b"SQLite format 3\x00 the arm's session store")
+        return code
 
     def arms(fields):
         order.append("arms")
@@ -992,21 +1021,27 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
                  judge=L.WatchJudge(default=J.as_reply_text(J.reply_doc(bucket="none", systems=[]))),
                  oracle=S.oracle(then=S.submit()).model, verifier=S.passing_verifier().model,
                  directory=est.launch_directory(tenant), spawn=spawned, candidates=L.choose(T.BRANCH_MESSAGE_ID))
-    answers = {"export.materialise": materialise_export(tenant), "evidence.pull": pull, "evidence.put": put,
+    # r10 (a), H1: the helper's `copy.make` answers the claim's pin and `main` only (its own answers:
+    # `test_1546_helper_folders.py`); the knowledge the job reads is fetched, never placed in its inputs.
+    answers = {"copy.make": copy_make(tenant, pin=pin), "evidence.pull": pull, "evidence.put": put,
                "outcome": outcome, "arms": arms, "arm": arm}
     # The launch facts the real helper hands a learning container (its own answers: `test_1546_job_tenant.py`): the claim's
-    # inputs folder, holding the pinned export the helper placed there, and the pin itself.
+    # inputs folder (empty at the launch: no export, r10 (a)) and the pin itself.
     inputs = tmp_path / ".job-inputs" / "c-1546"
     inputs.mkdir(parents=True)
-    answers["export.materialise"] = pinned_materialise(pin, placed_inputs(tenant, inputs, pin))
     launch = {"kind": "learning", "job": L.JOB, "records": handed_records(seams["directory"], tenant),
               LAUNCH_INPUTS: str(inputs), "knowledge_commit": pin, "export_commit": pin}
     previous = signal.signal(signal.SIGTERM, L._unexpected_sigterm)
     try:
-        with SocketStandIn(tenant, launch=launch, answers=answers) as helper:
+        # The job socket is named in this process's environment too, as in the container's whole process: the judge's
+        # copy of lesson bodies at the pin (`learning.judge.knowledge.helper_copy`, #1618 F3) reads it there (`run_entry`).
+        with SocketStandIn(tenant, launch=launch, answers=answers) as helper, \
+                mock.patch.dict(os.environ, helper.environ_delta()):
+            # The container's command (`python -m defender.cli.learning.job`, the helper's default), which hands the entry
+            # the episode page's renderer (repair-brief D12: `job_entry.main` alone is given none, so no page could be pushed).
             with contextlib.suppress(SystemExit):
-                job_entry.main(["--job", L.JOB, "--tenant", tenant, "--source", src.name],
-                               environ=helper.environ(), **seams)
+                learning_job_command.main(["--job", L.JOB, "--tenant", tenant, "--source", src.name],
+                                          environ=helper.environ(), **seams)
             asked = [name for name, _ in helper.asked]
     finally:
         signal.signal(signal.SIGTERM, previous)
@@ -1050,3 +1085,39 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
     assert arm_databases, "premise: the arms left session databases in the job's root"
     assert set(arm_databases) <= set(inside), f"an arm's session database is missing from the bundle: {sorted(set(arm_databases) - set(inside))}"
     assert not [n for n in inside if n.startswith(f"runs/{src.name}/")], "the bundle holds the pulled source's run folder"
+
+
+# --- #1546 r10 (a): the launcher takes the pin from the launch facts only ------------------------------------------------
+
+#: A full commit id the tenant's forge does not hold: a source record naming it, if followed, asks for a copy no helper serves.
+_OTHER_COMMIT = "e" * 40
+
+
+@pytest.mark.parametrize("record", [
+    json.dumps({"kind": "pinned", "commit": _OTHER_COMMIT, "stale_kind": None, "reason": None}) + "\n",
+    json.dumps({"kind": "fresh"}) + "\n",
+], ids=["names-another-commit", "names-none"])
+def test_1546_r10_the_launcher_pins_the_launch_facts_commit_and_ignores_the_pulled_sources_knowledge_record(tmp_path, record):
+    """The pulled source's bundle carries a knowledge record (`RunPaths.knowledge_source()`, beside its run folder) that
+    names another commit, or none: the launcher asks `copy.make(commit=)` only for the launch facts' `knowledge_commit`,
+    never for the record's commit, writes that pin to the episode's `knowledge_pin.json`, and the job completes; the
+    record neither moves the pin nor refuses the job. The stamp names the launch pin in both arms (as the store writes the
+    claim's pin from the source row), so only the record differs from the D12 flow above, which is the control that the
+    same job completes with no record. (design r10 (a) "Inside the container": the launcher takes the pin from the launch
+    facts only; main's `_source_pin` stays the operator's)"""
+    from defender.records import RunPaths
+
+    ran = run_entry(tmp_path, source_record=record)
+    pin = ran.launch["knowledge_commit"]
+    assert pin != _OTHER_COMMIT, "premise: the launch pin is not the record's commit"
+    assert ran.asked, "the job never reached its socket"
+    pulled = RunPaths(ran.src).knowledge_source()
+    assert pulled.is_file(), f"premise: the pulled bundle's knowledge record was unpacked beside the run: {pulled}"
+    commits = [f.get("commit") for name, f in ran.asked if name == "copy.make" and f.get("world") is None]
+    assert _OTHER_COMMIT not in commits, f"the launcher asked for the source record's commit: {commits}"
+    assert pin in commits, f"the launcher never asked `copy.make(commit=<the launch pin>)`: {commits}"
+    assert all(c in (None, pin) for c in commits), f"a `copy.make(commit=)` of neither the pin nor `main`: {commits}"
+    written = json.loads((ran.ep / "knowledge_pin.json").read_text(encoding="utf-8"))
+    assert written == {"commit": pin}, f"the episode's pin is not the launch facts': {written}"
+    assert ran.end is not None, ran.exit
+    assert ran.end.get("status") == "completed", (ran.end, ran.exit)

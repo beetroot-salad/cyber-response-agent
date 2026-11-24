@@ -180,8 +180,13 @@ def test_6_grading_another_tenants_episode_is_refused(tmp_path):
     refused_store = MemoryStore()
 
     judge = J.scripted_judge()
+    # #1618 K5 (flow 3): the judge reads post-move lesson bodies from a copy at the family's pin, through its `copy=` seam;
+    # both passes get a working one (the product's fetch from the launch tenant's remote), so only the tenant can refuse.
+    from defender.tests.support.tenancy._fetch_standin_1618 import fetched_copy
+
+    copy = fetched_copy(P.LAUNCH_TENANT)
     err = H.raised(grade_episode, other.runs_repository(), episode_id, judge=judge,
-                   store=refused_store)
+                   store=refused_store, copy=copy)
     assert isinstance(err, (JudgeRefused, RunRefused, TenantRefused,
                             FileNotFoundError)), f"another tenant graded the episode: {err!r}"
     assert not (ep / "judge.yaml").exists(), "a grade was written for another tenant"
@@ -197,7 +202,7 @@ def test_6_grading_another_tenants_episode_is_refused(tmp_path):
     handle.close()
     moved.rename(ep / "runs")
 
-    graded = grade_episode(own, episode_id, judge=J.scripted_judge(), store=MemoryStore())
+    graded = grade_episode(own, episode_id, judge=J.scripted_judge(), store=MemoryStore(), copy=copy)
     assert graded is not None
     assert (ep / "judge.yaml").is_file(), "control: the own tenant did not grade"
 

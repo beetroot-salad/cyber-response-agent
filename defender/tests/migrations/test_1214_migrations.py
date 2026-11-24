@@ -122,7 +122,7 @@ def test_code_at_head_refuses_a_database_at_the_baseline_naming_both(empty_datab
 @pytest.mark.postgres
 def test_the_revision_moves_tenants_and_adds_the_lifecycle_tables(migrated_database):
     """At head `tenancy` holds tenants and the new tables, `identity` no tenants, and memberships reference `tenancy.tenants` (O11)."""
-    assert _tables(migrated_database, "tenancy") == {"tenants", "forge_wiring", "generations", "publish_status",
+    assert _tables(migrated_database, "tenancy") == {"tenants", "forge_wiring", "generations",  # #1618: 0027 drops publish_status
                                                      "alert_mappings", "system_versions", "case_versions",  # #1345 r5: the mapping is a tenant record; #1366: the records tables
                                                      "evidence_retention",  # #1546 A-O7 (r9 A): the tenant's retention, written at creation
                                                      "forge_people_requests"}  # #1592: the people requests; `merge_eligibility` is dropped there (OD-6)
@@ -177,7 +177,7 @@ def test_existing_tenant_rows_are_backfilled_as_failed_creates_at_names(empty_da
         assert row[6] == BACKFILL_FAILURE
         assert row[7:] == (None, None, None)
     assert {r[0] for r in rows} == {LAB, OTHER, THIRD}
-    for table in ("forge_wiring", "generations", "publish_status"):  # the administrator, not the migration, records the wiring
+    for table in ("forge_wiring", "generations"):  # the administrator, not the migration, records the wiring (#1618: no publish_status at head)
         assert execute(empty_database, f"SELECT count(*) FROM tenancy.{table}") == [(0,)]  # noqa: S608
 
 
@@ -276,6 +276,10 @@ def test_the_upgrade_keeps_every_row_of_every_tenancy_table_and_only_adds_the_si
     upgrade_marking_tenants(empty_database)  # #1470 O12: the tenant has its mark, so the drop does not stop
     after = rows()
 
+    # #1618: `0028_drop_publish_status` drops that table with its rows (`test_1618_publish_status_migration.py` holds what the
+    # drop keeps); every other table keeps every row.
+    assert "publish_status" not in after, "premise: the head has no publish_status table"
+    before.pop("publish_status")
     assert after.keys() == before.keys()
     for table, old in before.items():
         new = after[table]
@@ -359,9 +363,10 @@ def test_a_generation_status_outside_the_model_is_refused(migrated_database):
 
 
 @pytest.mark.postgres
-@pytest.mark.parametrize("table", ["forge_wiring", "generations", "publish_status"])
+@pytest.mark.parametrize("table", ["forge_wiring", "generations"])
 def test_each_lifecycle_table_belongs_to_a_tenant(table, migrated_database):
-    """forge_wiring, generations and publish_status rows need an existing tenant (foreign keys, O11)."""
+    """forge_wiring and generations rows need an existing tenant (foreign keys, O11). (#1618: publish_status, the third,
+    is dropped at head by `0028_drop_publish_status`.)"""
     import psycopg.errors
 
     execute(migrated_database, "INSERT INTO tenancy.tenants (id, created_at, state) VALUES ('aa000000-0000-4000-8000-00000000000a', now(), 'active')")

@@ -97,58 +97,36 @@ def ensure_d9_tenant(tenant_id: str = D9_TENANT_ID) -> str:
     return D9Tenant(tenant_id)
 
 
-#: `tenant_id` -> a published fixture tenant's folder, built once per process (`_published_copy`).
-_PUBLISHED: dict[str, Path] = {}
-_PUBLISHED_HOME: list[Any] = []
-
-
-def _published_copy(tenant_id: str) -> Path:
-    """`<process scratch>/<n>/root/<tenant_id>`: the committed fixture tenant set up as
-    `tenant_id` and published for real ONCE per process through
-    `tenant_1108_p4._support.published_tenant` (a git clone, a real export, `exports/current`),
-    its origin server closed after: reading a published tenant needs no network. Callers copy
-    the folder in; nothing in it names its root."""
-    if tenant_id in _PUBLISHED:
-        return _PUBLISHED[tenant_id]
-    import tempfile
-
-    from defender.tests.tenancy.tenant_1108_p4._support import published_tenant
-
-    if not _PUBLISHED_HOME:
-        _PUBLISHED_HOME.append(tempfile.TemporaryDirectory(prefix="d9-published-tenants-"))
-    home = Path(_PUBLISHED_HOME[0].name) / str(len(_PUBLISHED))
-    with published_tenant(home / "forge", root=home / "root", tenant_id=tenant_id):
-        pass
-    _PUBLISHED[tenant_id] = home / "root" / tenant_id
-    return _PUBLISHED[tenant_id]
-
-
 def set_up_tenant(root: Path, tenant_id: str = D9_TENANT_ID, *, published: bool = False) -> Any:
     """`tenant_id` set up under the data root `root` the way an operator does and accepted: the
     committed fixture tenant copied to `<root>/<id>/knowledge` with its `agent/.tenant-id`
     (O6: no row is written; the tenant exists in `.directory`). Each step is skipped when already
     done. Returns the `Tenant` the real `accept_tenant` hands back.
 
-    `published=True` (opt-in for branch-launch scenes): the same content as a REAL published
-    tenant (clone, export, `exports/current`), so a source stamped through
-    `_triplet_947.provenance_record` names a commit its clone holds and can be materialised and
-    pinned. Asking for it over a tenant already set up unpublished is a fixture bug, refused.
+    `published=True` (opt-in for branch-launch scenes): the placed content is also committed on `main` of the tenant's
+    Forgejo repository, the data root's served remote (#1618: knowledge lives only there;
+    `_fetch_standin_1618.seed_placed`), so a source stamped through `_triplet_947.provenance_record` names a commit
+    Forgejo serves, which a fetch can copy and pin.
 
     `.directory` on the returned `Tenant` (#1214): a `LazyDirectory` over `tenant_directory(root, id)`, the
     tenant active with its forge wiring; a migrated call site passes `directory=t.directory`."""
     owner = _tenant_owner()
     root = Path(location_path(root))
-    if published:
-        folder = root / tenant_id
-        if not folder.exists():
-            shutil.copytree(_published_copy(tenant_id), folder, symlinks=True)
-        assert (folder / "exports" / "current").is_file(), (
-            f"fixture bug: tenant {tenant_id} under {root} was already set up UNPUBLISHED; ask "
-            "for `published=True` at its first set-up")
     knowledge = root / tenant_id / "knowledge"
+    on_its_remote = False
     if not knowledge.exists():
+        from defender.tests.support.tenancy._fetch_standin_1618 import served_remote
+
+        # Already set up with its knowledge on its Forgejo repository only (`_spec1224.Estate.place`, a published
+        # scene): placing the fixture here would be committed over that `main` by the next fetch's seeding.
+        on_its_remote = (served_remote(root, tenant_id) / "HEAD").exists()
+    if not knowledge.exists() and not on_its_remote:
         shutil.copytree(FIXTURE, knowledge, symlinks=True)
         (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
+    if published:
+        from defender.tests.support.tenancy._fetch_standin_1618 import seed_placed
+
+        seed_placed(root, tenant_id)
     accepted = owner.accept_tenant(fixture_data_root(root), tenant_id, defender_dir=DEFENDER)
     # a frozen dataclass without slots still takes an instance attribute; eq and hash use the fields only
     with contextlib.suppress(AttributeError, TypeError):

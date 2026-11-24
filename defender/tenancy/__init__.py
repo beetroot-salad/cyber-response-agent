@@ -52,36 +52,20 @@ if TYPE_CHECKING:
     )
     from defender.tenancy._exports import (
         DeliveryRefused as DeliveryRefused,
-        POINTER as POINTER,
-        TenantExport as TenantExport,
-        current_export as current_export,
-        current_export_at as current_export_at,
-        knowledge_lock_holder as knowledge_lock_holder,
-        lock_pid as lock_pid,
-        read_export_text as read_export_text,
         regular_files as regular_files,
         remove_entry as remove_entry,
     )
     from defender.tenancy._owner import (
         OWNER_FILE as OWNER_FILE,
+        REPO_SCRATCH as REPO_SCRATCH,
         mark_alive as mark_alive,
         owned_temporary as owned_temporary,
         owner_alive as owner_alive,
+        private_folder as private_folder,
         process_mark as process_mark,
         process_start as process_start,
+        sweep_dead_owners as sweep_dead_owners,
         write_owner as write_owner,
-    )
-    from defender.tenancy._publish_status import (
-        FRESH as FRESH,
-        MISCONFIGURED as MISCONFIGURED,
-        OPERATOR as OPERATOR,
-        STALE_OPERATOR as STALE_OPERATOR,
-        STALE_TRANSIENT as STALE_TRANSIENT,
-        TRANSIENT as TRANSIENT,
-        read_status as read_status,
-        record_published as record_published,
-        record_refusal as record_refusal,
-        record_report as record_report,
     )
     from defender.tenancy._tenant import (
         ISSUER_ROLE as ISSUER_ROLE,
@@ -93,7 +77,6 @@ if TYPE_CHECKING:
         box_mounted_episodes as box_mounted_episodes,
         check_knowledge_folder as check_knowledge_folder,
         check_run_settings as check_run_settings,
-        clone_halves as clone_halves,
         data_root_for_child as data_root_for_child,
         data_root_from_path as data_root_from_path,
         is_valid_tenant_id as is_valid_tenant_id,
@@ -104,7 +87,6 @@ if TYPE_CHECKING:
         requested_tenant as requested_tenant,
         requested_tenant_id as requested_tenant_id,
         resolve_data_root as resolve_data_root,
-        tenant_exports as tenant_exports,
         tenant_id_file_text as tenant_id_file_text,
     )
     from defender.tenancy._tenants import (
@@ -120,7 +102,6 @@ if TYPE_CHECKING:
         ForgeWiring as ForgeWiring,
         Generation as Generation,
         PeopleRequest as PeopleRequest,
-        PublishStatus as PublishStatus,
         TenantRecord as TenantRecord,
         knowledge_repo as knowledge_repo,
         offboard as offboard,
@@ -149,13 +130,12 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("admit_tenant", "database_address_variable", "host_directory", "in_lifecycle_process", "mark_lifecycle_process", "still_active",), "_admission"),
     **dict.fromkeys(("open_command_line_run",), "_command_line_run"),
     **dict.fromkeys(("RecordsUnreachable", "TenantDirectory", "connection_lost", "why_unreachable",), "_directory"),
-    **dict.fromkeys(("DeliveryRefused", "POINTER", "TenantExport", "current_export", "current_export_at", "knowledge_lock_holder", "lock_pid", "read_export_text", "regular_files", "remove_entry",), "_exports"),
-    **dict.fromkeys(("OWNER_FILE", "mark_alive", "owned_temporary", "owner_alive", "process_mark", "process_start", "write_owner",), "_owner"),
-    **dict.fromkeys(("FRESH", "MISCONFIGURED", "OPERATOR", "STALE_OPERATOR", "STALE_TRANSIENT", "TRANSIENT", "read_status", "record_published", "record_refusal", "record_report",), "_publish_status"),
-    **dict.fromkeys(("ISSUER_ROLE", "JobTenant", "Tenant", "TenantId", "accept_tenant", "box_mounted_arm_container", "box_mounted_episodes", "check_knowledge_folder", "check_run_settings", "clone_halves", "data_root_for_child", "data_root_from_path", "is_valid_tenant_id", "job_tenant_folder", "job_tenant_from_launch", "parse_tenant_id_bytes", "refuse_unplaceable_data_root", "requested_tenant", "requested_tenant_id", "resolve_data_root", "tenant_exports", "tenant_id_file_text",), "_tenant"),
+    **dict.fromkeys(("DeliveryRefused", "regular_files", "remove_entry",), "_exports"),
+    **dict.fromkeys(("OWNER_FILE", "REPO_SCRATCH", "mark_alive", "owned_temporary", "owner_alive", "private_folder", "process_mark", "process_start", "sweep_dead_owners", "write_owner",), "_owner"),
+    **dict.fromkeys(("ISSUER_ROLE", "JobTenant", "Tenant", "TenantId", "accept_tenant", "box_mounted_arm_container", "box_mounted_episodes", "check_knowledge_folder", "check_run_settings", "data_root_for_child", "data_root_from_path", "is_valid_tenant_id", "job_tenant_folder", "job_tenant_from_launch", "parse_tenant_id_bytes", "refuse_unplaceable_data_root", "requested_tenant", "requested_tenant_id", "resolve_data_root", "tenant_id_file_text",), "_tenant"),
     **dict.fromkeys(("AGENT_HALF", "SETTINGS_HALF", "TENANT_ID_FILE", "add_tenant_arguments", "template_dir",), "_tenants"),
     **dict.fromkeys(("InMemoryTenantRepository",), "memory"),
-    **dict.fromkeys(("EvidenceRetention", "ForgeWiring", "Generation", "PeopleRequest", "PublishStatus", "TenantRecord", "knowledge_repo", "offboard", ), "models"),
+    **dict.fromkeys(("EvidenceRetention", "ForgeWiring", "Generation", "PeopleRequest", "TenantRecord", "knowledge_repo", "offboard", ), "models"),
     **dict.fromkeys(("SystemRecord", "CaseRecord", "TenantRecords"), "record_values"),
     **dict.fromkeys(("ALL", "Conflict", "FenceMissed", "HeldTenant", "KEEP", "NotFound", "PEOPLE_LOCK_NAMESPACE", "TenantRepository", "claimable_now",), "repository"),
 }

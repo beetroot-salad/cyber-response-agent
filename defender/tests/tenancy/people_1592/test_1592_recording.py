@@ -527,7 +527,7 @@ READS = frozenset({
     "IdentityRepository.warning_deliveries", "IdentityRepository.session_by_value",
     "IdentityRepository.live_signin_attempts",
     "TenantRepository.close", "TenantRepository.tenant", "TenantRepository.tenants", "TenantRepository.generations",
-    "TenantRepository.forge_wiring", "TenantRepository.admission", "TenantRepository.publish_status",
+    "TenantRepository.forge_wiring", "TenantRepository.admission",
     "TenantRepository.alert_mapping", "TenantRepository.current_records", "TenantRepository.claimable",
     "TenantRepository.open_people_requests", "TenantRepository.lock",
     "TenantRepository.evidence_retention",  # #1546 A-O7: the tenant's retention row
@@ -767,11 +767,6 @@ async def _request_rotate(w: World, m: Model, r: random.Random) -> None:
     await w.tenants.request_rotate(r.choice(_tenants(m)))
 
 
-async def _record_publish_status(w: World, m: Model, r: random.Random) -> None:
-    line = r.choice(["fresh 0123456789abcdef0123456789abcdef01234567", "stale:transient down", "misconfigured x"])
-    await w.tenants.record_publish_status(r.choice([T1, T2]), line, by=r.choice(["run", "drain"]))
-
-
 async def _set_evidence_retention(w: World, m: Model, r: random.Random) -> None:
     """#1546 A-O7: the retention row is no people change (no trigger on `tenancy.evidence_retention`)."""
     from defender.tenancy import EvidenceRetention
@@ -833,7 +828,6 @@ GENERATED: dict[str, Callable[[World, Model, random.Random], Any]] = {
     "IdentityRepository.purge_expired_signin_attempts": _purge_expired_signin_attempts,
     "TenantRepository.request_resume": _request_resume,
     "TenantRepository.request_rotate": _request_rotate,
-    "TenantRepository.record_publish_status": _record_publish_status,
     "TenantRepository.set_evidence_retention": _set_evidence_retention,  # #1546 A-O7
     "TenantRepository.edit_people_requests": _edit_people_requests,
     "TenantRepository.people_lock": _people_lock,

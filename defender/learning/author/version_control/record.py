@@ -8,7 +8,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class _BatchKey:
     """Which batch a commit-maker commit belongs to: the branch it was made on, the commit the
-    batch started from (the export commit for a drain's batch, `main` for a revert), and the
+    batch started from (`main` as its operation fetched it), and the
     start's own random word, so a batch id used again is never mistaken for its earlier use."""
 
     branch: str

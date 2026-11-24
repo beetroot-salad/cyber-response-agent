@@ -110,6 +110,17 @@ def accept_refusal(owner: Any, root: Path | str, tenant_id: str = TID, **kw: Any
     return str(refusal(owner, accept, owner, root, tenant_id, **kw))
 
 
+def check_folder(owner: Any, root: Path | str, tenant_id: str = TID) -> None:
+    """The real folder rules, `check_knowledge_folder(<root>/<T>/knowledge, tenant_id=<T>)`. #1618 K8: acceptance judges
+    `<T>` alone (a tenant holds no knowledge folder); the folder rules stand unchanged (K6) here, `tenant.py check --folder`."""
+    owner.check_knowledge_folder(knowledge_dir(Path(location_path(root)), tenant_id), tenant_id=owner.TenantId(tenant_id))
+
+
+def folder_refusal(owner: Any, root: Path | str, tenant_id: str = TID) -> str:
+    """`check_knowledge_folder`'s refusal message for this tree (`TenantRefused`, never an escaping error)."""
+    return str(refusal(owner, check_folder, owner, root, tenant_id))
+
+
 # ======================================================================================
 # The data root, hand-spelled: expected paths are composed here, never read back from the
 # owner (asking `Tenant` where the runs are, then finding them there, passes for any layout).
@@ -578,11 +589,11 @@ def drive_run(run_module: Any, argv: list[str], rec: RunRecorder, *, directory: 
     seam recorded: `(exit status, None)`, or `(None, the SystemExit it refused with)`. `directory`
     defaults to `directory_for(argv)`."""
     try:
-        # Plus the in-process launch-time publish.
-        from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+        # Plus the in-process launch-time fetch.
+        from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
         return run_module.main(list(argv), directory=directory if directory is not None else directory_for(argv),
-                               **with_publish(dict(rec.seams()))), None
+                               **with_fetch(dict(rec.seams()))), None
     except SystemExit as refused:
         return None, refused
 

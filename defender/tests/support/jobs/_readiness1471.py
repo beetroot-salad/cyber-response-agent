@@ -213,11 +213,12 @@ def entry_of(scene: HelperScene, rid: str, done: Readied, *, roster: Any = None,
 
 def readiness(  # noqa: PLR0913 — one keyword per seam the helper takes
               scene: HelperScene, *, signer: Any = None, docker: ContainerStandIn | None = None, rid: str | None = None,
-              container: Callable[[Any], int] | None = None, roster: Any = None, publish: Callable[..., str] | None = None,
-              defender_dir: Path | None = None, directory: Any = None, staged: dict[str, Any] | None = None) -> Readied:
+              container: Callable[[Any], int] | None = None, roster: Any = None, fetch: Callable[..., str] | None = None,
+              defender_dir: Path | None = None, directory: Any = None, staged: dict[str, Any] | None = None,
+              client: Any = None) -> Readied:
     """The helper for a readiness check of the scene's tenant (kind `readiness`, job id `rid`), its container the real
-    `readiness_main` unless `container(Container) -> rc` says otherwise. `publish` is the launch-time publish seam
-    (default: `fresh` at the published commit). `defender_dir`: the code tree the container entry reads. `directory`: the tenant records the helper is handed (`job_host.main(directory=)`),
+    `readiness_main` unless `container(Container) -> rc` says otherwise. `fetch` is the one knowledge fetch seam (#1618:
+    default the real fetch child over the scene's remote, `drive_helper`'s). `defender_dir`: the code tree the container entry reads. `directory`: the tenant records the helper is handed (`job_host.main(directory=)`),
     passed only when given. `staged`: facts (name -> body) already staged under the claim when the helper starts, as a crash
     or a second run would leave them. #1546: the request row (running) and its claim under the scene's claim token are planted
     first, as the worker's claim leaves them (`claim_check`); the helper is configured with the real store and the tenant's
@@ -237,9 +238,11 @@ def readiness(  # noqa: PLR0913 — one keyword per seam the helper takes
 
     stand_in.job = captured
     done.docker = stand_in
-    seams: dict[str, Any] = {} if publish is None else {"publish": publish}
+    seams: dict[str, Any] = {} if fetch is None else {"fetch": fetch}
     if directory is not None:
         seams["directory"] = directory
+    if client is not None:  # #1618 D9: the forge client the branch-protection read uses (`job_host.main(client=)`)
+        seams["client"] = client
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
         done.ran = drive_helper(scene, scene.argv("readiness", rid), docker=stand_in,
@@ -260,21 +263,26 @@ def claim_check(scene: HelperScene, rid: str) -> None:
     """The running readiness row `rid` and its claim under `scene.claim`, as the worker's claim transaction leaves them
     (#1546 PR7). A second check in one scene first ends the previous live row (`failed/worker_error`, as a lapse would) and
     drops the previous claim's rows, so the scene's one claim token names this check."""
+    host_claim(scene, "readiness", rid)
+
+
+def host_claim(scene: HelperScene, kind: str, rid: str, *, system: str | None = None) -> None:
+    """`claim_check` for a host request of `kind` (readiness or adoption; an adoption row names its `system`)."""
     from defender.tests.support.jobs._host_requests1471 import plant
     from defender.tests.support.shared._postgres1339 import execute
 
-    if execute(scene.dsn, "SELECT 1 FROM jobs.claims WHERE token = %s AND kind = 'readiness' AND host_request_id = %s",
-               (scene.claim, rid)):
-        return  # the case planted this check's own row and claim: kept as it wrote them
+    if execute(scene.dsn, "SELECT 1 FROM jobs.claims WHERE token = %s AND kind = %s AND host_request_id = %s",
+               (scene.claim, kind, rid)):
+        return  # the case planted this request's own row and claim: kept as it wrote them
     execute(scene.dsn, "UPDATE jobs.host_requests SET stage = 'failed', failure_reason = 'worker_error', finished_at = now(), "
-                       "lease_expires_at = NULL WHERE tenant_id = %s AND kind = 'readiness' AND stage IN ('queued', 'running') "
-                       "AND id <> %s", (scene.tenant, rid))
+                       "lease_expires_at = NULL WHERE tenant_id = %s AND kind = %s AND stage IN ('queued', 'running') "
+                       "AND id <> %s", (scene.tenant, kind, rid))
     for table in ("staged_facts", "uploads", "claims"):
         execute(scene.dsn, f"DELETE FROM jobs.{table} WHERE token = %s", (scene.claim,))  # noqa: S608 — fixed names
     if not execute(scene.dsn, "SELECT 1 FROM jobs.host_requests WHERE id = %s", (rid,)):
-        plant(scene.dsn, scene.tenant, "readiness", stage="running", request_id=rid)
+        plant(scene.dsn, scene.tenant, kind, system=system, stage="running", request_id=rid)
     execute(scene.dsn, "INSERT INTO jobs.claims (token, tenant_id, kind, host_request_id, launch, inputs) "
-                       "VALUES (%s, %s, 'readiness', %s, '{}'::jsonb, '[]'::jsonb)", (scene.claim, scene.tenant, rid))
+                       "VALUES (%s, %s, %s, %s, '{}'::jsonb, '[]'::jsonb)", (scene.claim, scene.tenant, kind, rid))
 
 
 # --- test-only doubles and planted trees ----------------------------------------------------------------------------
@@ -362,8 +370,7 @@ def listed_runs(scene: HelperScene) -> list[str]:
     from defender import tenancy
     from defender._paths import process_defender_dir
 
-    accepted = tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=process_defender_dir(),
-                                     clone_tree=False)
+    accepted = tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=process_defender_dir())
     return [str(r) for r in accepted.runs_repository().list()]
 
 

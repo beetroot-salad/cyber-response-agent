@@ -10,7 +10,7 @@ two-way rule for a fault in a curator, observed over the store (`drains._HALTING
 
 Retired with the handle (deleted files, design r8 A1/O10, Locks; `test_1278_census.py` now holds the line that no product code
 reaches the old root or its handle): `test_1135_handle.py` (the handle's refusal of linked entries, roots, lock roles, claim
-moves, ledger refusal, `move_at`, `open_lock_at`: every verb is gone) and `test_1135_front_door.py` (the tenant-selected root
+moves, ledger refusal, `move_at`, `open_lock_at`: every verb is gone) and `test_1135_front_door.py` (the tenant-selected root  # lint-stale-ref: ok — a retired verb named in this retirement record
 routes and `describe` strings: `LoopPaths.state_root` is gone, and so is the root).
 
 Retired from this file (their obligation is a file-state one the store replaced):

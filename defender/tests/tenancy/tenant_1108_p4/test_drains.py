@@ -35,7 +35,6 @@ from defender.tests.tenancy.tenant_1108_delivery._support import (
     NAMESAKE,
     OURS,
     SIBLING_FORK,
-    LockAudit,
     close_on_remote,
     pr_row,
     fresh_process_env,
@@ -76,7 +75,6 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
 )
 from defender.tests.tenancy.tenant_1108_p4._support import (
     bind_forge,
-    current_commit,
     git,
     unbind_forge,
 )
@@ -109,9 +107,9 @@ def _author_tick(w: Any) -> tuple[Any, CuratorTrigger, BoxSpy]:
 @postgres
 def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_forge_O7(
         world, caplog):  # noqa: F811 — the imported fixture
-    """A tick publishes first (a pending human merge becomes `current` and the batch's base), then
-    delivers the lesson as one commit on a tenant `lessons/` branch with its PR, moving no
-    checkout of the clone and nothing in the product repo."""
+    """A tick's opening fetch sees a pending human merge, which becomes the batch's base (#1618: no publish, clone or
+    `current`), then delivers the lesson as one commit on a tenant `lessons/` branch with its PR, moving nothing in the
+    product repo and mounting no git repository into the box."""
     w = world
     t = w.t
     merged = t.merge({"agent/lessons/human-merged.md": "a human-reviewed lesson\n"})
@@ -131,9 +129,6 @@ def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_fo
     # One tick serves both curators of the lane into its one batch (each handed its own kind's
     # items, A2 D1; a kind with no item is not run).
     assert trigger.calls == ["author", "questioner_curator"], trigger.calls
-    # Publish ran first: the merge is `current`, the clone fast-forwarded to it.
-    assert current_commit(t.tenant) == merged
-    assert git(t.clone, "rev-parse", "HEAD") == merged
     # One batch branch on the tenant origin, based on the merge, touching the lesson alone.
     branches = remote_branches(t.remote)
     assert len(branches) == 1, branches
@@ -144,10 +139,9 @@ def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_fo
     # Its PR, on the tenant forge, against `main`.
     assert [(c["head"], c["base"]) for c in t.forge.creates] == [(branch, "main")]
     assert [row["head"]["ref"] for row in t.forge.prs if row["state"] == "open"] == [branch]
-    # The clone: no checkout but the publish's fast-forward, no worktree, nothing left dirty.
-    assert git(t.clone, "symbolic-ref", "HEAD") == "refs/heads/main"
-    assert git(t.clone, "status", "--porcelain", "--untracked-files=all") == ""
-    assert len(git(t.clone, "worktree", "list", "--porcelain").split("\n\n")) == 1
+    # #1618 K8: the tick left no clone, export, `current` or lock under `<T>`.
+    tenant_dir = Path(location_path(t.tenant.tenant_root))
+    assert [n for n in ("knowledge", "exports", "knowledge.lock") if (tenant_dir / n).exists()] == []
     # The draft is gone (discard), and the box mounted it, never git.
     assert draft_entries(t) == []
     assert len(box.requests) == 1, box.requests
@@ -158,7 +152,9 @@ def test_flow4_author_drain_publishes_then_delivers_a_lesson_pr_on_the_tenant_fo
     # The box mounts the draft's `stage/`, never the folder holding `owner`.
     assert Path(staged[0].source).name == "stage", mounts
     assert Path(staged[0].source).parent.parent == drafts_dir(t), mounts
-    assert not [m for m in mounts if under(m.source, t.clone) or under(t.clone, m.source)], mounts
+    # Never the tick's private repository (`<data root>/.repo-scratch/`, design Model), nor anything holding it.
+    scratch = Path(location_path(t.data_root)) / ".repo-scratch"
+    assert not [m for m in mounts if under(m.source, scratch) or under(scratch, m.source)], mounts
     writable = sorted(Path(m.source).relative_to(staged[0].source).as_posix()
                       for m in mounts if m.writable)
     assert writable == ["agent/lessons", "agent/lessons-questioner"], writable
@@ -374,7 +370,7 @@ def test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_lease_and_nothing_el
 
 
 # ---------------------------------------------------------------------------------------------
-# O-SWEEP (draft half): a draft whose owner is dead is swept by the next publish
+# O-SWEEP (draft half): a draft whose owner is dead is swept (#1618 flow 8; the publish trigger and its lock are gone)
 # ---------------------------------------------------------------------------------------------
 
 _DRAFT_OWNER = """
@@ -421,70 +417,51 @@ def _owner_process(t: Any, tmp_path: Path, batch_id: str, *, hold: bool) -> subp
     return proc
 
 
-def _sweeps_under(folder: Path):
-    """`pick` for P3's `LockAudit`: labels `sweep` the first removal of anything under
-    `folder`, or rename of something out of it (a name relative to a folder descriptor is
-    resolved through `/proc/self/fd`)."""
-    top = os.path.realpath(folder)
-    seen: set[str] = set()
+def _swept(t: Any) -> None:
+    """#1618 flow 8: the host sweep every trigger runs (`fetch_copy`'s start, the helper's `batch.start`, a host
+    drain's tick and its `start_batch`): `sweep_dead_owners(data_root, tenant_id)`. These cases were triggered by a
+    publish under the tenant lock, both of which r5 deletes (K1); which trigger runs it is
+    `test_repo_scratch_1618`/`knowledge_1618/test_sweep_1618`'s, the liveness rules are these cases'."""
+    from defender.tests.tenancy.knowledge_1618 import _support as K
 
-    def pick(event: str, args: tuple) -> str | None:
-        if event not in {"os.remove", "os.rmdir", "shutil.rmtree", "os.rename"} or "sweep" in seen:
-            return None
-        path = args[0]
-        dir_fd = args[2] if event == "os.rename" else (args[1] if len(args) > 1 else None)
-        if not isinstance(path, (str, bytes, os.PathLike)):
-            return None
-        path = os.fsdecode(path)
-        if isinstance(dir_fd, int) and dir_fd >= 0 and not os.path.isabs(path):
-            path = os.path.join(os.readlink(f"/proc/self/fd/{dir_fd}"), path)
-        path = os.path.abspath(path)
-        if path != top and not path.startswith(top + os.sep):
-            return None
-        seen.add("sweep")
-        return "sweep"
-    return pick
+    K.sweep(t)
 
 
-def test_o_sweep_publish_sweeps_a_draft_whose_owner_died_and_keeps_a_live_owners(
-        p4_tenant, tmp_path):
-    """The next publish sweeps, under the tenant lock, a draft whose owner process died; this
-    live process's draft survives (control), its owner record naming this pid and start time."""
+def test_o_sweep_sweeps_a_draft_whose_owner_died_and_keeps_a_live_owners(p4_tenant, tmp_path):
+    """The sweep removes a draft whose owner process died; this live process's draft survives (control), its owner
+    record naming this pid and start time. (Was: "the next publish, under the tenant lock": #1618 K1 retires both.)"""
     t = p4_tenant
-    _owner_process(t, tmp_path, "orphan", hold=False)
-    mine = t.open_delivery().start_batch("mine", lanes=("lessons",))
-    assert draft_entries(t) == ["mine", "orphan"], "control: both drafts stand before the publish"
-    audit = LockAudit(t.tenant, _sweeps_under(drafts_dir(t)))
+    with t.open_delivery() as d:
+        mine = d.start_batch("mine", lanes=("lessons",))  # first: a batch start is itself a sweep trigger (flow 8)
+        _owner_process(t, tmp_path, "orphan", hold=False)
+        assert draft_entries(t) == ["mine", "orphan"], "control: both drafts stand before the sweep"
 
-    with audit:
-        t.publish()
+        _swept(t)
 
-    assert draft_entries(t) == ["mine"], draft_entries(t)
-    assert mine.draft_root.is_dir()
-    assert [label for label, _ in audit.probes] == ["sweep"], audit.probes
-    assert all("busy" in verdict for _, verdict in audit.probes), "the sweep ran outside the lock"
-    record = owner_record(draft_folder(mine))
-    assert record["pid"] == os.getpid(), record
-    assert str(record["start"]) == process_start(os.getpid()), record
+        assert draft_entries(t) == ["mine"], draft_entries(t)
+        assert mine.draft_root.is_dir()
+        record = owner_record(draft_folder(mine))
+        assert record["pid"] == os.getpid(), record
+        assert str(record["start"]) == process_start(os.getpid()), record
 
 
-def test_o_sweep_a_live_owners_draft_survives_publish_until_its_owner_exits(p4_tenant, tmp_path):
+def test_o_sweep_a_live_owners_draft_survives_the_sweep_until_its_owner_exits(p4_tenant, tmp_path):
     """Liveness is the owner's, not the draft's age: another live process's draft survives a
-    publish and is swept once that process exits."""
+    sweep and is swept once that process exits."""
     t = p4_tenant
     owner = _owner_process(t, tmp_path, "held", hold=True)
     try:
         record = owner_record(drafts_dir(t) / "held")
         assert record["pid"] == owner.pid, record
         assert str(record["start"]) == process_start(owner.pid), record
-        t.publish()
+        _swept(t)
         assert draft_entries(t) == ["held"], "a live owner's draft was swept"
     finally:
         (tmp_path / "release-held").write_text("go", encoding="utf-8")
         owner.communicate(timeout=300)
     assert owner.returncode == 0
 
-    t.publish()
+    _swept(t)
 
     assert draft_entries(t) == [], draft_entries(t)
 
@@ -493,51 +470,48 @@ def test_o_sweep_an_owner_record_naming_a_live_pid_with_another_start_time_is_de
     """An owner is pid and start time: a record naming this running pid with another start time
     (a reused pid) is dead, so its draft is swept; this process's true record survives."""
     t = p4_tenant
-    d = t.open_delivery()
-    reused = d.start_batch("reused", lanes=("lessons",))
-    kept = d.start_batch("kept", lanes=("lessons",))
-    true_start = process_start(os.getpid())
-    write_owner(draft_folder(reused), os.getpid(), str(int(true_start) + 1))
-    assert owner_record(draft_folder(kept))["pid"] == os.getpid()
+    with t.open_delivery() as d:
+        reused = d.start_batch("reused", lanes=("lessons",))
+        kept = d.start_batch("kept", lanes=("lessons",))
+        true_start = process_start(os.getpid())
+        write_owner(draft_folder(reused), os.getpid(), str(int(true_start) + 1))
+        assert owner_record(draft_folder(kept))["pid"] == os.getpid()
 
-    t.publish()
+        _swept(t)
 
-    assert draft_entries(t) == ["kept"], draft_entries(t)
-    assert kept.draft_root.is_dir()
+        assert draft_entries(t) == ["kept"], draft_entries(t)
+        assert kept.draft_root.is_dir()
 
 
-def test_o_sweep_a_dead_owners_half_built_temporary_is_swept_under_the_lock(p4_tenant):
+def test_o_sweep_a_dead_owners_half_built_temporary_is_swept(p4_tenant):
     """A build cut off before its rename leaves a dot-named temporary holding its owner record;
-    that owner being dead, the next publish sweeps it under the tenant lock. A live draft
-    survives (control)."""
+    that owner being dead, the next sweep removes it. A live draft survives (control)."""
     t = p4_tenant
-    kept = t.open_delivery().start_batch("kept", lanes=("lessons",))
-    temp = drafts_dir(t) / ".halfbuilt-0a1b2c"
-    (temp / "stage" / "agent" / "lessons").mkdir(parents=True)
-    (temp / "stage" / "agent" / "lessons" / "seed.md").write_text("half\n", encoding="utf-8")
-    write_owner(temp, *_dead_process())
-    assert draft_entries(t) == [".halfbuilt-0a1b2c", "kept"], "control: the temporary is seen"
-    audit = LockAudit(t.tenant, _sweeps_under(drafts_dir(t)))
+    with t.open_delivery() as d:
+        kept = d.start_batch("kept", lanes=("lessons",))
+        temp = drafts_dir(t) / ".halfbuilt-0a1b2c"
+        (temp / "stage" / "agent" / "lessons").mkdir(parents=True)
+        (temp / "stage" / "agent" / "lessons" / "seed.md").write_text("half\n", encoding="utf-8")
+        write_owner(temp, *_dead_process())
+        assert draft_entries(t) == [".halfbuilt-0a1b2c", "kept"], "control: the temporary is seen"
 
-    with audit:
-        t.publish()
+        _swept(t)
 
-    assert draft_entries(t) == ["kept"], draft_entries(t)
-    assert kept.draft_root.is_dir()
-    assert [label for label, _ in audit.probes] == ["sweep"], audit.probes
-    assert all("busy" in verdict for _, verdict in audit.probes), "the sweep ran outside the lock"
+        assert draft_entries(t) == ["kept"], draft_entries(t)
+        assert kept.draft_root.is_dir()
 
 
-def test_control_o_sweep_a_publish_right_after_start_batch_keeps_the_fresh_draft(p4_tenant):
-    """Control: a publish right after `start_batch` in this live process keeps the fresh draft
+def test_control_o_sweep_a_sweep_right_after_start_batch_keeps_the_fresh_draft(p4_tenant):
+    """Control: a sweep right after `start_batch` in this live process keeps the fresh draft
     and leaves no dot-named entry beside it."""
     t = p4_tenant
-    batch = t.open_delivery().start_batch("fresh", lanes=("lessons",))
+    with t.open_delivery() as d:
+        batch = d.start_batch("fresh", lanes=("lessons",))
 
-    t.publish()
+        _swept(t)
 
-    assert draft_entries(t) == ["fresh"]
-    assert batch.draft_root.is_dir()
+        assert draft_entries(t) == ["fresh"]
+        assert batch.draft_root.is_dir()
 
 
 # ---------------------------------------------------------------------------------------------
@@ -748,3 +722,85 @@ def test_r_i3_a_drain_with_no_daemon_refuses_even_under_the_unsandboxed_opt_out(
     assert rc == 0, critical_text(caplog)
     assert ran, "the control never got past the box start"
     assert draft_entries(t) == []
+
+
+# --- #1618 D11 / K9: a refusal is `transient` or `lasting` with a reason; the drains' split behind the person ceiling ----
+
+def _fault_1618(kind):
+    """An error as the delivery's open raises it: the delivery refusal over the fault it was raised from."""
+    import httpx
+    from defender import _git
+    from defender.learning.author.version_control.auth import CredentialMisconfigured
+    from defender.learning.author.version_control.forgejo import ForgeError
+
+    request = httpx.Request("GET", "http://forge.invalid/api/v1/repos/o/r")
+
+    def status(code):
+        response = httpx.Response(code, request=request, text="refused")
+        return httpx.HTTPStatusError(f"HTTP {code}", request=request, response=response)
+
+    faults = {
+        "connect": lambda: httpx.ConnectError("down", request=request),
+        "timeout": lambda: httpx.ReadTimeout("slow", request=request),
+        "http-503": lambda: status(503),
+        "http-401": lambda: status(401),
+        "http-403": lambda: status(403),
+        "no-host-secret": lambda: CredentialMisconfigured("the generation records no host secret file"),
+        "git-unreachable": lambda: _git.GitError(["fetch"], 128, "fatal: unable to access: Could not resolve host: forge"),
+        "git-refused": lambda: _git.GitError(["fetch"], 128, "fatal: Authentication failed for 'http://forge/'"),
+    }
+    cause = faults[kind]()
+    refused = ForgeError(f"the forge refused: {cause}")
+    refused.__cause__ = cause
+    return refused
+
+
+TRANSIENT_1618 = ["connect", "timeout", "http-503", "git-unreachable"]
+LASTING_1618 = ["http-401", "http-403", "no-host-secret", "git-refused"]
+
+
+@pytest.mark.parametrize("kind", [*TRANSIENT_1618, *LASTING_1618])
+def test_d11_a_refusal_is_classified_transient_or_lasting_and_the_drains_split_follows_it(kind):
+    """`classify` answers `transient` or `lasting` (never `operator` or `misconfigured`); the drains' refusal is an outage to wait out
+    only for `transient`. A credential the host cannot log in with is `lasting`, as `misconfigured` was. (D11, K9)"""
+    from defender.learning.author.version_control.status import classify
+    from defender.learning.core.store_tick import classified_refusal
+
+    fault = _fault_1618(kind)
+    expected = "transient" if kind in TRANSIENT_1618 else "lasting"
+    got, reason = classify(fault)
+    assert (got, bool(reason)) == (expected, True)
+    assert classified_refusal("the tenant's delivery refused", fault).transient is (expected == "transient")
+
+
+def _product_files_1618():
+    root = Path(__file__).resolve().parents[3]
+    for path in root.rglob("*.py"):
+        parts = path.relative_to(root).parts
+        if parts[0] in {"tests", "migrations", ".venv", "__pycache__"} or ".venv" in parts:
+            continue
+        yield path.relative_to(root).as_posix(), path.read_text(encoding="utf-8")
+
+
+def test_d11_no_product_code_has_a_misconfigured_outcome_or_a_stale_report_class():
+    """No `MISCONFIGURED`, `is_misconfigured`, `"misconfigured"` outcome word or `stale:<kind>` report class is left in product code:
+    a refusal says `transient|lasting` and a reason. (D11, K9)"""
+    import re
+
+    pattern = re.compile(r"""\bMISCONFIGURED\b|\bis_misconfigured\b|["']misconfigured["']|\bSTALE_(?:TRANSIENT|OPERATOR)\b|stale:(?:transient|operator)""")
+    found = {name: sorted(set(pattern.findall(text))) for name, text in _product_files_1618() if pattern.search(text)}
+    assert found == {}, found
+    assert pattern.search('x = "misconfigured"'), "control: the census pattern finds the word"
+
+
+#: Where the retired causes stay as words read back from storage: the vocabularies and one reason text.
+READ_ONLY_HOMES_1618 = {"records/learning_causes.py", "records/job_lane.py", "worker/_worker.py"}
+
+
+@pytest.mark.parametrize("word", ["foreign_commits_local", "repository_busy"])
+def test_k9_foreign_commits_local_and_repository_busy_have_no_writer_only_their_read_side(word):
+    """The stored causes `foreign_commits_local` and `repository_busy` stay in the vocabularies that read them back; no drain, adoption or
+    other product code names them, so nothing writes them. (K9, D7)"""
+    named = {name for name, text in _product_files_1618() if word in text}
+    assert named & READ_ONLY_HOMES_1618, f"control: {word} stays readable where stored values are read"
+    assert named - READ_ONLY_HOMES_1618 == set(), sorted(named - READ_ONLY_HOMES_1618)

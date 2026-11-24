@@ -8,10 +8,13 @@ A folder built outside the tenant lock is made under an `owned_temporary` name, 
 same two values: it is owned from the instant it exists, before its `owner` file is written."""
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import secrets
+import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
 from defender import _io
@@ -85,3 +88,38 @@ def owner_alive(folder: Path) -> bool:
     if not isinstance(pid, int) or isinstance(pid, bool):
         return False
     return process_start(pid) == str(start)
+
+
+#: Host-side private git repositories (one fetch, one drain tick), never under a tenant's folder.
+REPO_SCRATCH = ".repo-scratch"
+
+
+@contextlib.contextmanager
+def private_folder(data_root: Path, tenant_id: object) -> Iterator[Path]:
+    """A 0700 folder `<data root>/.repo-scratch/<tenant id>.owner-...`, owned by this process from its first
+    instant and removed on exit; a crashed owner's is removed by `sweep_dead_owners`."""
+    root = Path(data_root) / REPO_SCRATCH
+    root.mkdir(mode=0o700, exist_ok=True)  # lint-unguarded-tree-write: ok — the host's own scratch root, made owner-only
+    folder = root / owned_temporary(str(tenant_id))
+    folder.mkdir(mode=0o700)  # lint-unguarded-tree-write: ok — a fresh name no other process can hold
+    try:
+        yield folder
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def sweep_dead_owners(data_root: Path, tenant_id: object) -> None:
+    """Flow 8, host side only: remove every entry whose owner is gone from the tenant's `run-knowledge/` and
+    `drafts/` and from `.repo-scratch/` (this tenant's entries). No lock: each entry carries its owner from its first
+    instant, and a live owner's is kept however old it is."""
+    from defender.tenancy._exports import remove_entry
+
+    tenant = str(tenant_id)
+    base = Path(data_root)
+    for root, prefix in ((base / tenant / "run-knowledge", ""), (base / tenant / "drafts", ""),
+                         (base / REPO_SCRATCH, tenant)):
+        if not _io.entry_present(root):
+            continue
+        for name in sorted(os.listdir(root)):
+            if name.startswith(prefix) and not owner_alive(root / name):
+                remove_entry(root, name)

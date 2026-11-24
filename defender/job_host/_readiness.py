@@ -1,8 +1,9 @@
 """The readiness kind (#1471 P-1, R3, R12-1, R13-1, C4): an investigation's launch, stopped before the run.
 
 The helper runs the launch's tenant-level steps as the investigation's own code (`_common.tenant_launch_steps`: the
-tenant's lock and admission, its records, its alert mapping, the launch-time publish (recorded `readiness`), the
-runs-folder check, the run copy named by the check's id, the tenant over the copy, the roster, the verdict, the
+tenant's lock and admission, its records, its alert mapping, the knowledge fetch
+(`publish`: `main` fetched by the fetch child into the run copy named by the check's id, whose branch protection the child also reads,
+D9), the runs-folder check, the tenant over the copy, the roster, the verdict, the
 grant, the signing set-up and the first pass, signed under the check's id and thrown away), and none of the
 investigation's own (the launch check, the alert, the run folder, the versions record).
 
@@ -33,7 +34,7 @@ from ._common import HelperFault, LaunchFacts, StepRefused, tenant_launch_steps
 from ._session import KindSpec, Prepared, Registry, Session
 
 KIND = "readiness"
-#: Who asked for the launch-time publish, as its outcome is recorded (design §6 "Publish trigger").
+#: Who asked for the fetch: the fetch child also checks main's branch protection for it (D9).
 TRIGGER = "readiness"
 #: The prefix every `run_common` setup refusal carries: a readiness sentence is the refusal's words without it.
 _RUN_PY = "[run.py] "
@@ -50,24 +51,17 @@ _LANE = _readiness_lane()
 
 
 def _publish_sentence(report: Any) -> str:
-    """A refused publish's sentence (P-2, R5): the report's kind only, never its reason (the forge's reply, which the
+    """A refused fetch's sentence (P-2, R5): the report's class only, never its reason (the forge's reply, which the
     helper's log carries)."""
-    from defender.tenancy import run_knowledge
-
-    kind = getattr(report, "kind", None)
-    if kind == run_knowledge.MISCONFIGURED:
-        return ("the launch-time publish refused the tenant's knowledge as misconfigured, so no run can start on it; "
-                "the publish's own reply is in the platform's log")
-    if kind == run_knowledge.STALE:
-        return (f"the launch-time publish is stale ({getattr(report, 'stale_kind', None)}) and the tenant has no "
-                "published knowledge a run can start on")
-    return "the launch-time publish settled on no published knowledge a run can start on"
+    klass = "transient" if getattr(report, "transient", False) else "lasting"
+    return (f"the knowledge fetch was refused ({klass}), so no run can start on the tenant's knowledge; "
+            "the fetch's own reply is in the platform's log")
 
 
 def _readiness_sentence(refused: StepRefused) -> str:
     """The readiness sentence of a step's refusal: the launch's own words (P-2: its `sentence`, never its log-only
     `detail`), the publish's its kind alone."""
-    if refused.step == "publish":
+    if refused.step == "publish" and refused.report is not None:
         return _publish_sentence(refused.report)
     return refused.sentence.removeprefix(_RUN_PY).strip()
 

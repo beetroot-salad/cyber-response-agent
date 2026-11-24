@@ -1,6 +1,7 @@
 """Shared helpers for the PR 2 run-repository tests (tenant fixtures, CLI/process drivers). No test functions."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an entry's one knowledge fetch, in-process
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 
 import logging
@@ -195,7 +196,8 @@ def drive_launch(est: Any, argv: list[str], *, spawn: Any = None, judge: Any = N
     message = ""
     raised: BaseException | None = None
     try:
-        rc = branch_entry.main(list(argv), spawn=spawn, judge=judge, questioner=questioner, **seams)
+        rc = branch_entry.main(list(argv), spawn=spawn, judge=judge, questioner=questioner,
+                               **{"fetch": in_process_fetch(), **seams})
     except SystemExit as stop:
         raised = stop
         if isinstance(stop.code, str):
@@ -298,13 +300,13 @@ def drive_run_py(argv: list[str], rec: SiblingRecorder, **override: Any) -> tupl
     """Drive the REAL `run.main` over `argv` with `rec`'s seams. Returns `(exit status, the
     SystemExit it refused with or None, everything it printed to stderr)`."""
     from defender import run as run_py
-    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
     err = io.StringIO()
     try:
         with redirect_stderr(err):
-            # Plus the in-process launch-time publish.
-            rc = run_py.main(list(argv), **with_publish({**rec.seams(), **override}, argv))
+            # Plus the in-process launch-time fetch.
+            rc = run_py.main(list(argv), **with_fetch({**rec.seams(), **override}, argv))
     except SystemExit as refused:
         return None, refused, err.getvalue()
     return rc, None, err.getvalue()

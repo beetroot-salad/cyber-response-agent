@@ -1,7 +1,22 @@
-"""#1108 P4: how the launcher stops a publish child and how the child takes a stop, each case a
-wrong-but-green production variant. Real processes, real signals, the real tenant lock."""
+"""#1108 P4 r6 and #1379 r3, ported to #1618 flow 1: how the launcher stops a fetch child and how a run's fetch wait takes a
+stop, each case a wrong-but-green production variant. Real processes, real signals.
+
+One fetch is one process group (the child's own session): however the child ends, nothing of its group outlives the launch;
+a child asked to end gets `_STOP_GRACE` to unwind before its group is killed; a run stopped while it waits ends non-zero and
+never goes on. Each launch here runs in its own driver process bounded from outside, so a launcher that never kills (or never
+returns) fails the case instead of hanging it.
+
+Retired (K1: there is no lock, so no locked phase in which a child ignores a stop and is waited for):
+`test_r6_a_child_that_takes_the_lock_after_being_asked_to_stop_is_let_finish`,
+`test_r6_a_real_child_in_its_locked_phase_ignores_sigterm_and_finishes`,
+`test_1379_a_run_start_stopped_while_its_publish_holds_the_lock_waits_for_it_to_finish` (3 cases),
+`test_1379_a_publish_child_past_its_locked_phase_is_not_signalled_while_it_reports`, and the locked-flag half of
+`test_r6_the_child_entry_restores_the_sigterm_handler_and_clears_its_locked_flag`.
+"""
 from __future__ import annotations
 
+import contextlib
+import json
 import os
 import signal
 import subprocess
@@ -11,59 +26,17 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, current_commit
-import contextlib
+from defender.tests.tenancy.knowledge_1618 import _support as K
 
 WORKTREE = Path(__file__).resolve().parents[4]
 OID = "0123456789abcdef0123456789abcdef01234567"
+#: How long a case waits for a driver that should be done within the launcher's own grace (5 s) and budget.
+OUTSIDE_BOUND = 40.0
 
 
 @pytest.fixture
 def child_env(monkeypatch):
     monkeypatch.setenv("PYTHONPATH", f"{WORKTREE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}")
-
-
-@pytest.fixture
-def tenant(tmp_path, data_root):
-    with B.run_tenant(tmp_path, data_root) as t:
-        bind_forge(t)
-        yield t
-
-
-# --- the child is asked to end, and given time to unwind, before it is killed -------------------
-
-_UNWINDS = '''
-import pathlib, signal, sys, time
-marker = pathlib.Path(sys.argv[1])
-def stopped(*_):
-    time.sleep(1.5)  # unwinding its network calls takes a moment
-    marker.write_text("unwound")
-    sys.exit(143)
-signal.signal(signal.SIGTERM, stopped)
-(marker.parent / "ready").write_text("1")
-time.sleep(60)
-'''
-
-
-def test_r6_a_child_that_ends_when_asked_is_given_time_to_unwind_before_any_kill(tmp_path):
-    marker = tmp_path / "marker"
-    line = B.launcher()("r6-tenant", data_root=tmp_path, budget=2.0,
-                        command=[sys.executable, "-c", _UNWINDS, str(marker)])
-    assert B.outcome_class(line) == "stale:transient", line
-    assert marker.read_text() == "unwound", (
-        "the child was killed instead of asked to end and given time to unwind")
-
-
-# --- a kill takes the child's whole process group ----------------------------------------------
-
-_STUBBORN = '''
-import pathlib, signal, subprocess, sys, time
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(25)"])
-pathlib.Path(sys.argv[1]).write_text(str(grandchild.pid))
-time.sleep(60)
-'''
 
 
 def _alive(pid: int) -> bool:
@@ -79,8 +52,7 @@ def _alive(pid: int) -> bool:
 
 
 def _outlives(pid: int) -> bool:
-    """Still alive after 2 seconds? A SIGKILL is delivered asynchronously: the launch returns
-    once the group's pipes close, which can be a moment before the grandchild's exit."""
+    """Still alive after 2 seconds? A SIGKILL is delivered asynchronously."""
     deadline = time.monotonic() + 2.0
     while _alive(pid):
         if time.monotonic() > deadline:
@@ -89,98 +61,133 @@ def _outlives(pid: int) -> bool:
     return False
 
 
-def test_r6_a_killed_child_takes_its_grandchildren_and_the_launch_does_not_wait_on_them(tmp_path):
-    pidfile = tmp_path / "grandchild.pid"
-    started = time.monotonic()
-    try:
-        line = B.launcher()("r6-tenant", data_root=tmp_path, budget=1.0,
-                            command=[sys.executable, "-c", _STUBBORN, str(pidfile)])
-        elapsed = time.monotonic() - started
-        grandchild = int(pidfile.read_text())
-        assert B.outcome_class(line) == "stale:transient", line
-        assert elapsed < 15, f"the launch waited {elapsed:.1f}s on a grandchild holding its pipes"
-        assert not _outlives(grandchild), "the child's grandchild outlived the kill"
-    finally:
-        if pidfile.exists():
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(int(pidfile.read_text()), signal.SIGKILL)
+def _kill_all(pids: list[int]) -> None:
+    for pid in pids:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, signal.SIGKILL)
 
 
-# --- a child that takes the lock while being stopped is never killed ---------------------------
-
-_LOCKS_WHEN_ASKED = '''
-import pathlib, signal, sys, time
-from defender.learning.author.version_control import tenant_lock
-from defender.tenancy._tenant import data_root_from_path, requested_tenant
-marks = pathlib.Path(sys.argv[1])
-asked = []
-signal.signal(signal.SIGTERM, lambda *_: asked.append(1))
-tenant = requested_tenant(data_root_from_path(pathlib.Path(sys.argv[4])), sys.argv[2])
-(marks / "ready").write_text("1")
-while not asked:
-    time.sleep(0.02)
-with tenant_lock(tenant):
-    (marks / "locked").write_text("1")
-    time.sleep(7.5)  # past the launcher's whole grace for a stop
-    (marks / "finished").write_text("1")
-print("fresh " + sys.argv[5])
+#: A process that runs the production launcher once (`argv`: a JSON list of the child's command, the budget, the folder),
+#: printing the line it returned: the case bounds it from outside.
+_LAUNCH = '''
+import json, sys, time
+from pathlib import Path
+from defender.investigation.publish_launch import launch_publish
+command, budget, folder = json.loads(sys.argv[1]), float(sys.argv[2]), Path(sys.argv[3])
+dest = folder / "dest"
+dest.mkdir(exist_ok=True)
+started = time.monotonic()
+line = launch_publish("r6-tenant", data_root=folder, dest=dest, budget=budget, command=command)
+print(f"TOOK {time.monotonic() - started}", flush=True)
+print("LINE " + line, flush=True)
 '''
 
 
-def test_r6_a_child_that_takes_the_lock_after_being_asked_to_stop_is_let_finish(
-        tenant, tmp_path, child_env):
-    marks = tmp_path / "marks"
-    marks.mkdir()
-    code = _LOCKS_WHEN_ASKED.replace("sys.argv[5]", repr(OID))
-    line = B.launcher()(tenant.tenant_id, data_root=tenant.data_root, budget=1.5,
-                        command=[sys.executable, "-c", code, str(marks)])
-    assert (marks / "finished").exists(), "a child holding the tenant lock was killed"
-    # The child's own report is the outcome, however the wait ended: it published, so calling
-    # the run stale would be false.
-    assert B.outcome_class(line) == "fresh", line
-
-
-# --- a child in its locked phase ignores SIGTERM and finishes -----------------------------------
-
-def test_r6_a_real_child_in_its_locked_phase_ignores_sigterm_and_finishes(
-        tenant, tmp_path, child_env):
-    merged = tenant.merge(B.MERGE_FILES)
-    command, _spec, marks = B.child_command(tenant, tmp_path, network_timeout=60.0,
-                                            locked_sleep=3.0)
-    proc = subprocess.Popen([*command, tenant.tenant_id, "--data-root", str(tenant.data_root)],  # noqa: S603
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+def _launch_bounded(tmp_path: Path, code: str, *args: str, budget: float) -> tuple[str | None, float]:
+    """The launch's line (None if the driver did not return within `OUTSIDE_BOUND`) and how long the launch itself took
+    (measured in the driver around `launch_publish`; the driver's whole run when it did not return)."""
+    started = time.monotonic()
+    driver = subprocess.Popen(  # noqa: S603 — the test's own driver
+        [sys.executable, "-c", _LAUNCH, json.dumps([sys.executable, "-c", code, *args]), str(budget), str(tmp_path)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True, cwd=WORKTREE)
     try:
-        deadline = time.monotonic() + 60
-        while not (marks / "locked").exists() and proc.poll() is None and time.monotonic() < deadline:
-            time.sleep(0.02)
-        assert (marks / "locked").exists(), "premise: the child never reached its locked phase"
-        proc.send_signal(signal.SIGTERM)
-        out, err = proc.communicate(timeout=60)
+        out, _err = driver.communicate(timeout=OUTSIDE_BOUND)
+    except subprocess.TimeoutExpired:
+        os.killpg(driver.pid, signal.SIGKILL)
+        driver.communicate()
+        return None, time.monotonic() - started
+    lines = [line[len("LINE "):] for line in out.splitlines() if line.startswith("LINE ")]
+    took = [float(line[len("TOOK "):]) for line in out.splitlines() if line.startswith("TOOK ")]
+    return (lines[-1] if lines else ""), (took[-1] if took else time.monotonic() - started)
+
+
+# --- the child is asked to end, and given time to unwind, before it is killed -------------------
+
+_UNWINDS = '''
+import pathlib, signal, sys, time
+marker = pathlib.Path(sys.argv[1])
+def stopped(*_):
+    time.sleep(1.5)  # unwinding its network calls takes a moment
+    marker.write_text("unwound")
+    sys.exit(143)
+signal.signal(signal.SIGTERM, stopped)
+time.sleep(60)
+'''
+
+
+def test_r6_a_child_that_ends_when_asked_is_given_time_to_unwind_before_any_kill(tmp_path, child_env):
+    marker = tmp_path / "marker"
+    line, _took = _launch_bounded(tmp_path, _UNWINDS, str(marker), budget=2.0)
+    assert line is not None, "the launch never returned"
+    assert line.startswith("refused transient "), line
+    assert marker.read_text() == "unwound", "the child was killed instead of asked to end and given time to unwind"
+
+
+# --- a kill takes the child's whole process group ----------------------------------------------
+
+_STUBBORN = '''
+import pathlib, signal, subprocess, sys, time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(25)"])
+pathlib.Path(sys.argv[1]).write_text(str(grandchild.pid))
+time.sleep(60)
+'''
+
+
+def test_r6_a_child_that_will_not_end_is_killed_after_the_grace_with_its_grandchildren(tmp_path, child_env):
+    """A child that ignores the request to end is killed once the grace is over, its grandchild with it, and the launch
+    returns `refused transient` instead of waiting on them. (O-BUDGET; was
+    `test_r6_a_killed_child_takes_its_grandchildren_and_the_launch_does_not_wait_on_them`)"""
+    pidfile = tmp_path / "grandchild.pid"
+    try:
+        line, took = _launch_bounded(tmp_path, _STUBBORN, str(pidfile), budget=1.0)
+        assert line is not None, f"the launch never killed a child that ignores its stop (still waiting after {took:.0f}s)"
+        assert line.startswith("refused transient "), line
+        assert took < 15, f"the launch waited {took:.1f}s on a child (and a grandchild holding its pipes) that ignore its stop"
+        assert not _outlives(int(pidfile.read_text())), "the child's grandchild outlived the kill"
     finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
-    assert (marks / "locked-done").exists(), f"SIGTERM cut the locked phase short: {err[-500:]}"
-    assert proc.returncode == 0, (proc.returncode, err[-500:])
-    assert out.strip().splitlines()[-1] == f"fresh {merged}", out
-    assert current_commit(tenant.tenant) == merged
+        if pidfile.exists():
+            _kill_all([int(pidfile.read_text())])
+
+
+_REPORTS_AND_LEAVES_A_GRANDCHILD = f'''
+import pathlib, subprocess, sys
+grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+pathlib.Path(sys.argv[1]).write_text(str(grandchild.pid))
+print("ok {OID}")
+'''
+
+
+def test_1618_a_child_that_reported_and_exited_takes_its_process_group_with_it(tmp_path, child_env):
+    """A child that printed its line and exited 0, leaving a process in its group (one that holds none of its pipes), has
+    that process gone once the launch returns: one fetch is one process group, whatever the child left running ends with
+    the launch, however the child ended. Control: the child's own line is the answer. (Flow 1, O-BUDGET)"""
+    pidfile = tmp_path / "grandchild.pid"
+    try:
+        line, _took = _launch_bounded(tmp_path, _REPORTS_AND_LEAVES_A_GRANDCHILD, str(pidfile), budget=30.0)
+        assert line == f"ok {OID}", line
+        assert not _outlives(int(pidfile.read_text())), "a process of the fetch child's group outlived the launch"
+    finally:
+        if pidfile.exists():
+            _kill_all([int(pidfile.read_text())])
 
 
 # --- the child's signal state is its own to restore --------------------------------------------
 
-def test_r6_the_child_entry_restores_the_sigterm_handler_and_clears_its_locked_flag(
-        tenant, tmp_path):
-    from defender.learning.author import version_control as vc
-    from defender.learning.author.version_control import publish
+def test_r6_the_child_entry_restores_the_sigterm_handler(tmp_path, data_root):
+    """`fetch_child_main` takes SIGTERM over only while it runs: the handler it found is back after each call."""
+    from defender.learning.author.version_control.fetch import fetch_child_main
 
-    before = signal.getsignal(signal.SIGTERM)
-    for _ in range(2):
-        rc = vc.publish_child_main(
-            [tenant.tenant_id, "--data-root", str(tenant.data_root)], directory=tenant.directory,
-            client=tenant.forge.client, identity=tenant.vault.identity(), network_timeout=30.0)
-        assert rc == 0
-        assert signal.getsignal(signal.SIGTERM) is before
-        assert publish._LOCKED.held is False
+    with K.scene(tmp_path, data_root) as t:
+        before = signal.getsignal(signal.SIGTERM)
+        for n in range(2):
+            dest = K.owned_dest(K.tenant_root(t) / "run-knowledge", f"entry{n}")
+            rc = fetch_child_main([t.tenant_id, "--data-root", str(K.tenant_root(t).parent), "--dest", str(dest)],
+                                  directory=t.directory, identity=t.vault.identity(), network_timeout=30.0)
+            assert rc == 0
+            assert signal.getsignal(signal.SIGTERM) is before
+            assert sorted(os.listdir(dest)) == ["agent", "settings"], "control: the entry fetched"
 
 
 # --- the run process stopped while it waits: the child's group goes with it ---------------------
@@ -192,207 +199,106 @@ pathlib.Path(sys.argv[1]).write_text(f"{__import__('os').getpid()} {grandchild.p
 time.sleep(60)
 '''
 
-_RUN_START_PUBLISHING = '''
-import functools, pathlib, sys, types
-from defender import run, tenancy
+#: A run's fetch wait (`run_knowledge.fetch_report`, what run start calls) over the production launcher.
+_RUN_START_FETCHING = '''
+import pathlib, sys
+from defender import tenancy
+from defender.tenancy import run_knowledge
 from defender.investigation.publish_launch import launch_publish
-publish = functools.partial(launch_publish, budget=60.0,
-                            command=[sys.executable, "-c", sys.argv[1], sys.argv[2]])
-run._publish_report(publish, types.SimpleNamespace(id="r6-tenant"),
-                    tenancy.data_root_from_path(pathlib.Path(sys.argv[3])), None)
-print("the publish returned", flush=True)
+
+def fetch(tenant_id, dest, *, data_root, commit=None, **named):  # `default_fetch`'s shape, with a stand-in child
+    return launch_publish(tenant_id, data_root=data_root, dest=dest, commit=commit, budget=60.0,
+                          command=[sys.executable, "-c", sys.argv[1], sys.argv[2]], **named)
+root = pathlib.Path(sys.argv[3])
+(root / "dest").mkdir(exist_ok=True)
+run_knowledge.fetch_report(fetch, "r6-tenant", root / "dest", tenancy.data_root_from_path(root))
+print("the fetch returned", flush=True)
 '''
 
 
-def test_r6_a_run_start_stopped_while_its_publish_runs_takes_the_childs_group_with_it(tmp_path, child_env):
-    """Teardown SIGTERMs the recorded run process while the launch-time publish runs: the run exits non-zero and the
-    publish child's whole process group (its own session) is gone, so nothing keeps writing into the tenant's folder
-    that teardown is removing (PR #1350 review)."""
+def _stop_a_run_fetching(tmp_path: Path, child: str) -> tuple[subprocess.Popen, list[int], bytes, bytes]:
     pidfile = tmp_path / "child.pids"
-    parent = subprocess.Popen([sys.executable, "-c", _RUN_START_PUBLISHING, _WAITING_CHILD, str(pidfile), str(tmp_path)],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    parent = subprocess.Popen([sys.executable, "-c", _RUN_START_FETCHING, child, str(pidfile), str(tmp_path)],  # noqa: S603
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True, cwd=WORKTREE)
     pids: list[int] = []
     try:
         deadline = time.monotonic() + 30
         while not (pidfile.exists() and len(pidfile.read_text().split()) == 2):
             assert parent.poll() is None, parent.communicate()
-            assert time.monotonic() < deadline, "the publish child never started"
+            assert time.monotonic() < deadline, "the fetch child never started"
             time.sleep(0.02)
         pids = [int(p) for p in pidfile.read_text().split()]
-        assert all(_alive(p) for p in pids), "control: the child and its grandchild run while the publish waits"
+        assert all(_alive(p) for p in pids), "control: the child and its grandchild run while the fetch waits"
         parent.send_signal(signal.SIGTERM)
-        out, err = parent.communicate(timeout=20)
-        assert parent.returncode != 0, (out, err)
-        assert b"the publish returned" not in out, "a stopped run went on past its publish"
-        for pid in pids:
-            assert not _outlives(pid), f"process {pid} of the publish child's group outlived the stopped run"
-    finally:
+        try:
+            out, err = parent.communicate(timeout=OUTSIDE_BOUND)
+        except subprocess.TimeoutExpired:
+            os.killpg(parent.pid, signal.SIGKILL)
+            out, err = parent.communicate()
+            pytest.fail(f"a stopped run still waited on its fetch child after {OUTSIDE_BOUND:.0f}s")
+        return parent, pids, out, err
+    except BaseException:
         if parent.poll() is None:
             parent.kill()
-        for pid in pids:
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.kill(pid, signal.SIGKILL)
+        _kill_all(pids)
+        raise
 
 
-_LOCKED_WHEN_THE_RUN_IS_STOPPED = '''
-import os, pathlib, signal, sys, time
-marks = pathlib.Path(sys.argv[1])
-# Ignored, as the real child does while locked; noted only when it comes while the lock is held (a stop
-# that comes first, while it still imports, is the launcher's to send).
-signal.signal(signal.SIGTERM, lambda *_: (marks / "locked").exists() and (marks / "asked").write_text("1"))
-(marks / "pid").write_text(str(os.getpid()))
-from defender.learning.author.version_control import tenant_lock
-from defender.tenancy._tenant import data_root_from_path, requested_tenant
-tenant = requested_tenant(data_root_from_path(pathlib.Path(sys.argv[4])), sys.argv[2])
-with tenant_lock(tenant):
-    (marks / "locked").write_text("1")
-    time.sleep(float(sys.argv[6]))
-    (marks / "finished").write_text("1")
-print("fresh " + sys.argv[5])
-'''
-
-_RUN_START_PUBLISHING_FOR = '''
-import functools, pathlib, sys, types
-from defender import run, tenancy
-from defender.investigation.publish_launch import launch_publish
-publish = functools.partial(launch_publish, budget=float(sys.argv[5]),
-                            command=[sys.executable, "-c", sys.argv[1], sys.argv[2]])
-run._publish_report(publish, types.SimpleNamespace(id=sys.argv[4]),
-                    tenancy.data_root_from_path(pathlib.Path(sys.argv[3])), None)
-print("the publish returned", flush=True)
-'''
-
-
-def _stop_a_run_whose_publish_holds_the_lock(tenant, tmp_path, *, budget, locked_for, stops, after_lock=0.0,
-                                             child=_LOCKED_WHEN_THE_RUN_IS_STOPPED):
-    """Run start with a publish child that takes the tenant lock at once and holds it `locked_for` seconds (ignoring
-    SIGTERM, as the real child does while locked); once it holds the lock and `after_lock` has passed, the run is sent
-    SIGTERM `stops` times. Returns the marks folder and the run's (returncode, out, err)."""
-    marks = tmp_path / "marks"
-    marks.mkdir()
-    code = child.replace("sys.argv[5]", repr(OID)).replace("sys.argv[6]", repr(str(locked_for)))
-    parent = subprocess.Popen(  # noqa: S603
-        [sys.executable, "-c", _RUN_START_PUBLISHING_FOR, code, str(marks), str(tenant.data_root),
-         tenant.tenant_id, str(budget)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def test_r6_a_run_start_stopped_while_its_fetch_runs_takes_the_childs_group_with_it(tmp_path, child_env):
+    """Teardown SIGTERMs the run process while its fetch runs: the run exits non-zero and never goes on, and the fetch
+    child's whole process group is gone, so nothing keeps writing into the tenant's folder teardown is removing."""
+    parent, pids, out, err = _stop_a_run_fetching(tmp_path, _WAITING_CHILD)
     try:
-        deadline = time.monotonic() + 30
-        while not (marks / "locked").exists():
-            assert parent.poll() is None, parent.communicate()
-            assert time.monotonic() < deadline, "premise: the publish child never took the lock"
-            time.sleep(0.02)
-        time.sleep(after_lock)
-        for _ in range(stops):
-            parent.send_signal(signal.SIGTERM)
-            time.sleep(0.3)
-        out, err = parent.communicate(timeout=30)
+        assert parent.returncode == 128 + signal.SIGTERM, (out, err)
+        assert b"the fetch returned" not in out, "a stopped run went on past its fetch"
+        for pid in pids:
+            assert not _outlives(pid), f"process {pid} of the fetch child's group outlived the stopped run"
     finally:
-        if parent.poll() is None:
-            parent.kill()
-        with contextlib.suppress(OSError, ValueError):  # never leave a lock holder behind on a failure
-            os.kill(int((marks / "pid").read_text()), signal.SIGKILL)
-    return marks, (parent.returncode, out, err)
+        _kill_all(pids)
 
 
-@pytest.mark.parametrize(("budget", "after_lock", "stops"), [
-    pytest.param(60.0, 0.0, 1, id="stopped within the budget"),
-    pytest.param(1.0, 1.5, 1, id="stopped after the budget ran out"),
-    pytest.param(60.0, 0.0, 3, id="stopped again while it waits"),
-])
-def test_1379_a_run_start_stopped_while_its_publish_holds_the_lock_waits_for_it_to_finish(
-        tenant, tmp_path, child_env, budget, after_lock, stops):
-    """However the run's stop arrives (within the publish budget, after it ran out, or repeated), a publish child
-    holding the tenant lock is never signalled and finishes its locked phase (O-BUDGET) before the run exits; the run
-    then exits as stopped and never goes on. (#1379 r3 O3)"""
-    from defender.investigation import publish_launch
-
-    marks, (returncode, out, err) = _stop_a_run_whose_publish_holds_the_lock(  # held past the launcher's grace
-        tenant, tmp_path, budget=budget, locked_for=publish_launch._STOP_GRACE + 2 + after_lock, stops=stops,
-        after_lock=after_lock)
-    assert (marks / "finished").exists(), f"the run's stop cut a lock-holding publish child: {err[-500:]!r}"
-    assert not (marks / "asked").exists(), "a publish child holding the lock was signalled"
-    assert returncode == 128 + signal.SIGTERM, (out, err)
-    assert b"the publish returned" not in out, "a stopped run went on past its publish"
-
-
-_PAST_THE_LOCK = '''
-import os, pathlib, signal, sys, time
-marks = pathlib.Path(sys.argv[1])
-(marks / "pid").write_text(str(os.getpid()))
-from defender.learning.author.version_control import tenant_lock
-from defender.tenancy._tenant import data_root_from_path, requested_tenant
-tenant = requested_tenant(data_root_from_path(pathlib.Path(sys.argv[4])), sys.argv[2])
-signal.signal(signal.SIGTERM, signal.SIG_IGN)  # ignored while locked, as the real child does
-with tenant_lock(tenant):
-    pass
-signal.signal(signal.SIGTERM, signal.SIG_DFL)  # the real child's flag clears with the lock
-(marks / "locked").write_text("1")  # released: what remains is recording and printing its report
-time.sleep(float(sys.argv[6]))
-(marks / "finished").write_text("1")
-print("fresh " + sys.argv[5])
-'''
-
-
-def test_1379_a_publish_child_past_its_locked_phase_is_not_signalled_while_it_reports(tenant, tmp_path, child_env):
-    """A publish child that has left its locked phase, but still records and prints its report, is not signalled by
-    the run's stop: its fresh publish is not turned into a failure. (#1379 r3 O3, review of PR #1395)"""
-    marks, (returncode, out, err) = _stop_a_run_whose_publish_holds_the_lock(
-        tenant, tmp_path, budget=60.0, locked_for=2.0, stops=1, child=_PAST_THE_LOCK)
-    assert (marks / "finished").exists(), f"the run's stop cut a publish child reporting its publish: {err[-500:]!r}"
-    assert returncode == 128 + signal.SIGTERM, (out, err)
-
-
-def test_1379_a_run_start_stopped_while_its_publish_will_not_stop_kills_it_after_the_grace(tmp_path, child_env):
-    """A publish child in its network phase that ignores the run's stop is killed after the launcher's grace, with
-    its whole group, and the run exits non-zero: the run never waits on it without limit. (#1379 r3 O3)"""
-    from defender.investigation import publish_launch
-
-    pidfile = tmp_path / "child.pids"
+def test_1379_a_run_start_stopped_while_its_fetch_will_not_stop_kills_it_after_the_grace(tmp_path, child_env):
+    """A fetch child that ignores the run's stop is killed after the launcher's grace, with its whole group, and the run
+    exits non-zero: the run never waits on it without limit. (#1379 r3 O3)"""
     stubborn = "import signal; signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" + _WAITING_CHILD
-    parent = subprocess.Popen([sys.executable, "-c", _RUN_START_PUBLISHING, stubborn, str(pidfile), str(tmp_path)],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    pids: list[int] = []
+    parent, pids, out, err = _stop_a_run_fetching(tmp_path, stubborn)
     try:
-        deadline = time.monotonic() + 30
-        while not (pidfile.exists() and len(pidfile.read_text().split()) == 2):
-            assert parent.poll() is None, parent.communicate()
-            assert time.monotonic() < deadline, "the publish child never started"
-            time.sleep(0.02)
-        pids = [int(p) for p in pidfile.read_text().split()]
-        parent.send_signal(signal.SIGTERM)
-        out, err = parent.communicate(timeout=publish_launch._STOP_GRACE + 10)
         assert parent.returncode != 0, (out, err)
-        assert b"the publish returned" not in out, "a stopped run went on past its publish"
+        assert b"the fetch returned" not in out, "a stopped run went on past its fetch"
         for pid in pids:
-            assert not _outlives(pid), f"process {pid} of the publish child's group outlived the stopped run"
+            assert not _outlives(pid), f"process {pid} of the fetch child's group outlived the stopped run"
     finally:
-        if parent.poll() is None:
-            parent.kill()
-        for pid in pids:
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.kill(pid, signal.SIGKILL)
+        _kill_all(pids)
 
 
-def test_r6_the_publish_wait_puts_back_the_sigterm_handler_it_found():
-    """The run's publish wait turns SIGTERM into its own unwinding only while it waits: the handler it found is back
-    afterwards, and a launcher that returns normally is read as before."""
-    from defender import run, tenancy
+def test_r6_the_fetch_wait_puts_back_the_sigterm_handler_it_found(tmp_path):
+    """The run's fetch wait turns SIGTERM into its own unwinding only while it waits, and so does the launcher: the handler
+    each found is back afterwards, and a seam that returns normally is read as before."""
+    from defender import tenancy
+    from defender.investigation.publish_launch import launch_publish
+    from defender.tenancy import run_knowledge
 
     def mine(*_a: object) -> None:
         return None
 
     seen: list[object] = []
 
-    def publish(*_a: object, **_k: object) -> str:
+    def fetch(*_a: object, **_k: object) -> str:
         seen.append(signal.getsignal(signal.SIGTERM))
-        return f"fresh {OID}"
+        return f"ok {OID}"
 
+    dest = tmp_path / "dest"
+    dest.mkdir()
     before = signal.signal(signal.SIGTERM, mine)
     try:
-        report = run._publish_report(publish, type("T", (), {"id": "r6-tenant"})(),
-                                     tenancy.data_root_from_path(Path("/nonexistent")), None)
-        assert signal.getsignal(signal.SIGTERM) is mine, "the publish wait did not put back the handler it found"
+        report = run_knowledge.fetch_report(fetch, "r6-tenant", dest, tenancy.data_root_from_path(tmp_path))
+        assert signal.getsignal(signal.SIGTERM) is mine, "the fetch wait did not put back the handler it found"
+        line = launch_publish("r6-tenant", data_root=tmp_path, dest=dest, budget=30.0,
+                              command=[sys.executable, "-c", f"print('ok {OID}')"])
+        assert signal.getsignal(signal.SIGTERM) is mine, "the launcher did not put back the handler it found"
     finally:
         signal.signal(signal.SIGTERM, before)
-    assert seen, "the publish was not called"
-    assert seen[0] is not mine, "SIGTERM was not taken over while the publish ran"
+    assert seen, "the fetch was not called"
+    assert seen[0] is not mine, "SIGTERM was not taken over while the fetch ran"
     assert not report.unreadable, report
+    assert line == f"ok {OID}", line

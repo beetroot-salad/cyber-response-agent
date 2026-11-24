@@ -73,7 +73,7 @@ def test_the_run_start_frame_dispatches_only_a_fresh_run_with_a_registry(tmp_pat
     tree.mkdir(parents=True)
     T1106.place_tenant(tmp_path / "tenants", fixture_uuid("tenant:acme"), catalog=False)
     tenant = T1106.accept(tmp_path / "tenants", fixture_uuid("tenant:acme"))
-    grants = T1106.run_grants(tenant.settings)
+    grants = T1106.run_grants(T1106.placed_half(tenant, "settings"))  # #1618 K8: the placed half
 
     dispatching = run_tenant_for(tenant, defender_dir=tree, dispatches_lead_zero=True)
     assert dispatching.correlation == CorrelationDispatch(system="elastic", grant=grants.correlation)

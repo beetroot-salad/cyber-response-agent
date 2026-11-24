@@ -245,7 +245,7 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
 
     argv = ["--tenant", S.FIXTURE_TENANT, "--episode", ep.name, "--world", label]
     try:
-        from defender.tests.support.tenancy._launch_publish_p4 import in_process_publish
+        from defender.tests.support.tenancy._launch_publish_p4 import in_process_fetch
 
         # The launch-time publish, in process; the tenant's records are the estate's (stated, #1366 R10).
         directory = est.directory(tenant_id=S.FIXTURE_TENANT)
@@ -253,7 +253,7 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
         sib.rc = S.mod(S.RUN).main(argv, directory=directory, lifecycle=lifecycle, visualize=_no_visualize,
                                    preflight=_no_preflight, oracle=oracle.model,
                                    verifier=verifier.model, roster=est.roster(),
-                                   publish=in_process_publish())
+                                   fetch=in_process_fetch())
     except SystemExit as stop:
         sib.rc = 0 if stop.code is None else stop.code
     except Exception as exc:  # noqa: BLE001 — only the coined class is kept, the rest re-raise

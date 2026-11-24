@@ -40,8 +40,8 @@ from sqlalchemy.pool import NullPool
 from defender.database import async_engine, url
 from defender.records.formats import AlertMapping, PeopleRequestId, TenantId, UserId
 from defender.tenancy.models import (SCHEMA, AlertMappingRow, CaseRecord, CaseVersionRow, EvidenceRetention,
-                                     EvidenceRetentionRow, ForgeWiring, Generation, PeopleRequest, PublishStatus,
-                                     SystemVersionRow, TenantRecord, TenantRecords)
+                                     EvidenceRetentionRow, ForgeWiring, Generation, PeopleRequest, SystemVersionRow,
+                                     TenantRecord, TenantRecords)
 from defender.tenancy._directory import why_unreachable
 from defender.tenancy.record_refusals import refuse_unless_active
 from defender.tenancy.repository import (
@@ -53,7 +53,6 @@ from defender.tenancy.repository import (
     Conflict,
     FenceMissed,
     NotFound,
-    publish_outcome,
 )
 
 _logger = logging.getLogger(__name__)
@@ -61,7 +60,6 @@ _logger = logging.getLogger(__name__)
 _T: Table = TenantRecord.__table__  # type: ignore[assignment]
 _G: Table = Generation.__table__  # type: ignore[assignment]
 _W: Table = ForgeWiring.__table__  # type: ignore[assignment]
-_P: Table = PublishStatus.__table__  # type: ignore[assignment]
 _M: Table = AlertMappingRow.__table__  # type: ignore[assignment]
 _SV: Table = SystemVersionRow.__table__  # type: ignore[assignment]
 _CV: Table = CaseVersionRow.__table__  # type: ignore[assignment]
@@ -136,10 +134,6 @@ class PostgresTenantRepository:
         row = rows[0]
         wiring = None if row.repo is None else ForgeWiring(tenant_id=tenant_id, repo=row.repo, origin=row.origin)
         return row.state, wiring
-
-    async def publish_status(self, tenant_id: TenantId) -> dict[str, str] | None:
-        rows = await self._rows(select(_P).where(_P.c.tenant_id == tenant_id))
-        return PublishStatus(**rows[0]._mapping).as_dict() if rows else None
 
     async def alert_mapping(self, tenant_id: TenantId) -> AlertMapping | None:
         rows = await self._rows(select(_M).where(_M.c.tenant_id == tenant_id))
@@ -223,17 +217,6 @@ class PostgresTenantRepository:
             tenant_id, (_T.c.state == "active") & _T.c.pending_action.is_(None),
             "only an active tenant with nothing pending can rotate",
             pending_action="rotate", step="names", step_actor=SERVICE)
-
-    # --- host processes --------------------------------------------------------------------------
-    async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
-        published, refused, kind = publish_outcome(line)
-        values = dict(recorded_by=by, published=published, refused=refused, kind=kind)
-        try:
-            async with self._engine.begin() as conn:
-                await conn.execute(insert(_P).values(tenant_id=tenant_id, **values)
-                                   .on_conflict_do_update(index_elements=[_P.c.tenant_id], set_=values))
-        except IntegrityError as e:
-            raise ValueError(f"no tenant {tenant_id}") from e
 
     # --- workers ---------------------------------------------------------------------------------
     async def claimable(self, actor: str, *, now: _dt.datetime) -> list[TenantId]:
@@ -377,7 +360,7 @@ class _Held:
         add_generation: Generation | None = None,
         update_generations: Mapping[str, Mapping[str, Any]] | None = None,
         go_live: str | None = None, destroy: Collection[str] | Literal["all"] = (),
-        wiring: ForgeWiring | None = None, drop_wiring: bool = False, drop_publish_status: bool = False,
+        wiring: ForgeWiring | None = None, drop_wiring: bool = False,
         drop_records: bool = False,
     ) -> TenantRecord:
         columns = {k: v for k, v in dict(state=state, pending_action=pending_action, repo_url=repo_url,
@@ -392,9 +375,6 @@ class _Held:
                           w_repo=wiring.repo, w_origin=wiring.origin)
         if drop_wiring:
             statement.cte("drop_wiring", f"DELETE FROM {SCHEMA}.forge_wiring"
-                          " WHERE tenant_id IN (SELECT id FROM fence) RETURNING tenant_id")
-        if drop_publish_status:
-            statement.cte("drop_status", f"DELETE FROM {SCHEMA}.publish_status"
                           " WHERE tenant_id IN (SELECT id FROM fence) RETURNING tenant_id")
         if drop_records:
             statement.cte("drop_sv", f"DELETE FROM {SCHEMA}.system_versions WHERE tenant_id IN (SELECT id FROM fence) RETURNING tenant_id")

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618 flow 4: the launch's one fetch
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.records._episode_handle import Episode
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -183,7 +184,7 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tm
         with pytest.raises(T.refusals()) as refused:
             T.mod("cli.learning.branch").main(
                 ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
-                spawn=spawn, preflight=_no_preflight,
+                spawn=spawn, preflight=_no_preflight, fetch=in_process_fetch(),
                 questioner=questioner, live_tree=T.source_capture(),
                 directory=T.launcher_directory(src.parent.parent.name))
         assert questioner.calls > 0, "the launch was refused before the identity gate ran"

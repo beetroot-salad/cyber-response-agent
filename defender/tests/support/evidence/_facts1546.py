@@ -11,8 +11,9 @@ PICKS (r8 wins where it speaks; otherwise the spelling most slices already used)
 - the closing field is `review_outcome`; a readiness `result` carries no knowledge (its own staged `knowledge` fact does).
 - a learning outcome is sent with `findings {state: ok, text}` and staged with `screened{rows by channel}` or `refused{reason}`.
 - an `End` reads the same for both kinds: `stage`/`failure_reason` (a learning row's `status`/`reason` columns take them).
-- a drain's staged `result` is its tick's exit status, an int (`DRAIN_EXIT_STATUS`); a readiness job's knowledge record travels on
-  the verb `knowledge` (`VERB_KNOWLEDGE`) and is staged mapped to the served shape.
+- a drain's staged `result` is its tick's exit status, an int (`DRAIN_EXIT_STATUS`); a readiness job's `knowledge` is staged by
+  the helper itself from the source it settled (r10 (c), U-3): there is no `knowledge` verb, and a `knowledge` request from any
+  kind is refused as an unknown verb (`KNOWLEDGE_VERB_GONE`).
 - pull refusals `out_of_claim | unavailable | store_fault`; the verdict reader is `defender.box._scrub.verdict_state(tree)`.
 - the helper's store env is `DEFENDER_EVIDENCE_{ENDPOINT,BUCKET,ACCESS_KEY,SECRET_KEY,REGION}`; `REGION` is optional (the
   lifecycle requires the other four names).
@@ -26,7 +27,9 @@ from typing import Any
 
 VERB_OUTCOME, VERB_PAGE, VERB_ARMS, VERB_ARM, VERB_PROGRESS, VERB_RESULT = (
     "outcome", "page", "arms", "arm", "progress", "result")
-VERB_KNOWLEDGE = "knowledge"  # a readiness job's knowledge record, which the helper maps once to the served shape
+#: r10 (c) U-3: the readiness `knowledge` verb is dropped (trusted code never reads job-written bytes it can know itself); the name a
+#: job might still ask, refused for every kind as an unknown verb.
+KNOWLEDGE_VERB_GONE = "knowledge"
 VERB_PUT, VERB_PULL = "evidence.put", "evidence.pull"
 RECORD = "record"  # the argument every record verb carries it in
 
@@ -59,8 +62,9 @@ STARTED = {"container": "started"}
 COMMIT = "c" * 40
 #: STAGED `knowledge`: the served shape, mapped once by the helper.
 KNOWLEDGE = {"status": "current", "commit": COMMIT, "stale_kind": None}
-#: The source record the helper maps from (a record, never a staged fact).
-KNOWLEDGE_RECORD = {"kind": "fresh", "commit": COMMIT, "stale_kind": None, "reason": None}
+#: The source record the helper maps from (a record, never a staged fact): main's `{kind, commit, reason}` (#1618 D7; r10 (f): no
+#: `stale_kind`).
+KNOWLEDGE_RECORD = {"kind": "fresh", "commit": COMMIT, "reason": None}
 
 
 def staged_knowledge(commit: str = COMMIT, **over: Any) -> dict[str, Any]:
@@ -197,13 +201,12 @@ VALID: dict[str, tuple[str, str, Any, str, Any]] = {
     "learning-arms": ("learning", VERB_ARMS, sent_arms((ARM_RUN, ARM_WORLD)), "arms", staged_arms((ARM_RUN, ARM_WORLD))),
     "learning-arm": ("learning", VERB_ARM, sent_arm(), f"arm/{ARM_RUN}", staged_arm()),
     "readiness-result": ("readiness", VERB_RESULT, READINESS_RESULT, "result", READINESS_RESULT),
-    "readiness-knowledge": ("readiness", VERB_KNOWLEDGE, KNOWLEDGE_RECORD, "knowledge", KNOWLEDGE),
     "adoption-result": ("adoption", VERB_RESULT, ADOPTION_RESULT, "result", ADOPTION_RESULT),
     "drain-result": ("drain", VERB_RESULT, DRAIN_EXIT_STATUS, "result", DRAIN_EXIT_STATUS),
 }
 
 #: The launch fact naming the claim's inputs folder (`.job-inputs/<claim>/`, design "The job's folders"), from which a container
-#: builds its `JobTenant`'s `run_knowledge` and `export_folder(pin)`; adopted from the implementation's helper (both kinds).
+#: builds its `JobTenant`'s `run_knowledge`; adopted from the implementation's helper (every container kind, adoption included).
 LAUNCH_INPUTS = "inputs_dir"
 
 #: An investigation claim's launch facts (`jobs.claims.launch`, design "Claim": admission facts, knowledge pin, alert reference;

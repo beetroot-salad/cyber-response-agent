@@ -11,7 +11,7 @@ Operator configuration, all read at start:
   row's `id` and `state`, nothing else; the proxy keeps no tenant list), `audit_path` (the append-only audit file), and optionally
   `upstream_timeout_sec`. OpenBao is the deployment's fixed address and transit mount, not
   configuration; a config still naming `openbao_addr`, `transit_mount`, `tenant_keys`,
-  `tenant_exports`, `data_root` or `max_response_bytes` refuses to start (#1163 A26, #1412). The token is read from files only, never from
+  `tenant_exports`, `data_root` or `max_response_bytes` refuses to start (#1163 A26, #1412). (lint-stale-ref: ok — the retired key the proxy still refuses) The token is read from files only, never from
   the environment.
 - `DEFENDER_CREDENTIAL_PROXY_HOST` (default `127.0.0.1`; a compose service sets `0.0.0.0` to
   listen on the compose network) and `DEFENDER_CREDENTIAL_PROXY_PORT` (default `8411`).

@@ -215,9 +215,10 @@ def rig(tmp_path, monkeypatch, data_root, *, working_tree_edit: bool = False,  #
                  **A.system_files("hr", H.declaration(merged.url + "/hr"))}
         with published_tenant(tmp_path / "forge", root=data_root, tenant_id=S.FIXTURE_TENANT,
                               files=files) as t:
-            if working_tree_edit:  # an unmerged edit in the clone's working tree (C28, C34)
-                (t.clone / ACCESS_FILE.format(system="idp")).write_text(
-                    H.declaration(wt.url + API), encoding="utf-8")
+            if working_tree_edit:  # an unmerged edit in a working copy on the host (C28, C34; #1618 K8: the old clone's place)
+                from defender.tests.tenancy.tenant_1108_p4._support import plant_old_clone
+
+                plant_old_clone(t, {ACCESS_FILE.format(system="idp"): H.declaration(wt.url + API)})
             # The launcher signs in-process with the live generation's sign login, read from the
             # episode's records it passes in as `directory=` (A24); the delivery file is absent
             # (the signer never reads it). No signer is injected, the OpenBao stand-in is the transport.

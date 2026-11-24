@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib
 import re
-from pathlib import Path
 
 import pytest
 
@@ -14,7 +13,10 @@ from defender.tests.tenancy.tenant_1108_delivery._support import (
     push_to_remote,
     remote_refs,
     git_bytes,
+    target,
 )
+
+from defender.tests.tenancy.tenant_1108_delivery._clone_free_1618 import delivery_without_clone
 
 from ._forge import (
     DIGEST,
@@ -79,7 +81,8 @@ def test_a_fresh_offer_is_one_commit_off_the_fetched_main_pushed_and_opened_once
     """No PR, main lacks the files, local main stale: one commit of exactly the rendered paths off the REMOTE main, one PR, `opened` with its number. (A3.5, P-9, N-A4)"""
     _land(repo, tmp_path, {"agent/lessons/merged-since.md": b"landed after the clone fetched\n"})
     before = main_tip(repo[1])
-    assert git(repo[0].knowledge, "rev-parse", "origin/main") != before, "premise: the local clone is stale"
+    assert before != repo.seed, "premise: main moved on since the tenant was seeded"
+    # (#1618: the "local clone is stale" premise is gone with the clone; the step's repository is fetched at its open.)
 
     record = _adopt(repo, forge)
 
@@ -363,45 +366,56 @@ def test_the_branch_name_is_the_systems_and_the_digests_first_16_hex(repo, forge
     assert re.fullmatch(r"adopt/elastic/[0-9a-f]{16}", forge.creates[0]["head"])
 
 
-# --- A3, surface §7: both of adopt()'s fetches tell a ref-lock collision from any other fault (repair 5) -----------------------
-
-def _clone_git_dir(repo):
-    from defender.tests.support.shared._locations_1210 import location_path
-
-    return Path(location_path(repo[0].knowledge)) / ".git"
-
-
-def _lock_ref(repo, ref):
-    """A ref lock held on the clone (another writer of the shared clone mid-update): `<ref>.lock` planted."""
-    lock = _clone_git_dir(repo) / f"{ref}.lock"
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text("", encoding="utf-8")
-
+# --- A3, surface §7: a fetch fault of adopt()'s is `delivery_failed` (repair 5) ------------------------------------------
+# #1618 (design "Retired promises": adoption's ref-lock collision and `repository_busy` writer): with one private repository
+# per operation no other writer can hold a ref lock in it, so the `ref-lock` -> `repository_busy` arms are retired; a stored
+# `repository_busy` stays readable (census "Keep"). Any other fetch fault is still `delivery_failed`.
 
 def _no_fetching(repo):
-    """Any other fetch fault: the remote serves no fetch over HTTP (`http.uploadpack false`), pushes still land."""
+    """Any fetch fault: the remote serves no fetch over HTTP (`http.uploadpack false`), pushes still land."""
     git(repo[1], "config", "http.uploadpack", "false")
 
 
-@pytest.mark.parametrize(("fault", "reason"), [("ref-lock", "repository_busy"), ("other", "delivery_failed")])
-@pytest.mark.parametrize("fetch", ["first", "after-a-refused-push"])
-def test_each_fetch_reads_a_ref_lock_as_repository_busy_and_any_other_fault_as_delivery_failed(repo, forge, tmp_path, fetch, fault, reason):
-    """The first fetch of `origin/main`, and the fetch of the branch after a racer refused our push: a ref lock held on
-    the clone's ref it updates is `repository_busy`, any other fetch fault `delivery_failed`; nothing is opened. (A3,
-    surface §7)"""
+def test_a_fetch_fault_at_the_repositorys_open_refuses_before_anything_is_offered(repo, forge, tmp_path):
+    """#1618: the step's first fetch of `main` is its private repository's open (the old step fetched `origin/main` into
+    the shared clone itself): a fetch fault there refuses the open, and nothing is pushed or opened. (A3, K4)"""
+    _land(repo, tmp_path, {"agent/lessons/merged-since.md": b"landed before the step\n"})
+    _no_fetching(repo)
+    with pytest.raises(target().DeliveryRefused):
+        delivery(repo, forge)
+    _nothing_sent(forge, repo)
+
+
+def test_the_fetch_after_a_refused_push_fault_is_delivery_failed(repo, forge, tmp_path):
+    """The fetch of the branch after a racer refused our push: a fetch fault is `delivery_failed`; nothing is opened.
+    (A3, surface §7)"""
     step = importlib.import_module("defender.learning.author.version_control.adoption")
     repository = delivery(repo, forge).repository
     seen = {}
-    if fetch == "first":
-        _land(repo, tmp_path, {"agent/lessons/merged-since.md": b"landed after the clone fetched\n"})
-        _lock_ref(repo, "refs/remotes/origin/main") if fault == "ref-lock" else _no_fetching(repo)
-    else:
-        def racer():
-            seen["racer"] = racer_push(repo[1], tmp_path, BRANCH, RENDERING, message="the racer's own commit")
-            _lock_ref(repo, f"refs/remotes/origin/{BRANCH}") if fault == "ref-lock" else _no_fetching(repo)
-        forge.after_listing = racer
+
+    def racer():
+        seen["racer"] = racer_push(repo[1], tmp_path, BRANCH, RENDERING, message="the racer's own commit")
+        _no_fetching(repo)
+    forge.after_listing = racer
     record = step.adopt(repository, system=SYSTEM, rendering=RENDERING, digest=DIGEST)
-    if fetch != "first":
-        assert seen, "premise: the racer pushed between the listing and our push"
-    assert (record.outcome, getattr(record, "reason", None)) == ("failed", reason)
+    assert seen, "premise: the racer pushed between the listing and our push"
+    assert (record.outcome, getattr(record, "reason", None)) == ("failed", "delivery_failed")
     assert forge.creates == []
+
+
+def test_1618_f7_an_offer_needs_no_clone_on_the_host_and_is_one_commit_off_the_remote_main(repo, forge, tmp_path):
+    """With the clone, `exports/` and lock deleted, the step works from a private repository: one commit off the remote `main`, one PR. (F7, A3.5)"""
+    _land(repo, tmp_path, {"agent/lessons/merged-since.md": b"landed after the host last fetched\n"})
+    before = main_tip(repo[1])
+    step = importlib.import_module("defender.learning.author.version_control.adoption")
+    repository = delivery_without_clone(repo, forge).repository
+
+    record = step.adopt(repository, system=SYSTEM, rendering=RENDERING, digest=DIGEST)
+
+    [created] = forge.creates
+    assert created["head"] == BRANCH
+    assert _outcome(record)[0] == "opened"
+    tip = git(repo[1], "rev-parse", f"refs/heads/{BRANCH}")
+    assert git(repo[1], "rev-parse", f"{tip}^") == before
+    assert blobs_at(repo[1], tip, RENDERING) == RENDERING
+    _quiet(forge, repo, before)

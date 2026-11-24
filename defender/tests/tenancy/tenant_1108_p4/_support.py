@@ -1,11 +1,10 @@
-"""Shared machinery for #1108 P4: the fixture tenant as a real tenant repo, published for real
-through P3's delivery path.
+"""Shared machinery for #1108 P4: the fixture tenant as a real tenant repository on a fake Forgejo.
 
-Built on P3's `tenant_1108_delivery/` helpers, imported, never copied: a real clone, a bare remote
-served over smart HTTP (`GitHTTP`, Bearer-authenticated as Forgejo is), the forge API fake
-(`ForgeHTTP`), the issuer fake (`VaultHTTP`) and P3's `place_tenant`. Nothing here implements P4
-policy: it plants trees, lands commits on the fake origin as a human merge would, and calls P3's
-real `TenantDelivery.open(...).publish()`; every judgement is the code under test's.
+Built on P3's `tenant_1108_delivery/` helpers, imported, never copied: a bare remote served over smart HTTP (`GitHTTP`,
+Bearer-authenticated as Forgejo is), the forge API fake (`ForgeHTTP`), the issuer fake (`VaultHTTP`) and P3's
+`place_tenant`. Nothing here implements P4 policy: it plants trees, seeds and lands commits on the fake origin by git
+plumbing as a human merge would (#1618 r5: knowledge lives only in Forgejo; there is no publish, clone, `exports/` or
+`current` on the host), and every judgement is the code under test's. Expected values are read from the bare remote.
 
 The pytest fixture `p4_tenant` (conftest.py) is a `PublishedTenant` under the test's own data root.
 """
@@ -16,6 +15,7 @@ import shutil
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -75,19 +75,22 @@ def _write_files(checkout: Path, files: Files | None) -> None:
 
 @dataclass(frozen=True, eq=False)
 class PublishedTenant:
-    """An accepted tenant whose clone is a real git repo holding the fixture (plus any `files`),
-    with a live loopback origin, a forge fake and an issuer fake, published once for real.
+    """An accepted tenant whose Forgejo repository (the bare `remote`, served at `origin`) holds the fixture (plus any
+    `files`) on `main`, with a forge fake and an issuer fake. `checkout` is the test's own seed checkout, outside the data
+    root (`seed_checkout`): a human's copy, never read by the code under test. `export.commit` (= `commit`) is the seed.
+    There is no `clone` (#1618 K8): reading `.clone` raises, so a case written against the host clone is ruled on, never
+    silently re-pointed at the checkout.
 
     Fault seams are P3's fakes: `server` (`GitHTTP`: `.refuse`, `.on_service` returning a
     `Trickle`), `forge` (`ForgeHTTP`: `.fault`, `.protection`), `vault` (`VaultHTTP`: `.status`,
     `.body`, `.calls`). `identity` is the first publish's; it caches its token under a clock that
     never moves, so `open_delivery` builds a fresh `vault.identity()` per call: set an issuer
-    fault on `vault` before the next `open_delivery`/`publish`. `p3` is P3's
+    fault on `vault` before the next `open_delivery`. `p3` is P3's
     `(tenant, bare remote, None)` repo tuple, so P3's helpers (`push_to_remote`, ...) apply."""
 
     tenant: Any
     data_root: Path
-    clone: Path
+    checkout: Path
     remote: Path
     origin: str
     forge: ForgeHTTP
@@ -103,6 +106,12 @@ class PublishedTenant:
     @property
     def tenant_id(self) -> str:
         return str(self.tenant.id)
+
+    @property
+    def clone(self) -> Path:
+        raise AttributeError(
+            "#1618 K8: a tenant has no clone on the host; `checkout` is the test's own seed checkout (outside the data root, "
+            "no reader looks there), a decoy for a reader that might still read the old clone goes under `<T>/knowledge`")
 
     @property
     def directory(self) -> Any:
@@ -149,6 +158,11 @@ class PublishedTenant:
             bound["origin"] = origin
         bound.setdefault("origin", self.origin)
         merged = {**bound, **keywords}
+        if "records" not in merged:
+            # #1366 R8 DERIVED read `<T>/knowledge/settings`, which #1618 removes: derive from the seed checkout's instead.
+            from defender.tests.support.tenancy._systems1366 import derive
+
+            merged["records"] = derive(Path(self.checkout) / "settings")
         if merged.get("wiring", True) and "generations" not in merged:
             # The fixture tenant's elastic is proxied (#1391 P1/D12): run start needs a live generation with a
             # sign login. A test whose premise is "none" passes `generations=()`.
@@ -166,23 +180,19 @@ class PublishedTenant:
 
     @property
     def commit(self) -> str:
-        """The commit the first publish exported (the clone's seeded fixture commit)."""
+        """The seed commit: `main` on the remote when the tenant was seeded."""
         return self.export.commit
 
     def open_delivery(self, **options: Any) -> Any:
         """P3's real `TenantDelivery.open` for this tenant over the forge fake's client, a fresh
-        `vault.identity()` (so a fault set on `vault` is seen) and the clone's origin; any of them
-        overridable by keyword."""
+        `vault.identity()` (so a fault set on `vault` is seen) and the origin; any of them
+        overridable by keyword. It owns a private repository (#1618): use it as a context manager."""
         options.setdefault("defender_dir", DEFENDER)
         options.setdefault("client", self.forge.client)
         if "identity" not in options:
             options["identity"] = self.vault.identity()
         options.setdefault("origin", self.origin)
         return target().TenantDelivery.open(self.tenant, **options)
-
-    def publish(self, **options: Any) -> Any:
-        """Publish again for real (`open_delivery(**options).publish()`); returns the export."""
-        return self.open_delivery(**options).publish()
 
     def merge(self, files: Files, message: str = "human merge") -> str:
         """A human-merged PR: one commit on the fake origin's `main` writing `files` (`None`
@@ -194,6 +204,15 @@ class PublishedTenant:
     def origin_main(self) -> str:
         """The fake origin's `main` tip, read from the bare remote."""
         return git(self.remote, "rev-parse", "refs/heads/main")
+
+
+def plant_old_clone(t: PublishedTenant, files: Files) -> Path:
+    """A decoy for a reader that might still read the host clone r5 deletes (#1618 K8): `files` written under
+    `<T>/knowledge/` (the old clone's place), never committed anywhere. Returns that folder."""
+    folder = Path(location_path(t.tenant.tenant_root)) / "knowledge"
+    folder.mkdir(exist_ok=True)
+    _write_files(folder, files)
+    return folder
 
 
 def place_fixture(root: Path, tenant_id: str = FIXTURE_TENANT_ID, *,
@@ -213,61 +232,92 @@ def place_fixture(root: Path, tenant_id: str = FIXTURE_TENANT_ID, *,
     return knowledge
 
 
+def seed_checkout(scratch: Path, name: str) -> Path:
+    """The test's own working checkout of the tenant's repository (a human's copy, outside the data root): where
+    `publish_placed` commits what was placed, `<scratch>/seeds/<name>`."""
+    return Path(scratch) / "seeds" / name
+
+
+def _take_placed(placed: Path, work: Path) -> None:
+    """Move what was placed at `<T>/knowledge` into the seed checkout `work` (its `agent/` and `settings/` replace the
+    checkout's), and leave `<T>` with no `knowledge/` (#1618 K8, design "Upgrade")."""
+    if not work.exists():
+        work.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(placed), str(work))
+        return
+    for entry in list(work.iterdir()):
+        if entry.name != ".git":
+            shutil.rmtree(entry) if entry.is_dir() and not entry.is_symlink() else entry.unlink()
+    for entry in list(placed.iterdir()):
+        if entry.name != ".git":
+            shutil.move(str(entry), str(work / entry.name))
+    shutil.rmtree(placed)
+
+
 @contextlib.contextmanager
 def publish_placed(scratch: Path, *, root: Path, tenant_id: str,
                    repo_name: str | None = None) -> Iterator[PublishedTenant]:
-    """Publish for real a tenant already placed under `root`, with whatever its folder holds now.
+    """Seed the tenant's Forgejo repository with what is placed under `root` now, by git plumbing alone (#1618: r5 has no
+    publish, clone, `exports/` or `current`; knowledge lives only in Forgejo).
 
-    The folder becomes (or stays) a git repo on `main` with everything committed; the commit goes
-    to the bare remote `<scratch>/tenants/<repo_name>.git` (default name: the tenant id), served
-    as `origin` for the context, and P3's real publish exports it and points `current` at it.
-    Calling it again (same `scratch`) publishes new content as a fast-forward. P3's
-    `DeliveryRefused` and acceptance's `TenantRefused` propagate: a caller planting a broken
-    tenant decides what a failed publish means."""
+    What `place_fixture`/`place_tenant` planted at `<T>/knowledge` is moved into the seed checkout
+    (`seed_checkout(scratch, name)`, outside the data root), committed on `main` and pushed to the bare remote
+    `<scratch>/tenants/<repo_name>.git` (default name: the tenant id), served as `origin` for the context. `<T>` is left
+    with no `knowledge/`, `exports/` or `knowledge.lock` (the design's upgrade step done). Calling it again (same
+    `scratch`) after placing new content pushes it as a fast-forward. Acceptance's `TenantRefused` propagates. Nothing
+    of the code under test runs here: every expected value is the remote's (`t.commit`, `t.origin_main()`)."""
     root, scratch = Path(root), Path(scratch)
     name = repo_name if repo_name is not None else tenant_id
     tenant = tenants.accept(root, tenant_id)
-    clone = Path(location_path(tenant.knowledge))
-    if not (clone / ".git").exists():
-        git(clone, "init", "-b", "main")
-        git(clone, "config", "user.name", "P4 fixture")
-        git(clone, "config", "user.email", "p4@test.invalid")
-    git(clone, "add", "-A")
-    if git(clone, "status", "--porcelain"):
-        git(clone, "commit", "-m", "tenant content")
-    head = git(clone, "rev-parse", "HEAD")
+    tenant_folder = Path(location_path(tenant.tenant_root))
+    placed = tenant_folder / "knowledge"
+    work = seed_checkout(scratch, name)
+    if placed.is_dir():
+        _take_placed(placed, work)
+    for leftover in ("exports",):
+        shutil.rmtree(tenant_folder / leftover, ignore_errors=True)
+    (tenant_folder / "knowledge.lock").unlink(missing_ok=True)
+    assert work.is_dir(), f"nothing placed for {tenant_id} and no seed checkout at {work}"
+    if not (work / ".git").exists():
+        git(work, "init", "-b", "main")
+        git(work, "config", "user.name", "P4 fixture")
+        git(work, "config", "user.email", "p4@test.invalid")
+    git(work, "add", "-A")
+    if git(work, "status", "--porcelain"):
+        git(work, "commit", "-m", "tenant content")
+    head = git(work, "rev-parse", "HEAD")
     remote = scratch / "tenants" / f"{name}.git"
     if remote.exists():
-        git(clone, "push", "-q", remote, "main:main")
+        git(work, "push", "-q", remote, "main:main")
     else:
         remote.parent.mkdir(parents=True, exist_ok=True)
-        git(scratch, "clone", "--bare", *BARE_NO_UPKEEP, clone, remote)
+        git(scratch, "clone", "--bare", *BARE_NO_UPKEEP, work, remote)
+    assert git(remote, "rev-parse", "refs/heads/main") == head, "premise: the remote's main is the seed"
+    from defender.tests.support.tenancy._fetch_standin_1618 import link_published
+
+    link_published(root, tenant_id, remote)  # the data root's forge names it (`in_process_fetch()`, `settings_of`)
     server = GitHTTP(scratch, token=issuer_token(tenant_id))
     try:
         origin = f"{server.url}/tenants/{name}.git"
-        if git(clone, "remote"):
-            git(clone, "remote", "set-url", "origin", origin)
+        if git(work, "remote"):
+            git(work, "remote", "set-url", "origin", origin)
         else:
-            git(clone, "remote", "add", "origin", origin)
-        git(clone, "fetch", remote, "+refs/heads/*:refs/remotes/origin/*")
+            git(work, "remote", "add", "origin", origin)
+        git(work, "fetch", remote, "+refs/heads/*:refs/remotes/origin/*")
         forge = ForgeHTTP(remote=remote, origin=origin)
+        server.api = forge.reply  # #1618 D9: a fetch child of its own process reads `main`'s protection over HTTP
         vault = VaultHTTP(tenant_id)
         identity = vault.identity()
-        export = target().TenantDelivery.open(
-            tenant, defender_dir=DEFENDER, client=forge.client, identity=identity,
-            origin=origin).publish()
-        assert export.commit == head, (export.commit, head)
         yield PublishedTenant(
-            tenant=tenant, data_root=root, clone=clone, remote=remote, origin=origin,
+            tenant=tenant, data_root=root, checkout=work, remote=remote, origin=origin,
             forge=forge, vault=vault, identity=identity, server=server, scratch=scratch,
-            export=export, p3=(tenant, remote, None))
+            export=SimpleNamespace(commit=head), p3=(tenant, remote, None))
     finally:
         server.close()
 
 
 def publish_once(scratch: Path, *, root: Path, tenant_id: str) -> PublishedTenant:
-    """`publish_placed` for a caller that needs only the export: the origin server is closed on
-    return, so `publish()` needs another `publish_placed`/`publish_once`."""
+    """`publish_placed` for a caller that needs only the seeded remote: the origin server is closed on return."""
     with publish_placed(scratch, root=root, tenant_id=tenant_id) as done:
         return done
 
@@ -276,8 +326,7 @@ def publish_once(scratch: Path, *, root: Path, tenant_id: str) -> PublishedTenan
 def published_tenant(scratch: Path, *, root: Path, tenant_id: str = FIXTURE_TENANT_ID,
                      files: Files | None = None, agent: Path | None = None,
                      repo_name: str = "fixture") -> Iterator[PublishedTenant]:
-    """`place_fixture` then `publish_placed`: the clone holds one commit on `main`, exported and
-    named by `current`. Keep `scratch` (served remotes, merge checkouts) apart from `root`; `root`
+    """`place_fixture` then `publish_placed`: the remote holds one commit on `main` (the seed). Keep `scratch` (served remotes, merge checkouts) apart from `root`; `root`
     must not already hold `tenant_id` (don't combine with `d9_tenant` or `fixture_tenant()` on
     one id).
 
@@ -456,6 +505,7 @@ __all__ = [
     "files_under",
     "fixture_agent_files",
     "place_fixture",
+    "plant_old_clone",
     "publish_once",
     "publish_placed",
     "git",

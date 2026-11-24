@@ -75,7 +75,7 @@ def test_s1_a_system_a_lacks_is_refused_the_same_whether_or_not_b_declares_it(
 
         b.merge(H.access_files("billing", H.declaration(up.url + "/billing"),
                                env=H.http_proxy_env("billing")), "B adds billing")
-        b.publish()
+        # #1618 D7/K8: the merge is `main`, which the proxy's next read fetches; there is no publish step.
         store.sets[(b.tenant_id, "billing")] = T.static_set(KEY_B)
         with_b = T.ask(client, tok, "billing", "GET", f"{up.url}/billing/invoices")
         assert (with_b, store.reads, up.seen) == (without_b, [], [])

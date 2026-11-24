@@ -164,8 +164,10 @@ def _session(root: Path, runtime: str) -> dict[str, Any]:
     # Execute in the shared model view; forbidden episode/sibling targets retain host paths.
     command = f"python3 {MODEL_RUN / PROBE_NAME} {MODEL_RUN} {episode} {sibling}"
     from defender.tests.support.tenancy._run_copy_stage import staged_agent
+    from defender.tests.support.tenancy._tenants1106 import placed_half
 
-    agent, token = staged_agent(Path(t.agent), arm.parent.parent / "run-copies")
+    # #1618 K8: a `Tenant` names no knowledge path; the run copy is staged from the agent half the spec placed.
+    agent, token = staged_agent(placed_half(t, "agent"), arm.parent.parent / "run-copies")
     box = start_box(arm, H.DEFENDER, spec=BoxSpec(runtime=runtime),
                     tenant_agent=agent, tenant_id=t.id, staged_token=token, data_root=current_data_root())
     sandboxed, name = box.sandboxed, box.name

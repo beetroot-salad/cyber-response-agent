@@ -25,15 +25,15 @@ def clean_box_env(monkeypatch):
     monkeypatch.setenv('DEFENDER_AGENT_DIR', '/wrong/inherited/agent')
 
 
-# Tenant identity is checked at publish, not in the box: the run box mounts the run copy's
+# Tenant identity is checked at the fetch, not in the box: the run box mounts the run copy's
 # `agent/` and a staged token (pinned in tenant_1108_p4/test_run_copy.py).
 
 
 def test_explicit_unsandboxed_lane_hands_its_programs_the_run_copy_not_an_inherited_path(
         tmp_path, data_root, monkeypatch):
     """Under the explicit unsandboxed opt-out, the bash lane's `DEFENDER_AGENT_DIR` is neither
-    the inherited shell value nor the tenant's clone, and the files it names are the run copy's
-    (the clone's working tree holds a different, unpublished lesson)."""
+    the inherited shell value nor the old clone's place, and the files it names are the run copy's
+    (a decoy at `<T>/knowledge`, where the host clone was before #1618 K8, holds a different lesson)."""
     import functools
 
     from defender.execution.bash_exec import parse
@@ -55,19 +55,20 @@ def test_explicit_unsandboxed_lane_hands_its_programs_the_run_copy_not_an_inheri
     def no_daemon(argv, **_kw):
         raise FileNotFoundError('docker: no daemon in this test')
 
+    from defender.tests.tenancy.tenant_1108_p4._support import plant_old_clone
+
     with B.run_tenant(tmp_path, data_root) as t:
-        (B.clone_dir(t) / B.LESSON).write_text(B.lesson_text(B.CLONE_ONLY_MARK), encoding='utf-8')
+        decoy = plant_old_clone(t, {B.LESSON: B.lesson_text(B.CLONE_ONLY_MARK)})
         lifecycle = functools.partial(
             run_py._run_investigation_lifecycle, investigate=investigate,
             start_box=functools.partial(box_mod.start_box, docker=no_daemon))
-        out = B.launch(t, tmp_path, publish=lambda *a, **k: B.fresh(t.commit),
-                       lifecycle=lifecycle)
-        clone_agent = B.clone_dir(t) / 'agent'
+        out = B.launch(t, tmp_path, fetch=B.fetching(t), lifecycle=lifecycle)
+        clone_agent = decoy / 'agent'
     assert out.reached, out.text()
     assert out.rc == 0, out.text()
     ((seen, lesson),) = observed
     assert seen != '/wrong/inherited/agent', 'fallback subprocess inherited the wrong agent path'
-    assert seen != str(clone_agent), 'the opt-out lane was handed the tenant clone'
+    assert seen != str(clone_agent), "the opt-out lane was handed the old clone's place"
     assert B.SEEDED_MARK.encode() in lesson, (
         f'the agent half the fallback hands its programs is not the run copy: {lesson[-200:]!r}')
     assert B.CLONE_ONLY_MARK.encode() not in lesson

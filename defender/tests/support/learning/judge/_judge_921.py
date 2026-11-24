@@ -615,10 +615,15 @@ def episode_location(episode_dir: Path) -> tuple[Path, str]:
     test's `DEFENDER_DATA_ROOT` or one a scene set up of its own (several same-id episodes in one
     test each need one). An episode anywhere else is a fixture bug, raised here rather than met
     as a confusing "absent" refusal further in."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import served_remote
+
     episode_dir = Path(episode_dir).absolute()
     container = episode_dir.parent
     tenant_dir = container.parent
-    if container.name != "episodes" or not (tenant_dir / "knowledge").is_dir():
+    # Set up: its knowledge placed at `<T>/knowledge`, or (#1618 K8: knowledge lives only in Forgejo) seeded on the data
+    # root's served remote for `<T>` (`_data_root_1078.set_up_tenant`'s two shapes).
+    set_up = (tenant_dir / "knowledge").is_dir() or (served_remote(tenant_dir.parent, tenant_dir.name) / "HEAD").exists()
+    if container.name != "episodes" or not tenant_dir.is_dir() or not set_up:
         raise AssertionError(
             f"fixture bug: {episode_dir} is not at <data root>/<T>/episodes/<id> under a set-up "
             "tenant — build it with `_triplet_947.episode` (default root), or under "
@@ -661,8 +666,21 @@ def render_at(episode_dir: Path, label: str, **kw: Any) -> Any:
     with repository.episode_files(episode_dir.name) as episode:
         # The episode's run view is a required argument of the render (#1534); its name is the contract's proposal.
         view = repository.episode(episode_dir.name, held=episode)
+        bound = episode.view()
+        kw.setdefault("knowledge", pass_knowledge(episode_dir, bound))
         return mod("learning.judge.render").render(
-            episode_dir, label, bound=episode.view(), episode_runs=view, **kw)
+            episode_dir, label, bound=bound, episode_runs=view, **kw)
+
+
+def pass_knowledge(episode_dir: Path, bound: Any) -> Any:
+    """The judge's `KnowledgeBodies` for a render-level call, as `grade_episode` builds it (#1618 K5): at the family's
+    pin (`_pass_knowledge`), its copy the product's fetch from the tenant's served remote (`fetched_copy`), as the
+    launcher's `_judge_copy` hands it; outside a job container there is no helper to ask."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import fetched_copy
+
+    judge = mod("learning.judge")
+    return mod("learning.judge.knowledge").KnowledgeBodies(
+        knowledge=judge._pass_knowledge(bound, []), copy=fetched_copy(Path(episode_dir).parent.parent.name))
 
 
 def read_manifest_at(episode_dir: Path) -> dict:
@@ -683,11 +701,19 @@ def read_grade_at(episode_dir: Path) -> Any:
 def grade_at(episode_dir: Path, *, runs: Any = None, **kw: Any) -> Any:
     """`learning.judge.grade_episode(runs, episode_dir.name, **kw)`, the judge's one entry
     point. `runs` defaults to the repository of the tenant holding `episode_dir`
-    (`episode_runs_for`). Every keyword passes through unchanged; nothing is defaulted, and no
-    environment is set."""
+    (`episode_runs_for`). Every keyword passes through unchanged and no environment is set; the one default is `copy=`
+    (#1618 K5: a post-move lesson body is read from a copy at the family's pin), the product's fetch of that commit from
+    the tenant's served remote (`_fetch_standin_1618.fetched_copy`), as the launcher's own judge copy does; not when the
+    job-socket environment names a helper, where the judge's own default (the helper's `copy.make`) is the path driven."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import fetched_copy
+
     episode_dir = Path(episode_dir)
     repository = episode_runs_for(episode_dir) if runs is None else runs
     kw.pop("runs_base", None)  # Some callers still pass it; `grade_episode` takes none.
+    if not os.environ.get(mod("job_socket").SOCKET_ENV):
+        # Outside a job container (no job socket named) the judge's own default, the helper's `copy.make`, has no helper
+        # to ask: stand in the launcher's fetch. Inside one (the socket named) the default path is what the case drives.
+        kw.setdefault("copy", fetched_copy(episode_dir.parent.parent.name))
     return mod("learning.judge").grade_episode(repository, episode_dir.name, **kw)
 
 
@@ -1071,6 +1097,32 @@ class FakeGitShow:
     @property
     def revs(self) -> list[str]:
         return [rev for rev, _path in self.asked]
+
+
+@dataclass
+class FakeCopy:
+    """A `copy=` seam for an in-process judge pass (`grade_episode(copy=)`; #1618 K5, flow 3: a post-move sibling's lesson
+    bodies are read from a copy of the tenant's knowledge at the family's pin, which in a job container the helper's
+    `copy.make` makes). Each ask makes a fresh folder under `root` holding `bodies` (`{rel: text}`) under `agent/` and
+    nothing else, and records the commit asked; with no bodies it answers as `FakeGitShow()` did: no body is found."""
+
+    root: Path
+    bodies: dict[str, str] = field(default_factory=dict)
+    asked: list[str] = field(default_factory=list)
+
+    def __call__(self, commit: str) -> Any:
+        import contextlib
+        import tempfile
+
+        self.asked.append(commit)
+        Path(self.root).mkdir(parents=True, exist_ok=True)
+        dest = Path(tempfile.mkdtemp(prefix="copy-", dir=self.root))
+        (dest / "agent").mkdir()
+        for rel, text in self.bodies.items():
+            target = dest / "agent" / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+        return contextlib.nullcontext(dest)
 
 
 def refusals() -> tuple[type[BaseException], ...]:

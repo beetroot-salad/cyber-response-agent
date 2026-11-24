@@ -236,16 +236,12 @@ _EXPORT_READER = "tenancy/_exports.py"
 RECORD_LOCATION_NAMES = frozenset({
     "tenant_root", "row_path", "runs", "sessions", "episodes", "learning", "worktrees",
     "data_root", "runs_base", "trust_root", "sessions_dir", "runs_legacy", "episodes_legacy",
-    "exports", "drafts", "knowledge_lock", "commit_record", "scratch",
+    "drafts", "commit_record", "scratch",
 })
 # Keys are (location role, module), values are exact qualified functions, not module exemptions.
 CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     ("session_trust_root", "records/session_store/_write.py"): frozenset({"open_store"}),
-    ("exports_root", _EXPORT_OWNER): frozenset({"materialise_export", "publish_locked", "write_export"}),
     ("drafts_root", _EXPORT_OWNER): frozenset({"sweep_dead_owners", "build_draft", "draft_path"}),
-    ("knowledge_lock", _EXPORT_OWNER): frozenset({"tenant_lock"}),
-    ("exports_root", _EXPORT_READER): frozenset({"current_export"}),
-    ("knowledge_lock", _EXPORT_READER): frozenset({"knowledge_lock_holder"}),
     # #1278 A1: the curators' call folders, made in the tenant's scratch location by their one owner.
     ("scratch_root", "learning/call_folders.py"): frozenset({"call_folder"}),
     # #1170: the per-job helper makes the oracle's folder in the tenant's scratch location.
@@ -267,7 +263,7 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     ("data_root", "credential_proxy/_app.py"): frozenset({"_Proxy.__init__"}),
 }
 _ATTRIBUTE_ROLES = {
-    "exports": "exports_root", "drafts": "drafts_root", "knowledge_lock": "knowledge_lock",
+    "drafts": "drafts_root",
     "commit_record": "commit_record", "data_root": "data_root", "worktrees": "worktrees_root",
     "scratch": "scratch_root",
 }

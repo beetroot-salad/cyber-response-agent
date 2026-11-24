@@ -358,11 +358,11 @@ def _run(session: Session, spec: KindSpec, signals: _Signals) -> int:
         _finish(session, proc, server, hold)
 
 
-def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: Any = None, forge: Any = None,  # noqa: PLR0913
+def main(argv: list[str], *, docker: Any = None, signer: Any = None, fetch: Any = None, forge: Any = None,  # noqa: PLR0913
          command: list[str] | None = None, client: Any = None, directory: Any = None, evidence: Any = None,
          evidence_keys: Any = None, upload_budget: float | None = None) -> int:
     """The helper for one job (module doc). `docker` is the docker seam (the box package's real one by default),
-    `signer` the request signer (the tenant's sign login), `publish` the launch-time publish (the real child),
+    `signer` the request signer (the tenant's sign login), `fetch` the one knowledge fetch seam (#1618: the real fetch child),
     `forge` the forge credential's builder (the learning kinds'), `command` a container command line in place of the
     kind's entry, `client` the forge client the drain's delivery uses (a new one by default), `directory` the tenant
     records the tenant is admitted through (`host_tenant(directory=)`; None: the process's own, #1471), `evidence` the
@@ -396,7 +396,7 @@ def main(argv: list[str], *, docker: Any = None, signer: Any = None, publish: An
     session = Session(kind=ns.kind, job_id=ns.job, tenant_id=tenant_id, source=ns.source, root=root,
                       root_folder=tenancy.data_root_for_child(root), claim=claim,
                       docker=docker if docker is not None else run_docker,
-                      defender_dir=process_defender_dir().resolve(), signer=signer, publish=publish, forge=forge,
+                      defender_dir=process_defender_dir().resolve(), signer=signer, fetch=fetch, forge=forge,
                       client=client, command=list(command) if command is not None else None, directory=directory,
                       alert_digest=ns.alert_digest, system=ns.system, post_ticket=bool(ns.post_ticket),
                       ticket_link=ns.ticket_link if ns.post_ticket else None, evidence=evidence,

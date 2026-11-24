@@ -68,7 +68,9 @@ class Layout:
 
     @property
     def agent(self) -> Path:
-        return Path(self.tenant.agent)
+        """The agent half this layout placed (`<T>/knowledge/agent`): #1618 K8, a `Tenant` names no knowledge path, so
+        the layout names the folder it stages from."""
+        return self.data_root / self.tenant_id / "knowledge" / "agent"
 
     def staged(self) -> tuple[Path, Path]:
         """The tenant's agent half staged as a run copy (`stage/agent`, its token), under this

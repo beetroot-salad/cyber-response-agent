@@ -370,7 +370,7 @@ def unreadable_findings() -> dict[str, Any]:
 REFUSED, READY, FAILED = "refused", "ready", "failed"
 #: A readiness refusal's steps (surface §5): P-1's sequence (`runs_folder` is machinery, never a step: R13-1.1), then
 #: the container's tenant step and its systems step.
-READINESS_STEPS = ("tenant", "records", "alert_mapping", "publish", "knowledge_copy", "run_tenant", "roster",
+READINESS_STEPS = ("tenant", "records", "alert_mapping", "publish", "run_tenant", "roster",
                    "tenant_verdict", "signing", "first_pass", "container_tenant", "systems")
 
 
@@ -679,8 +679,8 @@ class JobLane:
 
     def knowledge(self, run_id: object) -> dict[str, str | None] | None:
         """The run's knowledge in the API's shape (`api_knowledge`): `None` when the run never
-        started; otherwise its host record, read no-follow — missing or unreadable is stale,
-        operator kind, no commit."""
+        started; otherwise its host record, read no-follow — missing or unreadable is
+        unreadable, no commit."""
         run_id = _run_id(run_id)
         if not self.run_started(run_id):
             return None

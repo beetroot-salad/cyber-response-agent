@@ -18,9 +18,7 @@ from defender.records.formats import (
     EpisodesRoot,
     WorktreesRoot,
     ScratchRoot,
-    ExportsRoot,
     DraftsRoot,
-    KnowledgeLock,
     LegacyRunsRoot,
     LegacyEpisodesRoot,
     unwrap_data_root,
@@ -109,33 +107,12 @@ class _TenantLayout:
         return self.scratch / "worktrees"
 
     @property
-    def knowledge(self) -> Path:
-        return self.tenant_root / "knowledge"
-
-    @property
-    def exports(self) -> Path:
-        return self.tenant_root / "exports"
-
-    @property
     def drafts(self) -> Path:
         return self.tenant_root / "drafts"
 
     @property
     def run_knowledge(self) -> Path:
         return self.tenant_root / "run-knowledge"
-
-    @property
-    def knowledge_lock(self) -> Path:
-        return self.tenant_root / "knowledge.lock"
-
-    @property
-    def settings(self) -> Path:
-        return self.knowledge / SETTINGS_HALF
-
-    @property
-    def agent(self) -> Path:
-        return self.knowledge / AGENT_HALF
-
 
 class _TenantPaths(_TenantLayout):
     """The tenant's layout under a data root, guarded (M4). Private: the sites that need a
@@ -227,6 +204,11 @@ class Tenant(RecordTenant):
                 "a Tenant is built only by accept_tenant — accept the tenant instead")
 
     @property
+    def data_root_path(self) -> Path:
+        """The data root this tenant was accepted under, for the host-side private repositories and the sweep (K7)."""
+        return unwrap_data_root(self.data_root)
+
+    @property
     def _layout(self) -> _TenantLayout:
         return _TenantLayout(unwrap_data_root(self.data_root) / self.id)
 
@@ -267,16 +249,6 @@ class Tenant(RecordTenant):
         return WorktreesRoot(self._layout.worktrees)
 
     @property
-    def knowledge(self) -> Path:
-        return self._layout.knowledge
-
-    @property
-    def exports(self) -> ExportsRoot:
-        """Host-made, immutable copies of the knowledge at one commit each (`<commit>/`), and
-        the `current` pointer naming the latest (#1108 amendment 2)."""
-        return ExportsRoot(self._layout.exports)
-
-    @property
     def drafts(self) -> DraftsRoot:
         """Host-made, git-free copies of `agent/` a drain box writes into, one per batch."""
         return DraftsRoot(self._layout.drafts)
@@ -287,27 +259,6 @@ class Tenant(RecordTenant):
         #1108 P4 U9): what a run reads, removed when the run ends and swept by a publish once
         their owner is dead."""
         return self._layout.run_knowledge
-
-    def export_folder(self, commit: str) -> Path:
-        """`<T>/exports/<commit>/`, the published export of one commit, for a reader that judges
-        it itself (a run's copy, a map of what a run read). `commit` must be one path segment:
-        anything else is `TenantRefused`, never joined (callers hold it to a commit id first)."""
-        return self._layout.exports / _export_segment(commit)
-
-    @property
-    def knowledge_lock(self) -> KnowledgeLock:
-        """The per-tenant lock over the knowledge clone and its exports: held for a
-        fast-forward, export publication, filter configuration and draft build or sweep,
-        never across network I/O, a box window or commit creation."""
-        return KnowledgeLock(self._layout.knowledge_lock)
-
-    @property
-    def settings(self) -> Path:
-        return self._layout.settings
-
-    @property
-    def agent(self) -> Path:
-        return self._layout.agent
 
     def root_names(self) -> dict[str, str]:
         """How text shown to a model or an operator names this tenant's host roots instead of
@@ -331,13 +282,6 @@ class Tenant(RecordTenant):
     def learning_paths(self, paths_type: Callable[..., _P], *, repo_root: Path) -> _P:
         """Build learning configuration where the tenant's record root is owned."""
         return paths_type(repo_root=repo_root, tenant=self)
-
-
-def _export_segment(commit: str) -> str:
-    """`commit` as the one path segment an export folder is named by: anything else is `TenantRefused`, never joined."""
-    if not commit or "/" in commit or commit in (".", "..") or "\x00" in commit:
-        raise TenantRefused(f"{commit!r} does not name an export (one commit id, no path)")
-    return commit
 
 
 # ==========================================================================================
@@ -377,14 +321,14 @@ class _JobEpisodesRoot(EpisodesRoot):
 @dataclasses.dataclass(frozen=True)
 class JobTenant(RecordTenant):
     """The tenant a job container sees: its own root (`data_root`, laid out as `<root>/<T>/{runs,episodes,...}`) and its
-    read-only `inputs` folder (the run's knowledge copy, for a learning job the pinned export), and no clone of the tenant's
+    read-only `inputs` folder (the run's knowledge copy), and no clone of the tenant's
     knowledge, no lock and no scratch. `accept_tenant` opens `<T>/knowledge` and so refuses such a root: the container
     entries build a `JobTenant` from the launch facts instead (`job_tenant_from_launch`). The helper that made the folders
     already admitted the tenant for the claim; what a container can check for itself is the id grammar and where the two
     folders are, and that is what the constructor judges.
 
     A `RecordTenant`, so the record stores and `RunsRepository` work over it unchanged. Its members are `id`, `data_root`
-    (the job root), `tenant_root`, `runs`, `episodes`, `runs_repository()`, `run_knowledge`, `export_folder(pin)` and
+    (the job root), `tenant_root`, `runs`, `episodes`, `runs_repository()`, `run_knowledge` and
     `root_names()`; `runs_legacy` and `episodes_legacy` raise; it has no `knowledge`, `settings`, `agent`, lock, scratch,
     drafts or worktrees.
 
@@ -440,11 +384,6 @@ class JobTenant(RecordTenant):
         """The folder of the run knowledge copies the helper made, one `<run id>/` each, in the read-only inputs."""
         return _TenantLayout(self.inputs).run_knowledge
 
-    def export_folder(self, commit: str) -> Path:
-        """The pinned export's folder in the inputs (`exports/<commit>/`): `commit` is one path segment, else
-        `TenantRefused`, never joined."""
-        return _TenantLayout(self.inputs).exports / _export_segment(commit)
-
     def root_names(self) -> dict[str, str]:
         """How text shown to a model or an operator names this job's folders instead of locating them (as `Tenant`'s): its
         own folder `<tenant folder>`, its root `<data root>` and its inputs `<job inputs>`."""
@@ -468,13 +407,6 @@ def job_tenant_from_launch(data_root: DataRoot, raw_id: object, launch: Mapping[
     return JobTenant(id=requested_tenant_id(raw_id), data_root=data_root, inputs=Path(inputs))
 
 
-def clone_halves(tenant: Tenant) -> tuple[Path, Path]:
-    """`(agent/, settings/)` of `tenant`'s clone working tree. No run reads them (#1108 P4, O-B:
-    run start hands its run copy's roots); they are the default roots of a tenant record resolved
-    over the tenant's own folder by a caller that names no export (REPLAY-WT)."""
-    return tenant.agent, tenant.settings
-
-
 def requested_tenant_id(raw: object) -> TenantId:
     """The tenant a request names (`--tenant`), checked against the id grammar — the ONE rule
     every entry point applies to it before accepting: absent is refused (there is no default
@@ -489,26 +421,15 @@ def requested_tenant_id(raw: object) -> TenantId:
 
 def accept_tenant(
     data_root: DataRoot, raw_id: object, *, defender_dir: Path, box_mounted: Iterable[Path | RunsBase | EpisodesRoot] = (),
-    clone_tree: bool = True, parse_tables: bool = True,
 ) -> Tenant:
-    """`raw_id` under `data_root`, checked whole — the ONE acceptance of a tenant, and the
-    only constructor of `Tenant`. Refused with `TenantRefused` naming the refused value, at the
-    FIRST check that fails, in this order:
-
-    `clone_tree=False` is run start's acceptance (#1108 P4, flow 3: "accept tenant" first). A run
-    reads its own copy of an export and nothing of the clone's working tree (P-1), and the run
-    copy's settings are held to `check_run_settings`. The folder rules still judge the clone
-    whenever it has a working tree, so a tenant whose folder is faulted is refused at run start
-    with the tenant check's own reason (#1222 A5), snapshot or none; only a clone whose working
-    tree is gone altogether (both halves absent, its git objects kept: R-I5) is not asked.
-
-    `parse_tables=False` leaves the reviewed tables (`SETTINGS_TABLES`) unparsed: for the one
-    consumer that only locates the settings folder and never loads a table (`validate_scaffold`,
-    #1120); every consumer that loads or admits the tenant keeps the default."""
+    """`raw_id` under `data_root`, checked whole: the ONE acceptance of a tenant, and the only constructor of `Tenant`.
+    Refused with `TenantRefused` naming the refused value, at the FIRST check that fails: the id's grammar, the data
+    root (absolute, outside the running checkout's box-mounted `defender/`), the tenant's folder (a real directory,
+    reached without following a link), and that no tree a box mounts holds the tenant's folder or lies inside its
+    own `runs`. A tenant holds no knowledge folder (#1618 K8): what a run reads is its own copy."""
     tenant_id = TenantId(raw_id)
     paths = _TenantPaths(data_root, tenant_id)
-    _accept_knowledge(paths, defender_dir=defender_dir, box_mounted=box_mounted,
-                      clone_tree=clone_tree, parse_tables=parse_tables)
+    _accept_folder(paths, defender_dir=defender_dir, box_mounted=box_mounted)
     return Tenant(id=tenant_id, data_root=data_root, _token=_ACCEPTED)
 
 
@@ -527,14 +448,6 @@ def job_tenant_folder(tenant: Tenant | JobTenant) -> Path:
     its own folder in the job's root (the adoption entry's clone lives there, #1546). A join:
     nothing is read or made."""
     return unwrap_tenant_root(tenant.tenant_root)
-
-
-def tenant_exports(data_root: DataRoot, raw_id: object) -> Path:
-    """The tenant's published exports, `<data root>/<T>/exports`, for a reader that holds no
-    tenant record — the credential proxy, which is handed only the data root (#1163 A26). Judged
-    as every pre-acceptance site judges the root and the id (`TenantRefused`). A join: nothing is
-    read or made."""
-    return _TenantPaths(data_root, TenantId(raw_id)).exports
 
 
 def box_mounted_arm_container(data_root: DataRoot, raw_id: object, episode_id: str) -> RunsBase:
@@ -566,69 +479,31 @@ def requested_tenant(data_root: DataRoot, raw: object) -> Tenant:
                          defender_dir=process_defender_dir())
 
 
-def _accept_knowledge(
+def _accept_folder(
     paths: _TenantPaths, *, defender_dir: Path, box_mounted: Iterable[Path | RunsBase | EpisodesRoot],
-    clone_tree: bool = True, parse_tables: bool = True,
 ) -> None:
-    """Steps 3-7 of `accept_tenant` over an id and root its layout class already guarded.
-    The knowledge folder is neither followed nor resolved: the walk opens `<T>` and
-    `knowledge` no-follow off the root's handle, so a linked `<T>` or `knowledge` is refused,
-    and the settings half's real path is then the root's own resolution joined below it.
-    Both relative names come from the layout (`_TenantLayout`), never spelled here."""
+    """Acceptance's folder checks: `<T>` opened no-follow off the root's handle is a real directory, and no tree a box
+    mounts (the code tree, the runs base, an episodes folder) lies where a box's writes could reach `<T>` beyond its
+    own `runs`."""
     root = paths.tenant_root.parent
-    knowledge_name = paths.knowledge.relative_to(root).as_posix()
     with _real_io.bind(root) as bound:
-        _knowledge_is_real(paths, _real_io.stat_entry(bound, knowledge_name))
-        if clone_tree or _has_working_tree(bound, knowledge_name):
-            _check_knowledge(bound.under(knowledge_name), paths.knowledge,
-                             tenant_id=paths.tenant_id, parse_tables=parse_tables)
-    root_real = _resolve_or_refuse(root)
-    settings_real = root_real / paths.settings.relative_to(root)
-    halves_real = (settings_real, root_real / paths.agent.relative_to(root))
-    knowledge_real = root_real / paths.knowledge.relative_to(root)
-    for mounted in (Path(defender_dir), paths.runs, *(unwrap_runs_base(m) if isinstance(m, RunsBase) else unwrap_episodes_root(m) if isinstance(m, EpisodesRoot) else m for m in box_mounted)):
-        mounted_real = _resolve_or_refuse(mounted)
-        if settings_real.is_relative_to(mounted_real):
-            raise TenantRefused(
-                f"tenant {paths.tenant_id!r}'s settings {paths.settings} are inside {mounted}, "
-                "which a box mounts — the settings half is host-only; keep the data root "
-                "outside the code tree and the runs base")
-        # The tenant's own runs base, where every run writes, stays out of the whole knowledge
-        # folder (its git working tree: a push would publish run data); any other mounted tree
-        # is held out of the two halves — the spec's near-miss cells name trees beside them.
-        inside = (knowledge_real,) if mounted == paths.runs else halves_real
-        if any(mounted_real.is_relative_to(tree) for tree in inside):
-            raise TenantRefused(
-                f"{mounted}, which a box mounts, lies inside tenant {paths.tenant_id!r}'s "
-                f"knowledge folder {paths.knowledge} — a run's writes would land in the "
-                "tenant's repo; keep the runs base and every mounted tree outside it")
-
-
-def _has_working_tree(bound: _real_io.Bound, knowledge_name: str) -> bool:
-    """Whether the knowledge folder has either half of a working tree (judged no-follow): any
-    entry at `settings` or `agent`, sound or not, counts, so only a tree that is gone
-    altogether escapes the folder rules."""
-    return any(not _real_io.stat_entry(bound, f"{knowledge_name}/{half}").absent
-               for half in (SETTINGS_HALF, AGENT_HALF))
-
-
-def _knowledge_is_real(paths: _TenantPaths, found: _real_io.StatRead) -> None:
-    """Step 3's first half: `<T>/knowledge`, reached without following `<T>` or itself, is a
-    real directory. Absent, the tenant's folder was never prepared on this host (the
-    lifecycle's host `prepare` step clones the tenant repo there, #1214 Flow 1), so the refusal
-    names the folder and says so."""
-    knowledge = paths.knowledge
+        found = _real_io.stat_entry(bound, paths.tenant_root.relative_to(root).as_posix())
     if found.absent:
         raise TenantRefused(
-            f"tenant {paths.tenant_id!r} has no knowledge folder: {knowledge} does not "
-            f"exist — the tenant's repo is cloned there when the execution host prepares the "
-            f"tenant; a tenant whose creation has not reached that step has none yet")
+            f"tenant {paths.tenant_id!r} has no folder: {paths.tenant_root} does not exist — the execution host "
+            "makes it when it prepares the tenant; a tenant whose creation has not reached that step has none yet")
     if found.st is None or not stat.S_ISDIR(found.st.st_mode):
-        why = found.reason or ("it is a link" if found.st is not None
-                               and stat.S_ISLNK(found.st.st_mode) else "it is not a directory")
-        raise TenantRefused(
-            f"tenant {paths.tenant_id!r}'s knowledge folder {knowledge} must be a real "
-            f"directory, never a link or a file, under an unlinked {paths.tenant_root}: {why}")
+        why = found.reason or ("it is a link" if found.st is not None and stat.S_ISLNK(found.st.st_mode)
+                               else "it is not a directory")
+        raise TenantRefused(f"tenant {paths.tenant_id!r}'s folder {paths.tenant_root} must be a real directory, "
+                            f"never a link or a file: {why}")
+    tenant_real = _resolve_or_refuse(root) / paths.tenant_root.relative_to(root)
+    for mounted in (Path(defender_dir), paths.runs, *(unwrap_runs_base(m) if isinstance(m, RunsBase) else unwrap_episodes_root(m) if isinstance(m, EpisodesRoot) else m for m in box_mounted)):
+        mounted_real = _resolve_or_refuse(mounted)
+        if tenant_real.is_relative_to(mounted_real):
+            raise TenantRefused(
+                f"tenant {paths.tenant_id!r}'s folder {paths.tenant_root} is inside {mounted}, which a box mounts: "
+                "keep the data root outside the code tree and the runs base")
 
 
 def check_knowledge_folder(folder: Path, *, tenant_id: TenantId | None) -> None:
@@ -645,11 +520,10 @@ def check_knowledge_folder(folder: Path, *, tenant_id: TenantId | None) -> None:
 
 
 def _check_knowledge(
-    bound: _real_io.Bound, folder: Path, *, tenant_id: TenantId | None, parse_tables: bool = True,
+    bound: _real_io.Bound, folder: Path, *, tenant_id: TenantId | None,
 ) -> None:
     """`check_knowledge_folder`'s rules over `bound`, the knowledge folder's no-follow reader;
-    `folder` is its path, used only to name what is refused. `parse_tables=False` skips the
-    `SETTINGS_TABLES` parse (see `accept_tenant`)."""
+    `folder` is its path, used only to name what is refused."""
     top = bound.entries()
     if top.entries is None:
         raise TenantRefused(f"{folder} could not be listed: "
@@ -669,7 +543,7 @@ def _check_knowledge(
     for name in (SETTINGS_HALF, AGENT_HALF):
         _refuse_links_and_special_files(bound, folder, name)
     # After the link walk: each table is read no-follow, but a link at its name is the walk's.
-    for rel, (what, known) in (SETTINGS_TABLES if parse_tables else {}).items():
+    for rel, (what, known) in SETTINGS_TABLES.items():
         _table_parses(bound.read(f"{SETTINGS_HALF}/{rel}"), folder / SETTINGS_HALF / rel,
                       what=what, known=known)
     tenant_id_file = folder / TENANT_ID_FILE

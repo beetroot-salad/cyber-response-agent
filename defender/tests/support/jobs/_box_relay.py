@@ -161,7 +161,7 @@ OTHER_HELPER = textwrap.dedent("""\
     from defender import job_host
     from defender.tests.support.jobs._job_helper import ContainerStandIn
     from defender.tests.support.jobs import _box_relay as R
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+    from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
     cfg = json.loads(sys.argv[1])
     state = Path(cfg["state"])
@@ -181,7 +181,7 @@ OTHER_HELPER = textwrap.dedent("""\
 
     docker = ContainerStandIn(job, exec_writer=[sys.executable, "-c", "import os; os.write(1, " + repr(R.OK_FRAME) + ")"])
     rc = job_host.main(cfg["argv"], docker=docker, signer=A.MarkedSigner(),
-                       publish=lambda *a, **k: B.fresh(cfg["commit"]))
+                       fetch=in_process_fetch(cfg["remote"]))
     (state / "rc").write_text(str(rc))
     (state / "box-stops").write_text(json.dumps([c for c in docker.calls if c[1] in ("stop", "rm", "kill")]))
 """)

@@ -123,7 +123,10 @@ def proxied_runs(tmp_path: Path, data_root: Path) -> Iterator[Callable[..., tupl
         up.replies[f"/{A.ELASTIC_EVENTS}/_search"] = (
             200, {"Content-Type": "application/json"},
             b'{"hits": {"total": {"value": 0}, "hits": []}}')
-        with A.elastic_proxied(tmp_path / "px", data_root, up.url) as (proxied, tap):
+        # #1618 K8: the tenant is published, so its `main` is what each run fetches; the lessons the launches read are
+        # published with it (`C.plant_lessons` writes the placed folder, which a published tenant's runs never read).
+        lessons = {f"agent/lessons/{name}.md": C.lesson_text(name) for name in C.LESSONS}
+        with A.elastic_proxied(tmp_path / "px", data_root, up.url, extra_files=lessons) as (proxied, tap):
             def run(name: str, flags: list[str], **kw: Any) -> tuple[C.Launched, Seen]:
                 seen = Seen()
                 out = launch(tmp_path / name, flags, registry_cls=wired_registry(seen, proxied), **kw)

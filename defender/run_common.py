@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import contextlib
 import datetime as _dt
-import functools
 import logging
-import signal
 import sys
-import threading
 import dataclasses as _dataclasses
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 DEFENDER_DIR = Path(__file__).resolve().parent
 REPO_ROOT = DEFENDER_DIR.parent
@@ -22,6 +19,12 @@ if str(REPO_ROOT) not in sys.path:
 from defender import _clock, _io
 from defender.records import formats, run_end
 from defender import tenancy  # noqa: E402
+from defender.investigation.publish_launch import default_fetch  # noqa: E402,F401
+from defender.tenancy.run_knowledge import (  # noqa: E402,F401 — the fetch seam lives with the knowledge copies (below `learning`)
+    FetchSeam,
+    stopped_by_sigterm,
+)
+from defender.tenancy import run_knowledge as _knowledge  # noqa: E402
 from defender._io import read_bytes_capped  # noqa: E402
 from defender.records import (  # noqa: E402
     RUN_LAYOUT, Run, RunAddress, RunId, RunPaths, RunRefused, artifact_dir, artifact_file, case_ref_of_digest, sidecar_names,
@@ -529,14 +532,6 @@ def read_alert_mapping(records: Any, tenant_id: Any) -> AlertMapping:
     return mapping
 
 
-class PublishLaunch(Protocol):
-    """The launch-time publish run start calls (`publish_launch.launch_publish`, or an in-process
-    caller's stand-in): typed, so the tenant id reaches the records it writes as a `TenantId`. `trigger` is who asked
-    for the publish (`publish_report` hands it whenever a job's helper names one, #1471); a stand-in takes it too."""
-
-    def __call__(self, tenant_id: TenantId, *, data_root: Path, trigger: str = ...) -> object: ...
-
-
 class KnowledgeExit(SystemExit):
     """`resolve_knowledge`'s `[run.py]` refusal (a `SystemExit` like every run setup refusal, its code the text), with
     the publish report it was refused on (`None` for a pinned run's): a caller that must not pass the report's reason
@@ -547,98 +542,69 @@ class KnowledgeExit(SystemExit):
         self.report = report
 
 
-def default_publish(records: tenancy.TenantDirectory) -> PublishLaunch:
-    """The real launch-time publish: a separate child process (O-BUDGET, P-3), whose outcomes
-    only the launcher sees are recorded through this run's tenant records."""
-    from defender.investigation.publish_launch import launch_publish as real
-
-    return functools.partial(real, directory=records)
-
-
-@contextlib.contextmanager
-def stopped_by_sigterm() -> Iterator[None]:
-    """While the launch-time publish runs, a SIGTERM (teardown stopping this run) unwinds this
-    process as `SystemExit(128 + SIGTERM)`, so the run never goes on past its publish. The real
-    launcher holds the signal back while its child runs: it stops the child by its one rule (a
-    child that took the tenant lock is waited for, never signalled), kills its process group (its own session, which
-    no signal to this process reaches) and only then delivers the signal here (#1379 r3). The
-    handler found is put back after. Only in the main thread, the one a handler runs in."""
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-
-    def stop(signum: int, _frame: object) -> None:
-        raise SystemExit(128 + signum)
-
-    previous = signal.signal(signal.SIGTERM, stop)
-    try:
-        yield
-    finally:
-        signal.signal(signal.SIGTERM, previous if previous is not None else signal.SIG_DFL)
-
-
-def publish_report(
-    publish: PublishLaunch | None, tenant: tenancy.Tenant, data_root: DataRoot,
-    records: tenancy.TenantDirectory, *, trigger: str | None = None,
-) -> PublishReport:
-    """The launch-time publish's outcome (#1108 P4, U7): the child is handed identifiers only
-    — the tenant id and the data root (O8: no login material passes through the run process)
-    — and its one report line is read back. The real launcher never raises and records every
-    outcome itself in the tenant records; a seam that raises is U11's `stale:operator`, never
-    fresh, recorded by the same recorder the launcher uses. `trigger` (who asked: a job's
-    helper names its own, #1471) is handed to the publish when given, and records its outcomes;
-    none keeps the launcher's own (an investigation's launch)."""
-    from defender.tenancy import run_knowledge
-
-    named = {} if trigger is None else {"trigger": trigger}
-    try:
-        launch = publish if publish is not None else default_publish(records)
-        with stopped_by_sigterm():
-            line = launch(tenant.id, data_root=tenancy.data_root_for_child(data_root), **named)
-    except Exception as failed:  # noqa: BLE001 — U11: a failed child is stale:operator, recorded
-        from defender.tenancy import record_report
-
-        line = run_knowledge.failed_line(f"{type(failed).__name__}: {failed}")
-        record_report(records, tenant.id, line, by=trigger or "launch-time publish")
-    return run_knowledge.read_publish_report(line)
-
-
 def resolve_knowledge(
-    tenant: tenancy.Tenant, *, pin: str | None, publish: PublishLaunch | None,
-    data_root: DataRoot, records: tenancy.TenantDirectory, trigger: str | None = None,
+    tenant: tenancy.Tenant, *, pin: str | None, fetch: FetchSeam | None,
+    data_root: DataRoot, records: tenancy.TenantDirectory, run_id: str, trigger: str | None = None,
 ) -> KnowledgeSource:
-    """Which export this run reads and why: the pinned one (no publish), else `current` after
-    the launch-time publish (`trigger`: who asked for it, `publish_report`) — or the refusal
-    before the box (O-A, O9), a `KnowledgeExit` holding the report it was refused on."""
+    """Which commit this run reads and why — the pinned one, else `main`'s tip — and the run's own copy of it, made by
+    the one operation every run copy is made by (D5): an owned empty folder beside the copy's place under
+    `<T>/run-knowledge/`, filled by the fetch child, held to the pin and to the run settings rules, and only then
+    placed as `run_id`, owned by this process. Any refusal before the box (O-A, O9) is a `KnowledgeExit`, holding the
+    report it was refused on (`None` for a settings refusal), and leaves nothing under `<T>/run-knowledge/`. `records`
+    is not read. A stop (a plain `SystemExit` from the fetch's signal handler) goes on up, the folder discarded."""
     from defender.tenancy import run_knowledge
 
-    report = None if pin is not None else publish_report(publish, tenant, data_root, records, trigger=trigger)
+    del records
+    parent = tenant.run_knowledge
+
+    def refused_fetch(why: object) -> KnowledgeExit:
+        report = run_knowledge.read_publish_report(run_knowledge.failed_line(str(why)))
+        try:
+            run_knowledge.resolve_source(tenant, report=report, pinned=pin)
+        except run_knowledge.KnowledgeRefused as refused:
+            return KnowledgeExit(f"[run.py] {refused}", report=report)
+        raise AssertionError("a failed report resolved")  # pragma: no cover — `failed_line` is never `ok`
+
     try:
-        source = run_knowledge.resolve_source(tenant, report=report, pinned=pin)
-    except run_knowledge.KnowledgeRefused as refused:
-        raise KnowledgeExit(f"[run.py] {refused}", report=report) from None
-    if source.kind == run_knowledge.STALE:
-        _logger.warning(f"knowledge is stale ({source.stale_kind}): the run reads the last "
-                        f"published snapshot {source.commit[:12]}; the publish said: "
-                        f"{source.reason}")
+        temporary = run_knowledge.make_owned_empty(parent, run_id)
+    except (OSError, ValueError) as unmade:
+        raise refused_fetch(f"the run's copy folder could not be made under {parent}: {unmade}") from None
+    try:
+        report = fetch_report(fetch, tenant.id, temporary, data_root, commit=pin, trigger=trigger)
+        try:
+            source = run_knowledge.resolve_source(tenant, report=report, pinned=pin)
+        except run_knowledge.KnowledgeRefused as refused:
+            raise KnowledgeExit(f"[run.py] {refused}", report=report) from None
+        try:
+            tenancy.check_run_settings(run_knowledge.RunCopy(temporary).settings)
+        except TenantRefused as refused:
+            why = str(refused).replace(str(temporary), str(parent / run_id))  # the copy's name, not its build folder's
+            raise KnowledgeExit(f"[run.py] this run's tenant cannot be used: {why}", report=None) from None
+        try:
+            run_knowledge.place(temporary, parent / run_id)
+        except (run_knowledge.KnowledgeRefused, OSError) as unplaced:
+            raise refused_fetch(unplaced) from None
+    except BaseException:
+        _discard(temporary)
+        raise
     return source
 
 
+def _discard(temporary: Path) -> None:
+    from defender.tenancy import remove_entry
+
+    remove_entry(temporary.parent, temporary.name)
+
+
 def copy_knowledge(tenant: tenancy.Tenant, source: KnowledgeSource, run_id: str) -> RunCopy:
-    """The run's own copy of its export (U9), made and owned by the calling process, or the
-    refusal before the box."""
+    """The run's own copy, as `resolve_knowledge` placed and checked it (U9), or the refusal before the box."""
     from defender.tenancy import run_knowledge
 
+    del source
     try:
-        copy = run_knowledge.copy_for_run(tenant, source, run_id)
+        return run_knowledge.adopt_copy(tenant, run_id)
     except (run_knowledge.KnowledgeRefused, OSError) as refused:
         sys.exit(f"[run.py] the run's knowledge could not be copied: {refused}")
-    try:
-        tenancy.check_run_settings(copy.settings)
-    except TenantRefused as refused:
-        copy.remove()
-        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
-    return copy
 
 
 def run_tenant_or_exit(
@@ -760,3 +726,13 @@ def handed_records(launch: Any, *, label: str) -> TenantRecords:
         return TenantRecords.handed(launch)
     except ValueError as bad:
         sys.exit(f"[run.py] {label}: {bad}")
+
+
+def fetch_report(fetch: FetchSeam | None, *args: Any, **kwargs: Any) -> PublishReport:
+    """`run_knowledge.fetch_report` with the real fetch (`default_fetch`) when no seam is given."""
+    return _knowledge.fetch_report(fetch if fetch is not None else default_fetch(), *args, **kwargs)
+
+
+def temporary_copy(*args: Any, fetch: FetchSeam | None = None, **kwargs: Any) -> contextlib.AbstractContextManager[Path]:
+    """`run_knowledge.temporary_copy` with the real fetch (`default_fetch`) when no seam is given."""
+    return _knowledge.temporary_copy(*args, fetch=fetch if fetch is not None else default_fetch(), **kwargs)

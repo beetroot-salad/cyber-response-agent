@@ -153,7 +153,7 @@ def test_m2_a_config_naming_no_token_does_not_fall_back_to_the_environment(tmp_p
 
 @pytest.mark.parametrize("key", P.REMOVED_CONFIG_KEYS)
 def test_m3_a_config_still_naming_a_removed_key_refuses_to_start(tmp_path, key):
-    """An old config (`tenant_keys`, `tenant_exports`, `transit_mount` or `openbao_addr`) makes
+    """An old config (`tenant_keys`, `tenant_exports`, `transit_mount` or `openbao_addr`) makes  # lint-stale-ref: ok — the retired #1163 proxy config key, not the removed function
     the program refuse to start: exit 2, logged, not serving. A26, upgrade note."""
     token_file = tmp_path / "bao-token"
     token_file.write_text(FILE_TOKEN + "\n", encoding="utf-8")

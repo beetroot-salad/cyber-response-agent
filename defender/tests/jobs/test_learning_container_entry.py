@@ -1,6 +1,6 @@
 """#1170 r4 (A3, A5, A6): the learning entries inside the job container: the learning job entry (`job_entry.main`), the
 post-step and the family-less check (`post_step.main`), and the sibling (`run.main` with `--episode --world`). Inside the
-container none takes a host lock, runs an admission, opens the tenant database, makes a run copy, publish or draft, or
+container none takes a host lock, runs an admission, opens the tenant database, makes a run copy, fetches knowledge or drafts, or
 builds a signer (the helper does, and answers over the job socket); EOF on stdin ends each as
 SIGTERM does. The operator sibling, run from a host shell, is unchanged (positive control). Driven through the real helper
 (`job_host.main`) over a container stand-in whose process is the entry; the process cases run each entry's real command
@@ -18,7 +18,7 @@ from defender.tests.support.jobs import _job_helper as J
 from defender.tests.support.evidence._facts1546 import VERB_ARMS
 from defender.tests.support.jobs import _helper_evidence1546 as H
 from defender.tests.support.jobs._container_entry1170 import ThreadCalls, in_container_environment
-from defender.tests.support.jobs._job_helper_learning import learning_end, listing, publish_status
+from defender.tests.support.jobs._job_helper_learning import learning_end, listing
 from defender.tests.support.tenancy._host1214 import counting_calls
 from defender.tests.support.jobs._learning_container1170 import (
     LEARNING_JOB_HOLD,
@@ -45,8 +45,9 @@ POST_STEPS = pytest.mark.parametrize("family_less", [False, True], ids=["post-st
 
 
 def _watched() -> dict[str, Any]:
-    """What a container-side entry must not call: the host lock, an admission, a database, a run copy, the launch-time
-    publish, a signer (the helper's side calls each: the controls)."""
+    """What a container-side entry must not call: the host lock, an admission, a database, a run copy, a knowledge
+    fetch or the child launch behind it (#1618: `fetch_report` / `launch_publish`, which replaced the launch-time
+    publish), a signer (the helper's side calls each: the controls)."""
     from defender.credential_proxy import _launcher, _tokens
     from defender.database import async_engine
     from defender.investigation import publish_launch
@@ -55,7 +56,8 @@ def _watched() -> dict[str, Any]:
 
     return {"repository": postgres.PostgresTenantRepository.__init__, "engine": async_engine,
             "admission": run_tenant.host_tenant, "hold_shared": host_lock.hold_shared, "acquire": host_lock.acquire,
-            "copy": run_knowledge.copy_for_run, "publish": publish_launch.launch_publish,
+            "copy": run_knowledge.adopt_copy, "fetch": run_knowledge.fetch_report,
+            "publish": publish_launch.launch_publish,
             "request_signer": _launcher.request_signer, "signing_access": _launcher.signing_access,
             "mint": _tokens.mint_request_token}
 
@@ -217,7 +219,7 @@ def test_a5_eof_on_stdin_is_sigterm_to_the_learning_job_entry_and_takes_its_sibl
 
 @POST_STEPS
 def test_a6_the_post_step_takes_no_lock_runs_no_admission_opens_no_database_and_makes_no_copy_or_draft(scene, family_less):
-    """Run in the container with the job socket set, the post-step (and the family-less check) runs the drain's gate and writes no record, having taken no host lock, run no admission, opened no database; it made no run copy, draft or publish-status row. (A6, C23, P-C, #1487 O7)"""
+    """Run in the container with the job socket set, the post-step (and the family-less check) runs the drain's gate and writes no record, having taken no host lock, run no admission, opened no database; it made no run copy or draft. (A6, C23, P-C, #1487 O7; #1618: no publish-status row exists to write)"""
     from defender.learning.branch import post_step
 
     job_id = None if family_less else str(uuid.uuid4())
@@ -241,7 +243,6 @@ def test_a6_the_post_step_takes_no_lock_runs_no_admission_opens_no_database_and_
     assert calls.helper("repository") >= 1, "control: the helper's side opens the database"
     assert calls.helper("hold_shared") + calls.helper("acquire") >= 1, "control: the helper holds the tenant lock"
     assert (listing(tenant_folder / "run-knowledge"), listing(tenant_folder / "drafts")) == before
-    assert publish_status(scene) is None, "the post-step's own code wrote the publish-status row"
     _no_database_login(seen, scene)
 
 
@@ -324,8 +325,63 @@ def test_a6_a_sibling_in_the_container_takes_no_lock_runs_no_admission_and_signs
     assert got["signed_before"] >= 1, "premise: the helper signed the learning job's first pass at claim"
     assert len(signer.payloads) == got["signed_before"] + 1, "the sibling's run had more than the helper's one pass signed"
     assert _container_side(calls, _watched()) == {k: 0 for k in _watched()}
-    assert calls.helper("copy") == 1, "control: the helper made the sibling's run copy once"
+    # #1618 flow 3 ("`copy.make` ..., the grant read and the judge's lesson bodies all ask the helper"): the helper adopts
+    # two copies, the grant read's (`main`, at claim) and the sibling's (its pin), and the container none.
+    assert calls.helper("copy") == 2, "control: the helper made the grant read's copy and the sibling's run copy, once each"
     _no_database_login(seen, scene)
+
+
+def test_1546_r10_a_siblings_run_and_its_start_records_are_made_in_the_container_at_the_answered_run_id(scene):
+    """D-2 (owner decision; design r10 (a) "The container materialises the run"): on `copy.make(world=)` the helper makes
+    the sibling's run copy and only the episode's `runs/` folder; the sibling, in the container, makes its run
+    (`run_common.materialize_run` at the roster's id: the folder with its alert and stamp) and writes its knowledge record
+    (naming the launch facts' `knowledge_commit`) and its versions record. The helper writes none of them, so each is
+    counted on the container's thread and never on the helper's. WRITE-TESTS CHOICE (r10 "Open for write-tests: the
+    versions record's source"): the launch facts already carry `records` (#1366 O6), so the container writes the versions
+    record from them and `copy.make(world=)`'s answer adds nothing; the oracle is the launch facts' own versions, read from
+    the wire here, not through the writer. Control: the lifecycle ran at that run (the sibling started at all)."""
+    from pathlib import Path
+
+    from defender import run as run_py
+    from defender import run_common
+    from defender.records import RunPaths
+
+    job_id, source = str(uuid.uuid4()), str(uuid.uuid4())
+    got: dict[str, Any] = {}
+
+    def lifecycle(**kw):
+        run_dir = Path(kw["run"].run_dir)
+        paths = RunPaths(run_dir)
+        got["run_dir"] = run_dir
+        got["made"] = {"alert": paths.alert.is_file(), "stamp": paths.provenance.is_file()}
+        got["knowledge"] = json.loads(paths.knowledge_source().read_text(encoding="utf-8"))
+        got["versions"] = json.loads(paths.record_versions.read_text(encoding="utf-8"))
+        return {"output": "done", "requests": 1, "truncated_by": None}
+
+    def entry(c, seen):
+        got["ep"], got["roster_id"] = _episode_in_the_job_root(scene, c, job_id, source)
+        got["launch"] = c.request("launch")
+        with in_container_environment(c.env):
+            return run_py.main(["--tenant", scene.tenant, "--episode", job_id, "--world", "b"], environ=c.env,
+                               lifecycle=lifecycle, visualize=lambda *a, **k: None, preflight=lambda *a, **k: 0)
+
+    watched = {"materialize": run_common.materialize_run, "knowledge_record": run_common.write_knowledge_record,
+               "versions_record": run_common.write_versions_record}
+    with ThreadCalls(watched) as calls:
+        seen = seen_in_container(scene, "learning", entry, job_id=job_id, source=source)
+
+    _clean(seen)
+    assert got.get("run_dir") == got["ep"] / "runs" / got["roster_id"], "control: the sibling did not run at its roster id"
+    for label in watched:
+        assert calls.helper(label) == 0, f"the helper ran `{label}` for the sibling (D-2: the container's)"
+        assert calls.container(label) == 1, f"the sibling's container did not run `{label}` once: {calls.by_thread[label]}"
+    assert got["made"] == {"alert": True, "stamp": True}, got["made"]
+    launch = got["launch"]
+    assert got["knowledge"].get("commit") == launch["knowledge_commit"], (got["knowledge"], launch["knowledge_commit"])
+    handed = launch["records"]
+    expected = {"systems": {sid: rec["version"] for sid, rec in sorted(handed["systems"].items())},
+                "case": None if handed.get("case") is None else handed["case"]["version"]}
+    assert got["versions"] == expected, f"the versions record is not the launch facts' records: {got['versions']}"
 
 
 def test_o2_a_sibling_in_the_container_has_its_oracle_box_started_by_its_helper(scene, tmp_path, monkeypatch):

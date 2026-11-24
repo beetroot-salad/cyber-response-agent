@@ -4,7 +4,6 @@ create-only record. Driven as `test_job_helper_learning.py` drives the learning 
 from __future__ import annotations
 
 import base64
-import json
 import shutil
 import sys
 import uuid
@@ -56,9 +55,15 @@ def _argv(scene, job, system):
     return [*scene.argv("adoption", job), "--system", system]
 
 
+from defender.tests.support.jobs._readiness1471 import host_claim  # noqa: E402 — #1546 PR7: the worker's claim rows
+
+
 def _run(scene, job_id, system, job=None, **seams):
+    """The helper for adoption request `job_id` of `system`. #1546 (PR7): the running row and its claim under the scene's
+    claim token are planted first, as the worker's claim transaction leaves them (`host_claim`)."""
     from defender.tests.support.jobs._job_helper import drive_helper
 
+    host_claim(scene, "adoption", job_id, system=system)
     docker = ContainerStandIn(job)
     forge = seams.pop("forge", None) or ForgeCredentialRecorder()
     ran = drive_helper(scene, _argv(scene, job_id, system), docker=docker, signer=make_signer(), forge=forge, **seams)
@@ -68,8 +73,14 @@ def _run(scene, job_id, system, job=None, **seams):
 
 
 def _record(scene, job_id):
-    path = scene.runs / f"{job_id}.adoption.json"
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    """The adoption result the helper staged under the claim of `job_id` (#1546 A-O2, PR2: a typed record is a staged fact,
+    never a file in the tenant's runs folder), or None; asserted first that no record file was written."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    assert not (scene.runs / f"{job_id}.adoption.json").exists(), "the adoption record went through the tenant folder (A-O2)"
+    found = execute(scene.dsn, "SELECT f.body FROM jobs.staged_facts f JOIN jobs.claims c ON c.token = f.token "
+                               "WHERE c.host_request_id = %s AND c.kind = 'adoption' AND f.name = 'result'", (job_id,))
+    return found[0][0] if found else None
 
 
 # --- the launch facts -----------------------------------------------------------------------------------------------------
@@ -79,10 +90,14 @@ def test_the_container_is_handed_the_tenant_the_system_and_the_rendering(scene, 
     from defender.system_rules import base_files
 
     from defender.tests.tenancy.tenant_1108_delivery._support import git
+    from defender.tests.tenancy.tenant_1108_p4._support import plant_old_clone
 
     job_id, got = str(uuid.uuid4()), {}
-    # the clone's own remote is a dead address unlike the recorded wiring: the facts must carry the wiring (G3, repair 5)
-    git(scene.t.clone, "config", "remote.origin.url", DEAD_ORIGIN)
+    # A repository at the old clone's place (#1618 K8: no host clone) whose remote is a dead address unlike the recorded
+    # wiring: the facts must carry the wiring (G3, repair 5).
+    clone = plant_old_clone(scene.t, {})
+    git(clone, "init", "-q")
+    git(clone, "remote", "add", "origin", DEAD_ORIGIN)
 
     def job(c) -> int:
         got["facts"] = c.request("launch")
@@ -92,7 +107,10 @@ def test_the_container_is_handed_the_tenant_the_system_and_the_rendering(scene, 
     assert "facts" in got, f"premise: the container never ran (the helper's rc {ran.rc!r}): the adoption kind is not served"
     facts = got["facts"]
     assert set(facts) == {"kind", "tenant", "job", "tenant_state", "system", "digest", "rendering", "forge_origin",
-                          "forge_repo"}, "the facts are surface §4's keys, no more (the container entry's cases run over them)"
+                          "forge_repo", "inputs_dir"}, (
+        "the facts are surface §4's keys plus #1546's `inputs_dir`, no more (the container entry's cases run over them)")
+    assert isinstance(facts["inputs_dir"], str), f"no inputs folder for the container's `JobTenant`: {facts['inputs_dir']!r}"
+    assert facts["inputs_dir"].startswith("/"), f"the inputs folder is not absolute (#1546 r10 (b)): {facts['inputs_dir']!r}"
     assert (facts["kind"], facts["job"], facts["tenant"], facts["tenant_state"], facts["system"]) == (
         "adoption", job_id, scene.tenant, "active", SYSTEM)
     rendering = {path: base64.b64decode(data) for path, data in facts["rendering"].items()}
@@ -117,12 +135,13 @@ def test_the_container_is_started_on_the_adoption_entry_for_this_job_and_tenant(
 
 # --- what the helper refuses to do (N-A1) -------------------------------------------------------------------------------------
 
-ADOPTION_ANSWERS = {"launch", "forge.token"}
+#: #1546 (A-O2, PR2): the adoption's typed `result` travels on the socket as readiness's does (the helper stages it).
+ADOPTION_ANSWERS = {"launch", "forge.token", "result"}
 
 
 def test_an_adoption_helper_answers_launch_and_forge_token_and_nothing_else(scene, checkout):
-    """The kind's row of C4, generated from the helper's own registry: `launch` and `forge.token` are the only requests answered to an adoption
-    job, and every other registered request name is refused `not-for-kind`, signing, minting and starting nothing. (N-A1, R13-1)"""
+    """The kind's row of C4, generated from the helper's own registry: `launch`, `forge.token` and `result` (#1546) are the only
+    requests answered to an adoption job, and every other registered request name is refused `not-for-kind`, signing, minting and starting nothing. (N-A1, R13-1)"""
     from defender.job_host._main import registry
 
     names = {name for name, _kind in registry().handlers}
@@ -145,6 +164,7 @@ def test_an_adoption_helper_answers_launch_and_forge_token_and_nothing_else(scen
     docker = ContainerStandIn(job)
     from defender.tests.support.jobs._job_helper import drive_helper
 
+    host_claim(scene, "adoption", job_id, system=SYSTEM)
     ran = drive_helper(scene, _argv(scene, job_id, SYSTEM), docker=docker, signer=signer, forge=forge)
     assert ran.raised is None
     assert docker.job_error is None, (ran.raised, docker.job_error)
@@ -182,8 +202,10 @@ def test_a_system_whose_adapter_ships_no_base_files_is_failed_no_base_files(scen
 
 def test_the_helper_never_reads_the_tenants_own_files_for_the_rendering(scene, checkout):
     """The rendering is the release's: a tenant `agent/skills/identity/SKILL.md` of other text does not change what is handed over. (P-9 digest of the render, never checked-out files)"""
-    (scene.t.clone / "agent" / "skills" / "identity").mkdir(parents=True, exist_ok=True)
-    (scene.t.clone / "agent" / "skills" / "identity" / "SKILL.md").write_bytes(b"the tenant's own text\n")
+    from defender.tests.tenancy.tenant_1108_p4._support import plant_old_clone
+
+    # #1618 K8: the tenant's own files on the host would be at the old clone's place; a decoy there.
+    plant_old_clone(scene.t, {"agent/skills/identity/SKILL.md": "the tenant's own text\n"})
     got = {}
     ran, _, _ = _run(scene, str(uuid.uuid4()), SYSTEM, lambda c: (got.update(f=c.request("launch")), 0)[1])
     assert "f" in got, f"premise: the container never ran (the helper's rc {ran.rc!r}): the adoption kind is not served"
@@ -192,12 +214,13 @@ def test_the_helper_never_reads_the_tenants_own_files_for_the_rendering(scene, c
 
 def test_a_tenant_still_creating_is_failed_tenant_not_active_and_no_container_starts(scene, checkout):
     """The tenant admission at claim refuses a tenant that is not active: one `{failed, tenant_not_active}` record, no container; the active tenant's run is the control. (A3, R13-1.2)"""
-    from defender.tests.support.jobs._jobs1342 import restate_tenant
+    from defender.tests.support.jobs._jobs1342 import move_tenant
 
     control = str(uuid.uuid4())
     _, ran_docker, _ = _run(scene, control, SYSTEM, lambda c: (c.request("launch"), 0)[1])
     assert ran_docker.boxes, "control: an active tenant's adoption is handed over"
-    restate_tenant(scene.dsn, scene.tenant, state="creating", data_root=scene.root)
+    # In place (#1546: the control's request and claim rows reference the tenant, so it is not dropped and re-registered).
+    move_tenant(scene.dsn, scene.tenant, state="creating")
     job_id = str(uuid.uuid4())
     _, docker, _ = _run(scene, job_id, SYSTEM)
     assert _record(scene, job_id) == {"outcome": "failed", "reason": "tenant_not_active"}
@@ -205,15 +228,14 @@ def test_a_tenant_still_creating_is_failed_tenant_not_active_and_no_container_st
     assert docker.creates() == []
 
 
-def test_the_helper_admits_the_tenant_and_reads_its_records_through_the_directory_it_was_handed(
-        scene, checkout, monkeypatch):
-    """`job_host.main(directory=)` reaches the adoption kind as it reaches readiness and learning: with no database address
-    in the process, the tenant is admitted and its system record read through the handed records, and the container is
-    handed over. (#1471 `main(directory=)`, A3)"""
+def test_the_helper_admits_the_tenant_and_reads_its_records_through_the_directory_it_was_handed(scene, checkout):
+    """`job_host.main(directory=)` reaches the adoption kind as it reaches readiness and learning: the tenant is admitted and
+    its system record read through the handed records, and the container is handed over. (#1471 `main(directory=)`, A3;
+    #1546 PR2/PR7: the helper reads its claim and stages its facts in the job store, so the process keeps its database
+    address; what is pinned is that admission and the record read go through the handed directory)"""
     from defender.tests.support.jobs._readiness1471 import RestatingDirectory
 
     directory = RestatingDirectory(scene, state="active")
-    monkeypatch.delenv("DEFENDER_DATABASE_DSN")
     job_id = str(uuid.uuid4())
     _, docker, _ = _run(scene, job_id, SYSTEM, lambda c: (c.request("launch"), 0)[1], directory=directory)
     assert directory.admitted_active, "the tenant was not admitted through the handed directory"
@@ -226,20 +248,23 @@ def test_the_helper_refuses_an_adoption_with_no_system_named(scene, checkout):
     docker = ContainerStandIn(lambda c: 0)
     from defender.tests.support.jobs._job_helper import drive_helper
 
-    ran = drive_helper(scene, scene.argv("adoption", str(uuid.uuid4())), docker=docker, signer=make_signer(), forge=ForgeCredentialRecorder())
+    job_id = str(uuid.uuid4())
+    host_claim(scene, "adoption", job_id, system=SYSTEM)  # the claimed request names one; only the command line lacks it
+    ran = drive_helper(scene, scene.argv("adoption", job_id), docker=docker, signer=make_signer(), forge=ForgeCredentialRecorder())
     assert ran.rc not in (0, None) or ran.raised is not None
     assert not docker.boxes
 
 
 def test_a_runs_folder_holding_the_helpers_failure_record_still_lists(scene, checkout):
-    """The helper's own `.adoption.json` (a vanished system) is an accepted sidecar: the tenant's runs listing succeeds and names no run. (R13-1.7)"""
+    """After the helper's own ending (a vanished system, staged as the claim's `result`, #1546 A-O2: no `.adoption.json`
+    sidecar any more) the tenant's runs listing succeeds and names no run, and still refuses an unknown file. (R13-1.7)"""
     from defender import tenancy
     from defender._paths import process_defender_dir
 
     job_id = str(uuid.uuid4())
     _run(scene, job_id, "ghost-system")
     assert _record(scene, job_id) == {"outcome": "failed", "reason": "system_gone"}, "premise: the helper wrote its record"
-    accepted = tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=process_defender_dir(), clone_tree=False)
+    accepted = tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=process_defender_dir())  # #1618 K8: no clone tree to judge
     assert [str(r) for r in accepted.runs_repository().list()] == []
 
     from defender.tests.support.shared._locations_1210 import location_path
@@ -264,6 +289,7 @@ def test_every_docker_exit_that_means_the_container_never_ran_is_failed_start_fa
 
     job_id = str(uuid.uuid4())
     docker = ContainerStandIn(lambda c: 0, run_fault=(rc, "docker: the container did not start\n"))
+    host_claim(scene, "adoption", job_id, system=SYSTEM)
     ran = drive_helper(scene, _argv(scene, job_id, SYSTEM), docker=docker, signer=make_signer(), forge=ForgeCredentialRecorder())
     assert ran.raised is None, ran.raised
     assert _record(scene, job_id) == {"outcome": "failed", "reason": "start_failed"}
@@ -290,6 +316,7 @@ def test_a_helper_told_to_stop_before_its_container_starts_writes_no_record(scen
     assert ran_docker.boxes, "control: the container starts"
     job_id = str(uuid.uuid4())
     docker = ContainerStandIn(lambda c: 0)
+    host_claim(scene, "adoption", job_id, system=SYSTEM)
     ran = drive_helper(scene, _argv(scene, job_id, SYSTEM), docker=docker, signer=make_signer(), forge=_StoppedWhileBuilding())
     assert ran.raised is None, ran.raised
     assert not docker.boxes, "a container was started after the stop"

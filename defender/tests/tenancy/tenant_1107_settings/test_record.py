@@ -1,6 +1,7 @@
 """resolve_tenant / resolve_run_tenant: systems, case-record file never refusing, faults kept per system, fresh read per resolve, read-only parts."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an operator tool's one fetch
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import fixture_data_root
 
@@ -347,10 +348,10 @@ def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys
     base = ["show", "gather", "--run-dir", str(run_dir)]
 
     healthy = [*base, "--tenant", fixture_uuid("tenant:healthy")]
-    assert policy_cli.main(healthy, directory=directory_for_argv(healthy)) == 0
+    assert policy_cli.main(healthy, fetch=in_process_fetch(), directory=directory_for_argv(healthy)) == 0
     healthy_out = capsys.readouterr().out
     broken_argv = [*base, "--tenant", fixture_uuid("tenant:broken")]
-    assert policy_cli.main(broken_argv, directory=directory_for_argv(broken_argv)) == 0  # resolves without raising
+    assert policy_cli.main(broken_argv, fetch=in_process_fetch(), directory=directory_for_argv(broken_argv)) == 0  # resolves without raising
     broken_out = capsys.readouterr().out
     assert "agent: gather" in broken_out, broken_out
     assert broken_out == healthy_out, "the grants answer moved with a system's config"
@@ -370,12 +371,17 @@ def test_s60_config_env_fs_confinement(tmp_path):
     outside = tmp_path / "outside.env"
     outside.write_text('TICKET_TIMEOUT_SEC="10"\nTICKET_KEY_PATTERN="OUTSIDE-[0-9]+"\n',
                        encoding="utf-8")
-    # A config.env reached through a symlink outside the folder: the link walk refuses it.
+    # A config.env reached through a symlink outside the folder: the link walk refuses it. #1618 K6/K8: acceptance walks
+    # no knowledge folder any more (a run reads its fetched copy, whose blobs the fetch holds to regular files); the walk
+    # is the folder rules' (`check_knowledge_folder`, `tenant.py check --folder`), unchanged.
+    from defender.tenancy import check_knowledge_folder
+
     linked = S.plant(root, fixture_uuid("tenant:linked"), marker="s60l")
     S.config_path(linked, "ticket").unlink()
     S.config_path(linked, "ticket").symlink_to(outside)
-    with pytest.raises(S.tenant_refused()):
-        _resolve(root, fixture_uuid("tenant:linked"))
+    with pytest.raises(S.tenant_refused()) as refused:
+        check_knowledge_folder(linked, tenant_id=None)
+    assert str(S.config_path(linked, "ticket")) in str(refused.value), refused.value
 
     folder = S.plant(root, marker="s60")
     rec = _resolve(root)

@@ -30,7 +30,6 @@ from defender.tests.tenancy.tenant_1108_delivery._support import (
     LANES,
     ForgeHTTP,
     build_tenant,
-    configured_origin,
     fixture_identity,
 )
 from defender.tests.tenancy.tenant_1108_delivery._support import target as p3_target
@@ -314,7 +313,7 @@ def _lane_box(base: Path, runtime: str) -> Iterator[_DockerExec]:
     batch's git-free draft (its lanes the only writable mounts), all under `base`."""
     with build_tenant(base / "tenant") as built:
         http = ForgeHTTP(remote=built[1])
-        origin = configured_origin(built[0].knowledge)
+        origin = built.origin  # #1618 K8: no clone on the host; the served origin the remote is wired to
         if origin is not None:
             http.serve(origin)
         delivery = p3_target().TenantDelivery.open(

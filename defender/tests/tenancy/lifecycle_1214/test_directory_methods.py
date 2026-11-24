@@ -52,18 +52,15 @@ def _directory(probe: Probe) -> Any:
 
 
 def _calls(directory: Any) -> dict[str, Any]:
-    from defender import tenancy
-
     return {
         "state": lambda: directory.state(T1),
         "forge_wiring": lambda: directory.forge_wiring(T1),
         "generations": lambda: directory.generations(T1),
-        "record_report": lambda: tenancy.record_report(directory, T1, "fresh abc", by="child"),
-        "read_status": lambda: tenancy.read_status(directory, T1),
     }
 
 
-CALLS = ["state", "forge_wiring", "generations", "record_report", "read_status"]
+# #1618 census: the publish outcome's write and read (`record_report`, `read_status`) went with the `publish_status` table.
+CALLS = ["state", "forge_wiring", "generations"]
 
 
 def _probe() -> _Probe:
@@ -72,7 +69,7 @@ def _probe() -> _Probe:
 
 @pytest.mark.parametrize("call", CALLS)
 def test_every_directory_call_closes_the_repository_it_opened_in_its_own_loop(call):
-    """Each call, `generations` and the outcome write/read included, opens one repository and closes it in the loop that ran it (P6)."""
+    """Each call, `generations` included, opens one repository and closes it in the loop that ran it (P6)."""
     probe = _probe()
     do = _calls(_directory(probe))[call]
     do()
@@ -84,12 +81,12 @@ def test_every_directory_call_closes_the_repository_it_opened_in_its_own_loop(ca
     assert probe.close_loops == [first, second]
 
 
-@pytest.mark.parametrize("call", ["state", "forge_wiring", "generations", "record_report"])
+@pytest.mark.parametrize("call", CALLS)
 def test_a_failing_read_or_write_still_closes_every_repository(call):
     """A failing database leaves no repository open, whichever method asked (P6)."""
     probe = _probe()
     probe.fail = ConnectionError("database away")
-    with contextlib.suppress(ConnectionError):  # the best-effort recorder swallows it; the others let it reach the caller
+    with contextlib.suppress(ConnectionError):  # each lets it reach the caller
         _calls(_directory(probe))[call]()
     assert probe.opened == probe.closed == 1
 
@@ -100,12 +97,8 @@ async def test_every_directory_call_inside_a_running_loop_is_refused_before_open
     """Inside a running loop a call raises RuntimeError and opens nothing, never answering from a helper thread (P6, RC-5)."""
     probe = _probe()
     do = _calls(_directory(probe))[call]
-    if call == "record_report":  # best effort: it may refuse loudly or log the refusal and record nothing
-        with contextlib.suppress(RuntimeError):
-            do()
-    else:
-        with pytest.raises(RuntimeError):
-            do()
+    with pytest.raises(RuntimeError):
+        do()
     assert probe.opened == 0, "a repository was opened inside a running loop"
     assert probe.read_loops == []
     await asyncio.to_thread(do)  # control: from a worker thread the same call runs

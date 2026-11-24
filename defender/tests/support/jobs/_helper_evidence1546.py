@@ -161,13 +161,20 @@ def another_investigation(scene: HelperScene, tenant: str | None = None, *, tain
     return other
 
 
+#: `plant(pin=NO_PIN)`: a learning claim whose launch facts carry no `knowledge_commit` at all (r10 (a): refused at setup).
+NO_PIN = object()
+
+
 def plant(scene: HelperScene, kind: str, *, inputs: list[dict[str, str]] | None = None, system: str = "identity",  # noqa: PLR0913
           claim: str | None = None, owner: str | None = None, source: str | None = None,
-          launch: dict[str, Any] | None = None, alert: bytes | None = None) -> Planted:
+          launch: dict[str, Any] | None = None, alert: bytes | None = None, pin: Any = None) -> Planted:
     """The owner row (running, with a lease) and the claim row for `kind`, as the worker's claim transaction leaves them.
     FORCED CHOICES: the claim's `launch` for an investigation is the launch record `HelperScene.plant` writes today
     (design: "launch facts (admission facts; knowledge pin...; alert reference)"), for a learning job `{"knowledge_commit":
-    <pin>}`; a post-step's hold row is `jobs.learning_checks` with `holder` = the claim token."""
+    <pin>}`; a post-step's hold row is `jobs.learning_checks` with `holder` = the claim token.
+    `pin` (learning): the claim's `knowledge_commit` (r10 (a): the family's pin is a claim launch fact). Default the scene's
+    published commit, which the fetch stand-in serves (`K.fetch_seam` over the scene's remote); `NO_PIN` leaves the key out;
+    any other value is written as given (a malformed or unserved pin)."""
     claim = claim or scene.claim
     t, dsn = scene.tenant, scene.dsn
     if kind == "investigation":
@@ -185,12 +192,12 @@ def plant(scene: HelperScene, kind: str, *, inputs: list[dict[str, str]] | None 
                      "evidence_state = 'complete', scrub = 'clean' WHERE id = %s", (source,))
         job = owner or str(uuid.uuid4())
         execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, "
-                     "trigger, status, created_at, started_at, lease_expires_at, sibling_cost_usd, publish_state) "
+                     "trigger, status, created_at, started_at, lease_expires_at, sibling_cost_usd, sibling_cost_is_lower_limit, publish_state) "
                      "VALUES (%s, %s, %s, %s, 'k-learn', 1, 'auto', 'running', now(), now(), "
-                     "now() + interval '1 hour', 0, 'none')", (job, t, alert, source))
+                     "now() + interval '1 hour', 0, false, 'none')", (job, t, alert, source))
         execute(dsn, "INSERT INTO jobs.claims (token, tenant_id, kind, learning_job_id, launch, inputs) "
                      "VALUES (%s, %s, 'learning', %s, %s::jsonb, %s::jsonb)",
-                (claim, t, job, json.dumps({"knowledge_commit": scene.t.commit}),
+                (claim, t, job, json.dumps({} if pin is NO_PIN else {"knowledge_commit": scene.t.commit if pin is None else pin}),
                  json.dumps(inputs if inputs is not None else [{"owner": source, "object": "bundle"}])))
         return Planted(kind, job, claim, source, "learning_jobs", "learning")
     if kind in ("readiness", "adoption", "drain"):
@@ -325,11 +332,13 @@ class Store:
                            "WHERE id = %s", (state, scrub, owner))
         return claim
 
-    def plant_source_bundle(self, scene: HelperScene, source: str, workdir: Path) -> str:
+    def plant_source_bundle(self, scene: HelperScene, source: str, workdir: Path, *,
+                            knowledge_commit: str | None = None) -> str:
         """A learning source's accepted `bundle`: a real finished source run of the scene's tenant (`source_bundle`, its
-        knowledge stamp the scene's published commit, which `plant` pins the claim to) planted accepted under `source`;
-        returns its claim token."""
-        data = source_bundle(scene.tenant, source, workdir, knowledge_commit=scene.t.commit)
+        knowledge stamp the scene's published commit, which `plant` pins the claim to, unless `knowledge_commit` names
+        another: a bundle whose record disagrees with the claim, r10 (a)) planted accepted under `source`; returns its claim
+        token."""
+        data = source_bundle(scene.tenant, source, workdir, knowledge_commit=knowledge_commit or scene.t.commit)
         return self.plant_accepted(scene, scene.tenant, source, "bundle", data)
 
     def read(self, tenant: str, owner_kind: str, owner: str, claim: str, obj: str, wrapped: str) -> bytes:
@@ -604,3 +613,35 @@ def store_for(request: pytest.FixtureRequest, scene: HelperScene) -> Store:
     store.seams = {"evidence": store.blob_store(),
                    "evidence_keys": evidence_module().EvidenceKeys(addr=openbao.addr, **login)}
     return store
+
+
+def stage_roster(scene: HelperScene, c: Any, planted: Planted) -> tuple[Path, dict[str, str], dict[str, str]]:
+    """What a learning job's pre-flight leaves, made from inside the container: the source's run folder and the episode in
+    the job's own root, and its roster sent as the `arms` record. Returns (episode, world id by label, run id by label)."""
+    from defender.tests.support.evidence._facts1546 import sent_arms
+    from defender.tests.support.jobs._job_helper import host_path
+    from defender.tests.support.learning.branch import _triplet_947 as T
+
+    owner, source = str(planted.owner), str(planted.source)  # repair-brief D1: plain `str` (YAML cannot dump an id subclass)
+    folder = host_path(c.mounts, str(job_root(scene) / scene.tenant))  # the job's own root, where its episode is made
+    (folder / "runs" / source).mkdir(parents=True, exist_ok=True)
+    doc = T.family_doc(episode_id=owner, source_run_dir=str(folder / "runs" / source), source_run_id=source)
+    ep = T.episode(scene.root, doc=doc, root=folder / "episodes", episode_id=owner)
+    worlds = {w: T.world_id(ep, w) for w in T.WORLDS}
+    runs = {w: str(uuid.uuid4()) for w in T.WORLDS}
+    send(c, "arms", record=sent_arms(*[(runs[w], worlds[w]) for w in T.WORLDS]))
+    return ep, worlds, runs
+
+
+def recording_fetch(scene: HelperScene) -> tuple[Any, list[tuple[str, str | None]]]:
+    """The real fetch seam over the scene's remote, each ask's `(dest, commit)` also recorded."""
+    from defender.tests.tenancy.knowledge_1618 import _support as K
+
+    seam, asked = K.fetch_seam(scene.t), []
+
+    def fetch(tenant_id, dest, **kw) -> str:
+        asked.append((str(dest), kw.get("commit")))
+        return seam(tenant_id, dest, **kw)
+
+    fetch.calls = seam.calls  # type: ignore[attr-defined]  # what `drive_helper` reads as `ran.fetch.calls`
+    return fetch, asked

@@ -17,7 +17,6 @@ path)` seam (body read and pre-move test alike), which `ProductRepo` serves.
 from __future__ import annotations
 
 import json
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,7 +25,7 @@ import pytest
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
 
-from ._support import current_commit, export_dir, git, published_tenant
+from ._support import committed_blobs, current_commit, export_dir, git, plant_old_clone, published_tenant
 
 #: The fixture tenant's own lesson (committed under `defender/tests/fixtures/tenant-fixture/agent/lessons/`).
 NAME = "fixture-owner-before-close"
@@ -112,8 +111,9 @@ def scene(tmp_path, data_root):
                                  SETTINGS_BAIT[0]: SETTINGS_BAIT[1]}) as t:
         k1 = t.commit
         k2 = t.merge({TENANT_PATH: _lesson(CURRENT)}, message="a later merged lesson edit")
-        assert t.publish().commit == k2
-        (t.clone / TENANT_PATH).write_text(_lesson(WORKTREE), encoding="utf-8")
+        assert t.origin_main() == k2, "premise: main is the later commit"
+        # #1618: (c) is `main`'s tip now (no `current`), (d) a decoy where the old clone's working tree was.
+        plant_old_clone(t, {TENANT_PATH: _lesson(WORKTREE)})
         product = _product_repo(tmp_path / "product")
         ep = J.accepted_episode(tmp_path / "ep", ledgers={"b": [J.oracle_row("b")], "c": []})
         assert Path(ep).parent.parent.name == t.tenant_id, "fixture bug: episode not the tenant's"
@@ -172,42 +172,91 @@ def test_o6_a_pre_move_run_is_judged_on_the_product_tree_at_its_code_commit(scen
         "the product body was not read from the product repository at the code commit")
 
 
-def test_o6_a_post_move_run_is_judged_on_the_export_at_its_knowledge_commit(scene):
-    """The code commit's tree lacks the lesson, so the body is the export's at the knowledge
-    commit: not the product tree at an older commit, `current`, or the clone."""
+def test_o6_a_post_move_run_is_judged_on_the_body_at_its_knowledge_commit(scene, helper):
+    """The code commit's tree lacks the lesson, so the body is the knowledge commit's (#1618: a copy the helper makes):
+    not the product tree at an older commit, `main`'s tip, or the old clone's place; and no `exports/` or `current` is
+    made."""
     _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1})
-    _only(_shown(scene), EXPORT)
-    assert current_commit(scene.t.tenant) == scene.k2, "the judge moved `current`"
+    _only(_shown_with(scene), EXPORT)
+    assert current_commit(scene.t.tenant) is None, "the judge made a `current`"
 
 
-def test_o6_a_missing_export_is_materialised_from_the_clone_then_read(scene):
-    """Exports are derived, so the judge materialises the missing `exports/<K1>/` from the
-    clone's objects and reads it; `current` and the clone are untouched, and nothing went to
-    the network."""
-    t = scene.t
-    shutil.rmtree(export_dir(t.tenant, scene.k1))
-    head_before = git(t.clone, "rev-parse", "HEAD")
-    calls_before = (len(t.server.seen), len(t.forge.requests), len(t.vault.calls))
+@pytest.fixture
+def helper(scene, tmp_path, monkeypatch):
+    """The job helper's socket (`copy.make`), named by the job-socket environment the judge's in-container default path reads
+    (#1618 FORCED, `_support`'s seam list): it answers by the real fetch child over the scene's remote."""
+    from defender.tests.tenancy.knowledge_1618 import _readers_1618 as RD
+
+    with RD.helper_socket(scene.t, tmp_path, monkeypatch) as stand_in:
+        yield stand_in
+
+
+def _shown_with(scene: Scene) -> str:
+    judge = J.scripted_judge()
+    J.grade(scene.ep, judge=judge, git_show=scene.product, draws=1)
+    assert judge.prompts, "the judge model was never called"
+    return "\n".join(judge.prompts)
+
+
+def test_1618_k5_a_post_move_run_is_judged_on_the_body_at_its_commit_copied_from_forgejo(scene, helper):
+    """The judge shows the lesson body at the sibling's knowledge commit as the helper's copy holds it (fetched by id);
+    no export is made and nothing else is read. (F3, K5)"""
     _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1})
+    assert not export_dir(scene.t.tenant, scene.k1).exists(), "premise: no export stands for the commit"
 
-    _only(_shown(scene), EXPORT)
-    rebuilt = export_dir(t.tenant, scene.k1) / TENANT_PATH
-    assert rebuilt.is_file(), "the missing export was not materialised"
-    assert rebuilt.read_text(encoding="utf-8") == _lesson(EXPORT)
-    assert current_commit(t.tenant) == scene.k2, "materialising moved `current`"
-    assert git(t.clone, "rev-parse", "HEAD") == head_before, "the clone's HEAD moved"
-    assert (t.clone / TENANT_PATH).read_text(encoding="utf-8") == _lesson(WORKTREE), (
-        "the clone's working tree was rewritten")
-    assert (len(t.server.seen), len(t.forge.requests), len(t.vault.calls)) == calls_before, (
-        "the judge's read reached the origin, the forge or the issuer (flow 2: no network)")
+    _only(_shown_with(scene), EXPORT)
+
+    assert {f.get("commit") for name, f in helper.requests if name == "copy.make"} == {scene.k1}, helper.requests
+    assert not export_dir(scene.t.tenant, scene.k1).exists(), "an export was made inside the judge's pass"
+
+
+def test_1618_f3_the_judges_default_copy_path_asks_the_helper_and_the_judge_never_fetches_itself(scene, helper):
+    """With no copy seam the judge's pass asks the helper (`copy.make`) for each body's commit over the job socket, and its own
+    process mints no credential and opens no git connection: a judge fetching inside the container could not. (F3, O8)"""
+    from defender.learning.author.version_control.auth import ForgejoIdentity
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1})
+    judge_requests = len(scene.t.server.seen)
+    with counting_calls(mint=ForgejoIdentity.token) as minted:
+        _only(_shown_with(scene), EXPORT)
+
+    asked = [f.get("commit") for name, f in helper.requests if name == "copy.make"]
+    assert asked, "the judge never asked the helper"
+    assert set(asked) == {scene.k1}, f"the judge did not ask the helper for its body's commit: {helper.requests}"
+    assert minted.counts["mint"] == 0, "the judge minted a credential of its own (it fetched in the container)"
+    assert len(scene.t.server.seen) > judge_requests, "control: the helper's child never reached Forgejo"
+
+
+@pytest.mark.parametrize("cause", ["unserved"])  # the unreachable arm is `test_readers_1618` (every reader, naming the cause)
+def test_1618_k4_k5_a_refused_copy_refuses_the_judge_pass_naming_why(scene, helper, cause):
+    """When the helper refuses `copy.make` (Forgejo down, or a commit it does not serve; the helper's own typed refusal) the pass
+    is `JudgeRefused` naming why, the model is never called and nothing is graded; the readable case above is the control. (F3, K4, K5)"""
+    from defender.learning.judge import JudgeRefused
+
+    commit = scene.k1 if cause == "unreachable" else ABSENT_COMMIT
+    _stamp(scene, code=scene.product.post, knowledge={"commit": commit})
+    if cause == "unreachable":
+        from defender.tests.tenancy.knowledge_1618 import _support as K
+
+        K.forge_down(scene.t)
+    judge = J.scripted_judge()
+
+    with pytest.raises(JudgeRefused) as refused:
+        J.grade(scene.ep, judge=judge, git_show=scene.product, draws=1)
+
+    assert judge.prompts == [], "the model was called on a pass that could not read its knowledge"
+    assert str(refused.value).strip()
+    assert [name for name, _f in helper.requests] == ["copy.make"], "the refusal did not come from the helper's answer"
+    if cause == "unserved":
+        assert commit in str(refused.value), str(refused.value)
 
 
 @pytest.mark.parametrize(("knowledge", "cause"), [
     ("unversioned", "unversioned"),
     ({"unavailable": "O6-REASON-the-knowledge-clone-could-not-be-read"},
      "O6-REASON-the-knowledge-clone-could-not-be-read"),
-    ({"commit": ABSENT_COMMIT}, ABSENT_COMMIT),
-], ids=["unversioned", "unavailable", "commit-absent-from-clone"])
+], ids=["unversioned", "unavailable"])
 def test_o6_a_post_move_run_with_no_readable_knowledge_commit_is_unreadable_naming_why(
         scene, knowledge, cause):
     """Never some other revision's body (`current`, the clone, the product tree) and the slot
@@ -224,16 +273,16 @@ def test_o6_a_post_move_run_with_no_readable_knowledge_commit_is_unreadable_nami
         "an export folder was made for a commit the clone does not hold")
 
 
-def test_o6_a_traversing_lesson_name_is_never_read_out_of_the_export(scene):
+def test_o6_a_traversing_lesson_name_is_never_read_out_of_the_export(scene, helper):
     """`lessons_loaded.jsonl` is box-writable, so a row's `lesson_name` may walk out of
     `agent/lessons/`; the export holds a file exactly there and the judge never shows it. The
     row's slot is still shown, named, and the ordinary lesson beside it renders (control)."""
     _stamp(scene, code=scene.product.post, knowledge={"commit": scene.k1},
            names=(TRAVERSAL_NAME, NAME))
-    assert (export_dir(scene.t.tenant, scene.k1) / SETTINGS_BAIT[0]).is_file(), (
-        "fixture bug: the bait the traversal would reach is not in the export")
+    assert SETTINGS_BAIT[0] in committed_blobs(scene.t.remote, scene.k1, "settings"), (
+        "fixture bug: the bait the traversal would reach is not in the commit (so not in its copy)")
 
-    shown = _shown(scene)
+    shown = _shown_with(scene)
 
     assert SETTINGS_MARKER not in shown, (
         "a traversing lesson name was read outside the export's agent/lessons/")
@@ -266,8 +315,8 @@ def test_o6_a_hostile_knowledge_commit_is_unreadable_and_reads_nothing_outside_e
     (bait / "agent" / "lessons" / f"{NAME}.md").write_text(
         _lesson("O6-BODY-FROM-AN-ABSOLUTE-PATH"), encoding="utf-8")
     commit = HOSTILE_COMMITS[shape].format(out=out, abs=bait)
-    exports = export_dir(scene.t.tenant, scene.k1).parent
-    before = sorted(p.name for p in exports.iterdir())
+    tenant_dir = export_dir(scene.t.tenant, scene.k1).parent.parent
+    before = sorted(p.name for p in tenant_dir.iterdir())
     _stamp(scene, code=scene.product.post, knowledge={"commit": commit})
 
     shown = _shown(scene)
@@ -276,5 +325,5 @@ def test_o6_a_hostile_knowledge_commit_is_unreadable_and_reads_nothing_outside_e
     assert not leaked, f"a hostile knowledge commit read a body from somewhere: {leaked}"
     assert f"### {NAME}" in shown, "the lesson vanished from the judge's view entirely"
     assert not out.exists(), "an option-shaped commit made git write a host file"
-    assert sorted(p.name for p in exports.iterdir()) == before, (
-        "an export folder was made for a hostile commit")
+    assert sorted(p.name for p in tenant_dir.iterdir()) == before, (
+        "a folder (an export, a copy) was made in the tenant's folder for a hostile commit")

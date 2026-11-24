@@ -2,6 +2,10 @@
 
 `tenant.py setup` (row, learning provisioning, `--learning-state-from` adoption) is retired; the surviving
 folder rules are asserted through acceptance. The successor map is in slice-Re-report.md.
+
+#1618 K8: a tenant holds no knowledge folder, so acceptance judges `<T>` alone and runs no folder rule; the folder rules
+stand unchanged (K6) in `check_knowledge_folder` (`tenant.py check --folder`). The refusal cases below drive those rules
+over the same placed `<T>/knowledge` (`H.folder_refusal`), still read-only; acceptance's own controls stay.
 """
 from __future__ import annotations
 
@@ -51,16 +55,18 @@ ABSENT_KNOWLEDGE = [
 
 
 @pytest.mark.parametrize("plant", ABSENT_KNOWLEDGE)
-def test_1214_accepting_over_an_absent_knowledge_folder_names_it_and_writes_nothing(
+def test_1214_the_folder_rules_over_an_absent_knowledge_folder_name_it_and_write_nothing(
         tmp_path: Path, plant) -> None:
-    """No knowledge folder is a refusal naming it, whatever else is or is not there, and nothing is written (Flow 4)."""
+    """No knowledge folder is a refusal naming it, whatever else is or is not there, and nothing is written (Flow 4;
+    #1618 K8: the folder rules' refusal, not acceptance's)."""
     root = tmp_path / "data"
     plant(root)
     before = H.tree_census(root)
-    text = H.accept_refusal(_tenant, root)
+    text = H.folder_refusal(_tenant, root)
     assert str(H.knowledge_dir(root)) in text, text
     assert H.census_diff(before, H.tree_census(root)) == [], "the refused acceptance wrote into the data root"
-    H.place_knowledge(root)  # control: the same address with knowledge placed is accepted
+    H.place_knowledge(root)  # control: the same address with knowledge placed passes and is accepted
+    assert H.check_folder(_tenant, root) is None
     assert H.accept(_tenant, root).id == H.TID
 
 
@@ -167,11 +173,12 @@ TENANT_ID_CELLS = [
 @pytest.mark.parametrize(("content", "also_named"), TENANT_ID_CELLS)
 def test_1214_a_placed_knowledge_folder_whose_tenant_id_is_absent_or_names_another_tenant_is_refused(
         tmp_path: Path, content: str | None, also_named: tuple[str, ...]) -> None:
-    """A clone of another tenant's repo (or no id file) is refused naming the id file; the right clone is accepted (Flow 4)."""
+    """A clone of another tenant's repo (or no id file) is refused naming the id file; the right clone passes (Flow 4;
+    #1618 K8: by the folder rules held to the tenant's id, not acceptance)."""
     root = tmp_path / "data"
     knowledge = H.cloned_tenant(tmp_path / "bad", root, tenant_id_file=content)
     before = H.tree_census(root)
-    text = H.accept_refusal(_tenant, root)
+    text = H.folder_refusal(_tenant, root)
     for name in (str(knowledge / H.TENANT_ID_FILE), *also_named):
         assert name in text, f"the refusal does not name {name!r}: {text!r}"
     assert H.census_diff(before, H.tree_census(root)) == [], "the refused acceptance wrote something"
@@ -179,6 +186,7 @@ def test_1214_a_placed_knowledge_folder_whose_tenant_id_is_absent_or_names_anoth
 
     control = tmp_path / "control"
     H.cloned_tenant(tmp_path / "good", control)
+    assert H.check_folder(_tenant, control) is None
     assert H.accept(_tenant, control).id == H.TID
 
 
@@ -233,26 +241,30 @@ REVERIFY_CELLS = [
 
 
 @pytest.mark.parametrize("damage", REVERIFY_CELLS)
-def test_1214_a_tenant_accepted_before_is_refused_naming_the_knowledge_folder_that_no_longer_passes(
+def test_1214_a_folder_that_passed_before_is_refused_naming_the_knowledge_folder_that_no_longer_passes(
         tmp_path: Path, damage) -> None:
-    """Every acceptance runs the folder rules afresh: damage after a first acceptance is refused, naming it (Flow 4)."""
+    """Every check runs the folder rules afresh: damage after a first pass is refused, naming it (Flow 4; #1618 K8: the
+    folder rules, which acceptance no longer runs)."""
     root = tmp_path / "data"
     H.place_knowledge(root)
     assert H.accept(_tenant, root).id == H.TID
+    assert H.check_folder(_tenant, root) is None
     named = damage(root)
     before = H.tree_census(root)
-    assert named in H.accept_refusal(_tenant, root)
+    assert named in H.folder_refusal(_tenant, root)
     assert H.census_diff(before, H.tree_census(root)) == [], "the refused acceptance wrote something"
 
 
-def test_1214_a_placed_folder_that_fails_acceptance_is_refused_and_grant_gaps_are_left_to_check(
+def test_1214_a_placed_folder_that_fails_the_folder_rules_is_refused_and_grant_gaps_are_left_to_check(
         tmp_path: Path) -> None:
+    """#1618 K8: a missing or torn table is the folder rules' refusal (acceptance reads no table); a grant gap passes
+    them and is `check`'s refusal."""
     missing = tmp_path / "missing"
     H.place_knowledge(missing)
     grants = H.settings_dir(missing) / "verb-grants.yaml"
     grants.unlink()
     before = H.tree_census(missing)
-    assert str(grants) in H.accept_refusal(_tenant, missing)
+    assert str(grants) in H.folder_refusal(_tenant, missing)
     assert H.census_diff(before, H.tree_census(missing)) == [], "the refused acceptance wrote something"
 
     torn = tmp_path / "torn"
@@ -260,13 +272,14 @@ def test_1214_a_placed_folder_that_fails_acceptance_is_refused_and_grant_gaps_ar
     table = H.settings_dir(torn) / "verb-grants.yaml"
     table.write_text("dispositions:\n  cmdb: [unclosed\n", encoding="utf-8")
     before = H.tree_census(torn)
-    assert str(table) in H.accept_refusal(_tenant, torn)
+    assert str(table) in H.folder_refusal(_tenant, torn)
     assert H.census_diff(before, H.tree_census(torn)) == [], "the refused acceptance wrote something"
 
     gapped = tmp_path / "gapped"
     H.place_knowledge(gapped)
     _gap_table(H.settings_dir(gapped))
     assert H.accept(_tenant, gapped).id == H.TID
+    assert H.check_folder(_tenant, gapped) is None
     H.assert_refused(H.check(tenant_py, None, "--folder", str(H.knowledge_dir(gapped))), GAP_PAIR)  # #1471 B3: over `--folder` (stale, updated)
 
 
@@ -275,16 +288,6 @@ def _outside_file(tmp: Path) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("not this tenant's bytes\n", encoding="utf-8")
     return target
-
-
-def _first_knowledge_symlink(root: Path, tmp: Path) -> Path:
-    """The clone is elsewhere and symlinked in: the target is a complete, valid knowledge folder, so only
-    the link itself can be the refusal."""
-    real = H.place_knowledge(tmp / "clone-elsewhere")
-    link = H.knowledge_dir(root)
-    link.parent.mkdir(parents=True)
-    link.symlink_to(real, target_is_directory=True)
-    return link
 
 
 def _first_knowledge_file(root: Path, tmp: Path) -> Path:
@@ -325,8 +328,12 @@ def _first_unparseable_grants(root: Path, tmp: Path) -> Path:
     return path
 
 
+#: #1618 K8 (design "Delete `<T>/knowledge`"): the `knowledge_dir:symlink` cell is retired. "`<T>/knowledge` is reached
+#: without following a link" was acceptance's no-follow walk from the tenant folder, and the host knowledge folder it
+#: guarded is gone; the folder rules take the folder an operator names as named (`check_knowledge_folder` binds it,
+#: unchanged since before #1618), and a link at a copy's destination is the fetch child's refusal
+#: (`test_fetch_child_1618.py::test_a3_a_destination_that_is_a_link_to_an_empty_folder_is_refused...`).
 FIRST_RUN_FAULTS = [
-    pytest.param(_first_knowledge_symlink, id="knowledge_dir:symlink"),
     pytest.param(_first_knowledge_file, id="knowledge_dir:file"),
     pytest.param(_first_symlink_in_settings, id="settings_half:symlink-inside"),
     pytest.param(_first_hardlink_in_agent, id="agent_half:hardlink-inside"),
@@ -336,16 +343,18 @@ FIRST_RUN_FAULTS = [
 
 
 @pytest.mark.parametrize("plant", FIRST_RUN_FAULTS)
-def test_1214_acceptance_of_a_never_accepted_folder_applies_every_folder_rule(tmp_path: Path, plant) -> None:
-    """A freshly placed folder with one planted fault is refused naming it and nothing is written; a clean one is accepted (Flow 4)."""
+def test_1214_the_folder_rules_over_a_never_checked_folder_apply_every_rule(tmp_path: Path, plant) -> None:
+    """A freshly placed folder with one planted fault is refused naming it and nothing is written; a clean one passes and
+    is accepted (Flow 4; #1618 K8: the folder rules, which acceptance no longer runs)."""
     root = tmp_path / "data"
     named = plant(root, tmp_path)
     before = H.tree_census(root)
-    text = H.accept_refusal(_tenant, root)
+    text = H.folder_refusal(_tenant, root)
     needle = str(named)
     assert needle in text, f"the refusal does not name {needle!r}: {text!r}"
     assert H.census_diff(before, H.tree_census(root)) == [], "the refused acceptance wrote something"
 
     control = tmp_path / "control"
     H.place_knowledge(control)
+    assert H.check_folder(_tenant, control) is None
     assert H.accept(_tenant, control).id == H.TID

@@ -237,12 +237,13 @@ def test_r13_3_the_census_reads_the_published_copy_not_the_host_clone(tmp_path, 
     (repair 5 and 6, G3)"""
     files = {"settings/case-record.yaml": "system: ticket\n"}
     with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL, files=files) as scene:
-        clone_settings = Path(scene.t.clone) / "settings"
-        (clone_settings / "case-record.yaml").unlink()  # the copy holds it, the clone no longer does
-        (clone_settings / "lead-zero.yaml").write_text("system: elastic\n", encoding="utf-8")  # the clone only
-        registry = Path(scene.t.clone) / "agent" / "skills" / "tacit-knowledge" / "registry.yaml"
-        assert registry.is_file(), "premise: the clone holds the tacit registry the copy holds"
-        registry.write_text(REGISTRY_BROKEN, encoding="utf-8")  # the clone only: the copy's stays sound
+        from defender.tests.tenancy.tenant_1108_p4._support import plant_old_clone
+
+        # #1618 K8: there is no host clone; its divergent halves are a decoy at the old clone's place (`<T>/knowledge`),
+        # where a census still reading the clone would find them: a retired file and a broken tacit registry, the
+        # clone's only (the copy, fetched from Forgejo, holds `case-record.yaml` and a sound registry).
+        clone = plant_old_clone(scene.t, {"settings/lead-zero.yaml": "system: elastic\n",
+                                          "agent/skills/tacit-knowledge/registry.yaml": REGISTRY_BROKEN})
         ran = readiness(scene)
         warnings = _warnings(ran)
         retired = _of(warnings, "retired_file")
@@ -251,7 +252,7 @@ def test_r13_3_the_census_reads_the_published_copy_not_the_host_clone(tmp_path, 
         assert "lead-zero.yaml" not in retired, f"the host clone was censused, not the published copy: {ran.said()}"
         assert not [w for w in warnings if w["kind"].startswith("tacit_")], (
             f"the host clone's agent half was censused, not the published copy's: {ran.said()}")
-        assert Path(ran.facts["run_copy"]) != Path(scene.t.clone), "premise: the copy is not the clone"
+        assert Path(ran.facts["run_copy"]) != clone, "premise: the copy is not the old clone's place"
 
 
 @pytest.mark.parametrize("recorded", [True, False], ids=["recorded", "unrecorded"])
@@ -444,7 +445,8 @@ def test_r13_1_4_launch_facts_saying_the_tenant_is_not_active_are_refused_at_the
 # Retired (#1546 D4/A-O9): `test_r13_1_4_launch_facts_saying_active_over_a_tenant_folder_the_container_refuses_are_refused_at_
 # container_tenant`. The container no longer reads the host's tenant folder: it builds a `JobTenant` over its job root and
 # inputs, and "`accept_tenant` stays the host's ... the knowledge-clone, `.tenant-id` and settings-vs-mount checks have no
-# job-side counterpart" (design, JobTenant). That no in-box entry reaches `accept_tenant` is pinned by
+# job-side counterpart" (design, JobTenant). That no container entry reaches `accept_tenant` (or its host wrappers) is
+# pinned by `tooling/test_no_container_accept_tenant_1546.py` (r10 (b) "New lint") and
 # `tenancy/lifecycle_1214/test_entry_boundaries.py` (`IN_BOX_ENTRIES`); the host's own refusals by this file's and
 # `test_1471_readiness_helper.py`'s tenant-step cases.
 

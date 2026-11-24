@@ -11,7 +11,7 @@ import re
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
 from pydantic import SkipValidation
 
@@ -28,6 +28,7 @@ from defender.hooks.record_lesson_load import (
     exposures,
 )
 from defender.learning.judge._errors import JudgeRefused
+from defender.learning.judge.knowledge import AGENT_DIR, KnowledgeBodies
 from defender.learning.judge.family import (
     WorldFacts,
     discriminator_of,
@@ -67,77 +68,12 @@ class RunText:
     text: str
 
 
-if TYPE_CHECKING:
-    from defender.tenancy import TenantExport
-
-
 def _git_show_default(cwd: Path, rev: str, path: str) -> str | None:
     from defender._git import git_show_file
 
     return git_show_file(cwd, rev, path)
 
 
-@dataclasses.dataclass
-class KnowledgeBodies:
-    """Where a post-move sibling's lesson bodies are read (O6, #1108 P4): the tenant's export
-    at the family's knowledge pin (`records._knowledge_pin`: `<T>/exports/<commit>/agent/...`),
-    materialised from the clone's objects when absent — never `current`, the clone's HEAD or
-    its working tree. `why` names what made the bodies unreadable (an `unversioned` or
-    `unavailable` stamp, none recorded, or a commit that cannot be materialised); the export is
-    resolved once, on the first read, so a pass that never needs it touches nothing."""
-
-    tenant: Any
-    knowledge: Any
-    _export: TenantExport | None = None
-    _why: str | None = None
-    _resolved: bool = False
-
-    def read(self, rel: str) -> tuple[str | None, str | None]:
-        """`(body, None)` for the export's `agent/<rel>`, or `(None, why)`."""
-        self._resolve()
-        if self._export is None:
-            return None, self._why
-        from defender.tenancy import read_export_text
-
-        text, why = read_export_text(self._export, f"{AGENT_DIR}/{rel}")
-        if text is None:
-            return None, (f"unreadable: {AGENT_DIR}/{rel} in the export at "
-                          f"{self._export.commit} could not be read ({why})")
-        return text, None
-
-    def _resolve(self) -> None:
-        if self._resolved:
-            return
-        self._resolved = True
-        from defender.records.formats import KnowledgeRevision
-
-        revision = KnowledgeRevision.from_wire(self.knowledge)
-        if revision is None:
-            self._why = "unreadable: no knowledge commit is recorded for this sibling"
-        elif revision.unavailable is not None:
-            self._why = ("unreadable: the sibling's knowledge was unavailable: "
-                         f"{revision.unavailable}")
-        elif revision.commit is None:
-            self._why = "unreadable: the sibling's knowledge was unversioned"
-        elif self.tenant is None:
-            self._why = (f"unreadable: no tenant is known to read knowledge commit "
-                         f"{revision.commit} from")
-        else:
-            from defender.learning.author.version_control import (
-                DeliveryRefused,
-                LockBusy,
-                materialise_export,
-            )
-
-            try:
-                self._export = materialise_export(self.tenant, revision.commit)
-            except (DeliveryRefused, LockBusy) as refused:
-                self._why = (f"unreadable: knowledge commit {revision.commit} has no export "
-                             f"and none could be materialised ({refused})")
-
-
-#: The agent root's folder inside an export (`<T>/exports/<commit>/agent/`).
-AGENT_DIR = "agent"
 
 
 @model
@@ -468,8 +404,7 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
                         path = product_path
                         break
             if body is None:
-                source = knowledge if knowledge is not None else KnowledgeBodies(
-                    tenant=None, knowledge=provenance.get("knowledge"))
+                source = knowledge if knowledge is not None else KnowledgeBodies(knowledge=provenance.get("knowledge"))
                 for _product_path, agent_rel in candidates:
                     body, note = source.read(agent_rel)
                     if body is not None:

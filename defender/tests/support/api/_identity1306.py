@@ -808,8 +808,8 @@ class World:
         lease = job.created_at + DAY if job.status == "running" else None
         ended = job.status not in ("queued", "running")  # #1546 A-O4: an ended row has an evidence state
         self._sql("INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, "
-                  "trigger, status, created_at, finished_at, reason, lease_expires_at, sibling_cost_usd, "
-                  "publish_state, evidence_state) VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s, 0, 'none', %s)",
+                  "trigger, status, created_at, finished_at, reason, lease_expires_at, sibling_cost_usd, sibling_cost_is_lower_limit, "
+                  "publish_state, evidence_state) VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s, 0, false, 'none', %s)",
                   (job.learning_job_id, tenant, job.alert_id, job.investigation_id, f"k-{job.learning_job_id}",
                    job.trigger, job.status, job.created_at, job.finished_at, job.reason, lease,
                    "none" if ended else None))

@@ -147,8 +147,6 @@ def _launch_copies(session: Session) -> Any:
 
 def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:
     from defender import run_common
-    from defender.investigation.publish_launch import LAUNCH_TRIGGER
-
     from ._folders import copy_tenant
 
     inv = str(session.job_id)
@@ -160,7 +158,7 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:
 
     # The tenant-level steps, the readiness check's too (#1471 P-1), with the launch check after the admission; then
     # the investigation's own: the run folder and the records beside it.
-    facts = tenant_launch_steps(session, hold, copy_id=inv, facts=LaunchFacts(), trigger=LAUNCH_TRIGGER,
+    facts = tenant_launch_steps(session, hold, copy_id=inv, facts=LaunchFacts(),
                                 launch=lambda: _launch_copies(session), job_tenant=job_tenant,
                                 copy_tenant=lambda accepted: copy_tenant(session, accepted))
     accepted, launch, source, copy, current = facts.accepted, facts.launched, facts.source, facts.copy, facts.current

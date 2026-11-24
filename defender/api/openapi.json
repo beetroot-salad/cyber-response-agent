@@ -1124,7 +1124,7 @@
         "type": "object"
       },
       "InvestigationKnowledge": {
-        "description": "Which revision of the tenant's knowledge the investigation's run read (#1108 P4, O-WARN):\nthe latest approved one (`current`), an earlier one because the newer could not be loaded\n(`stale`, with why in two words), or one named at launch (`pinned`).",
+        "description": "Which revision of the tenant's knowledge the investigation's run read (#1108 P4, O-WARN):\nthe latest approved one (`current`), one named at launch (`pinned`), or none that can be\nnamed (`unreadable`: no readable record). `stale` appears only in a record stored before #1618.",
         "properties": {
           "commit": {
             "anyOf": [
@@ -1151,14 +1151,15 @@
                 "type": "null"
               }
             ],
-            "description": "Set iff `status` is `stale`: `transient` (a temporary outage) or `operator` (awaiting operator action).",
+            "description": "Set only on a `stale` record stored before #1618; never on a new answer.",
             "title": "Stale Kind"
           },
           "status": {
             "enum": [
               "current",
-              "stale",
-              "pinned"
+              "pinned",
+              "unreadable",
+              "stale"
             ],
             "title": "Status",
             "type": "string"
@@ -2389,7 +2390,6 @@
               "records",
               "alert_mapping",
               "publish",
-              "knowledge_copy",
               "run_tenant",
               "roster",
               "tenant_verdict",

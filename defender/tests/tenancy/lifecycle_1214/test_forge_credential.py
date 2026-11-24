@@ -205,6 +205,15 @@ def test_a_token_still_valid_is_handed_out_without_reading_the_tenant_records(sc
 
 # --- the fault chain after the login moves to the shared owner (A24, A24') ---------------------------------------
 
+def _file_fault(error: BaseException) -> bool:
+    """Whether `error` stems from a credential the host cannot even log in with (its delivery secret file missing,
+    unreadable or malformed): `CredentialMisconfigured` in its chain. (#1618 D11 deleted the status helper that
+    asked the same; the fault type itself stays.)"""
+    from defender.learning.author.version_control.auth import CredentialMisconfigured
+
+    return any(isinstance(fault, CredentialMisconfigured) for fault in _chain(error))
+
+
 def _chain(error: BaseException) -> list[BaseException]:
     seen: list[BaseException] = []
     at: BaseException | None = error
@@ -259,9 +268,10 @@ def _two_secrets(path: Path) -> None:
                          ids=["absent", "unreadable", "empty", "two secrets"])
 def test_a_delivery_secret_file_that_fails_is_a_misconfigured_credential_and_sends_no_login(scene, spoil):
     """An absent, unreadable or malformed delivery secret file is `CredentialMisconfigured` with no login sent
-    and no secret in the message; before the damage the same credential mints. A24."""
+    and no secret in the message, a `lasting` refusal (#1618 D11: `misconfigured` goes; a retry changes nothing); before
+    the damage the same credential mints. A24."""
     from defender.learning.author.version_control.auth import CredentialMisconfigured
-    from defender.learning.author.version_control.status import is_misconfigured
+    from defender.learning.author.version_control.status import classify
 
     tenant, gen = _active(scene)
     credential = scene.make(tenant)
@@ -272,7 +282,8 @@ def test_a_delivery_secret_file_that_fails_is_a_misconfigured_credential_and_sen
     logins = len(scene.logins())
     with pytest.raises(CredentialMisconfigured) as refused:
         credential.token()
-    assert is_misconfigured(refused.value)
+    assert _file_fault(refused.value)
+    assert classify(refused.value)[0] == "lasting"
     assert len(scene.logins()) == logins
     assert secret not in str(refused.value)
 
@@ -295,23 +306,24 @@ def test_a_generation_that_records_no_absolute_secret_file_is_a_misconfigured_cr
 
 
 def test_an_unreachable_openbao_is_an_auth_error_with_the_transport_error_in_its_chain_and_transient(scene):
-    """The login cannot connect: `ForgejoAuthError` with the `httpx` error in its chain; publish status files it
-    `transient`, not misconfigured. A24."""
+    """The login cannot connect: `ForgejoAuthError` with the `httpx` error in its chain, not a file fault; the fetch
+    child's refusal class is `transient` (#1618 D11). A24."""
     from defender.learning.author.version_control import ForgejoAuthError
-    from defender.learning.author.version_control.status import classify, is_misconfigured
+    from defender.learning.author.version_control.status import classify
 
     tenant, credential = _login_fault(scene, lambda r: httpx.ConnectError("connection refused", request=r))
     with pytest.raises(ForgejoAuthError) as refused:
         credential.token()
     assert any(isinstance(e, httpx.TransportError) for e in _chain(refused.value))
-    assert not is_misconfigured(refused.value)
+    assert not _file_fault(refused.value)
     assert classify(refused.value)[0] == "transient"
 
 
-@pytest.mark.parametrize(("status", "kind"), [(500, "transient"), (503, "transient"), (403, "operator"),
-                                              (400, "operator")])
+@pytest.mark.parametrize(("status", "kind"), [(500, "transient"), (503, "transient"), (403, "lasting"),
+                                              (400, "lasting")])
 def test_a_refused_login_is_an_auth_error_with_the_status_in_its_chain_sorted_by_status(scene, status, kind):
-    """A login OpenBao answers 5xx is `transient`, 4xx `operator`; the `HTTPStatusError` is in the chain. A24."""
+    """A login OpenBao answers 5xx is `transient`, 4xx `lasting` (#1618 D11: the `operator` class is `lasting`); the
+    `HTTPStatusError` is in the chain. A24."""
     from defender.learning.author.version_control import ForgejoAuthError
     from defender.learning.author.version_control.status import classify
 
@@ -328,7 +340,6 @@ def test_a_cleartext_address_is_refused_before_the_secret_file_is_read_and_nothi
     """With either address on http the credential is refused as an auth error that is not a file fault, though the
     secret file is absent (it was not read), and nothing is sent. A24."""
     from defender.learning.author.version_control import ForgejoAuthError, forge_credential
-    from defender.learning.author.version_control.status import is_misconfigured
 
     tenant, gen = _active(scene)
     sent: list[httpx.Request] = []
@@ -345,7 +356,7 @@ def test_a_cleartext_address_is_refused_before_the_secret_file_is_read_and_nothi
                                   transport=httpx.MockTransport(handle), clock=scene.now)
     with pytest.raises(ForgejoAuthError, match=r"(?i)https") as refused:
         credential.token()
-    assert not is_misconfigured(refused.value), "the secret file was judged before the address"
+    assert not _file_fault(refused.value), "the secret file was judged before the address"
     assert sent == []
 
 

@@ -5,6 +5,7 @@ its stand-in container). What a container can reach from inside is `e2e/test_job
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import time
 import uuid
@@ -22,12 +23,12 @@ from defender.tests.support.jobs._job_helper import (
     parse_labels,
     parse_mounts,
 )
+from defender.tests.support.jobs import _helper_evidence1546 as H
 from defender.tests.support.jobs import _job_helper as J
+from defender.tests.tenancy.knowledge_1618 import _support as K
 from defender.tests.support.jobs._job_helper_learning import (
     PlantedEpisode,
-    clear_publish_status,
     listing,
-    publish_status,
     run_kind,
 )
 
@@ -50,9 +51,10 @@ POST_STEPS = pytest.mark.parametrize("family_less", [False, True], ids=["post-st
 
 
 def _job_state(scene, signer, forge, docker):
-    """What a refused request must leave alone: passes signed, forge tokens asked, status row, copies, drafts, boxes."""
+    """What a refused request must leave alone: passes signed, forge tokens asked, copies, drafts, boxes. (#1618: the
+    publish-status row is gone with its table.)"""
     tenant = scene.root / scene.tenant
-    return (len(signer.payloads), len(forge.asked), publish_status(scene), listing(J.run_copies(scene)),
+    return (len(signer.payloads), len(forge.asked), listing(J.run_copies(scene)),
             listing(tenant / "drafts"), len(docker.creates()))
 
 
@@ -63,6 +65,8 @@ _OWN_REQUEST = {"investigation": ("pass", {"id": "<job>"}), "learning": ("pass",
                 "post-step": ("forge.token", {"min_validity": 60})}
 _RECORD = {"commit": COMMIT}
 _REFUSAL = {"kind": "transient", "reason": "the forge is unreachable"}
+# #1618 (design r5 census: "the `publish_status` table and its writers (`record.published`, `record.refusal`)" go): the
+# record.* rows below now show the writers refused to every kind; the post-step's publish-outcome cases are retired.
 
 
 @pytest.mark.parametrize(("kind", "request_name", "fields"), [
@@ -75,6 +79,8 @@ _REFUSAL = {"kind": "transient", "reason": "the forge is unreachable"}
     ("learning", "record.refusal", _REFUSAL),
     ("learning", "batch.start", {"lanes": ["lessons"]}),
     ("post-step", "pass", {"id": "<job>"}),
+    ("post-step", "record.published", _RECORD),
+    ("post-step", "record.refusal", _REFUSAL),
 ])
 def test_requests_are_refused_by_job_kind(scene, kind, request_name, fields):
     """A kind that runs adapter code gets no forge token, database write or drain publish; the post-step gets no pass;
@@ -103,64 +109,270 @@ def test_requests_are_refused_by_job_kind(scene, kind, request_name, fields):
     assert got["after"] == got["before"], "a refused request signed, minted, wrote, published or created something"
 
 
-def _inodes(folder: Path) -> dict[str, tuple[int, int]] | None:
-    """Every entry under `folder` (links not followed) by its inode and modification time, or None when it is absent: a
-    folder left as it was, not one written again with the same bytes."""
-    if not folder.exists():
-        return None
-    return {str(p.relative_to(folder)): (p.lstat().st_ino, p.lstat().st_mtime_ns) for p in sorted(folder.rglob("*"))}
+#: #1546 r10 (c) "Verbs" (owner decision H3): the drain's verbs are the post-step's set plus `owner.unusable` and
+#: `evidence.pull`; `outcome`, `progress`, `evidence.put` and `_upload` are not a drain's (it pushes no evidence and its result
+#: is its tick's exit status), and `record.*` is refused to every kind (#1618).
+_DRAIN_REFUSED = [
+    ("outcome", {"record": {"status": "completed"}}),
+    ("progress", {"record": {"stage": "tick"}}),
+    ("evidence.put", {"object": "bundle", "part": 0, "last": True, "data": b"x"}),
+    ("_upload", {"object": "bundle"}),
+    ("record.published", _RECORD),
+    ("record.refusal", _REFUSAL),
+]
 
 
-#: A full commit id the tenant's clone does not hold.
-_ABSENT_COMMIT = "fedcba9876543210" * 2 + "fedcba98"
+def _drive_drain(request, scene, job, *, signer: Any = None, forge: Any = None, docker: Any = None) -> None:
+    """A drain claim (empty input set) driven over the real store and key login."""
+    planted = H.plant(scene, "drain")
+    H.drive(scene, planted, job, docker=docker or ContainerStandIn(job), signer=signer or make_signer(),
+            forge=forge or scene.forge_seams()["forge"], **H.store_for(request, scene).seams)
 
 
-@pytest.mark.parametrize("kind", ["learning", "post-step", "investigation"])
-def test_c32_export_materialise_answers_the_pin_for_a_learning_job_and_refuses_every_other_commit(scene, kind):
-    """#1546 (conflict updated: the export lives in the job's inputs, not `<T>/exports/<commit>`): for a learning job,
-    `export.materialise(commit=)` of the claim's pin answers that commit and a folder under `.job-inputs/<claim>/` holding
-    exactly its `agent/` and `settings/` blobs; a later commit the clone holds (merged and fetched, never published) and one
-    it lacks are refused and no export is made anywhere. The post-step and the investigation are refused it and nothing is
-    made. (Flow 2 behind the socket, C32; export pin)"""
-    from defender.tests.support.jobs._helper_evidence1546 import job_inputs
-    from defender.tests.tenancy.tenant_1108_p4._support import agent_blobs, export_dir, files_under, git
-
-    t = scene.t
-    later = t.merge({"agent/lessons/merged-not-yet-published.md": "merged on origin, fetched, never published\n"})
-    git(t.clone, "fetch", str(t.remote), "+refs/heads/main:refs/remotes/origin/main")
+@pytest.mark.parametrize(("request_name", "fields"), _DRAIN_REFUSED, ids=[n for n, _f in _DRAIN_REFUSED])
+def test_1546_a_drain_is_refused_the_verbs_that_are_not_its_and_the_refusal_changes_nothing(request, scene, request_name,
+                                                                                                 fields):
+    """A drain job is refused `outcome`, `progress`, `evidence.put`, `_upload` and the `record.*` writers; the refusal
+    signs, mints, copies, drafts and starts nothing; the same socket answers the drain's own `forge.token` (control).
+    (r10 (c) "Verbs"; the requests-by-kind rows above, for the drain)"""
     got: dict = {}
 
     def job(c) -> int:
-        if kind == "learning":
-            got["answer"] = c.request("export.materialise", commit=t.commit)
-            folder = Path(got["answer"]["path"])  # read while the job runs: the inputs go with it
-            got["inputs"] = job_inputs(scene)
-            got["under_inputs"] = folder.is_relative_to(job_inputs(scene))
-            got["agent"] = files_under(folder / "agent")
-            got["settings"] = files_under(folder / "settings")
-            got["later"] = c.refused("export.materialise", commit=later).code
-            got["absent"] = c.refused("export.materialise", commit=_ABSENT_COMMIT).code
-        else:
-            got["refused"] = c.refused("export.materialise", commit=later).code
+        got["launch"] = c.request("launch")
+        got["own"] = c.request("forge.token", min_validity=60)
+        got["before"] = _job_state(scene, signer, forge, docker)
+        got["refusal"] = c.refused(request_name, **fields)
+        got["after"] = _job_state(scene, signer, forge, docker)
         return 0
 
-    published = _inodes(export_dir(t.tenant, t.commit))
-    run_kind(scene, kind, job, family_less=kind == "post-step")
+    signer, forge, docker = make_signer(), scene.forge_seams()["forge"], ContainerStandIn(job)
+    _drive_drain(request, scene, job, signer=signer, forge=forge, docker=docker)
 
-    assert not export_dir(t.tenant, later).exists(), f"a {kind} job materialised an export"
+    assert got["launch"], "control: launch was not answered"
+    assert got["own"], "control: a drain was refused its own `forge.token`"
+    assert got["refusal"] is not None
+    assert got["refusal"].code in ("not-for-kind", "unknown-request"), got["refusal"].code
+    assert got["after"] == got["before"], "a refused request signed, minted, wrote or created something"
+
+
+def test_1546_a_drain_may_pull_and_a_pull_outside_its_input_set_is_refused_out_of_claim_not_for_kind(request, scene):
+    """`evidence.pull` is a drain's verb (owner decision H3: the container pulls its own inputs): a pull of a pair outside the
+    claim's input set is refused `out_of_claim` (A-O6, as for every kind), never `not-for-kind`; and the drain's launch facts
+    name its input set (`input_set`, here empty). (r10 (c); the served and unpacked pulls are
+    `learning/test_1546_drain_tick.py`'s)"""
+    got: dict = {}
+
+    def job(c) -> int:
+        got["launch"] = c.request("launch")
+        got["pull"] = c.refused("evidence.pull", owner=str(uuid.uuid4()), object="bundle", part=0)
+        return 0
+
+    _drive_drain(request, scene, job)
+
+    assert got["pull"].code == "out_of_claim", f"a drain's pull was refused as {got['pull'].code}, not as out of its claim"
+    assert got["launch"].get("input_set") == [], f"the drain's launch facts do not name its (empty) input set: {got['launch']}"
+
+
+#: A full commit id Forgejo does not serve.
+_ABSENT_COMMIT = K.ABSENT_COMMIT
+
+
+def _fetch_seam(scene, asked: list):
+    """The one fetch seam (`K.fetch_seam`: the real child over the scene's remote) with the `(tenant, commit)` of each ask also
+    appended to `asked` (the helper holds no credential, #1618 O8)."""
+    seam = K.fetch_seam(scene.t)
+
+    def fetch(tenant_id: str, dest, *, data_root=None, commit=None, **_kw) -> str:
+        asked.append((tenant_id, commit))
+        return seam(tenant_id, dest, data_root=data_root if data_root is not None else scene.root, commit=commit)
+
+    fetch.calls = seam.calls
+    return fetch
+
+
+def _shared(scene) -> Path:
+    """The claim's `shared/` folder: where a learning job's copies go (#1618 owner ruling: the job container mounts it)."""
+    return scene.root / ".job-scratch" / scene.claim / "shared"
+
+
+def _copy_dirs(scene) -> list[Path]:
+    """Every copy the claim's scratch holds: each entry of its `shared/` folder, and anything beside that folder."""
+    base = scene.root / ".job-scratch" / scene.claim
+    beside = [p for p in base.iterdir() if p.name != "shared"] if base.is_dir() else []
+    inside = list(_shared(scene).iterdir()) if _shared(scene).is_dir() else []
+    return sorted(beside + inside)
+
+
+@pytest.mark.parametrize("kind", ["learning", "post-step", "investigation"])
+def test_1618_c1_copy_make_with_a_commit_copies_that_commit_from_forgejo_for_a_learning_job_only(scene, kind):
+    """`copy.make(commit=)` answers a copy of that older commit's `agent/` and `settings/` made from Forgejo in the
+    claim's `shared/` folder (not main's, not `exports/`), only for a learning job; the copy goes with the claim. (F3, K5)
+    #1546 (r10 (a), owner decision H1): the older commit is the one the learning claim pins (`knowledge_commit`); main's
+    later tip, a full commit the forge serves but not the pin, is refused `not-for-kind` naming it, fetching nothing.
+    (The general pin-only rule: `test_1546_helper_folders.py::test_copy_make_with_a_commit_answers_the_claims_pin...`.)"""
+    t = scene.t
+    old = t.commit
+    later = t.merge({"agent/lessons/merged-after-the-pin.md": "merged on main after the pinned commit\n"})
+    asked: list = []
+    got: dict = {}
+    pinned: dict[str, Any] = {}
+    if kind == "learning":
+        planted = H.plant(scene, "learning", pin=old)  # the claim pins `old`, as the claim transaction writes it
+        pinned = {"job_id": planted.owner, "source": planted.source}
+
+    def job(c) -> int:
+        if kind == "learning":
+            got["answer"] = c.request("copy.make", commit=old)
+            got["agent"] = K.tree_bytes(Path(got["answer"]["path"]) / "agent")
+            got["settings"] = K.tree_bytes(Path(got["answer"]["path"]) / "settings")
+            got["dirs"] = _copy_dirs(scene)
+            got["asks_before"] = len(asked)
+            got["later"] = c.refused("copy.make", commit=later)
+            got["asks_after"] = len(asked)
+            got["dirs_after"] = _copy_dirs(scene)
+        else:
+            got["refused"] = c.refused("copy.make", commit=old).code
+        return 0
+
+    run_kind(scene, kind, job, family_less=kind == "post-step", fetch=_fetch_seam(scene, asked), **pinned)
+
     if kind != "learning":
-        assert got["refused"] in ("not-for-kind", "unknown-request"), got["refused"]
+        assert got["refused"] in ("not-for-kind", "unknown-request", "bad-fields"), got["refused"]
+        assert [c for _t, c in asked if c is not None] == [], f"a {kind} job had a copy fetched"
         return
-    assert got["answer"]["commit"] == t.commit
-    assert got["under_inputs"], f"the export is not in the job's inputs: {got['answer']['path']}"
-    assert got["agent"] == agent_blobs(t.clone, t.commit)
-    assert got["settings"] == agent_blobs(t.clone, t.commit, prefix="settings")
-    assert got["later"], "a commit other than the pin was materialised"
-    assert got["absent"]
-    # The tenant folder's own published export of the pin (the fixture's launch-time publish made it before the job) is left
-    # as it was; the job's export is the one in its inputs, above.
-    assert _inodes(export_dir(t.tenant, t.commit)) == published, "the export was also written under the tenant folder"
-    assert not export_dir(t.tenant, _ABSENT_COMMIT).exists()
+    assert got["later"].code == "not-for-kind", f"main's later tip, not the pin, was not refused for kind: {got['later']}"
+    assert later in str(got["later"]), f"the refusal does not name the commit asked: {got['later']}"
+    assert got["asks_after"] == got["asks_before"], "a commit that is not the pin was fetched before its refusal"
+    assert got["dirs_after"] == got["dirs"], "a refused commit made a folder"
+    assert got["answer"]["commit"] == old
+    folder = Path(got["answer"]["path"])
+    assert folder.parent == _shared(scene), f"the copy is not in the claim's shared folder: {folder}"
+    assert got["agent"] == K.half_at(t, old, "agent")
+    assert got["settings"] == K.half_at(t, old, "settings")
+    assert "lessons/merged-after-the-pin.md" not in got["agent"], "main's later commit was copied"
+    assert (scene.tenant, old) in asked, "the copy was not fetched through the helper's fetch child"
+    assert _copy_dirs(scene) == [], "the copy outlived its claim"
+    assert not folder.exists()
+    assert got["dirs"] == [folder], "premise: the copy was in the claim's scratch while the job ran"
+
+
+def test_1618_c1_export_materialise_is_gone_for_every_kind(scene):
+    """`export.materialise` is merged into `copy.make(commit=)`: no kind is answered it and no `exports/<commit>/` is
+    made. (F3, K8; replaces #1170 C32's verb)"""
+    t = scene.t
+    later = t.merge({"agent/lessons/merged-not-yet-anywhere.md": "merged on origin\n"})
+    got: dict = {}
+
+    def job(c) -> int:
+        got["refused"] = c.refused("export.materialise", commit=later).code
+        return 0
+
+    run_kind(scene, "learning", job, fetch=_fetch_seam(scene, []))
+
+    assert got["refused"] in ("unknown-request", "not-for-kind"), got["refused"]
+    assert not (scene.root / scene.tenant / "exports" / later).exists(), "an export was made"
+
+
+def test_1618_c1_a_commit_forgejo_does_not_serve_is_refused_naming_it_and_leaves_no_copy(scene):
+    """`copy.make(commit=)` for a commit Forgejo does not hold refuses naming the commit and leaves no folder; a served
+    copy on the same channel is answered. (F3, K5) #1546 (r10 (a), H1): the unserved commit is the claim's own pin (any
+    other commit is refused before a fetch, so only the pin reaches Forgejo's refusal), and the fetch child was asked it by
+    id; the served control is `copy.make()` (`main`), the one other copy a learning job is answered."""
+    asked: list = []
+    got: dict = {}
+    planted = H.plant(scene, "learning", pin=_ABSENT_COMMIT)
+
+    def job(c) -> int:
+        got["control"] = c.request("copy.make")["commit"]
+        got["refusal"] = c.refused("copy.make", commit=_ABSENT_COMMIT)
+        got["dirs"] = [p.name for p in _copy_dirs(scene)]
+        return 0
+
+    run_kind(scene, "learning", job, job_id=planted.owner, source=planted.source, fetch=_fetch_seam(scene, asked))
+
+    assert got["control"] == scene.t.origin_main(), "control: `copy.make()` was not answered main's tip"
+    assert _ABSENT_COMMIT in str(got["refusal"]), f"the refusal does not name the commit: {got['refusal']}"
+    assert (scene.tenant, _ABSENT_COMMIT) in asked, "the pin was refused without asking the fetch child for it by id"
+    assert len(got["dirs"]) == 1, f"a refused copy left a folder behind: {got['dirs']}"
+
+
+def test_1618_c1_the_answered_copy_is_inside_a_folder_the_job_container_is_mounted_with(scene):
+    """The job reads its copy at the path the helper answers, so that path lies inside a `--mount source=` of the job
+    container's own `docker run` (the argv `job_host`'s container start built), mounted at that same path; the claim
+    folder itself is not mounted. (F3; #1618 owner ruling: the copy goes in the claim's `shared/` folder; #1546 r10 H1: the
+    commit asked is the claim's pin, `_job_helper.claim_for`'s default `scene.t.commit`)"""
+    got: dict = {}
+
+    def job(c) -> int:
+        got["path"] = Path(c.request("copy.make", commit=scene.t.commit)["path"])
+        return 0
+
+    ran = run_kind(scene, "learning", job, fetch=_fetch_seam(scene, []))
+
+    mounts = ran.docker.box.mounts
+    holding = [m for m in mounts if got["path"].is_relative_to(m["source"])]
+    assert holding, f"the answered copy {got['path']} lies in no folder the job container is mounted with: {mounts}"
+    assert all(m["target"] == m["source"] for m in holding), f"the copy's folder is mounted at another path: {holding}"
+    assert str(_shared(scene).parent) not in {m["source"] for m in mounts}, "premise: the claim folder is not mounted"
+
+
+def test_1618_c4_the_grant_is_read_from_mains_settings_not_the_kept_export(scene):
+    """The pass's grant follows `settings/verb-grants.yaml` at main's tip: with `identity` withheld on main (kept export
+    and clone still grant it) the learning job is answered no `identity` read: its grant is empty, so its `pass` is the
+    helper's existing `no-grant` refusal (#1170, `test_job_helper`'s W5 case) and nothing is signed. (F3; grant read at
+    main (r5.1-a))"""
+    from defender import job_host
+    from defender.tests.support.jobs._readiness1471 import grants_text
+    from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
+
+    def withhold_identity(d: dict) -> None:
+        for verb in d["identity"]:
+            d["identity"][verb] = {"roles": [], "reason": "withheld for #1618's grant read"}
+
+    job_id, got, signer = str(uuid.uuid4()), {}, make_signer()
+
+    def job(c) -> int:
+        got["control_launch"] = c.request("launch")["grant"]
+        try:
+            got["pass"] = c.request("pass", id=job_id)["token"]
+        except job_host.Refused as refused:
+            got["pass_refused"] = refused.code
+        return 0
+
+    asked: list = []
+    run_kind(scene, "learning", job, job_id=job_id, signer=signer, fetch=_fetch_seam(scene, asked))
+    assert got["control_launch"] == [["identity", "r"]], "control: main as seeded grants identity"
+    assert A.grant_of(claims_of(signer, got["pass"])) == [("identity", "r")], "control: the seeded grant's pass reads identity"
+
+    scene.t.merge({"settings/verb-grants.yaml": grants_text(withhold_identity)})
+    job_id, got, signer = str(uuid.uuid4()), {}, make_signer()
+    run_kind(scene, "learning", job, job_id=job_id, signer=signer, fetch=_fetch_seam(scene, asked))
+    assert got["control_launch"] == [], f"the grant came from somewhere other than main: {got['control_launch']}"
+    assert "pass" not in got, f"an empty grant was answered a pass: {got}"
+    assert got.get("pass_refused") == "no-grant", got
+    assert signer.payloads == [], "a pass was signed for a grant main withholds"
+
+
+def test_1618_c4_a_learning_job_is_refused_before_its_container_when_forgejo_is_down_at_the_grant_read(scene):
+    """Forgejo unreachable at the job's start refuses it naming why (`failed: launch_refused`); no container starts. Control:
+    the same job starts with Forgejo up. (F3, K4)"""
+    from defender.records.job_lane import LAUNCH_REFUSED, LEARNING_FAILED
+
+    control = ContainerStandIn(lambda c: 0)
+    run_kind(scene, "learning", None, job_id=str(uuid.uuid4()), docker=control, fetch=_fetch_seam(scene, []))
+    assert control.job_ran, "control: the job did not start with Forgejo up"
+
+    K.forge_down(scene.t)
+    job_id, docker = str(uuid.uuid4()), ContainerStandIn(lambda c: 0)
+    run_kind(scene, "learning", None, job_id=job_id, docker=docker, fetch=_fetch_seam(scene, []))
+
+    assert docker.boxes == [], "a container was started with the grant unread"
+    assert not docker.job_ran
+    end = _staged_end(scene)  # #1546 A-O2: the end is the staged `outcome`, no learning-end file
+    assert end is not None
+    assert (end.status, end.reason) == (LEARNING_FAILED, LAUNCH_REFUSED), end
+    assert end.message
+    assert "stale" not in end.message.lower()
 
 
 # --- the learning job: pre-flight --------------------------------------------------------------------------------------
@@ -285,16 +497,31 @@ def _ids() -> tuple[str, str]:
     return str(uuid.uuid4()), str(uuid.uuid4())
 
 
+def _as_the_container_makes(answer: dict[str, Any]) -> Path:
+    """#1546 (r10 (a), owner decision D-2): the sibling's run folder at the answered `run_dir`, made as the container makes it
+    (main's run setup: exclusively, in the container's own process); the helper makes only the episode's `runs/`. Tolerates a
+    folder already there, so a scene that needs the folder runs against a helper that still makes it (the D-2 assertion that
+    it does not is `test_a6_a_sibling_gets_its_worlds_roster_id...`'s)."""
+    run_dir = Path(answer["run_dir"])
+    run_dir.mkdir(exist_ok=True)
+    return run_dir
+
+
 # --- the learning job: siblings -----------------------------------------------------------------------------------------
 
 def test_a6_a_sibling_gets_its_worlds_roster_id_a_folder_in_the_episode_and_an_owned_copy_and_a_pass_and_box_for_that_id_only(
         scene):
-    """`copy.make(world=)` for a world of the job's staged roster answers that world's roster id, makes
-    `<episode>/runs/<run>/` in the job's root (not one under a `runs/` folder) and an owned copy in the claim's inputs
+    """`copy.make(world=)` for a world of the job's staged roster answers that world's roster id, its `run_dir`
+    `<episode>/runs/<run>/` in the job's root and an owned copy in the claim's inputs
     (`.job-inputs/<claim>/run-knowledge/<run>/`); `pass` and `box.start` for it are answered (a read pass for the run, #1449);
     nothing of it is under the host's tenant folder, and afterwards the copy is gone. (A6, C20, C23, O5;
     `test_triplet_sibling::test_947_sibling_run_id...`; #1546: the roster is the staged `arms` fact, the episode is the job's
-    own in its root, the copy is in its inputs, design "The job's folders")"""
+    own in its root, the copy is in its inputs, design "The job's folders")
+    #1546 r10 (a), owner decision D-2: the helper makes the episode's `runs/` folder only, never `runs/<run>/` (main's run
+    setup makes the run folder exclusively), and writes nothing beside or in the run: the run's knowledge record (the pin)
+    and versions record are the container's (claim R10-L9). The container-side half (it materialises the run at the answered
+    id, with its knowledge and versions records) is `learning/branch/test_1344_job_lane.py`'s; here the stand-in job makes
+    the folder as the container would, before its box."""
     from defender.box import TENANT_LABEL
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
     from defender.tests.tenancy.tenant_1108_p4._drain_support import owner_record
@@ -306,11 +533,18 @@ def test_a6_a_sibling_gets_its_worlds_roster_id_a_folder_in_the_episode_and_an_o
 
     def job(c) -> int:
         ep = got["ep"] = _episode(scene, c, job_id, source)
-        got["asked_at"] = time.time()
         got["copies"] = [c.request("copy.make", world=ep.worlds[w]) for w in labels]
-        got["seen"] = [(ep.dir / "runs" / x["run"]).is_dir() for x in got["copies"]]
+        got["runs_folder"] = (ep.dir / "runs").is_dir() and not (ep.dir / "runs").is_symlink()
+        got["seen"] = [(ep.dir / "runs" / x["run"]).exists() for x in got["copies"]]
+        got["helper_beside"] = sorted(p.name for p in (ep.dir / "runs").iterdir()) if got["runs_folder"] else None
+        for x in got["copies"]:
+            _as_the_container_makes(x)
         got["owners"] = [owner_record(Path(x["path"]))["pid"] for x in got["copies"]]
-        got["tokens"] = [c.request("pass", id=x["run"])["token"] for x in got["copies"]]
+        got["tokens"], got["asked"] = [], []
+        for x in got["copies"]:  # each pass's ask bracketed by the clock (#1618 ruling g: the copies' fetches take load-dependent time)
+            before = time.time()
+            got["tokens"].append(c.request("pass", id=x["run"])["token"])
+            got["asked"].append((before, time.time()))
         got["boxes"] = [c.request("box.start", kind="shell", id=x["run"]) for x in got["copies"]]
         (ep.dir / "runs" / got["copies"][0]["run"] / "report.md").write_text("sibling output", encoding="utf-8")
         runs = ep.dir / "runs"
@@ -331,14 +565,18 @@ def test_a6_a_sibling_gets_its_worlds_roster_id_a_folder_in_the_episode_and_an_o
         assert path.name == copy["run"]
         assert not (scene.runs / copy["run"]).exists(), "a sibling's folder was made under <T>/runs"
         assert not (scene.root / scene.tenant / "run-knowledge" / copy["run"]).exists(), "a copy under the tenant folder"
-    assert got["seen"] == [True, True]
+    assert got["runs_folder"], "the helper did not make the episode's `runs/` folder"
+    assert [Path(x["run_dir"]) for x in got["copies"]] == [ep.dir / "runs" / x["run"] for x in got["copies"]]
+    assert got["seen"] == [False, False], "D-2: the helper made a sibling's run folder (the container's run setup makes it)"
+    assert got["helper_beside"] == [], f"D-2: the helper wrote into the episode's runs/ folder: {got['helper_beside']}"
     assert got["owners"] == [os.getpid()] * 2, "a run copy's owner is not the helper"
-    for copy, token in zip(got["copies"], got["tokens"], strict=True):
+    for copy, token, (before, after) in zip(got["copies"], got["tokens"], got["asked"], strict=True):
         claims = claims_of(signer, token)
         assert claims["investigation"] == copy["run"]
         assert claims["tenant"] == scene.tenant
         assert A.grant_of(claims) == [("identity", "r")]
-        assert 590 <= claims["exp"] - got["asked_at"] <= 601
+        # one pass lifetime from the moment the pass was asked (whole seconds), never one fixed at the job's start
+        assert before - 1 <= claims["exp"] - 600 <= after + 1, (claims["exp"], before, after)
     assert len(got["boxes"]) == 2
     assert all(got["boxes"])
     sibling_creates = docker.creates()
@@ -346,11 +584,11 @@ def test_a6_a_sibling_gets_its_worlds_roster_id_a_folder_in_the_episode_and_an_o
     assert all(parse_labels(c)[TENANT_LABEL] == scene.tenant for c in sibling_creates)
     assert not copies.exists(), "the helper left a sibling's run copy or a temporary behind"
     made = sorted(x["run"] for x in got["copies"])
-    # Each sibling's folder, and beside it only the host-held knowledge-source record of that run (U12) and (#1366 O6) its
-    # record of the versions the job read.
+    # Each sibling's folder (the stand-in container's), and nothing beside it: main's helper wrote the knowledge-source record
+    # (U12) and (#1366 O6) the versions record beside the run; under D-2 both are the container's, written in its own run
+    # setup (`learning/branch/test_1344_job_lane.py`), so the helper wrote neither.
     assert got["folders"] == made
-    assert got["beside"] == sorted(f"{run}{suffix}" for run in made
-                                   for suffix in (".knowledge-source.json", ".record-versions.json"))
+    assert got["beside"] == [], f"D-2: the helper wrote a record beside a sibling's run: {got['beside']}"
     assert got["output"] == "sibling output"
 
 
@@ -406,14 +644,20 @@ def _bad_id(scene, good: str, how: str) -> str:
             "dot-dot-suffix": f"{good}/../{uuid.uuid4()}"}[how]
 
 
-@pytest.mark.parametrize("case", ["outside-world", "entry-folder-link", "runs-folder-link"])
+# #1546 r10 (a), owner decision D-2: the `entry-folder-link` case (a link the job plants at `runs/<run>` before its sibling's
+# `copy.make`) left this test: the helper no longer makes or reads `runs/<run>/`, so the copy need not be refused there; what
+# keeps the link harmless is `test_a6_h10_a_link_the_job_plants_at_a_siblings_run_folder_is_followed_by_nothing_and_its_box_
+# is_refused` below (nothing written through it, the box refused `confinement`) and main's run setup, which makes the run
+# folder exclusively and refuses anything at the id (`run_common.materialize_run`, "a run dir is never resumed";
+# `tenancy/test_legacy_tenant.py::test_an_arm_setup_that_was_interrupted_is_refused_not_resumed`).
+@pytest.mark.parametrize("case", ["outside-world", "runs-folder-link"])
 def test_a6_h10_a_sibling_for_a_world_outside_the_episode_or_a_bad_or_linked_roster_entry_is_refused_and_nothing_is_made(
         scene, case):
-    """`copy.make(world=)` for a world the job's staged roster does not hold (a stranger, another episode's), and for an
-    entry whose folder would resolve outside the episode (an entry link, the `runs/` link) is refused: no folder or copy is
-    made, and the id is not answered for `pass` or `box.start`; on the same channel another world of the roster is answered
-    (control). (A6, H10; #1546: the roster is the staged `arms` fact, the episode lies in the job's root; a roster id that
-    is not canonical is the next test's)"""
+    """`copy.make(world=)` for a world the job's staged roster does not hold (a stranger, another episode's; refused
+    `unknown-id`, r10 (a) step 1), and for a sibling whose `runs/` folder resolves outside the episode (the `runs/` link: the
+    helper makes `runs/` with no link followed) is refused: no folder or copy is made, and the id is not answered for `pass`
+    or `box.start`; on the same channel another world of the roster is answered (control). (A6, H10; #1546: the roster is the
+    staged `arms` fact, the episode lies in the job's root; a roster id that is not canonical is the next test's)"""
     job_id, source = _ids()
     got: dict = {"refusals": []}
 
@@ -448,8 +692,58 @@ def test_a6_h10_a_sibling_for_a_world_outside_the_episode_or_a_bad_or_linked_ros
 
     assert got["control"]["run"] == got["ep"].run_id("c"), "control: a world of the roster was refused"
     assert len(got["refusals"]) == 3 * got["asks"]
+    if case == "outside-world":  # r10 (a) step 1: a world the roster does not hold
+        assert [r.code for r in got["refusals"][::3]] == ["unknown-id"] * got["asks"], got["refusals"]
     assert got["after"] == got["before"], "a refused sibling signed, created, copied or made a folder"
     assert got["decoy"] == [], "the helper wrote through a link"
+
+
+def test_a6_h10_a_link_the_job_plants_at_a_siblings_run_folder_is_followed_by_nothing_and_its_box_is_refused(scene):
+    """The job plants a link at a roster world's `runs/<run>` to a decoy folder of its tenant before that sibling's
+    `copy.make(world=)`: whether or not the copy is answered, the helper writes nothing through the link (the decoy stays
+    empty, the link stays the job's link), makes nothing under the host's tenant folder, and the sibling's `box.start` is
+    refused `confinement` with no box created. Control: another world of the roster is answered and boxed. (A6, H10; #1546
+    r10 (a) D-2: the helper makes only `runs/`; was the `entry-folder-link` case of the test above, whose refusal of the copy
+    D-2 no longer requires)"""
+    from defender import job_host
+
+    job_id, source = _ids()
+    got: dict = {}
+
+    def job(c) -> int:
+        planted = got["ep"] = _episode(scene, c, job_id, source)
+        decoy = J.job_runs(scene).parent / "decoy-folder"
+        decoy.mkdir()
+        control = c.request("copy.make", world=planted.worlds["c"])
+        _as_the_container_makes(control)
+        got["control_box"] = c.request("box.start", kind="shell", id=control["run"])
+        link = planted.dir / "runs" / planted.run_id("b")
+        link.symlink_to(decoy, target_is_directory=True)
+        try:
+            got["answer"] = c.request("copy.make", world=planted.worlds["b"])
+        except job_host.Refused as refused:  # either is the design's (D-2): only what follows matters
+            got["answer"] = refused
+        creates = len(docker.creates())
+        got["box"] = c.refused("box.start", kind="shell", id=planted.run_id("b"))
+        got["creates"] = (creates, len(docker.creates()))
+        got["decoy"] = listing(decoy)
+        got["still_link"] = link.is_symlink() and Path(os.readlink(link)) == decoy
+        return 0
+
+    docker = ContainerStandIn(job)
+    run_kind(scene, "learning", None, job_id=job_id, source=source, docker=docker)
+
+    assert got["control_box"], "control: a sibling of the roster was not boxed"
+    answered = isinstance(got["answer"], dict)
+    if answered:
+        assert got["answer"]["run"] == got["ep"].run_id("b"), got["answer"]
+    # An answered sibling's box binds its run folder, here the job's link: refused as confinement. A refused copy minted no
+    # id, so its box is refused as an id the helper does not hold.
+    assert got["box"].code == ("confinement" if answered else "unknown-id"), f"the linked sibling's box: {got['box'].code}"
+    assert got["creates"][1] == got["creates"][0], "a box was created over the link"
+    assert got["decoy"] == [], f"the helper wrote through the job's link: {got['decoy']}"
+    assert got["still_link"], "the helper replaced or retargeted the job's link"
+    assert not (scene.runs / got["ep"].run_id("b")).exists(), "a sibling's folder was made under the host's <T>/runs"
 
 
 @pytest.mark.parametrize("how", ["control", *_NOT_CANONICAL])
@@ -550,7 +844,9 @@ def test_p_c_a_learning_jobs_siblings_add_no_holder_and_run_no_admission_inside_
     def job(c) -> int:
         ep = _episode(scene, c, job_id, source)
         got["start"] = dict(calls.counts)
-        run = c.request("copy.make", world=ep.worlds["b"])["run"]
+        made = c.request("copy.make", world=ep.worlds["b"])
+        _as_the_container_makes(made)
+        run = made["run"]
         c.request("pass", id=run)
         c.request("box.start", kind="shell", id=run)
         got["holders"] = recorded(scene.root, scene.tenant)
@@ -686,7 +982,9 @@ def test_h10_every_folder_from_the_tenant_down_to_each_bind_source_of_a_learning
 
     def job(c) -> int:
         if box == "sibling-shell":  # #1546: the episode is the job's own, in its root, its roster staged
-            ident = c.request("copy.make", world=_episode(scene, c, job_id, source).worlds["b"])["run"]
+            made = c.request("copy.make", world=_episode(scene, c, job_id, source).worlds["b"])
+            _as_the_container_makes(made)  # D-2: the run folder, a bind source, is the container's to make
+            ident = made["run"]
         elif box == "batch":
             ident = c.request("batch.start", lanes=["lessons"])["batch"]
         else:
@@ -819,58 +1117,6 @@ def test_o4_a_forge_token_valid_for_more_than_150_seconds_is_refused_and_none_is
 
     assert got["control"]["token"], "control: 150 s was refused"
     assert got["after"] == got["before"], "the credential was asked for a token valid longer than 150 s"
-
-
-@POST_STEPS
-def test_o4_the_post_steps_publish_outcomes_are_written_by_the_helper_and_the_container_holds_no_database_login(
-        scene, family_less):
-    """`record.published` and `record.refusal` change the tenant's publish-status row, written by the helper; the
-    post-step's container environment names no database. (O4, O3, C6)"""
-    got: dict = {}
-
-    def job(c) -> int:
-        got["env"] = dict(c.env)
-        clear_publish_status(scene)
-        got["empty"] = publish_status(scene)
-        c.request("record.published", commit=COMMIT)
-        got["published"] = publish_status(scene)
-        c.request("record.refusal", **_REFUSAL)
-        got["refused"] = publish_status(scene)
-        return 0
-
-    run_kind(scene, "post-step", job, family_less=family_less)
-
-    assert got["empty"] is None, "premise: the row was cleared"
-    assert got["published"] is not None
-    assert got["published"][:2] == (COMMIT, None), got["published"]
-    row = got["refused"]
-    assert row is not None
-    assert row[2] == "transient", row
-    assert "forge is unreachable" in row[1], row
-    assert "DEFENDER_DATABASE_DSN" not in got["env"]
-    assert scene.dsn not in "".join(str(v) for v in got["env"].values())
-
-
-@pytest.mark.parametrize("kind", ["", "other", "TRANSIENT", "stale:operator", "transient\nforged"])
-def test_o4_a_publish_refusal_of_a_kind_outside_the_vocabulary_is_refused_and_the_row_is_unchanged(scene, kind):
-    """`record.refusal` takes `transient` or `operator`; anything else is refused and writes nothing (control: `operator`
-    is written). (O4)"""
-    got: dict = {}
-
-    def job(c) -> int:
-        clear_publish_status(scene)
-        c.request("record.refusal", kind="operator", reason="a human is needed")
-        got["control"] = publish_status(scene)
-        got["refusal"] = c.refused("record.refusal", kind=kind, reason="nothing")
-        got["after"] = publish_status(scene)
-        return 0
-
-    run_kind(scene, "post-step", job, family_less=True)
-
-    assert got["control"] is not None
-    assert got["control"][2] == "operator", got["control"]
-    assert got["refusal"] is not None
-    assert got["after"] == got["control"]
 
 
 @POST_STEPS
@@ -1068,20 +1314,20 @@ def test_a1_a_learning_helper_signalled_before_it_starts_the_container_starts_no
     import signal
 
     from defender.records.job_lane import LEARNING_STOPPED
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     job_id = str(uuid.uuid4())
     signer = J.SignalingSigner(make_signer())
     sent: list[bool] = []
+    real = _fetch_seam(scene, [])
 
-    def publish(*_a, **_k) -> str:
+    def fetch(*a, **k) -> str:
         if not signer.sent and not sent:
             sent.append(True)
             os.kill(os.getpid(), signal.SIGTERM)
-        return B.fresh(scene.t.commit)
+        return real(*a, **k)
 
     docker = ContainerStandIn(lambda c: 0)
-    run_kind(scene, "learning", None, job_id=job_id, signer=signer, docker=docker, publish=publish)
+    run_kind(scene, "learning", None, job_id=job_id, signer=signer, docker=docker, fetch=fetch)
 
     assert signer.sent or sent, "premise: the signal was sent"
     assert docker.boxes == [], "a container was started after the signal"
@@ -1089,3 +1335,130 @@ def test_a1_a_learning_helper_signalled_before_it_starts_the_container_starts_no
     end = _staged_end(scene)
     assert end is not None, "no end record for a learning job signalled before its container"
     assert (end.status, end.reason) == (LEARNING_STOPPED, None), end
+
+
+def _retire_clone(scene):
+    """The design's upgrade step for the scene's tenant: no `<T>/knowledge`, `exports/` or `knowledge.lock`."""
+
+    root = scene.root / scene.tenant
+    for name in ("knowledge", "exports"):
+        shutil.rmtree(root / name, ignore_errors=True)
+    (root / "knowledge.lock").unlink(missing_ok=True)
+    assert not (root / "knowledge").exists()
+
+
+@POST_STEPS
+def test_1618_f6_batch_start_answers_the_remote_main_it_built_an_agent_only_draft_from_with_no_clone(scene, family_less):
+    """With no clone, `batch.start` answers `base`, the remote `main` tip at that moment, and a draft of its `agent/` alone (no `settings/`); a later merge does not change it. (F6 job lane, K8)"""
+    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+
+    scene.t.merge(B.MERGE_FILES)
+    base = scene.t.origin_main()
+    _retire_clone(scene)
+    got: dict = {}
+
+    def job(c) -> int:
+        got["batch"] = c.request("batch.start", lanes=["lessons"])
+        path = Path(got["batch"]["path"])
+        got["lesson"] = (path / "stage" / "agent" / B.LESSON_REL).read_text(encoding="utf-8")
+        got["stage"] = sorted(p.name for p in (path / "stage").iterdir() if p.is_dir())
+        scene.t.merge({B.MARK_FILE: B.mark_text("K1618-AFTER-BATCH-START")})
+        got["again"] = c.request("batch.start", lanes=["lessons"])
+        return 0
+
+    run_kind(scene, "post-step", job, family_less=family_less)
+
+    assert "again" in got, "the job never ran: the helper refused its setup"
+    assert got["batch"]["base"] == base, "the answered base is not the remote main the draft was built from"
+    assert B.MERGED_MARK in got["lesson"]
+    assert B.SEEDED_MARK not in got["lesson"]
+    assert got["stage"] == ["agent"], f"the draft holds more than `agent/`: {got['stage']}"
+    assert got["again"]["base"] == scene.t.origin_main() != base, "control: a later batch.start reads the then-current main"
+
+
+@POST_STEPS
+def test_1618_f6_batch_start_refuses_when_the_forge_cannot_serve_main_and_makes_no_draft(scene, family_less):
+    """With Forgejo unreachable `batch.start` is refused as a delivery fault and leaves no draft (the same request is answered with it up). (F6 job lane, K4)"""
+    from defender.tests.tenancy.knowledge_1618 import _support as K
+
+    _retire_clone(scene)
+    drafts = scene.root / scene.tenant / "drafts"
+    got: dict = {}
+
+    def job(c) -> int:
+        got["control"] = c.request("batch.start", lanes=["lessons"])["batch"]
+        got["before"] = listing(drafts)
+        K.forge_down(scene.t)
+        got["refusal"] = c.refused("batch.start", lanes=["lessons"])
+        got["after"] = listing(drafts)
+        return 0
+
+    run_kind(scene, "post-step", job, family_less=family_less)
+
+    assert got.get("control"), "control: batch.start was not answered with the forge up (the helper refused the job's setup?)"
+    assert got["refusal"].code == "delivery"
+    assert got["after"] == got["before"], "a draft was made for a batch whose base could not be fetched"
+
+
+def test_1618_f6_the_post_steps_container_has_a_tmpfs_tmp_no_login_and_no_new_way_to_reach_git(scene):
+    """The post-step container gets a writable tmpfs `/tmp` (its private repository dies with it), no database or issuer login in its environment, and only today's `forge.token` to reach Forgejo: git verbs of any new name are refused. (F6 job lane, O8)"""
+    forge = ForgeCredentialRecorder()
+    got: dict = {}
+
+    def job(c) -> int:
+        got["token"] = c.request("forge.token", min_validity=60)["token"]
+        got["refused"] = {name: c.refused(name).code for name in ("repo.fetch", "git.fetch", "git.push", "knowledge.fetch", "batch.fetch")}
+        return 0
+
+    docker = ContainerStandIn(job)
+    run_kind(scene, "post-step", None, forge=forge, docker=docker, family_less=True)
+
+    assert got.get("token"), "control: forge.token is answered"
+    create = docker.box.argv
+    assert any(spec.startswith("/tmp:rw") for spec in J.flag_values(create, "--tmpfs")), "the container has no writable tmpfs /tmp"
+    env = J.parse_env(create)
+    assert not [k for k in env if any(word in k.upper() for word in ("DSN", "PASSWORD", "SECRET", "ROLE_ID"))], sorted(env)
+    assert set(got["refused"].values()) <= {"unknown-request", "unknown", "bad-request", "unsupported"}, got["refused"]
+
+
+def test_1618_k2_concurrent_copy_makes_all_succeed_each_with_the_commit_its_own_fetch_reported_while_main_advances(scene):
+    """Several `copy.make` requests at once while main advances each answer a copy whose bytes are those of the commit its fetch
+    reported, a tip during its fetch. (K2)"""
+    import threading
+
+    t, n = scene.t, 4
+    got: dict = {"answers": [], "errors": []}
+    tips: list[str] = [t.origin_main()]
+
+    def job(c) -> int:
+        stop = threading.Event()
+
+        def advance() -> None:
+            while not stop.is_set() and len(tips) < 10:
+                tips.append(K.advance_main(t, f"K1618-ADV-{len(tips)}"))
+
+        def ask() -> None:
+            try:
+                got["answers"].append(c.request("copy.make"))
+            except Exception as err:  # noqa: BLE001 — recorded, asserted below
+                got["errors"].append(repr(err))
+
+        mover = threading.Thread(target=advance)
+        askers = [threading.Thread(target=ask) for _ in range(n)]
+        mover.start()
+        for a in askers:
+            a.start()
+        for a in askers:
+            a.join(120)
+        stop.set()
+        mover.join(120)
+        got["agent"] = [K.tree_bytes(Path(a["path"]) / "agent") for a in got["answers"]]
+        return 0
+
+    run_kind(scene, "learning", job, fetch=_fetch_seam(scene, []))
+
+    assert got["errors"] == [], got["errors"]
+    assert len(got["answers"]) == n
+    for answer, agent in zip(got["answers"], got["agent"], strict=True):
+        assert answer["commit"] in tips, f"a copy of a commit that was never main's tip: {answer['commit']}"
+        assert agent == K.half_at(t, answer["commit"], "agent")

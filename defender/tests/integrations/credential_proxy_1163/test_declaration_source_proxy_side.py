@@ -35,11 +35,11 @@ def test_d5_a_declaration_with_a_nested_repeat_or_an_unread_key_is_refused_unsen
     with T.rig(tmp_path / "forge", data_root) as r:
         base = r.up.url + T.BASE_PATH
         r.t.merge({ACCESS: _bad(base)[kind]}, "bad declaration")
-        r.t.publish()
+        # #1618 D7/K8: the merge is `main`, which the proxy's next read fetches; there is no publish step.
         refused = r.ask()
         assert (refused["fault"], r.up.seen, r.store.reads) == ("ConfigFault", [], [])
         r.t.merge({ACCESS: _yaml(base)}, "the plain declaration")
-        r.t.publish()
+        # #1618 D7/K8: the merge is `main`, which the proxy's next read fetches; there is no publish step.
         control = r.ask()
 
     assert control["fault"] is None

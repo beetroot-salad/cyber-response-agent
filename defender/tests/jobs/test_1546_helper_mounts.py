@@ -7,7 +7,6 @@ The claim row the helper stages under is planted by SQL because no worker claims
 `test_1546_host_request_rows.py`."""
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import sys
@@ -82,10 +81,14 @@ def checkout(tmp_path, monkeypatch):
     return root
 
 
-def test_an_adoption_container_gets_allowlisted_binds_and_a_hardlink_free_clone_in_its_own_root(scene, checkout):
-    """At the container's start: binds are allowlisted; its root holds one git clone (not the tenant's knowledge clone) whose
-    files all have link count 1 and whose origin is the forge's; every file the helper placed in root or inputs has link
-    count 1. (A-O9, G11, G12: `--no-hardlinks`)"""
+def test_an_adoption_container_gets_allowlisted_binds_and_no_repository_in_its_root(scene, checkout):
+    """At the container's start: binds are allowlisted; its root holds no repository (no `.git` anywhere under it or the
+    inputs: the helper makes no clone) and no file the helper placed has more than one link; the delivery opens against the
+    forge origin the launch facts name, which is the tenant's recorded wiring. (A-O9; r10 (c), #1618 flow 7: the container
+    opens a private repository in its tmpfs `/tmp` against the forge with `forge.token`; was
+    `..._and_a_hardlink_free_clone_in_its_own_root`, r10 (f) bucket 2)"""
+    from defender.tests.support.shared._postgres1339 import execute
+
     job_id = str(uuid.uuid4())
     seen: dict = {}
 
@@ -93,7 +96,8 @@ def test_an_adoption_container_gets_allowlisted_binds_and_a_hardlink_free_clone_
         root, inputs = scene.root / ROOTS / scene.claim, scene.root / INPUTS / scene.claim
         seen["links"] = sorted(str(p) for base in (root, inputs) if base.exists() for p in base.rglob("*")
                                if p.is_file() and not p.is_symlink() and os.stat(p).st_nlink != 1)
-        seen["gits"] = sorted(p for p in root.rglob(".git") if p.is_dir()) if root.exists() else []
+        seen["gits"] = sorted(str(p) for base in (root, inputs) if base.exists() for p in base.rglob(".git"))
+        seen["roots"] = [base.is_dir() for base in (root, inputs)]
         seen["facts"] = c.request("launch")
         return 0
 
@@ -106,7 +110,8 @@ def test_an_adoption_container_gets_allowlisted_binds_and_a_hardlink_free_clone_
     assert docker.job_error is None, (ran.raised, docker.job_error)
     assert docker.boxes, "premise: the container started"
     _allowlisted(scene, docker.boxes[0].mounts, docker.boxes[0].env)
+    assert seen["roots"] == [True, True], "premise: the root and the inputs existed at the container's start"
     assert seen["links"] == [], f"the helper placed files with more than one link: {seen['links']}"
-    assert len(seen["gits"]) == 1, seen["gits"]
-    assert str(seen["gits"][0]).startswith(str(scene.root / ROOTS / scene.claim))
-    assert json.dumps(seen["facts"]), "premise: the launch facts were served"
+    assert seen["gits"] == [], f"adoption's root or inputs hold a repository: {seen['gits']}"
+    [(origin,)] = execute(scene.dsn, "SELECT origin FROM tenancy.forge_wiring WHERE tenant_id = %s", (scene.tenant,))
+    assert seen["facts"].get("forge_origin") == origin, f"the delivery does not open against the forge: {seen['facts']}"
