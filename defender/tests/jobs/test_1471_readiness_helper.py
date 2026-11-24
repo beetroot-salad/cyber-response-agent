@@ -348,9 +348,10 @@ def test_r13_1_2_the_knowledge_a_check_ends_with_is_the_source_the_helper_settle
 
 def test_r13_1_2_a_knowledge_fact_already_staged_under_the_claim_is_kept_as_it_was(
         tmp_path, monkeypatch, migrated_database):
-    """A `knowledge` fact already staged under the claim is kept as it was: the job's own `knowledge` (the real readiness
-    entry, which sends one) never replaces it, a staged fact being create-once. Control: with none in the way the same check
-    stages the settled source's. (#1546 PR2 create-once; was `..._a_knowledge_record_that_cannot_be_written_is_a_crash_with_no_
+    """A `knowledge` fact already staged under the claim is kept as it was: the helper's own staging of the settled source's
+    knowledge before the container starts (r10 U-3: the job sends none; a `knowledge` request is an unknown verb,
+    `test_1546_helper_records.py::test_a_knowledge_request_is_an_unknown_verb_for_every_kind...`) never replaces it, a staged
+    fact being create-once, and the check still runs. Control: with none in the way the same check stages the settled source's. (#1546 PR2 create-once; was `..._a_knowledge_record_that_cannot_be_written_is_a_crash_with_no_
     record_and_no_container`: the record is a staged fact now, and a knowledge fact the helper could not stage owes nothing,
     r9, so the crash it pinned is gone; guard `test_1471_host_request_worker.py::test_r13_1_5_a_missing_or_refused_knowledge_
     record_owes_nothing_and_none_of_its_text_reaches_the_row`)"""
@@ -360,7 +361,7 @@ def test_r13_1_2_a_knowledge_fact_already_staged_under_the_claim_is_kept_as_it_w
         assert (control.knowledge or {}).get("commit") == scene.t.commit, f"control: the settled source is staged: {control.said()}"
         ran = readiness(scene, rid=str(uuid.uuid4()), staged={"knowledge": WEDGED_KNOWLEDGE})
 
-        assert ran.docker.job_ran, f"premise: the job ran, so its own knowledge was sent: {ran.said()}"
+        assert ran.docker.job_ran, f"premise: the check ran past the helper's refused staging: {ran.said()}"
         assert ran.knowledge == WEDGED_KNOWLEDGE, f"the staged knowledge fact was replaced: {ran.said()}"
 
 
@@ -562,9 +563,10 @@ def test_c4_a_readiness_container_is_started_for_readiness_is_answered_launch_al
 
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
         rid, refusals = str(uuid.uuid4()), {}
-        # #1546 A-O2/PR2: a readiness job's typed records travel on the verbs `knowledge` and `result` (the helper stages them),
-        # so those two are the kind's besides `launch`; every other registered request stays refused for the kind.
-        others = requests_other_than(("launch", "knowledge", "result"))
+        # #1546 A-O2/PR2: a readiness job's typed record travels on the verb `result` (the helper stages it), so that is the
+        # kind's besides `launch`; r10 U-3: its knowledge is the helper's own, staged before the container starts, and no
+        # `knowledge` verb is the job's; every other registered request stays refused for the kind.
+        others = requests_other_than(("launch", "result"))
         assert {"box.start", "pass", "pass.write_back"} <= set(others), f"premise: the registry's requests: {others}"
 
         def container(c: Any) -> int:
