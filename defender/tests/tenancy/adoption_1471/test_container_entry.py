@@ -49,7 +49,7 @@ def _facts(repo, forge, **over):
     return {**facts, **over}
 
 
-def _enter(repo, forge, tmp_path, *, facts=None, silent=False, token=None):
+def _enter(repo, forge, tmp_path, *, facts=None, token=None):
     """Run the entry once against a socket handing `facts` (default: the helper's own); returns the result it sent, or None."""
     from defender import adoption
     from defender.job_socket import SOCKET_ENV
@@ -72,7 +72,7 @@ def _enter(repo, forge, tmp_path, *, facts=None, silent=False, token=None):
     with SocketStandIn(tenant, launch=handed, answers={"forge.token": answer, "result": result}) as stand_in:
         for gone in set(own) - set(handed):  # the stand-in fills `tenant`/`tenant_state` by default: serve the removal
             stand_in.launch.pop(gone, None)
-        environ[SOCKET_ENV] = str(tmp_path / "no-such-socket") if silent else str(stand_in.path)
+        environ[SOCKET_ENV] = str(stand_in.path)
         adoption.main(["--job", job_id, "--tenant", tenant], environ=environ, client=forge.client)
     assert not (runs / f"{job_id}.adoption.json").exists(), "the adoption record still went through the tenant folder"
     assert len(results) <= 1, results
@@ -123,19 +123,21 @@ def test_a_ref_lock_held_on_the_clones_main_is_repository_busy_not_delivery_fail
     assert forge.creates == []
 
 
+# Retired param `silent` (#1546 A-O2): the adoption `result` reaches the store only through the helper, so a container with no
+# helper to answer stages nothing; the worker's end over a missing `result` is pinned for adoption by
+# `jobs/test_1546_host_request_rows.py::test_a_result_the_helper_refused_reads_bad_record_and_a_missing_one_no_record[adoption-...]`.
 @pytest.mark.parametrize("change", [
-    "silent", "other-kind", "other-tenant", "other-job", "no-rendering",
+    "other-kind", "other-tenant", "other-job", "no-rendering",
 ])
 def test_facts_that_are_not_this_requests_are_failed_handover_and_the_control_proceeds(repo, forge, tmp_path, change):
     """A launch that is unanswered, or facts of another kind, tenant or job or without a rendering: `{failed, handover}`; nothing sent. (R13-1.3, R13-1.4)"""
     mutate = {
-        "silent": None,
         "other-kind": lambda facts: {**facts, "kind": "readiness"},
         "other-tenant": lambda facts: {**facts, "tenant": str(uuid.UUID(int=1471))},
         "other-job": lambda facts: {**facts, "job": str(uuid.UUID(int=1472))},
         "no-rendering": lambda facts: {k: v for k, v in facts.items() if k != "rendering"},
     }[change]
-    assert _enter(repo, forge, tmp_path, facts=mutate, silent=change == "silent") == {"outcome": "failed", "reason": "handover"}
+    assert _enter(repo, forge, tmp_path, facts=mutate) == {"outcome": "failed", "reason": "handover"}
     assert forge.creates == []
 
 
