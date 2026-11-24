@@ -2,9 +2,11 @@
 (`systems.run_tenant.host_tenant`, `tenancy.requested_tenant`); each builds its `JobTenant` from the launch facts
 (`job_tenant_from_launch`). Static, in the style of #1618's `test_no_lock_1618` census.
 
-Scope (r10's list, by function): `run.py`'s container path `_container_tenant` (investigation, readiness, the arms),
-`learning/branch/cli.py`'s container admission `_admitted` (the learning job), `adoption/__main__.py`'s `_deliver`; each with
-every module-level function of the same module it calls, transitively. Out of scope (r10, claim R10-L8): the operator paths
+Scope (r10's list, by function): `run.py`'s container entries `job_main` (investigation), `readiness_main` (readiness),
+`_sibling_set_up` (the learning arms) and the tenant builder they share, `_container_tenant`; `learning/branch/cli.py`'s
+container admission `_admitted` and the learning job's entry `learning/branch/job_entry.py`'s `main`; adoption's `main` and
+`_deliver`. Each is scanned with every module-level function of the same module it calls or names (a function handed on as
+a value is reached too), transitively. Out of scope (r10, claim R10-L8): the operator paths
 in the same modules (`run.main`, `cli._launch`'s host branch, which reach `host_tenant`), and the post-step and drain entries,
 which keep `accept_tenant` over the bound tenant folder while H4's bind stands; the drain and post-step entries are this
 scanner's control that it sees a real call."""
@@ -21,8 +23,12 @@ DEFENDER = Path(__file__).resolve().parents[2]
 #: `accept_tenant` and the host wrappers that reach it (r10 (b)); `requested_tenant_id` (an id parse) is not one.
 FORBIDDEN = frozenset({"accept_tenant", "host_tenant", "requested_tenant"})
 
-#: (module, entry function): the job-container entry paths of the five `JobTenant` kinds.
-ENTRIES = [("run.py", "_container_tenant"), ("learning/branch/cli.py", "_admitted"), ("adoption/__main__.py", "_deliver")]
+#: (module, entry function, builds): the job-container entry paths of the five `JobTenant` kinds; `builds` marks the
+#: functions that must themselves (with what they reach) build the tenant with `job_tenant_from_launch`.
+ENTRIES = [("run.py", "job_main", False), ("run.py", "readiness_main", False), ("run.py", "_container_tenant", True),
+           ("run.py", "_sibling_set_up", True), ("learning/branch/cli.py", "_admitted", True),
+           ("learning/branch/job_entry.py", "main", False), ("adoption/__main__.py", "main", True),
+           ("adoption/__main__.py", "_deliver", True)]
 
 #: Entries r10 leaves on `accept_tenant` (H4's bind): the scanner's control over real code.
 EXEMPT = [("learning/branch/post_step.py", "main"), ("learning/branch/drain_job.py", "main")]
@@ -55,12 +61,10 @@ def reached(tree: ast.Module, entry: str) -> tuple[list[str], set[str]]:
             continue
         seen.add(name)
         for node in ast.walk(functions[name]):
-            if isinstance(node, ast.Call):
-                called = _name(node.func)
-                if called in FORBIDDEN:
-                    found.append(f"{name}:{node.lineno}:{called}")
-                elif isinstance(node.func, ast.Name) and called in functions:
-                    todo.append(called)
+            if isinstance(node, ast.Call) and _name(node.func) in FORBIDDEN:
+                found.append(f"{name}:{node.lineno}:{_name(node.func)}")
+            elif isinstance(node, ast.Name) and node.id in functions:  # called, or handed on as a value
+                todo.append(node.id)
     return found, seen
 
 
@@ -69,15 +73,17 @@ def _calls(tree: ast.Module, functions: set[str], callee: str) -> bool:
     return any(isinstance(n, ast.Call) and _name(n.func) == callee for f in functions for n in ast.walk(by_name[f]))
 
 
-@pytest.mark.parametrize(("rel", "entry"), ENTRIES, ids=[e for _r, e in ENTRIES])
-def test_a_job_container_entry_reaches_no_accept_tenant_and_builds_its_job_tenant_from_the_launch(rel, entry):
+@pytest.mark.parametrize(("rel", "entry", "builds"), ENTRIES, ids=[f"{r.split('/')[-2] if '/' in r else 'run'}-{e}"
+                                                                      for r, e, _b in ENTRIES])
+def test_a_job_container_entry_reaches_no_accept_tenant_and_builds_its_job_tenant_from_the_launch(rel, entry, builds):
     """The entry, and every function of its module it reaches, calls none of `accept_tenant`, `host_tenant`,
-    `requested_tenant`; and it does build its tenant with `job_tenant_from_launch` (so a renamed or emptied entry is not
-    vacuously clean). (r10 (b): every container entry, uniformly)"""
+    `requested_tenant`; and a `builds` entry does build its tenant with `job_tenant_from_launch` (so a renamed or emptied
+    entry is not vacuously clean). (r10 (b): every container entry, uniformly)"""
     tree = _module(rel)
     found, seen = reached(tree, entry)
     assert found == [], f"{rel}: a container entry reaches the host acceptance: {found}"
-    assert _calls(tree, seen, "job_tenant_from_launch"), f"{rel}:{entry} builds no `JobTenant` from the launch facts"
+    if builds:
+        assert _calls(tree, seen, "job_tenant_from_launch"), f"{rel}:{entry} builds no `JobTenant` from the launch facts"
 
 
 @pytest.mark.parametrize(("rel", "entry"), EXEMPT, ids=["post_step", "drain"])
