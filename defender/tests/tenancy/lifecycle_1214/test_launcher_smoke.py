@@ -78,8 +78,8 @@ def test_launcher_environment_gives_the_child_the_database_address_only_when_ask
 def _reports_active(directory: Any, tenant: str, origin_ends: str | None = None) -> None:
     assert directory.state(tenant) == "active"
     wiring = directory.forge_wiring(tenant)
-    assert wiring.repo == f"tenants/{tenant}"
-    assert wiring.origin.endswith(origin_ends or f"/tenants/{tenant}.git"), wiring
+    assert wiring.repo == f"t-{tenant}/knowledge"
+    assert wiring.origin.endswith(origin_ends or f"/t-{tenant}/knowledge.git"), wiring
     assert directory.state("not-this-tenant") is None  # control: it reports only its own tenant
 
 

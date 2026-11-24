@@ -40,8 +40,6 @@ from defender.learning.core.store_tick import (
 from defender.learning_store import Stop
 
 if TYPE_CHECKING:
-    import datetime
-
     from defender.learning_store.tick import TickStore
 
     import httpx
@@ -49,7 +47,6 @@ if TYPE_CHECKING:
     from defender.learning.author.version_control import Batch, TenantDelivery
     from defender.learning.author.version_control.auth import ForgeCredential
     from defender.systems.catalog import Catalog, TenantSystems
-    from defender.systems.run_tenant import Admitted
     from defender.tenancy import Tenant, TenantDirectory
 
 _logger = logging.getLogger(__name__)
@@ -323,22 +320,6 @@ def _open_delivery(
             raise _classified_refusal(
                 f"the tenant {tenant.id}'s delivery refused: {refused}", refused) from None
         yield delivery
-
-
-def revert_delivery(
-    admitted: Admitted, *, client: httpx.Client | None = None, identity: ForgeCredential | None = None,
-    credential_config: Any = None, issuer_transport: httpx.BaseTransport | None = None,
-) -> contextlib.AbstractContextManager[TenantDelivery]:
-    """The author lane's delivery for a by-hand lesson revert (`revert_lesson.py`, flow 5), which
-    runs under the author drain's lock: `vc.opened_delivery` as `_open_delivery` opens it, for the
-    tenant the revert's host acceptance admitted (`admitted`, r10.1 C1: its tenant and the records
-    it was admitted through; the admission is a parameter, not a precondition). A refusal is
-    `TenantRefused`, `DeliveryRefused` or `ForgejoAuthError`."""
-    from defender.learning.author import version_control as vc
-
-    return vc.opened_delivery(
-        admitted.tenant, defender_dir=process_defender_dir(), directory=admitted.directory, purpose="revert",
-        client=client, identity=identity, credential_config=credential_config, issuer_transport=issuer_transport)
 
 
 def _drain_directory(directory: TenantDirectory | None) -> TenantDirectory:
@@ -652,9 +633,10 @@ def feedback_drain(  # noqa: PLR0913 — the stage's seams: the model's decision
     directory: TenantDirectory | None = None,
     credential_config: Any = None,
     issuer_transport: httpx.BaseTransport | None = None,
-    eligibility_max_age: datetime.timedelta | None = None,
+    people: Any = None,
 ) -> int:
-    """The feedback tick (#1414 F2) over the learning store (#1278 A4): open issues, read eligible comments,
+    """The feedback tick (#1414 F2) over the learning store (#1278 A4): open issues, read the comments of the
+    tenant's people (`people.wanted_users`, #1592 OD-6: the identity records at `DEFENDER_DATABASE_DSN` when None),
     decide each once, draft approved entries onto a registry PR, and post the replies owed, under the
     tenant's feedback tick lease (one tick per tenant, O12; the store at `DEFENDER_DATABASE_DSN`)."""
     from defender.learning.core import feedback
@@ -668,4 +650,4 @@ def feedback_drain(  # noqa: PLR0913 — the stage's seams: the model's decision
                               credential_config=credential_config, issuer_transport=issuer_transport)
 
     return _refusing(lambda: feedback.run(paths, open_delivery, records, decide=decide or model_decide,
-                                          eligibility_max_age=eligibility_max_age))
+                                          people=people))

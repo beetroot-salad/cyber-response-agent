@@ -14,7 +14,7 @@ from defender.tests.support.api._identity1306 import NEW
 from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, OPENBAO_URL
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld
 
-REPOS = "/api/v1/orgs/tenants/repos"
+REPOS = "/api/v1/orgs/t-*/repos"  #: one pattern for every tenant's organisation (`_fakes._Recorder._popped`)
 USERS = "/api/v1/admin/users"
 
 

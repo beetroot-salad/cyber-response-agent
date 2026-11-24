@@ -24,8 +24,8 @@ Directory (give one; `--dsn` wins over `--seed` when both are given):
 - `--dsn DSN` (env `DEFENDER_TEST_DSN`): `_active1214.postgres_directory(DSN)`, over rows the test inserted with
   `_active1214.insert_active_tenant(...)` into a `migrated_database`.
 - `--seed TENANT[:STATE[:ORIGIN]]` (repeatable; env `DEFENDER_TEST_SEED`, comma separated): an in-memory directory
-  holding each tenant in STATE (default `active`) with forge wiring `tenants/<T>` and ORIGIN (default: the folder's
-  own `origin` remote under `--data-root`, else `http://forge.test/tenants/<T>.git`). A STATE other than `active`
+  holding each tenant in STATE (default `active`) with forge wiring `t-<T>/knowledge` and ORIGIN (default: the folder's
+  own `origin` remote under `--data-root`, else `http://forge.test/t-<T>/knowledge.git`). A STATE other than `active`
   is how a subprocess test reaches the refusal side. Seeded rows live only in this process.
 - `--data-root DIR` (env `DEFENDER_DATA_ROOT`, which the entry reads itself): where origins are read from.
 
@@ -139,7 +139,7 @@ def _seed(twin: Any, root: Path, tenant: str, state: str, origin: str | None) ->
 
     from defender.tests.support.tenancy import _active1214
 
-    added = seed_tenant(twin, tenant, created_at=_active1214.CREATED, state=state, repo=f"tenants/{tenant}",
+    added = seed_tenant(twin, tenant, created_at=_active1214.CREATED, state=state, repo=f"t-{tenant}/knowledge",
                             origin=_active1214._origin_of(root, tenant, origin))
     if inspect.isawaitable(added):
         asyncio.run(_active1214._await(added))

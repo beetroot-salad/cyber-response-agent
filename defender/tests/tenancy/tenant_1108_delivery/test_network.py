@@ -9,8 +9,7 @@ import time
 
 import pytest
 
-from ._revert_store import claimed_batch, reviewed, revert_with
-from ._support import LANES, ForgeHTTP, Trickle, delivery, merge_on_remote, opened, push_and_open, quiet, target
+from ._support import LANES, ForgeHTTP, Trickle, delivery, quiet, target
 
 #: The wall timeout the cases give network git, and how long past it a call may take to end.
 _TIMEOUT = 3.0
@@ -42,7 +41,7 @@ class _Stall:
 
 
 def _refusals(route):
-    """How the route's caller is refused: a delivery's open and a revert answer `DeliveryRefused`; the end push is the
+    """How the route's caller is refused: a delivery's open answers `DeliveryRefused`; the end push is the
     tick's bare `GitRepository.push` (#1618: `finish`, which wrapped it, is deleted), whose git failure or timeout the
     tick reads as a forge fault (`store_tick._forge_faults`)."""
     from defender import _git
@@ -65,29 +64,19 @@ def _left(tenant, server):
 _ROUTES = {
     "open-fetch": ("git-upload-pack", True),
     "end-push": ("git-receive-pack", True),
-    "revert-fetch": ("git-upload-pack", True),  # the revert's own repository's opening fetch (flow 7)
-    "revert-push": ("git-receive-pack", True),
 }
+_ROUTE_PARAMS = sorted(_ROUTES)
 
 
-#: The revert routes need the learning store (postgres); the rest need no database.
-_ROUTE_PARAMS = [pytest.param(route, marks=pytest.mark.postgres) if route.startswith("revert") else route
-                 for route in sorted(_ROUTES)]
-
-
-def _store_for(route, request):
-    return request.getfixturevalue("http_store") if route.startswith("revert") else None
-
-
-def _claimed(d, tag, recorded=None):
-    """A batch with one commit; `recorded` is `(repo, store)` to claim it in the learning store (a revert route)."""
-    batch, held = claimed_batch(recorded[0], recorded[1], d, tag) if recorded else (d.start_batch(tag, lanes=LANES), None)
+def _claimed(d, tag):
+    """A batch with one commit."""
+    batch = d.start_batch(tag, lanes=LANES)
     (batch.draft_root / f"agent/lessons/{tag}.md").write_text("a lesson\n", encoding="utf-8")
     batch.commit(batch.change_set(), "claim")
-    return (batch, held) if recorded else batch
+    return batch
 
 
-def _stalled_route(http_repo, tmp_path, route, then=None, trickle=False, store=None):
+def _stalled_route(http_repo, tmp_path, route, then=None, trickle=False):
     """A delivery (network timeout `_TIMEOUT`), set up so that `call` is the route's call
     with nothing else left to do on the network first, and the stall armed for its service.
     Returns `(call, stall, required)`."""
@@ -97,24 +86,12 @@ def _stalled_route(http_repo, tmp_path, route, then=None, trickle=False, store=N
     if route == "open-fetch":
         def call():
             return delivery(http_repo, http, network_timeout=_TIMEOUT)
-    elif route == "end-push":
+    else:  # end-push
         d = delivery(http_repo, http, network_timeout=_TIMEOUT)
         batch = _claimed(d, "stalled")
 
         def call():
             return batch.repository.push(batch.repository.branch_tip(batch.branch), batch.branch)
-    else:
-        d = delivery(http_repo, http, network_timeout=_TIMEOUT)
-        batch, held = _claimed(d, "stalled", (http_repo, store))
-        finished = push_and_open(batch)
-        opened(finished)
-        reviewed(store, held, finished)
-        merge_on_remote(http_repo, tmp_path, batch.branch)
-        d.close()
-
-        def call():  # flow 7: the revert opens its own private repository (its fetch), then commits and pushes
-            with delivery(http_repo, http, network_timeout=_TIMEOUT) as own:
-                return revert_with(own, store, "agent/lessons/stalled.md", "stalled")
     stall = _Stall(service, then, trickle)
     server.rearm()
     server.on_service = stall
@@ -123,9 +100,9 @@ def _stalled_route(http_repo, tmp_path, route, then=None, trickle=False, store=N
 
 @pytest.mark.parametrize("trickle", [False, True], ids=["silent", "trickle"])
 @pytest.mark.parametrize("route", _ROUTE_PARAMS)
-def test_a_stalled_forge_fails_within_the_timeout_and_leaves_no_process(http_repo, tmp_path, route, trickle, request):
+def test_a_stalled_forge_fails_within_the_timeout_and_leaves_no_process(http_repo, tmp_path, route, trickle):
     tenant, server = http_repo[0], http_repo[3]
-    call, stall, required = _stalled_route(http_repo, tmp_path, route, trickle=trickle, store=_store_for(route, request))
+    call, stall, required = _stalled_route(http_repo, tmp_path, route, trickle=trickle)
     started = time.monotonic()
     try:
         result, error = None, None
@@ -158,7 +135,7 @@ class _Interrupt(BaseException):
 
 @pytest.mark.parametrize("raised", [_Fault, _Interrupt], ids=["exception", "interrupt"])
 @pytest.mark.parametrize("route", _ROUTE_PARAMS)
-def test_an_exception_or_interrupt_during_network_git_leaves_no_process(http_repo, tmp_path, route, raised, request):
+def test_an_exception_or_interrupt_during_network_git_leaves_no_process(http_repo, tmp_path, route, raised):
     tenant, server = http_repo[0], http_repo[3]
 
     def handler(signum, frame):
@@ -166,7 +143,7 @@ def test_an_exception_or_interrupt_during_network_git_leaves_no_process(http_rep
     previous = signal.signal(signal.SIGUSR1, handler)
     try:
         call, stall, required = _stalled_route(
-            http_repo, tmp_path, route, store=_store_for(route, request),
+            http_repo, tmp_path, route,
             then=lambda: signal.pthread_kill(threading.main_thread().ident, signal.SIGUSR1),
             trickle=True)
         expected = (raised,) if raised is _Interrupt else (raised, target().DeliveryRefused)

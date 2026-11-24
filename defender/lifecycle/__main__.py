@@ -2,12 +2,14 @@
 
     python -m defender.lifecycle serve  # the management service and the host actor, one process (dev)
     python -m defender.lifecycle make-runs-folders  # one-time: `<T>/runs` for every active tenant made before #1471
+    python -m defender.lifecycle resync-people  # after a restore, and at the #1592 upgrade: a request per person and tenant
 
 It reads `DEFENDER_DATABASE_DSN` (the database at exactly this code's revision) and the lifecycle's
 settings (`defender.lifecycle.config`: the files holding the forge admin token and the OpenBao
 management login, the integration container, the secrets directory, `DEFENDER_DATA_ROOT`). The
 issuer and OpenBao addresses are fixed service names (`defender.configuration.issuer`); the
-infrastructure routes them."""
+infrastructure routes them. `resync-people` reads only `DEFENDER_DATABASE_DSN`, the forge's address, the file holding its
+admin token and the sign-in provider's login source's id."""
 from __future__ import annotations
 
 import argparse
@@ -82,17 +84,48 @@ async def _make_runs_folders() -> int:
     return 0
 
 
+async def _resync_people() -> int:
+    """`resync-people` (#1592 F6(c)): a (none, T) request for every wired tenant and a (U, none) one for every `p-<id>`
+    account on the sign-in provider's source; the accounts it cannot vouch for are listed on stdout, unchanged."""
+    from defender.identity.postgres import PostgresIdentityRepository
+    from defender.lifecycle._process import forge_client
+    from defender.lifecycle._resync import resync_people
+    from defender.lifecycle.config import (FORGE_TOKEN_FILE_ENV, FORGE_URL_ENV, KEYCLOAK_SOURCE_ID_ENV, ConfigRefused,
+                                           _secret_file, source_id_from_env)
+    from defender.tenancy import database_address_variable
+    from defender.tenancy.postgres import PostgresTenantRepository
+
+    missing = [n for n in (FORGE_URL_ENV, FORGE_TOKEN_FILE_ENV, KEYCLOAK_SOURCE_ID_ENV, database_address_variable())
+               if not os.environ.get(n)]
+    if missing:
+        raise ConfigRefused(f"set {', '.join(missing)}")
+    source_id = source_id_from_env()
+    token = _secret_file(os.environ[FORGE_TOKEN_FILE_ENV], FORGE_TOKEN_FILE_ENV)
+    dsn = _dsn()
+    tenants, identity = PostgresTenantRepository(dsn), PostgresIdentityRepository(dsn)
+    forge = forge_client(os.environ[FORGE_URL_ENV], token)
+    try:
+        await resync_people(tenants, identity, forge, source_id=source_id, say=print)
+    finally:
+        await forge.aclose()
+        await identity.close()
+        await tenants.close()
+    return 0
+
+
 async def _serve() -> int:
     from defender.identity import Bootstrap, IdentityService
     from defender.identity.postgres import PostgresIdentityRepository
     from defender.investigation.publish_launch import launch_publish
-    from defender.lifecycle import HostActor, ManagementService, git_runner, integration_runner, serve
+    from defender.lifecycle import (HostActor, ManagementService, PeopleWorker, PostgresForgeSessions, git_runner,
+                                    integration_runner, serve)
     from defender.lifecycle import _process as clients
     from defender.tenancy.postgres import PostgresTenantRepository
 
     dsn, config = _dsn(), _lifecycle_settings()
     tenants = PostgresTenantRepository(dsn, lock_keepalive=config.lock_keepalive)
-    identity = IdentityService(PostgresIdentityRepository(dsn), signin=_NoPeople(), mail=_NoPeople(),
+    people_records = PostgresIdentityRepository(dsn)
+    identity = IdentityService(people_records, signin=_NoPeople(), mail=_NoPeople(),
                                programs=_NoPeople(), clock=_now, bootstrap=Bootstrap(administrators=()))
     stopping = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -104,13 +137,40 @@ async def _serve() -> int:
                                 config=config, clock=_now)
     host = HostActor(tenants, forge=clients.forge_anonymous(config), openbao_login=clients.openbao_login(config),
                      git=git_runner, config=config, clock=_now, fetch=launch_publish)
-    _logger.info("lifecycle: serving both actors every %ss", config.poll_interval)
+    people = PeopleWorker(tenants, identity=people_records, forge=clients.forge_people(config),
+                          sessions=PostgresForgeSessions(config.forge_sessions_dsn,
+                                                         statement_timeout=config.people_call_timeout),
+                          config=config, clock=_now)
+    _logger.info("lifecycle: serving both actors every %ss, the people worker every %ss", config.poll_interval,
+                 config.people_poll)
+    people_task = asyncio.ensure_future(people.start())
     try:
         await serve(service, host, config=config, stop=stopping.is_set)
     finally:
+        people_task.cancel()
+        await asyncio.gather(people_task, return_exceptions=True)
+        await people.close()
         await identity.close()
         await tenants.close()
     return 0
+
+
+def _run(command: str) -> int:
+    """The command's coroutine run to its end; `resync-people` names a database or forge it cannot use in one line."""
+    if command == "make-runs-folders":
+        return asyncio.run(_make_runs_folders())
+    if command == "serve":
+        return asyncio.run(_serve())
+    import httpx
+
+    from defender.lifecycle._job import StepFailed
+    from defender.migrations import DatabaseUnreachable, RevisionMismatch
+
+    try:
+        return asyncio.run(_resync_people())
+    except (DatabaseUnreachable, RevisionMismatch, StepFailed, httpx.HTTPError) as failed:
+        print(f"python -m defender.lifecycle {command}: {failed}", file=sys.stderr)
+        return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -123,12 +183,13 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("serve", help="run the management service and the host actor until stopped (dev)")
     commands.add_parser("make-runs-folders", help="one-time upgrade: make <T>/runs for every active tenant that lacks it")
+    commands.add_parser("resync-people", help="after a restore: record a people request for every tenant and person account")
     args = parser.parse_args(argv)
 
     from defender.lifecycle import ConfigRefused
 
     try:
-        return asyncio.run(_make_runs_folders() if args.command == "make-runs-folders" else _serve())
+        return _run(args.command)
     except ConfigRefused as refused:
         print(f"python -m defender.lifecycle {args.command}: {refused}", file=sys.stderr)
         return 2

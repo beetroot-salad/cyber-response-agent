@@ -21,7 +21,7 @@ import pytest
 
 from ._identity import VaultHTTP, token as identity_token
 
-from ._revert_store import claimed_batch, reviewed, revert_with
+from ._revert_store import claimed_batch, reviewed
 from ._support import (
     LANES,
     TOKEN,
@@ -29,19 +29,17 @@ from ._support import (
     bounded,
     deliver,
     delivery,
-    forge_pulls,
     fresh_process_env,
     git,
     git_config_home,
     in_a_fresh_process_finishing,
-    merge_on_remote,
     opened,
     target,
 )
 
 #: #1618 (D4, K8): there is no host clone. A delivery's network git is its open (the one fetch of `main` and every
 #: branch into its private repository under `<data root>/.repo-scratch/`, removed when the delivery closes) and its
-#: deliver (the tick's push and PR, `_support.deliver`) and revert; what a clone's local configuration or hooks did
+#: deliver (the tick's push and PR, `_support.deliver`); what a clone's local configuration or hooks did
 #: here, the per-user configuration (`git_config_home`) does, the one a fresh private repository's git still reads.
 
 
@@ -198,9 +196,9 @@ def test_git_ignores_changes_to_a_legacy_credential_file(http_repo, spies, chang
 
 
 @pytest.mark.postgres
-def test_a_second_finish_and_a_revert_never_store_erase_prompt_for_or_share_the_credential(
+def test_a_second_finish_never_store_erase_prompt_for_or_share_the_credential(
         http_repo, http_store, spies, tmp_path):
-    """The retried deliver (the tick's push and PR; #1618: `finish` is deleted) and the revert authenticate without
+    """The retried deliver (the tick's push and PR; #1618: `finish` is deleted) authenticates without
     helpers or prompts, leaving the ignored legacy credential sentinel untouched."""
     tenant, remote, credentials, server = http_repo
     log = _armed(http_repo, spies)
@@ -217,12 +215,7 @@ def test_a_second_finish_and_a_revert_never_store_erase_prompt_for_or_share_the_
         again = deliver(d, batch)
         opened(again)
         reviewed(http_store, held, again)
-    merge_on_remote(http_repo, tmp_path, batch.branch)
-    server.seen.clear()
-    with delivery(http_repo, http) as d:
-        assert opened(revert_with(d, http_store, "agent/lessons/routes.md", "routes"), None) == \
-            forge_pulls(remote)[-1]["html_url"]
-    assert server.authorized("git-receive-pack"), "the revert pushed with the helper's token"
+    assert server.authorized("git-receive-pack"), "the deliver pushed with the helper's token"
     assert _state(credentials) == before
     assert sorted(p.name for p in credentials.parent.iterdir()) == ["git-credentials"]
     _silent(log)
@@ -251,8 +244,8 @@ def _holding(roots, secret: bytes, since: float):
 
 @pytest.mark.postgres
 def test_no_second_copy_of_the_credential_is_written_anywhere(http_repo, http_store, tmp_path):
-    """A fresh JWT never appears in a disk file after the delivery's open (its fetch), commit, refused deliver, retried
-    deliver and revert. (#1618: the after-scan cannot see a private repository, removed at close; the scan made while
+    """A fresh JWT never appears in a disk file after the delivery's open (its fetch), commit, refused deliver and retried
+    deliver. (#1618: the after-scan cannot see a private repository, removed at close; the scan made while
     network git waits, below, is the one that reads its configuration.)"""
     tenant, _remote, credentials, server = http_repo
     token = identity_token(signature=uuid.uuid4().hex)
@@ -273,10 +266,6 @@ def test_no_second_copy_of_the_credential_is_written_anywhere(http_repo, http_st
         again = deliver(d, batch)
         opened(again)
         reviewed(http_store, held, again)
-    merge_on_remote(http_repo, tmp_path, batch.branch)
-    with delivery(http_repo, http, identity=identity) as d:
-        assert opened(revert_with(d, http_store, "agent/lessons/no-copy.md", "no-copy"), None) == \
-            forge_pulls(http_repo[1])[-1]["html_url"]
     assert server.authorized("git-receive-pack")
     new_in_tmp = [os.path.join(tmp, name) for name in sorted(set(os.listdir(tmp)) - existing)]
     copies = _holding([*new_in_tmp, location_path(tenant.tenant_root), _private_roots(tenant),
@@ -301,8 +290,8 @@ def _private_configs(tenant):
 
 @pytest.mark.postgres
 def test_no_file_holds_the_credential_while_network_git_waits_on_the_forge(http_repo, http_store, tmp_path):
-    """A fresh JWT never appears on disk during authenticated fetch or push: the delivery's open (its fetch), its
-    deliver (the tick's push; #1618: `finish` is deleted) and the revert's open and push. Each scan is made while git
+    """A fresh JWT never appears on disk during authenticated fetch or push: the delivery's open (its fetch), and its
+    deliver (the tick's push; #1618: `finish` is deleted). Each scan is made while git
     waits on the forge and reads the private repository's own git configuration under `.repo-scratch/` (#1618 K8: the
     clone whose `.git/config` this guarded is gone; the private repository is removed on exit, so it is observed during
     the operation): the credential is never written into a repository's configuration."""
@@ -332,13 +321,7 @@ def test_no_file_holds_the_credential_while_network_git_waits_on_the_forge(http_
         finished = deliver(d, batch)
         opened(finished)
         reviewed(http_store, held, finished)
-    merge_on_remote(http_repo, tmp_path, batch.branch)
-    phase[0] = "revert"
-    server.rearm()
-    with delivery(http_repo, http, identity=identity) as d:
-        opened(revert_with(d, http_store, "agent/lessons/during.md", "during"), None)
-    required = {("open", "git-upload-pack"), ("deliver", "git-receive-pack"), ("revert", "git-upload-pack"),
-                ("revert", "git-receive-pack")}
+    required = {("open", "git-upload-pack"), ("deliver", "git-receive-pack")}
     assert required <= set(scans), sorted(required - set(scans))
     missing = sorted(moment for moment in required if not configs.get(moment))
     assert missing == [], f"premise: no private repository's configuration was there to read at {missing}: {configs}"
@@ -433,10 +416,6 @@ def test_the_credential_never_rides_in_a_process_argument_or_environment(http_re
         again = deliver(d, batch)
         opened(again)
         reviewed(http_store, held, again)
-    merge_on_remote(http_repo, tmp_path, batch.branch)
-    with spawns, delivery(http_repo, http) as d:
-        assert opened(revert_with(d, http_store, "agent/lessons/argv.md", "argv"), None) == \
-            forge_pulls(http_repo[1])[-1]["html_url"]
     assert spawns.seen
     assert spawns.carrying(_secrets(TOKEN)) == []
 
@@ -567,7 +546,7 @@ exit 0
 
 @pytest.mark.postgres
 def test_network_git_runs_no_hook_the_configuration_names(http_repo, http_store, tmp_path):
-    """Hooks never run under the delivery's network git: its deliver (refused, then retried) and the revert's push.
+    """Hooks never run under the delivery's network git: its deliver (refused, then retried).
     #1618 K8: there is no clone whose `.git/hooks` this guarded; the hooks are planted in the delivery's own private
     repository (`d.repository.path/hooks`, once it is open) and named by `core.hooksPath` in the per-user configuration.
     Control: a plain git under the same configuration runs them."""
@@ -605,13 +584,6 @@ def test_network_git_runs_no_hook_the_configuration_names(http_repo, http_store,
         again = deliver(d, batch)
         opened(again)
         reviewed(http_store, held, again)
-    # The person's merge is the test's own git (it reads the per-user configuration): the hooks are off for it alone.
-    git(http_repo.checkout, "config", "--file", str(_global_config(http_repo)), "--unset", "core.hooksPath")
-    merge_on_remote(http_repo, tmp_path, batch.branch)
-    git(http_repo.checkout, "config", "--file", str(_global_config(http_repo)), "core.hooksPath", str(hooks))
-    with delivery(http_repo, http) as d:
-        plant(d)
-        revert_with(d, http_store, "agent/lessons/hooked.md", "hooked")
     assert git(remote, "rev-parse", f"refs/heads/{batch.branch}")
     seen = log.read_text(encoding="utf-8") if log.exists() else ""
     assert seen == "", f"a configured hook ran under network git: {seen}"

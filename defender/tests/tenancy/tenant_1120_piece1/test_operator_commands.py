@@ -324,7 +324,6 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
     ("defender/learning/author/lessons/run.py", []),
     ("defender/learning/author/questioner/run.py", []),
     ("defender/cli/learning/lessons_page.py", []),
-    ("defender/cli/learning/revert_lesson.py", ["example-lesson"]),
     ("defender/cli/learning/trace_lesson.py", ["--all"]),
 ])
 @pytest.mark.parametrize("identity", [
@@ -379,7 +378,6 @@ def test_1186_learning_operator_commands_refuse_identity_before_state_access(
     # `loop.py --author-drain --tenant T` does, so it meets the author lane's working batch.
     ("defender/learning/author/lessons/run.py", [], "author", "skipping", 0),
     ("defender/learning/author/questioner/run.py", [], "author", "skipping", 0),
-    ("defender/cli/learning/revert_lesson.py", ["example-lesson"], "author", "an author drain is in progress", 3),
 ])
 @pytest.mark.postgres
 def test_1186_learning_operator_cli_meets_the_explicit_tenants_busy_lane(

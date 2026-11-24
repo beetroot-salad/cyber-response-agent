@@ -163,7 +163,6 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 
 **CLIs**
 - `cli/tenant.py`: `update(tenant_id, *, client=, identity=)`; `propose(tenant_id, staged, *, client=None, identity=None) -> int` (add/replace only, `agent/` only, refusals `[tenant.py] ...`). (The O-SEE tenant check retired with `check <id>` in #1471 B3.)
-- `cli/learning/revert_lesson.main(argv, *, client=None, identity=None, directory=None, credential_config=None, issuer_transport=None)`; drain lock still exit 3.
 - `validate_scaffold.py <system> --tenant <T> --staged <dir>`: the skill and template checks read the staged (agent-root-shaped) directory, the adapter checks the code tree (`DEFENDER_DIR`). `--tenant` exists today; `--staged` is the missing flag (U13).
 
 **Readers and run tenant**
@@ -206,7 +205,7 @@ Files are under `tenant_1108_p4/` unless a path is given.
 - O-TEXT model-facing spellings → `test_model_text.py`, `test_connect_propose.py`
 - O5 lesson load recorded → `test_lesson_load.py`, `learning/retrieval/test_record_lesson_load.py`
 - O6 judge pre/post-move, unreadable → `test_judge_bodies.py`, `learning/judge/test_render.py`
-- O7 all corpus writes via TenantDelivery, legacy delivery deleted → `test_writers.py`, `test_drains.py`, `test_revert_cli.py`, `test_connect_propose.py`, lane suites (#773/#869/#870/#1134/lead author/pitfalls)
+- O7 all corpus writes via TenantDelivery, legacy delivery deleted → `test_writers.py`, `test_drains.py`, `test_connect_propose.py`, lane suites (#773/#869/#870/#1134/lead author/pitfalls)
 - O7b merged PR read → `knowledge_1618/test_fetch_child_1618.py` (#1618: nothing is recorded stale)
 - O-STALE child classification (#1618: `ok`/`refused transient|lasting`) → `knowledge_1618/test_refusal_classes_1618.py`, `test_run_start.py`, `test_r6_inputs.py`, `learning/branch/test_family_knowledge.py`
 - O-WARN page/ticket/API → `test_stale_visibility.py`, `test_run_page.py`
@@ -225,7 +224,6 @@ Files are under `tenant_1108_p4/` unless a path is given.
 - Flow 2 materialise: retired with the exports (#1618 K8); a delivery's open is covered by `tenant_1108_delivery/test_credential.py`
 - Flow 3 run start → `test_run_start.py`, `test_run_copy.py`, `tests/tenancy/test_tenant_settings_location.py`, `e2e/test_tenant_run_start_e2e.py`
 - Flow 4 drain → `test_drains.py`, `test_refused_claims.py`
-- Flow 5 revert → `test_revert_cli.py`
 - Flow 6 connect → `test_connect_propose.py`, `e2e/test_consumers_e2e.py`
 - Flow 7 branch replay → `test_branch_replay.py`
 - A-ID drain AppRole login → `test_drain_credentials.py`, `test_live_dev_issuer.py`
@@ -259,7 +257,7 @@ Deleted (OD12 class i) or re-spelled in contract repair rounds 1–2 (merged as 
 - Deleted, class (i):
   - `learning/curation/test_drain_byte_identity.py` (whole file, above).
   - `learning/stages/test_frames_lifecycle.py::test_revert_lesson_driver_holds_shared_author_lock_and_calls_through` (`revert(branch=)`)
-    → `test_revert_cli.py::test_flow5_revert_cli_opens_a_revert_pr_on_the_tenant_forge_deleting_the_agent_lesson`, `::test_flow5_revert_cli_waits_out_a_running_author_drain`. <!-- lint-stale-ref: ok — historical record: this names the test as it was before the learning-store rewrite (#1278) -->
+    → the revert CLI's flow-5 cases, since removed with the CLI itself (#1592 F9: a member reverts a lesson in Forgejo's editor). <!-- lint-stale-ref: ok — historical record: this names the test as it was before the learning-store rewrite (#1278) -->
   - `tenant_1108_delivery/test_forgejo.py::test_the_writer_lease_is_not_held_by_a_fork_pr` (lease on `AuthorBranch`)
     → `test_drains.py::test_od8_an_open_tenant_pr_of_the_lane_holds_the_writer_lease_and_nothing_else_does` (`_LEASE_ROWS`, both drains).
   - `learning/curation/test_curator_glm_engine.py::test_marker_commit_message_with_trailer_rejected` (`commit_corpus` trailer guard; the commit-maker composes none);

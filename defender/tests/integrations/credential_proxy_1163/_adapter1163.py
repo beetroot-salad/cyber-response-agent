@@ -313,7 +313,7 @@ class Records:
         self._active = active
         for tenant, generations in tenants.items():
             active.run_sync(seed_tenant(self.twin, 
-                tenant, created_at=active.CREATED, state="active", repo=f"tenants/{tenant}",
+                tenant, created_at=active.CREATED, state="active", repo=f"t-{tenant}/knowledge",
                 origin=active._origin_of(Path(data_root), tenant, None)))  # noqa: SLF001
             for fields in generations:
                 active.run_sync(self.twin.add_generation(tenant, **fields))

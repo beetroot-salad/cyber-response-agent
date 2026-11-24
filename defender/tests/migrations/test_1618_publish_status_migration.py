@@ -1,4 +1,4 @@
-"""#1618 D7: a revision after `0026_host_requests` drops `tenancy.publish_status` and touches nothing else; no product
+"""#1618 D7: a revision after `0027_people_requests` (#1592) drops `tenancy.publish_status` and touches nothing else; no product
 code is left that writes or reads the table (the launch's publish outcome is no longer recorded)."""
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from defender.tests.migrations.test_1214_migrations import _tables, _upgrade_to
 from defender.tests.support.shared import _revisions1485 as revisions
 from defender.tests.support.shared._postgres1339 import execute
 
-PRIOR = "0026_host_requests"
+PRIOR = "0027_people_requests"
 TENANT = "5b1c2d3e-4f50-4a61-8b72-9c83d4e5f601"
 STAMP = dt.datetime(2026, 11, 1, 8, 0, tzinfo=dt.UTC)
 DEFENDER = Path(__file__).resolve().parents[2]
@@ -27,17 +27,17 @@ def _plant(dsn: str) -> None:
 
 
 def test_one_revision_after_the_host_requests_revision_drops_the_publish_status_table_and_the_head_is_not_behind_it():
-    """One line of history with a revision built after `0026_host_requests` (the head is not still there). (D7)"""
+    """One line of history with a revision built after `0027_people_requests` (the head is not still there). (D7)"""
     from defender.migrations import head, heads
 
     assert heads() == (head(),)
-    assert head() != PRIOR, "no revision follows 0026_host_requests"
+    assert head() != PRIOR, "no revision follows 0027_people_requests"
     assert PRIOR in revisions.ancestors(head())
 
 
 @pytest.mark.postgres
 def test_the_table_is_there_at_the_prior_revision_and_gone_at_head_with_every_other_tenancy_table_as_it_was(empty_database):
-    """`publish_status` exists at `0026_host_requests` (control) and not at head; the other `tenancy` tables keep their columns. (D7)"""
+    """`publish_status` exists at `0027_people_requests` (control) and not at head; the other `tenancy` tables keep their columns. (D7)"""
     from defender.migrations import head
 
     dsn = empty_database

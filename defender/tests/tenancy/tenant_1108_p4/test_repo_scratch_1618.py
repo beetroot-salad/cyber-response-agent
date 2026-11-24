@@ -15,7 +15,6 @@ from defender.tests.support.jobs import _job_helper as J
 from defender.tests.support.jobs._job_helper_learning import run_kind
 from defender.tests.support.learning.core._feedback1278 import FeedbackCurator, make_scene
 from defender.tests.support.learning.core._store1278 import (
-    authored_and_merged,
     migrated_database,  # noqa: F401 — fixture
     world,  # noqa: F401 — fixture
 )
@@ -26,7 +25,6 @@ from defender.tests.tenancy.knowledge_1618 import _slice_a as A
 from defender.tests.tenancy.knowledge_1618 import _support as K
 from defender.tests.tenancy.tenant_1108_p4._drain_support import without_clone
 from defender.tests.tenancy.tenant_1108_p4.test_1278_feedback import READ_ISSUE, _due, _files
-from defender.tests.tenancy.tenant_1108_p4.test_1278_revert import LESSON
 
 pytestmark = [pytest.mark.postgres]
 
@@ -68,19 +66,6 @@ def _drain_tick(request, tmp_path):
     return w.t, watch
 
 
-def _revert(request, tmp_path):
-    w = request.getfixturevalue("world")
-    t = w.t
-    authored_and_merged(w)
-    without_clone(t)
-    watch = R.Watch(t)
-    watch.arm()
-    cli = importlib.import_module("defender.cli.learning.revert_lesson")
-    rc = cli.main(["--tenant", t.tenant_id, LESSON], client=t.forge.client, identity=t.vault.identity(), directory=t.directory)
-    assert rc == 0
-    return t, watch
-
-
 def _adoption(request, tmp_path):
     t = request.getfixturevalue("world").t
     without_clone(t)
@@ -120,7 +105,6 @@ def _helper_batch_start(request, tmp_path):
 OPERATIONS = {
     "fetch-child": _fetch_child,
     "host-drain-tick": _drain_tick,
-    "revert": _revert,
     "adoption": _adoption,
     "feedback": _feedback,
     "helper-batch-start": _helper_batch_start,

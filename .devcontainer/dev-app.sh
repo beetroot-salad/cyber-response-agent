@@ -10,7 +10,9 @@
 #
 # - the API (`python -m defender.api_server`) on 127.0.0.1:8001, over the dev PostgreSQL, Keycloak and OpenBao. Its
 #   own start checks (database version, OpenBao, both realms) refuse start naming the step; the script shows that log.
-# - Vite's dev server (`bun run dev`, hot reload) on the container's port 8000, `/api` sent to the API;
+# - Vite's dev server (`bun run dev`, hot reload) on the container's port 8000, `/api` sent to the API and the Forgejo
+#   site's host (`forge.localhost`, Forgejo's ROOT_URL) to Forgejo whole: not the edge's allowlist (#1592), which only the
+#   ingress serves;
 # - `python -m defender.lifecycle serve` (which carries out tenant creation), only when none is running; it stops only
 #   one it started.
 #
@@ -158,6 +160,12 @@ start_lifecycle() {
   (
     cd "$REPO"
     set +u; source "$ISSUER/lifecycle.env"; set -u
+    # #1592: the request worker's two settings, which .devcontainer/forgejo/setup.sh's header says how to read, and the
+    # forge as a browser reaches it (dev: http://forge.localhost:8000, Forgejo's ROOT_URL).
+    local name
+    for name in DEFENDER_LIFECYCLE_KEYCLOAK_SOURCE_ID DEFENDER_LIFECYCLE_FORGE_SESSIONS_DSN DEFENDER_LIFECYCLE_FORGE_PUBLIC_URL; do
+      [ -n "${!name:-}" ] || die "$ISSUER/lifecycle.env sets no $name: run .devcontainer/forgejo/setup.sh and add it, as its header says"
+    done
     export PYTHONPATH="$REPO"
     launch lifecycle "$PY" -m defender.lifecycle serve
   )
@@ -173,6 +181,7 @@ start_vite() {
       || die "bun install failed: see $STATE/bun-install.log"
     # Every interface, not Vite's configured localhost: a published port arrives on the container's network address.
     export DEFENDER_INGRESS_API_UPSTREAM="127.0.0.1:$API_PORT"
+    export DEFENDER_FORGE_DOMAIN=forge.localhost DEFENDER_INGRESS_FORGE_UPSTREAM=forgejo:3000
     launch vite bun run dev --host 0.0.0.0
   )
 }

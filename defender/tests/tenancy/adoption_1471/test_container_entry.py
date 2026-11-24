@@ -49,7 +49,7 @@ def _facts(repo, forge, **over):
         "digest": DIGEST,
         "rendering": {path: base64.b64encode(data).decode() for path, data in RENDERING.items()},
         "forge_origin": forge.wired,
-        "forge_repo": "tenants/blue",
+        "forge_repo": "t-blue/knowledge",
     }
     return {**facts, **over}
 

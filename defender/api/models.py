@@ -213,8 +213,9 @@ class Adoption(SavedAdoption):
     """An adoption as served: the pull request's address is built from the tenant's forge wiring."""
 
     pr_url: str | None = Field(
-        description="The pull request's page on the tenant's forge; null without a number, or when the tenant has no "
-                    "forge wiring.")
+        description="The pull request's page on the public Forgejo site: the tenant's repository page, as its "
+                    "Knowledge repo link opens it, plus `/pulls/<n>`; null without a number, or when the tenant has no "
+                    "repository page a browser may open.")
 
 
 class Investigation(BaseModel):

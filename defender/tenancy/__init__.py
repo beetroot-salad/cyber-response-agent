@@ -47,6 +47,8 @@ if TYPE_CHECKING:
     from defender.tenancy._directory import (
         RecordsUnreachable as RecordsUnreachable,
         TenantDirectory as TenantDirectory,
+        connection_lost as connection_lost,
+        why_unreachable as why_unreachable,
     )
     from defender.tenancy._exports import (
         DeliveryRefused as DeliveryRefused,
@@ -96,8 +98,9 @@ if TYPE_CHECKING:
     from defender.tenancy.models import (
         ForgeWiring as ForgeWiring,
         Generation as Generation,
-        MergeEligibility as MergeEligibility,
+        PeopleRequest as PeopleRequest,
         TenantRecord as TenantRecord,
+        knowledge_repo as knowledge_repo,
         offboard as offboard,
     )
     from defender.tenancy.record_values import (
@@ -112,6 +115,7 @@ if TYPE_CHECKING:
         HeldTenant as HeldTenant,
         KEEP as KEEP,
         NotFound as NotFound,
+        PEOPLE_LOCK_NAMESPACE as PEOPLE_LOCK_NAMESPACE,
         TenantRepository as TenantRepository,
         claimable_now as claimable_now,
     )
@@ -122,15 +126,15 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("DELIVERY_LOGIN", "LOGIN_PATH", "SIGN_LOGIN", "AppRoleLogin", "AppRoleLoginError", "CleartextAddress", "LoginPair", "LoginRefused", "LoginUnreachable", "LoginUnrecorded", "NoLiveGeneration", "SecretFileUnusable", "approle_login", "live_generation", "recorded_login",), "_approle_login"),
     **dict.fromkeys(("admit_tenant", "database_address_variable", "host_directory", "in_lifecycle_process", "mark_lifecycle_process", "still_active",), "_admission"),
     **dict.fromkeys(("open_command_line_run",), "_command_line_run"),
-    **dict.fromkeys(("RecordsUnreachable", "TenantDirectory",), "_directory"),
+    **dict.fromkeys(("RecordsUnreachable", "TenantDirectory", "connection_lost", "why_unreachable",), "_directory"),
     **dict.fromkeys(("DeliveryRefused", "regular_files", "remove_entry",), "_exports"),
     **dict.fromkeys(("OWNER_FILE", "REPO_SCRATCH", "mark_alive", "owned_temporary", "owner_alive", "private_folder", "process_mark", "process_start", "sweep_dead_owners", "write_owner",), "_owner"),
     **dict.fromkeys(("ISSUER_ROLE", "Tenant", "TenantId", "accept_tenant", "box_mounted_arm_container", "box_mounted_episodes", "check_knowledge_folder", "check_run_settings", "data_root_for_child", "data_root_from_path", "is_valid_tenant_id", "job_tenant_folder", "parse_tenant_id_bytes", "refuse_unplaceable_data_root", "requested_tenant", "requested_tenant_id", "resolve_data_root", "tenant_id_file_text",), "_tenant"),
     **dict.fromkeys(("AGENT_HALF", "SETTINGS_HALF", "TENANT_ID_FILE", "add_tenant_arguments", "template_dir",), "_tenants"),
     **dict.fromkeys(("InMemoryTenantRepository",), "memory"),
-    **dict.fromkeys(("ForgeWiring", "Generation", "MergeEligibility", "TenantRecord", "offboard", ), "models"),
+    **dict.fromkeys(("ForgeWiring", "Generation", "PeopleRequest", "TenantRecord", "knowledge_repo", "offboard", ), "models"),
     **dict.fromkeys(("SystemRecord", "CaseRecord", "TenantRecords"), "record_values"),
-    **dict.fromkeys(("ALL", "Conflict", "FenceMissed", "HeldTenant", "KEEP", "NotFound", "TenantRepository", "claimable_now",), "repository"),
+    **dict.fromkeys(("ALL", "Conflict", "FenceMissed", "HeldTenant", "KEEP", "NotFound", "PEOPLE_LOCK_NAMESPACE", "TenantRepository", "claimable_now",), "repository"),
 }
 
 __getattr__ = lazy_door(globals(), _HOMES)

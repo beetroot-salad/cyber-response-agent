@@ -127,7 +127,8 @@ def _port(value: str) -> int:
 
 def artifact_domain(value: str) -> str:
     """A bare lowercase hostname (dot-separated labels of ASCII letters, digits and hyphens): no scheme, port, path,
-    wildcard or surrounding text. The one owner of the artifact domain's shape (S5)."""
+    wildcard or surrounding text. The one owner of a public hostname setting's shape: the artifact domain (S5) and the
+    Forgejo site's domain, the ingress's `DEFENDER_FORGE_DOMAIN` (#1592)."""
     if not is_hostname(value):
         raise ValueError("must be a bare lowercase hostname: no scheme, port, path, wildcard or empty label")
     return value

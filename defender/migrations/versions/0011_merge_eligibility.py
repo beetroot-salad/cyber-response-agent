@@ -14,7 +14,7 @@ down_revision = "0010_cost_lower_limit"
 
 def upgrade() -> None:
     op.create_table(
-        "merge_eligibility",
+        "merge_eligibility",  # lint-stale-ref: ok — the table this revision created (0027 drops it)
         sa.Column("tenant_id", sa.Uuid(as_uuid=False), nullable=False),
         sa.Column("logins", sa.ARRAY(sa.Text()), nullable=False),
         sa.Column("read_at", sa.DateTime(timezone=True), nullable=False),

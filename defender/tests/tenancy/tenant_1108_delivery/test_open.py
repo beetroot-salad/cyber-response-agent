@@ -12,16 +12,14 @@ import pytest
 
 from defender.learning.author.version_control.forgejo import ForgeError
 
-from ._revert_store import claimed_batch, reviewed, revert_with
+from ._revert_store import claimed_batch, reviewed
 from ._support import (
     LANES,
     TOKEN,
     ForgeHTTP,
     delivery,
     files_under,
-    forge_pulls,
     git,
-    merge_on_remote,
     opened,
     push_and_open,
     target,
@@ -128,18 +126,7 @@ def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, s
         reviewed(store, held, again)
     assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == sha
     assert git(repo[1], "rev-parse", "main") == expected
-    merged = merge_on_remote(repo, tmp_path, batch.branch)
     d.close()
-    with monkeypatch.context() as env:
-        redirect(env)
-        # #1618 (flow 7): the revert is its own operation, over its own private repository fetched after the merge.
-        with delivery(repo, http) as later:
-            reverted = revert_with(later, store, "agent/lessons/ambient.md", "ambient")
-    assert opened(reverted, None) == forge_pulls(repo[1])[-1]["html_url"]
-    revert_head = http.creates[-1]["head"]
-    tip = git(repo[1], "rev-parse", f"refs/heads/{revert_head}")
-    assert git(repo[1], "rev-parse", f"{tip}^") == merged == git(repo[1], "rev-parse", "main")
-    assert _name_status(repo[1], tip) == {"agent/lessons/ambient.md": "D"}
     assert git(repo[1], "show", f"{sha}:agent/lessons/ambient.md") == "tenant authored"
     assert _name_status(repo[1], sha) == {"agent/lessons/ambient.md": "A"}
     assert git(foreign, "rev-parse", "HEAD") == foreign_head

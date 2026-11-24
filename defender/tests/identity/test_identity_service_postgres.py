@@ -30,6 +30,7 @@ from defender.tests.support.shared._pglocks1339 import (
 from defender.tests.support.shared._postgres1339 import database, execute
 from defender.tests.support.api._programs1307 import NoProgramsRealm  # #1307 D7: the programs port is required
 from defender.tests.support.identity._seed1496 import seed_user
+from defender.tests.support.identity._wanted1592 import plant_member
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
 
@@ -345,3 +346,42 @@ async def test_closing_the_service_closes_its_repository_and_its_sign_in_port(pg
     await stack.service.close()
     assert stack.signin.closed is True
     await until(idle)
+
+
+# --- #1592 S3-4: the synchronous wrapper feedback reads the people with --------------------------------------
+
+UNREACHABLE_DSN = "postgresql://nobody:nothing@127.0.0.1:9/defender"
+
+
+def _directory(dsn: str):
+    from defender.identity import PeopleDirectory
+    from defender.identity.postgres import PostgresIdentityRepository
+
+    return PeopleDirectory(lambda: PostgresIdentityRepository(dsn))
+
+
+def test_the_wrapper_returns_the_users_wanted_in_a_tenant_S3_4():
+    """S3-4: `PeopleDirectory(open_repository).wanted_users(T)` is the active member's id (an invited and an ended member
+    are the negative controls: wanted is an active membership, S1-16), as plain strings or ids."""
+    with database(migrated=True) as dsn:
+        insert_active_tenant(dsn, T1)
+        planted = {plant_member(dsn, T1, "ann@s34.example")}
+        plant_member(dsn, T1, "bob@s34.example", "invited")
+        plant_member(dsn, T1, "ended@s34.example", "ended")
+        got = _directory(dsn).wanted_users(T1)
+        assert {str(u) for u in got} == planted
+        assert _directory(dsn).wanted_users(T2) == set()
+
+
+def test_an_unreachable_database_is_records_unreachable_not_a_raw_driver_error_S3_4():
+    """S3-4: a database nothing answers at raises `RecordsUnreachable`, a drain's transient refusal."""
+    from defender.systems.run_tenant import RecordsUnreachable
+
+    with pytest.raises(RecordsUnreachable):
+        _directory(UNREACHABLE_DSN).wanted_users(T1)
+
+
+async def test_the_wrapper_called_inside_a_running_loop_raises_runtime_error_S3_4():
+    """S3-4: it is a synchronous seam (one `asyncio.run` per call): inside a running loop it refuses with `RuntimeError`."""
+    with pytest.raises(RuntimeError):
+        _directory(UNREACHABLE_DSN).wanted_users(T1)

@@ -549,7 +549,9 @@ class IdentityService:
         return ProgramCaller(program=program, credential=credential)
 
     async def logout(self, auth: PersonCaller, value: str) -> None:
-        await self._repo.delete_session(value)
+        """End this session (other devices stay signed in) and stamp the person's sign-out (#1592), which records the
+        request that ends their forge sessions too."""
+        await self._repo.sign_out(auth.user.id, value)
 
     # --- the caller's own view ---------------------------------------------------------------
     async def member_of(self, auth: Authenticated, tenant_id: TenantId) -> Role:

@@ -9,7 +9,6 @@ Identity's memberships refer to `tenants`; nothing here refers to identity."""
 
 from __future__ import annotations
 
-import dataclasses
 import datetime as _dt
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -21,7 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 from defender.database import Base, IdColumn
-from defender.records.formats import MAPPING_KEYS, AlertMapping, TenantId
+from defender.records.formats import MAPPING_KEYS, AlertMapping, PeopleRequestId, TenantId, UserId
 # The records' plain values live apart from the tables (no database library needed to hold them); re-exported here.
 from defender.tenancy.record_values import CaseRecord as CaseRecord, SystemRecord as SystemRecord, TenantRecords as TenantRecords
 
@@ -132,11 +131,23 @@ async def share_tenant(executor: AsyncConnection | AsyncSession, tenant_id: Tena
         select(table.c.state).where(table.c.id == tenant_id).with_for_update(read=True))).scalar()
 
 
+def knowledge_repo(tenant_id: str) -> str:
+    """The tenant's repository on the forge (#1592): `t-<T>/knowledge`, the organisation `t-<T>` holding repository
+    `knowledge`. The one owner of the name: the lifecycle's `names` records it, the wiring CHECK admits only it, and the
+    memory twin's mirror of that CHECK compares with it."""
+    return f"t-{tenant_id}/knowledge"
+
+
+#: The wiring CHECK (#1592 OD-5): a tenant's wiring names its own knowledge repository, `knowledge_repo`'s spelling.
+WIRING_IS_KNOWLEDGE_REPO = "repo = 't-' || tenant_id::text || '/knowledge'"
+
+
 class ForgeWiring(Base, kw_only=True):
-    """The tenant's repository on the forge: recorded, never derived (the lab keeps `tenants/playground`)."""  # lint-shippable: ok — names the lab tenant that adoption keeps
+    """The tenant's repository on the forge: recorded by the lifecycle's `names` step, and only ever the tenant's own
+    `knowledge_repo` (the CHECK; the memory twin refuses any other with `ValueError`)."""
 
     __tablename__ = "forge_wiring"
-    __table_args__ = {"schema": SCHEMA}
+    __table_args__ = (CheckConstraint(WIRING_IS_KNOWLEDGE_REPO, name="repo_is_knowledge"), {"schema": SCHEMA})
 
     tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
     repo: Mapped[str] = mapped_column(Text)
@@ -263,26 +274,24 @@ class CaseVersionRow(Base, kw_only=True):
     written_at: Mapped[_dt.datetime] = mapped_column(_TIME)
 
 
-@dataclasses.dataclass(frozen=True)
-class MergeEligibility:
-    """Who may merge into the tenant's `main`, as of the management service's latest read (#1414 D13): the logins of the
-    merge whitelist's users and its teams' members, no generation's bot among them, and the instant it was read."""
-
-    logins: frozenset[str]
-    read_at: _dt.datetime
+# --- people requests (#1592) ---------------------------------------------------------------------------------------------
 
 
-class MergeEligibilityRow(Base, kw_only=True):
-    """The tenant's latest merge-eligibility record (#1414 D13): at most one row, absent until the first successful read,
-    replaced whole by each later one and never deleted. An empty `logins` is a record (a whitelist nobody is on)."""
+class PeopleRequest(Base, kw_only=True):
+    """That something changed for a person (#1592 OD-10): (U, T) U's place in T, (U, none) U's account and sessions,
+    (none, T) every person of T. Written by the database triggers on `identity.memberships.status`,
+    `tenancy.tenants.state` and `identity.users.signed_out_at` in the changing transaction (the memory twins record
+    where their stores write those columns), and deleted only by the request worker. Neither id has a foreign key: a
+    request may name a user the product does not know, and it outlives a tenant row deleted under it. `requested_at` is
+    the writing transaction's `now()` (the twin's process clock), which orders them; ties are expected."""
 
-    __tablename__ = "merge_eligibility"
-    __table_args__ = {"schema": SCHEMA}
+    __tablename__ = "forge_people_requests"
+    __table_args__ = (
+        CheckConstraint("user_id IS NOT NULL OR tenant_id IS NOT NULL", name="names_someone"),
+        {"schema": SCHEMA},
+    )
 
-    tenant_id: Mapped[TenantId] = mapped_column(IdColumn(TenantId), ForeignKey(f"{SCHEMA}.tenants.id"), primary_key=True)
-    logins: Mapped[list[str]] = mapped_column(ARRAY(Text))
-    read_at: Mapped[_dt.datetime] = mapped_column(_TIME)
-
-    def as_record(self) -> MergeEligibility:
-        """The record the row holds, its time an instant in UTC."""
-        return MergeEligibility(logins=frozenset(self.logins), read_at=self.read_at.astimezone(_dt.UTC))
+    id: Mapped[PeopleRequestId] = mapped_column(IdColumn(PeopleRequestId), primary_key=True)
+    user_id: Mapped[UserId | None] = mapped_column(IdColumn(UserId), default=None)
+    tenant_id: Mapped[TenantId | None] = mapped_column(IdColumn(TenantId), default=None)
+    requested_at: Mapped[_dt.datetime] = mapped_column(_TIME)

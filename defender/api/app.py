@@ -873,15 +873,17 @@ async def _read_readiness(deps: ApiDeps, tenant_id: TenantId, readiness_id: Host
 
 
 async def _read_adoption(deps: ApiDeps, tenant_id: TenantId, adoption_id: HostRequestId) -> Adoption:
-    """The adoption served. The pull request's address is built here from the tenant's recorded forge wiring and the
-    number, never taken from the job record (A3); a tenant with no wiring gives none (R13-2)."""
+    """The adoption served. The pull request's address is built here, never taken from the job record (A3): the tenant's
+    repository page as the lifecycle recorded it (the page the Knowledge repo link opens, under the forge's public URL),
+    plus `/pulls/<n>` (#1592). A tenant with no page a browser may open (none recorded, as with no wiring, R13-2) gives
+    none."""
     saved = await deps.host_requests.get_adoption(tenant_id, adoption_id)
     if saved is None:
         raise _not_found("adoption", adoption_id)
     number = None if saved.result is None else saved.result.pr_number
-    wiring = None if number is None else await deps.tenants.forge_wiring(tenant_id)
-    url = None if wiring is None else f"{wiring.origin.removesuffix('.git')}/pulls/{number}"
-    return Adoption(**dict(saved), pr_url=url)
+    record = None if number is None else await deps.tenants.tenant(tenant_id)
+    page = None if record is None else _browser_page(record.repo_url, deps.frontend_origin)
+    return Adoption(**dict(saved), pr_url=None if page is None else f"{page.rstrip('/')}/pulls/{number}")
 
 
 async def _readiness_started(

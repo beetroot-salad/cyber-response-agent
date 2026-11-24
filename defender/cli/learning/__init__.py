@@ -1,1 +1,1 @@
-"""Operator commands for lesson traceability and reverts."""
+"""Operator commands for lesson traceability."""

@@ -21,7 +21,7 @@ pytest.importorskip('fastapi')
 pytest.importorskip('httpx')
 
 from defender.tests.support.api._mount1161 import API  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import org_of, repo_of  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import (  # noqa: E402
     REPOS,
     USERS,
@@ -128,7 +128,7 @@ def test_a_failure_records_its_restart_point_is_not_retried_and_resume_only_clea
     assert (live.bot_login, live.oidc_role, live.approle, live.entity, live.sign_approle, live.sign_entity) == names
     assert (set(world.forge.users), set(world.openbao.oidc_roles), set(world.openbao.approles),
             set(world.openbao.entities)) == ({names[0]}, {names[1]}, {names[2], names[4]}, {names[3], names[5]})
-    assert list(world.forge.repos) == [f"{ORG}/{tenant}"]
+    assert list(world.forge.repos) == [repo_of(tenant)]
     assert world.openbao.secret_accessors(live.approle) == {live.secret_accessor}
     assert world.openbao.secret_accessors(live.sign_approle) == {live.sign_secret_accessor}
     assert len(world.openbao.aliases) == 2 and list(world.openbao.transit_keys) == [f"request-token-{tenant}"]
@@ -231,7 +231,7 @@ def test_d2_a_prepare_refused_by_the_fetch_over_an_old_export_does_not_fall_back
 
 
 def _unprotect_main(world, tenant) -> None:
-    world.forge.repos[f"{ORG}/{tenant}"]["protections"].pop("main")
+    world.forge.repos[repo_of(tenant)]["protections"].pop("main")
 
 
 def _main_reads_after(world, mark) -> list[Any]:
@@ -244,7 +244,7 @@ def test_d4_prepare_checks_that_main_is_protected_and_refuses_when_it_is_not(wor
     back, resume completes and the read is seen again (the control on the same channel). (D4, D9)"""
     tenant = world.create()
     world.drive(stop=lambda: world.item(tenant)["step"] == "prepare")
-    full = f"{ORG}/{tenant}"
+    full = repo_of(tenant)
     rule = dict(world.forge.rule(full))
     _unprotect_main(world, tenant)
     mark = len(world.forge.calls)
@@ -325,7 +325,7 @@ def test_a_failing_bot_step_leaves_no_foreign_collaborator_after_resume(world):
     world.forge.fail_next[("POST", USERS)] = 500
     tenant = world.create()
     world.drive()
-    full = f"{ORG}/{tenant}"
+    full = repo_of(tenant)
     world.forge.repos[full]["collaborators"]["intruder"] = "write"
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
@@ -359,7 +359,7 @@ def test_an_offboard_that_fails_midway_is_resumed_from_its_restart_point_and_fin
     retry; resume continues and the already-destroyed things are done, not errors (RC-4, DC-4, O4)."""
     tenant = world.active_tenant()
     gen = world.live(tenant)
-    world.forge.fail_next[("PATCH", f"/api/v1/repos/{ORG}/{tenant}")] = 500
+    world.forge.fail_next[("PATCH", f"/api/v1/repos/{repo_of(tenant)}")] = 500
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
     item = world.item(tenant)
@@ -373,23 +373,20 @@ def test_an_offboard_that_fails_midway_is_resumed_from_its_restart_point_and_fin
     record = world.record(tenant)
     assert (record.state, record.pending_action, record.failure) == ("offboarded", "delete_repo", None)
     assert gen.bot_login not in world.forge.users
-    assert world.forge.repos[f"{ORG}/{tenant}"]["archived"] is True
+    assert world.forge.repos[repo_of(tenant)]["archived"] is True
     assert record.repo_delete_after == record.offboarded_at + REPO_WINDOW
 
 
 LAB = "5e1f0c7a-3b2d-4c68-9a41-7d8e6f0b2a13"
 
 
-LAB_REPO = f"{ORG}/playground"
+LAB_REPO = repo_of(LAB)
 
 
 BACKFILL_FAILURE = "registered before #1214: record its forge wiring if it has a repository, then resume"
 
 
 HAND_MADE = "hand-made-bot"
-
-
-USER_OWNER = "alice"
 
 
 def _forge(world: LifecycleWorld, method: str, path: str, **body):
@@ -406,19 +403,16 @@ class Lab:
     """The pre-#1214 lab: forge repo with a commit, a hand-made collaborator and a clone; the row is backfilled
     (step `names`, failure set) and the administrator has recorded its wiring."""
 
-    def __init__(self, world: LifecycleWorld, *, clone_in: str = "knowledge", owner: str = ORG,
-                 rule: dict | None = None) -> None:
-        """`owner` is the repository's organisation (made if the fake does not know it with an `Owners` team, as a real
-        organisation has) or, when it is `alice`, a user; `rule` is a branch protection rule an administrator made by hand."""
+    def __init__(self, world: LifecycleWorld, *, clone_in: str = "knowledge", rule: dict | None = None) -> None:
+        """The repository is `t-<LAB>/knowledge`, in the organisation an operator made by hand at the upgrade (#1592 OD-5:
+        an `Owners` team and no `members`); `rule` is a branch protection rule an administrator made by hand."""
         self.world = world
-        self.repo = f"{owner}/playground"
+        owner = org_of(LAB)
+        self.repo = repo_of(LAB)
         self.folder = world.data_root / LAB
         self.clone = self.folder / clone_in
-        if owner == USER_OWNER:
-            world.forge.add_user_repo(owner, "playground")
-        else:
-            world.forge.orgs.setdefault(owner, {"Owners"})
-            assert _forge(world, "POST", f"orgs/{owner}/repos", name="playground", private=True).status_code == 201
+        assert _forge(world, "POST", "orgs", username=owner, visibility="private").status_code == 201
+        assert _forge(world, "POST", f"orgs/{owner}/repos", name="knowledge", private=True).status_code == 201
         assert _forge(world, "POST", "admin/users", username=HAND_MADE).status_code == 201
         assert _forge(world, "PUT", f"repos/{self.repo}/collaborators/{HAND_MADE}", permission="write").status_code == 204
         self.clone.mkdir(parents=True)
@@ -470,7 +464,7 @@ def test_a_backfilled_row_does_nothing_until_resumed(world, lab):
 
 
 def test_the_job_keeps_the_recorded_wiring_skips_repo_and_template_and_keeps_the_clone(world, lab):
-    """Resumed, the actors finish the job on the existing repo `tenants/playground`: wiring kept, no repo created, no
+    """Resumed, the actors finish the job on the existing repo `t-<LAB>/knowledge`: wiring kept, no repo created, no
     template push, an old clone left as it was and nothing cloned, no `learning/` made (RC-9, Flow 1.9, O10); prepare
     reads the recorded repository through the fetch seam (#1618 D1)."""
     lab.resume()
@@ -480,7 +474,7 @@ def test_the_job_keeps_the_recorded_wiring_skips_repo_and_template_and_keeps_the
     assert wiring.repo == LAB_REPO
     assert set(world.forge.repos) == {LAB_REPO}, "the job made another repo"
     new_calls = world.forge.calls[lab.forge_calls:]
-    assert not [c for c in new_calls if (c.method, c.path) == ("POST", f"/api/v1/orgs/{ORG}/repos")]
+    assert not [c for c in new_calls if (c.method, c.path) == ("POST", f"/api/v1/orgs/{org_of(LAB)}/repos")]
     assert world.git.pushes() == [], "the template was committed over an existing repository"
     assert not [1 for args, _e in world.git.calls[lab.git_calls:] if "clone" in args]
     assert (lab.clone / "keep.txt").read_text(encoding="utf-8") == "the lab's own clone\n"
@@ -506,9 +500,6 @@ def test_the_job_leaves_one_fresh_generation_and_only_its_bot_on_the_repo(world,
 
 # --- A23: the lab's rule on `main` (a rule that exists is changed, not recreated) ---------------------------------
 
-LABS = "labs"
-
-
 HAND_RULE = {"rule_name": "main", "branch_name": "main", "enable_push": True, "enable_push_whitelist": False,
              "enable_merge_whitelist": False, "required_approvals": 2, "block_on_rejected_reviews": True,
              "enable_status_check": True, "status_check_contexts": ["ci"]}
@@ -520,37 +511,38 @@ def _bot_view(world: LifecycleWorld, repo: str) -> dict:
     return as_bot(world, jwt, f"repos/{repo}/branches/main").json()
 
 
-def test_a_lab_without_a_rule_gets_main_protected_for_its_own_organisations_owners_and_no_bot(world):
-    """The lab's rule is made with push off and the merge whitelist on naming the lab's organisation's Owners team
-    and no user; the bot reads can-push and can-merge false (A23, r8.2)."""
-    lab = Lab(world, owner=LABS)
+def test_a_lab_without_a_rule_gets_main_protected_for_its_members_team_and_no_bot(world):
+    """The lab's rule is made with push off and the merge whitelist on naming team `members` and no user, and the team
+    is made in the organisation the operator created; the bot reads can-push and can-merge false (A23, #1592 OD-5)."""
+    lab = Lab(world)
     lab.resume()
     world.drive()
     assert world.item(LAB)["state"] == "active"
-    rule = world.forge.rule(LABS + "/playground")
+    rule = world.forge.rule(lab.repo)
     assert (rule["enable_push"], rule["enable_merge_whitelist"]) == (False, True)
-    assert (rule["merge_whitelist_teams"], rule["merge_whitelist_usernames"]) == (["Owners"], [])
+    assert (rule["merge_whitelist_teams"], rule["merge_whitelist_usernames"]) == (["members"], [])
+    assert world.forge.attached(org_of(LAB), "members") == {lab.repo}
     view = _bot_view(world, lab.repo)
     assert (view["protected"], view["user_can_push"], view["user_can_merge"]) == (True, False, False)
 
 
-def test_a_hand_made_rule_is_patched_keeping_its_other_settings_users_and_teams_and_dropping_every_bot(world):
-    """The lab's existing rule is PATCHed, not recreated: push off, whitelist on with the full lists sent (the human user, a
-    bot-like login of no generation and the team kept, Owners added, the pending bot removed), every other setting as it was (A23, r8.1/r8.2)."""
-    world.forge.team_members[(LABS, "Reviewers")] = {"carol"}
-    world.forge.orgs.setdefault(LABS, {"Owners"}).add("Reviewers")
-    world.forge.users.update({"carol", "bot-ops"})
-    base = f"/api/v1/repos/{LABS}/playground/branch_protections"
+def test_a_hand_made_rule_is_patched_keeping_its_other_settings_and_leaving_only_the_members_team(world):
+    """The lab's existing rule is PATCHed, not recreated: push off, whitelist on and exactly `members` (the human user, a
+    bot-like login of no generation, the pending bot and the other team all dropped), every other setting as it was
+    (A23 amended by #1592 OD-5, S3-19)."""
+    base = f"/api/v1/repos/{repo_of(LAB)}/branch_protections"
     seen: list[None] = []
 
     def whitelist_the_pending_bot() -> None:  # an administrator's earlier mistake, at the moment the step reads the rule
         if not seen:
             seen.append(None)
             bot = next(u for u in world.forge.users if u.startswith("bot-") and u != "bot-ops")
-            world.forge.repos[f"{LABS}/playground"]["collaborators"]["bot-ops"] = "write"  # bot-like, no generation's
-            world.forge.put_rule(f"{LABS}/playground", **{**HAND_RULE, "enable_merge_whitelist": True,
+            world.forge.repos[repo_of(LAB)]["collaborators"]["bot-ops"] = "write"  # bot-like, no generation's
+            world.forge.put_rule(repo_of(LAB), **{**HAND_RULE, "enable_merge_whitelist": True,
                                  "merge_whitelist_usernames": ["carol", "bot-ops", bot], "merge_whitelist_teams": ["Reviewers"]})
-    lab = Lab(world, owner=LABS, rule=HAND_RULE)
+    lab = Lab(world, rule=HAND_RULE)
+    world.forge.make_team(org_of(LAB), "Reviewers", members=["carol"])
+    world.forge.users.update({"carol", "bot-ops"})
     world.forge.during[("GET", f"{base}/main")] = whitelist_the_pending_bot
     world.forge.during[("GET", base)] = whitelist_the_pending_bot
     lab.resume()
@@ -559,48 +551,32 @@ def test_a_hand_made_rule_is_patched_keeping_its_other_settings_users_and_teams_
     assert seen, "control: the rule held the pending bot when the step read it"
     rule = world.forge.rule(lab.repo)
     assert rule["enable_push"] is False and rule["enable_merge_whitelist"] is True
-    assert sorted(rule["merge_whitelist_usernames"]) == ["bot-ops", "carol"]
-    assert sorted(rule["merge_whitelist_teams"]) == ["Owners", "Reviewers"]
+    assert (rule["merge_whitelist_usernames"], rule["merge_whitelist_teams"]) == ([], ["members"])
     assert (rule["required_approvals"], rule["status_check_contexts"], rule["block_on_rejected_reviews"]) == (2, ["ci"], True)
     assert world.forge.made("POST", base) == [], "an existing rule was created again"
     [patch] = world.forge.made("PATCH", f"{base}/main")
-    assert sorted(patch.body["merge_whitelist_usernames"]) == ["bot-ops", "carol"]
-    assert sorted(patch.body["merge_whitelist_teams"]) == ["Owners", "Reviewers"]
+    assert (patch.body["merge_whitelist_usernames"], patch.body["merge_whitelist_teams"]) == ([], ["members"])
     assert (patch.body["enable_merge_whitelist"], patch.body["enable_push"]) == (True, False)
     assert _bot_view(world, lab.repo)["user_can_merge"] is False
 
 
 def test_a_whitelist_left_with_only_the_bot_is_never_stored_empty(world):
-    """A rule whose merge whitelist names only the bot ends naming Owners: an enabled whitelist stored empty would let
-    nobody merge, the owners included (A23 never-empty, P-a)."""
-    base = f"/api/v1/repos/{LABS}/playground/branch_protections"
+    """A rule whose merge whitelist names only the bot ends naming `members`: an enabled whitelist stored empty would let
+    nobody merge (A23 never-empty, P-a, #1592 OD-5)."""
+    base = f"/api/v1/repos/{repo_of(LAB)}/branch_protections"
 
     def only_the_pending_bot() -> None:
         bot = next(u for u in world.forge.users if u.startswith("bot-"))
-        world.forge.put_rule(f"{LABS}/playground", **{**HAND_RULE, "enable_merge_whitelist": True,
+        world.forge.put_rule(repo_of(LAB), **{**HAND_RULE, "enable_merge_whitelist": True,
                              "merge_whitelist_usernames": [bot], "merge_whitelist_teams": []})
-    lab = Lab(world, owner=LABS, rule=HAND_RULE)
+    lab = Lab(world, rule=HAND_RULE)
     world.forge.during[("GET", f"{base}/main")] = only_the_pending_bot
     world.forge.during[("GET", base)] = only_the_pending_bot
     lab.resume()
     world.drive()
     rule = world.forge.rule(lab.repo)
-    assert (rule["merge_whitelist_usernames"], rule["merge_whitelist_teams"]) == ([], ["Owners"])
+    assert (rule["merge_whitelist_usernames"], rule["merge_whitelist_teams"]) == ([], ["members"])
     assert world.item(LAB)["state"] == "active"
-
-
-def test_a_repository_owned_by_a_user_fails_the_template_step_because_the_stored_rule_has_no_team(world):
-    """A user-owned repository answers 201 to a team whitelist and stores none: the stored read-back fails the step, so
-    the job stops at `template` before any secret is wrapped (A23 read-back, P-a)."""
-    lab = Lab(world, owner=USER_OWNER)
-    lab.resume()
-    world.drive()
-    item = world.item(LAB)
-    assert (item["state"], item["step"], item["step_actor"]) == ("creating", "template", "service")
-    assert item["failure"] and "template" in item["failure"]
-    assert world.forge.made("POST", f"/api/v1/repos/{lab.repo}/branch_protections"), "control: the rule was sent"
-    assert world.forge.rule(lab.repo)["merge_whitelist_teams"] == []
-    assert world.openbao.wrapped == {} and world.openbao.made("POST", "/v1/sys/wrapping/unwrap") == []
 
 
 def _login_and_mint(world: LifecycleWorld, gen, role: str | None = None) -> httpx.Response:
@@ -622,8 +598,8 @@ def test_a_credential_of_one_tenant_gets_404_on_the_others_repo_and_200_on_its_o
     """A's bot JWT reads A's repo (200, control) and is told 404 for B's repo through A's integration (O8)."""
     a, gen_a, b, _gen_b = _two(world)
     jwt = jwts(world, gen_a)[-1]
-    assert as_bot(world, jwt, f"repos/{ORG}/{a}").status_code == 200
-    assert as_bot(world, jwt, f"repos/{ORG}/{b}").status_code == 404
+    assert as_bot(world, jwt, f"repos/{repo_of(a)}").status_code == 200
+    assert as_bot(world, jwt, f"repos/{repo_of(b)}").status_code == 404
 
 
 def test_a_jwt_of_one_tenant_is_refused_by_the_others_integration_on_its_claim(world):
@@ -632,15 +608,15 @@ def test_a_jwt_of_one_tenant_is_refused_by_the_others_integration_on_its_claim(w
     a, gen_a, b, gen_b = _two(world)
     minted = _login_and_mint(world, gen_b)
     assert minted.status_code == 200
-    own = as_bot(world, minted.json()["data"]["token"], f"repos/{ORG}/{b}")
+    own = as_bot(world, minted.json()["data"]["token"], f"repos/{repo_of(b)}")
     assert own.status_code == 200, "control: B's own mint is accepted by B's integration"
     world.openbao.oidc_roles[gen_a.oidc_role]["client_id"] = gen_b.audience
     crossed = _login_and_mint(world, gen_a)
     assert crossed.status_code == 200
     jwt = crossed.json()["data"]["token"]
     assert world.openbao.claims(jwt)["tenant_id"] == a
-    assert as_bot(world, jwt, f"repos/{ORG}/{b}").status_code == 401
-    assert as_bot(world, jwt, f"repos/{ORG}/{a}").status_code == 401
+    assert as_bot(world, jwt, f"repos/{repo_of(b)}").status_code == 401
+    assert as_bot(world, jwt, f"repos/{repo_of(a)}").status_code == 401
 
 
 def test_an_entity_reads_only_its_own_oidc_role(world):
@@ -659,13 +635,13 @@ def test_the_entity_carries_the_role_and_tenant_the_templated_policy_and_the_cla
 
 
 def test_each_integration_is_created_with_the_issuer_the_tenant_claim_the_repo_and_a_write_scope(world):
-    """`--issuer <config.issuer_url> --claim-eq tenant_id=<T> --repo tenants/<T>` and a write scope (F-6, O8)."""
+    """`--issuer <config.issuer_url> --claim-eq tenant_id=<T> --repo t-<T>/knowledge` and a write scope (F-6, O8)."""
     a, gen_a, b, gen_b = _two(world)
     for tenant, gen in ((a, gen_a), (b, gen_b)):
         [made] = [c for c in world.integration.created if c["user"] == gen.bot_login]
         assert made["issuer"] == world.config.issuer_url
         assert made["claims_eq"] == {"tenant_id": tenant}
-        assert made["repos"] == [f"{ORG}/{tenant}"]
+        assert made["repos"] == [repo_of(tenant)]
         assert set(made["scopes"]) & {"write:repository", "all"}, made["scopes"]
         assert made["audience"] == gen.audience
 
@@ -673,7 +649,7 @@ def test_each_integration_is_created_with_the_issuer_the_tenant_claim_the_repo_a
 # --- install's check that the bot cannot push main (DC-11, F-7) -------------------------------------
 
 def _break_protection(world: LifecycleWorld, tenant: str, how: str) -> dict:
-    full = f"{ORG}/{tenant}"
+    full = repo_of(tenant)
     bot = world.generations(tenant)[0].bot_login
     protections = world.forge.repos[full]["protections"]
     saved = dict(protections["main"])
@@ -703,7 +679,7 @@ def test_install_fails_loudly_when_the_bot_could_push_or_merge_main_and_resumes_
     assert world.fetch.calls == []
     assert len(world.git.pushes()) == 1, "only the template commit may be pushed"
     assert not [1 for args, _e in world.git.calls if "--dry-run" in args]
-    world.forge.repos[f"{ORG}/{tenant}"]["protections"]["main"] = saved  # control: the same channel, protected again
+    world.forge.repos[repo_of(tenant)]["protections"]["main"] = saved  # control: the same channel, protected again
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
@@ -714,8 +690,8 @@ def test_the_protection_read_back_is_the_rule_on_main_that_stops_the_bot(world):
     """The recorded protection rule is for `main`, does not whitelist the bot, and `branches/main` agrees (O1, DC-11)."""
     tenant = world.active_tenant()
     gen = world.live(tenant)
-    rule = world.forge.repos[f"{ORG}/{tenant}"]["protections"]["main"]
+    rule = world.forge.repos[repo_of(tenant)]["protections"]["main"]
     assert (rule.get("rule_name") or rule.get("branch_name")) == "main"
     assert gen.bot_login not in (rule.get("push_whitelist_usernames") or [])
-    reads = [world.forge.calls[i] for i in protection_reads(world, f"{ORG}/{tenant}")]
+    reads = [world.forge.calls[i] for i in protection_reads(world, repo_of(tenant))]
     assert reads and reads[-1].headers["authorization"].startswith("token "), "read back as the administrator"

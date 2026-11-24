@@ -14,7 +14,7 @@ import pytest
 from defender.tests.support.learning.core._store1278 import ONE, finding
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture the store needs
 
-from ._support import LANES, ForgeHTTP, close_on_remote, delivery, merge_on_remote, push_and_open, target
+from ._support import LANES
 
 OWNER = "revert-test"
 
@@ -63,72 +63,3 @@ def reviewed(store, held, result):
     """The batch's PR is open: the store has it in review, as the tick leaves it."""
     store.in_review(held, int(result.url.rstrip("/").rsplit("/", 1)[-1]), {})
 
-
-def wrote(repo, tmp_path, store, name, commits, *, style="merge", merge=True):
-    """A lesson the commit-maker wrote, as the author tick writes one: a claimed author batch whose `commits`
-    (a list of `{path: bytes or None}`, `None` deleting the file) are made by the batch's commit-maker, each
-    recorded, then delivered as a PR and (`merge`) merged by a person in `style`, the batch then ended merged.
-    Unmerged, the batch stays in review. Returns the batch id."""
-    with delivery(repo, ForgeHTTP()) as d:
-        batch, held = claimed_batch(repo, store, d, name)
-        for files in commits:
-            for path, content in files.items():
-                file = batch.draft_root / path
-                if content is None:
-                    file.unlink()
-                else:
-                    file.parent.mkdir(parents=True, exist_ok=True)
-                    file.write_bytes(content)
-            batch.commit(batch.change_set(), f"learning {name}")
-            batch.reset()
-        result = push_and_open(batch)  # #1618: the tick's end push and PR (`finish` is deleted, test-only)
-    assert result.status == "opened", result
-    reviewed(store, held, result)
-    if merge:
-        merge_on_remote(repo, tmp_path, batch.branch, style)
-        store.end_review(str(repo[0].id), str(held.batch_id), expect_phase="in_review", outcome="merged",
-                         published=[], held=[])
-    return str(held.batch_id)
-
-
-def revert_with(d, store, path, name):
-    """`revert_lesson` through the delivery object `d`."""
-    from defender.learning.author.version_control.store_delivery import revert_lesson
-
-    return revert_lesson(d, store, lesson_path=path, lesson_name=name, owner=OWNER, lanes=LANES)
-
-
-def revert(repo, store, http, path, name):
-    """`revert_lesson` over `repo`'s tenant through a fresh delivery object backed by `http`."""
-    return revert_with(delivery(repo, http), store, path, name)
-
-
-def revert_batches(repo, store):
-    return [b for b in store.batches(str(repo[0].id)) if b.kind == "revert"]
-
-
-def end_revert(repo, tmp_path, store, how, style="merge", *, delete_branch=False):
-    """A person merges (`how` "merged", in `style`) or closes ("closed") the one revert PR in review, and the tick's
-    reconcile ends its batch with that outcome."""
-    [mine] = [b for b in revert_batches(repo, store) if b.phase == "in_review"]
-    if how == "merged":
-        merge_on_remote(repo, tmp_path, mine.branch, style, delete_branch=delete_branch)
-    else:
-        close_on_remote(repo, mine.branch)
-    assert store.end_review(str(repo[0].id), str(mine.id), expect_phase="in_review", outcome=how, published=[], held=[])
-    return mine
-
-
-def refused_revert(repo, store, path, name):
-    """`revert_lesson` expecting `DeliveryRefused` before any claim: nothing pushed, requested or claimed."""
-    from defender.tests.tenancy.tenant_1108_delivery._scenarios import _branches
-    from defender.tests.tenancy.tenant_1108_delivery._support import git
-
-    remote, http = repo[1], ForgeHTTP()
-    main, branches, before = git(remote, "rev-parse", "main"), _branches(remote), revert_batches(repo, store)
-    with pytest.raises(target().DeliveryRefused):
-        revert(repo, store, http, path, name)
-    assert _branches(remote) == branches
-    assert git(remote, "rev-parse", "main") == main
-    assert not http.creates
-    assert [b.id for b in revert_batches(repo, store)] == [b.id for b in before], "a refused revert claimed a batch"

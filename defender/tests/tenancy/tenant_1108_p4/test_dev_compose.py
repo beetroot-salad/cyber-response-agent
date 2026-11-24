@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import yaml  # tests may load YAML raw (tooling/lint/lint_raw_yaml.py excludes tests); a
@@ -59,8 +60,31 @@ def _environment(service: dict) -> dict[str, str]:
     """A service's `environment`, mapping or `KEY=value` list form."""
     env = service.get("environment") or {}
     if isinstance(env, list):
-        return dict(item.split("=", 1) if "=" in item else (item, "") for item in env)
-    return {str(k): "" if v is None else str(v) for k, v in env.items()}
+        env = dict(item.split("=", 1) if "=" in item else (item, "") for item in env)
+    from_files: dict[str, str] = {}
+    files = service.get("env_file") or []
+    for name in [files] if isinstance(files, str) else files:  # #1592: Forgejo's settings live in an `env_file`
+        path = COMPOSE_DIR / (name["path"] if isinstance(name, dict) else name)
+        if _gitignored(path):  # host-local (`../.env`): absent in CI's checkout, secrets on a developer's machine (C12)
+            continue
+        from_files |= _env_file(path)
+    return from_files | {str(k): "" if v is None else str(v) for k, v in env.items()}
+
+
+def _gitignored(path: Path) -> bool:
+    """Whether git ignores `path`: a host-local file the repository does not ship, which a test must never read."""
+    return bool(_ignored([str(path)]))
+
+
+def _env_file(path: Path) -> dict[str, str]:
+    """`KEY=value` lines of an env file (blank lines and `#` comments skipped), as compose reads them."""
+    out = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()  # noqa: PLW2901
+        if line and not line.startswith("#"):
+            key, _, value = line.partition("=")
+            out[key.strip()] = value.strip().strip("\"'")
+    return out
 
 
 def _mounts(service: dict) -> list[tuple[str, str, str]]:
@@ -231,7 +255,8 @@ def test_the_dev_container_environment_names_no_issuer_or_forge_fact_P4_O8():
     compose environment names none. Control: the reader sees the data root it does carry."""
     env = _environment(_services()["devcontainer"])
     assert "DEFENDER_DATA_ROOT" in env, "control: the devcontainer environment is read"
-    leaked = sorted(k for k in env if _DEPLOYMENT_FACT.search(k))
+    # #1592: the Forgejo site's public hostname is a public name, not a deployment secret or a path to one.
+    leaked = sorted(k for k in env if _DEPLOYMENT_FACT.search(k) and k != "DEFENDER_FORGE_DOMAIN")
     assert not leaked, f"deployment facts in the devcontainer environment: {leaked}"
 
 
@@ -462,3 +487,189 @@ def test_1540_pr5_the_tokens_are_declared_once():
         if again:
             declared_again.append(f"{other.relative_to(FRONTEND)}: {again}")
     assert declared_again == [], f"PR5: the tokens are declared again outside their one file: {declared_again}"
+
+
+# ---------------------------------------------------------------------------------------------
+# #1592 S4-0: CI's `forgejo-live` job runs the live module and cannot pass by skipping
+# ---------------------------------------------------------------------------------------------
+
+def test_s4_0_the_forgejo_live_job_runs_the_module_and_the_guard_fails_under_ci():
+    """S4-0 / F10: ci.yml's forgejo-live job runs test_1592_live.py under `-m live`; unset inputs fail under CI."""
+    from defender.tests.tenancy.people_1592._live1592 import require_environment
+
+    job = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))["jobs"]["forgejo-live"]
+    steps = job["steps"]
+    command = next(s for s in steps if "test_1592_live.py" in s.get("run", ""))["run"]
+    assert "-m live" in command
+    assert "-k " not in command
+    assert "--deselect" not in command
+    assert "||" not in command
+    assert not any(s.get("continue-on-error") for s in steps)
+    text = "\n".join(s.get("run", "") for s in steps)
+    for needed in ("forgejo", "keycloak", ".devcontainer/forgejo/setup.sh", "defender.api_server.ingress"):
+        assert needed in text, needed
+    assert "SESSIONS_SCRIPT" not in text, "the job builds the sessions database through setup.sh, not its own script path"
+    assert "INGRESS_FORGE_UPSTREAM_INPUT" not in text
+    assert "defender_product" in text, "S4-11's non-superuser login"
+    # r15.2 "setup.sh" (awaiting owner ruling: the interface is the author's choice): `COMPOSE` from the environment,
+    # the lifecycle's login named as the script makes it, the source id read from `forgejo admin auth list`.
+    assert re.search(r'COMPOSE="\$COMPOSE"\s+\.devcontainer/forgejo/setup\.sh', text), "setup.sh takes COMPOSE from the environment"
+    assert "fs_lifecycle_dev" in text
+    assert "pg_auth_members" not in text
+    assert "admin auth list" in text
+    with pytest.raises(pytest.fail.Exception):
+        require_environment({"CI": "true"})
+    with pytest.raises(pytest.skip.Exception):
+        require_environment({})
+
+
+# ---------------------------------------------------------------------------------------------
+# #1592 S3-14: Forgejo's shipped settings file agrees with the site's domain and says what the design lists
+# ---------------------------------------------------------------------------------------------
+
+FORGEJO_SETTINGS = COMPOSE_DIR / "forgejo" / "settings.env"
+
+#: The design's "Forgejo configuration", key by key (`FORGEJO__section__KEY`), as listed.
+_SETTINGS = {
+    "FORGEJO__oauth2_client__ENABLE_AUTO_REGISTRATION": "false",
+    "FORGEJO__oauth2_client__ACCOUNT_LINKING": "disabled",
+    "FORGEJO__service__DISABLE_REGISTRATION": "true",
+    "FORGEJO__service__ENABLE_INTERNAL_SIGNIN": "false",
+    "FORGEJO__service__ENABLE_BASIC_AUTHENTICATION": "false",
+    "FORGEJO__service__DEFAULT_ALLOW_CREATE_ORGANIZATION": "false",
+    "FORGEJO__service__REQUIRE_SIGNIN_VIEW": "true",
+    "FORGEJO__server__LANDING_PAGE": "login",
+    "FORGEJO__service__ENABLE_NOTIFY_MAIL": "false",
+    "FORGEJO__admin__EXTERNAL_USER_DISABLE_FEATURES": "manage_password",
+    "FORGEJO__security__LOGIN_REMEMBER_DAYS": "0",
+    "FORGEJO__session__PROVIDER": "postgres",
+    "FORGEJO__session__SESSION_LIFE_TIME": "3600",
+    "FORGEJO__repository__MAX_CREATION_LIMIT": "0",
+    "FORGEJO__repository__DISABLE_MIGRATIONS": "true",
+    "FORGEJO__mailer__ENABLED": "false",
+}
+
+
+def _forge_domains() -> set[str]:
+    """Every value the dev compose file gives `DEFENDER_FORGE_DOMAIN`, in any service's environment."""
+    return {_default(_environment(service)["DEFENDER_FORGE_DOMAIN"]) for service in _services().values()
+            if "DEFENDER_FORGE_DOMAIN" in _environment(service)}
+
+
+def test_the_forgejo_service_takes_its_settings_from_the_shipped_file_S3_14():
+    """S3-14 / F10: compose's `forgejo` service reads `.devcontainer/forgejo/settings.env` as its `env_file`, and the
+    file exists with `FORGEJO__section__KEY` lines only."""
+    forgejo = _services()["forgejo"]
+    files = forgejo.get("env_file") or []
+    files = [files] if isinstance(files, str) else files
+    assert [f["path"] if isinstance(f, dict) else f for f in files] == ["forgejo/settings.env"], files
+    assert FORGEJO_SETTINGS.is_file(), f"{FORGEJO_SETTINGS} is not shipped"
+    names = _env_file(FORGEJO_SETTINGS)
+    assert names, "control: the settings file is read"
+    assert [n for n in names if not re.fullmatch(r"FORGEJO__[a-z_0-9]+__[A-Z_0-9]+", n)] == []
+
+
+def test_the_settings_file_names_the_sites_domain_and_the_ingress_is_given_the_same_one_S3_14():
+    """S3-14 / OD-3: `DOMAIN` equals the dev compose file's `DEFENDER_FORGE_DOMAIN` and `ROOT_URL` is that host's
+    origin, so the site the ingress answers and Forgejo's links agree."""
+    domains = _forge_domains()
+    assert len(domains) == 1, f"dev compose must give DEFENDER_FORGE_DOMAIN exactly one value: {domains}"
+    [domain] = domains
+    settings = _env_file(FORGEJO_SETTINGS)
+    assert settings["FORGEJO__server__DOMAIN"] == domain
+    root = urlsplit(settings["FORGEJO__server__ROOT_URL"])
+    assert root.hostname == domain, root
+    assert root.path in ("", "/"), root
+    assert root.scheme in ("http", "https"), root
+
+
+@pytest.mark.parametrize(("key", "value"), sorted(_SETTINGS.items()))
+def test_the_settings_file_holds_each_listed_value_S3_14(key, value):
+    """S3-14 / PP-3: each key of the design's list is set, to the listed value, in the shipped file and so in the
+    service's environment as compose resolves it."""
+    assert _env_file(FORGEJO_SETTINGS).get(key) == value
+    assert _environment(_services()["forgejo"]).get(key) == value
+
+
+def test_the_sessions_provider_config_is_set_and_names_no_default_login_S3_14():
+    """S3-14 / PP-5: `[session] PROVIDER_CONFIG` is set (the DSN of a login that is a member of `fs_forgejo`)."""
+    assert _env_file(FORGEJO_SETTINGS).get("FORGEJO__session__PROVIDER_CONFIG"), "no sessions database for Forgejo"
+
+
+def test_the_settings_the_compose_file_had_survive_in_the_file_S3_14():
+    """The entries the compose file carried before #1592 (data, port, authorized integrations) moved, not vanished: the
+    `forgejo` service still resolves them (the reads above keep working)."""
+    env = _environment(_services()["forgejo"])
+    for key in ("FORGEJO__security__INSTALL_LOCK", "FORGEJO__server__HTTP_PORT",
+                "FORGEJO__authorized_integration__ALLOWED_DOMAINS"):
+        assert key in env, key
+
+
+# ---------------------------------------------------------------------------------------------
+# #1592 S3-14: the sessions SQL is mounted outside initdb; SSH, forks and mirrors off by V6's keys
+# ---------------------------------------------------------------------------------------------
+
+def test_the_postgres_service_mounts_the_sessions_sql_outside_initdb_S3_14():
+    """S3-14 / PP-5: `./postgres` is mounted read-only at `/defender-postgres`; no initdb entry names the sessions files."""
+    volumes = _services()["postgres"]["volumes"]
+    mounts = [v for v in volumes if isinstance(v, str)]
+    assert any(re.match(r"\./postgres/?:/defender-postgres:ro$", v) for v in mounts), mounts
+    initdb = [v for v in mounts if "docker-entrypoint-initdb.d" in v]
+    assert initdb, "control: the application database's initdb entry is still mounted"
+    assert not [v for v in initdb if "forgejo-sessions" in v], initdb
+
+
+def test_ssh_forks_and_mirrors_are_off_by_the_keys_V6_confirmed_and_sshd_is_kept_down():
+    """S3-14 / V6 (r15.2, P36): `DISABLE_SSH`, `DISABLE_FORKS`, `[mirror] ENABLED=false` are the only SSH, fork or mirror
+    keys; an empty file is mounted at `/etc/s6/openssh/down`; `SSH_DOMAIN` and `SSH_PORT` are dropped, no SSH port published."""
+    forgejo = _services()["forgejo"]
+    env = _environment(forgejo)
+    named = {k: v for k, v in env.items() if k.startswith("FORGEJO__") and any(w in k.upper() for w in ("SSH", "FORK", "MIRROR"))}
+    assert named == {"FORGEJO__server__DISABLE_SSH": "true", "FORGEJO__repository__DISABLE_FORKS": "true",
+                     "FORGEJO__mirror__ENABLED": "false"}, named
+    [down] = [m for m in _mounts(forgejo) if m[2] == "/etc/s6/openssh/down"]
+    assert down[0] == "bind", down
+    source = (COMPOSE_DIR / down[1]).resolve()
+    assert source.is_file(), f"{source} must be a shipped file (the s6 down file)"
+    assert source.stat().st_size == 0, "the s6 down file is empty"
+    assert not _gitignored(source), "the down file is shipped, not host-local"
+    published = [str(p) for p in forgejo.get("ports") or []]
+    assert not [p for p in published if re.search(r":22(/tcp)?$", p)], published
+    assert not [k for k in env if "SSH_DOMAIN" in k or "SSH_PORT" in k], "SSH_DOMAIN and SSH_PORT are dropped, not moved"
+
+
+# ---------------------------------------------------------------------------------------------
+# #1592 G5 (r15.2 "Names in dev and CI", P36): the split topology the live rig runs
+# ---------------------------------------------------------------------------------------------
+
+def test_keycloak_keeps_its_localhost_issuer_and_serves_backchannel_endpoints_by_request_host_G5():
+    """P36: `KC_HOSTNAME` stays `http://localhost:<port>` (the issuer) and `KC_HOSTNAME_BACKCHANNEL_DYNAMIC` is true, so
+    Forgejo's container can reach token, userinfo and JWKS at `keycloak:8080`."""
+    env = _environment(_services()["keycloak"])
+    assert _default(env["KC_HOSTNAME"]) == "http://localhost:8080", env["KC_HOSTNAME"]
+    assert env["KC_HOSTNAME_BACKCHANNEL_DYNAMIC"] == "true"
+
+
+def test_the_forgejo_login_source_discovers_over_the_compose_network_and_its_client_allows_the_sites_callback_G5():
+    """P36: `setup.sh` adds the source with `--auto-discover-url` at `http://keycloak:8080/realms/defender/...`, and the
+    realm's `forgejo` client allows `ROOT_URL/user/oauth2/product/callback` (the site's host and port)."""
+    import json
+
+    script = (COMPOSE_DIR / "forgejo" / "setup.sh").read_text(encoding="utf-8")
+    assert "http://keycloak:8080/realms/defender/.well-known/openid-configuration" in script
+    assert "add-oauth" in script
+    assert "--name product" in script
+    root = _env_file(FORGEJO_SETTINGS)["FORGEJO__server__ROOT_URL"].rstrip("/")
+    realm = json.loads((COMPOSE_DIR / "keycloak" / "realm-defender.json").read_text(encoding="utf-8"))
+    [client] = [c for c in realm["clients"] if c["clientId"] == "forgejo"]
+    assert f"{root}/user/oauth2/product/callback" in client["redirectUris"], client["redirectUris"]
+    assert urlsplit(root).hostname.endswith(".localhost"), root  # resolves to loopback for Chromium, curl and httpx
+
+
+def test_a_gitignored_env_file_is_never_read_by_the_environment_reader_C12():
+    """C12: a service whose `env_file` is git-ignored contributes nothing, present or absent."""
+    ignored = COMPOSE_DIR.parent / ".env"
+    assert _gitignored(ignored), "control: `../.env` is git-ignored"
+    assert not _gitignored(FORGEJO_SETTINGS), "control: the shipped settings file is not"
+    assert _environment({"env_file": ["../.env"], "environment": {"A": "1"}}) == {"A": "1"}
+    assert "FORGEJO__server__DOMAIN" in _environment({"env_file": ["forgejo/settings.env"]})
