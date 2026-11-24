@@ -130,8 +130,10 @@ def test_o11_investigation_role_tools_match_the_reviewed_snapshot():
     assert got["gather"], "premise: the recorder saw real registrations"
 
 
-#: Names of the launch-time publish (run.py's `_default_publish`, the child it starts, the seam type).
-_PUBLISH_NAMES = {"_default_publish", "launch_publish", "publish_launch", "PublishLaunch", "_knowledge_source"}
+#: Names of run start's knowledge fetch (#1618 flow 1: the one fetch seam, its default, the launcher of the child it
+#: starts, the run-side reader); the launch-time publish they replace is gone.
+_FETCH_NAMES = {"default_fetch", "launch_publish", "publish_launch", "FetchSeam", "_knowledge_source", "fetch_report",
+                "resolve_knowledge"}
 
 
 def _reached_names(entry: str) -> set[str]:
@@ -160,15 +162,16 @@ def _reached_names(entry: str) -> set[str]:
     return seen
 
 
-def test_a6_the_job_entry_runs_no_publish():
-    """The in-container job entry takes no `publish` seam and reaches no launch-time publish in run.py; the
-    operator command still does (control). CONFLICT with the exemption in this file's old docstring. (#1170 A6)"""
+def test_a6_the_job_entry_runs_no_fetch():
+    """The in-container job entry takes no `fetch` seam and reaches no knowledge fetch in run.py (its host helper
+    fetches the run copy); the operator command still does (control). CONFLICT with the exemption in this file's old
+    docstring. (#1170 A6; #1618 flow 1: the fetch seam replaced the launch-time publish seam.)"""
     import inspect
 
     from defender import run as run_py
 
     operator = _reached_names("main")
-    assert operator & _PUBLISH_NAMES, "control: the operator command reaches the launch-time publish"
-    assert "publish" in inspect.signature(run_py.main).parameters, "control: the operator command takes a publish seam"
-    assert "publish" not in inspect.signature(run_py.job_main).parameters
-    assert _reached_names("job_main") & _PUBLISH_NAMES == set()
+    assert operator & _FETCH_NAMES, "control: the operator command reaches the knowledge fetch"
+    assert "fetch" in inspect.signature(run_py.main).parameters, "control: the operator command takes a fetch seam"
+    assert {"fetch", "publish"} & set(inspect.signature(run_py.job_main).parameters) == set()
+    assert _reached_names("job_main") & _FETCH_NAMES == set()

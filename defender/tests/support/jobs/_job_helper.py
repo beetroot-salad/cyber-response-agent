@@ -6,12 +6,12 @@ Other slices import: `helper_scene(tmp_path, monkeypatch, dsn, *, proxied, files
 `make_signer` (the marked signer), `claims_of` (a pass token's claims), `after_the_signal`, `listing`, the fixtures
 `process_state` (autouse where imported) and `scene` (the default `helper_scene`), and the pure parsers `parse_mounts`,
 `parse_env`, `parse_labels`, `flag_values`, `host_path`, `until`. Picked names of the not-yet-built target (sketch choices, not settled
-by the design): `job_host.main(argv, *, docker, signer, publish, forge, command)`, the client `job_host.ask(socket, request,
+by the design): `job_host.main(argv, *, docker, signer, fetch, forge, command)`, the client `job_host.ask(socket, request,
 **fields) -> dict` raising `job_host.Refused`, the in-container variable `job_host.SOCKET_ENV` naming the job socket, the label
 `job_host.JOB_LABEL` carried by every job container, and the settings `job_host.IMAGE_ENV` (the image). Requests name an id as `id=`.
-One request beyond the design's socket table: `export.materialise(commit=)`, a learning job's only (its pre-flight's
-`--knowledge-commit` pin), answers `{commit, path}` for `<T>/exports/<commit>/` made from the tenant's clone (flow 2), or is
-refused `delivery` for a commit the clone lacks.
+One request beyond the design's socket table: `copy.make(commit=)`, a learning job's only (#1618 F3: `export.materialise`
+merged into it), answers `{commit, path}` for a copy of that commit's `agent/` and `settings/` fetched from Forgejo into the
+claim's `shared/` folder, or is refused `delivery` for a commit Forgejo does not serve.
 
 Docker double. The helper starts its job container as an attached `docker run` asked of the docker seam's `.popen`, and makes
 every other docker call through the seam. `ContainerStandIn` runs the job as a function on a thread (`job(container) -> rc`)
@@ -107,14 +107,16 @@ def child_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
 _HELPER_CHILD = Path(__file__).resolve().with_name("_helper_child1170.py")
 
 
-def helper_child(mode: str, commit: str, marks: Path, launch: Any, *, stderr_to: Path | None = None) -> list[str]:
+def helper_child(mode: str, commit: str, marks: Path, launch: Any, *, remote: Path,
+                 stderr_to: Path | None = None) -> list[str]:
     """A worker's `child_argv` answer for an investigation: the real helper in front of the replay job entry
     (`_helper_child1170.py`; `mode`, `commit` and `marks` are `_job_entry1342.py`'s), in place of `python -m
-    defender.job_host` (which would need a real vault, publish and docker). `stderr_to`: the child's stderr appended to it."""
+    defender.job_host` (which would need a real vault and docker). `remote` is the tenant's bare Forgejo repository the
+    helper's knowledge fetch reads (#1618: a `PublishedTenant`'s `.remote`). `stderr_to`: the child's stderr appended to it."""
     # C-1 (#1471 P-5): the worker's own start hands the helper the alert digest (required) and, flagged, the post flag and link.
     ticket = [*(["--alert-digest", launch.alert_digest] if launch.alert_digest is not None else []),
               *(["--post-ticket", "--ticket-link", launch.ticket_link] if launch.update_ticket else [])]
-    child = [sys.executable, str(_HELPER_CHILD), mode, commit, str(marks), "--job", launch.investigation_id,
+    child = [sys.executable, str(_HELPER_CHILD), mode, commit, str(marks), str(remote), "--job", launch.investigation_id,
              "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid), *ticket]
     return ["/bin/sh", "-c", 'exec "$@" 2>>"$0"', str(stderr_to), *child] if stderr_to is not None else child
 
@@ -865,16 +867,23 @@ def _is_uuid(text: str) -> bool:
 class HelperRan:
     rc: int | None = None
     raised: BaseException | None = None
-    publishes: int = 0
+    #: The helper's fetch seam (#1618: the real child; every ask it made is in `.calls`).
+    fetch: Any = None
+
+    @property
+    def publishes(self) -> int:
+        """How many times the helper asked for knowledge at launch (the former launch-time publish: now the one fetch)."""
+        return len(self.fetch.calls) if self.fetch is not None else 0
 
 
 def drive_helper(scene: HelperScene, argv: list[str], *, docker: ContainerStandIn, signer: Any, default_store: bool = True,
                  **seams: Any) -> HelperRan:
-    """`job_host.main` on this thread (it takes SIGTERM here), its launch-time publish answered `fresh` at the
-    published commit (as `test_job_entry.run_job` answers the job's today). `default_store=False`: the caller's seams are
-    exactly the store the helper gets (a #1546 case that leaves the store or key login unconfigured on purpose)."""
+    """`job_host.main` on this thread (it takes SIGTERM here); its knowledge comes through the one fetch seam (#1618 FORCED, see
+    `knowledge_1618._support`): the real fetch child over the scene's remote unless the case hands its own `fetch`.
+    `default_store=False`: the caller's seams are exactly the store the helper gets (a #1546 case that leaves the store or
+    key login unconfigured on purpose)."""
     from defender import job_host
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
+    from defender.tests.tenancy.knowledge_1618 import _support as K
 
     ran = HelperRan()
     claim_for(scene, argv)
@@ -889,12 +898,8 @@ def drive_helper(scene: HelperScene, argv: list[str], *, docker: ContainerStandI
             store = None
         for name, seam in (store.seams.items() if store is not None else ()):
             seams.setdefault(name, seam)
-
-    def publish(*_a: Any, **_k: Any) -> str:
-        ran.publishes += 1
-        return B.fresh(scene.t.commit)
-
-    seams.setdefault("publish", publish)
+    seams.setdefault("fetch", K.fetch_seam(scene.t))
+    ran.fetch = seams["fetch"]
     try:
         ran.rc = job_host.main(argv, docker=docker, signer=signer, **seams)
     except SystemExit as e:
@@ -1009,7 +1014,6 @@ _DRIVER = textwrap.dedent("""\
     import json, sys
     from defender import job_host
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
-    from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
     from defender.job_host import _session as S
     cfg = json.loads(sys.argv[1])
     real_answer = S.Registry.answer
@@ -1021,12 +1025,18 @@ _DRIVER = textwrap.dedent("""\
         return real_answer(self, session, name, fields)
 
     S.Registry.answer = answer
+    from types import SimpleNamespace
+    from defender.tests.tenancy.knowledge_1618 import _support as K
+    scene = SimpleNamespace(tenant_id=cfg["tenant"], origin=cfg["origin"], data_root=cfg["data_root"])
     seams = {}
+    if cfg.get("forge_token") is not None:  # the forge credential the scene's git listener accepts (#1618: a drain's pushes)
+        from defender.tests.support.jobs._job_helper import ForgeCredentialRecorder
+        seams["forge"] = ForgeCredentialRecorder(accepted=cfg["forge_token"])
     if cfg.get("store"):  # #1546: the real store and the tenant's key login, as `drive_helper` hands them
         from defender import evidence
-        seams = {"evidence": evidence.BlobStore(**cfg["store"]["blob"]),
-                 "evidence_keys": evidence.EvidenceKeys(**cfg["store"]["login"])}
-    sys.exit(job_host.main(cfg["argv"], signer=A.MarkedSigner(), publish=lambda *a, **k: B.fresh(cfg["commit"]), **seams))
+        seams["evidence"] = evidence.BlobStore(**cfg["store"]["blob"])
+        seams["evidence_keys"] = evidence.EvidenceKeys(**cfg["store"]["login"])
+    sys.exit(job_host.main(cfg["argv"], signer=A.MarkedSigner(), fetch=K.fetch_seam(scene), **seams))
 """)
 
 
@@ -1060,14 +1070,16 @@ def _process_store(scene: HelperScene) -> dict[str, Any] | None:
 
 
 class ProcessHelper:
-    """`job_host.main` as a real process (`python -c driver`, its signer and publish answered as `drive_helper`'s) over a
+    """`job_host.main` as a real process (`python -c driver`, its signer as `drive_helper`'s and its knowledge through the real fetch child, #1618) over a
     `docker` executable first on PATH, whose `run` is a stand-in container: it records itself (labels, argv) under
     `state/containers/<name>`, reads its stdin until EOF and then writes `state/eof` and exits; `ps --filter label=`, `rm`,
     `stop` and `kill` act on those records. `state/started` holds the stand-in container's pid once it runs.
-    `worker=True`: the helper is started by a process of its own (the worker's stand-in: a plain parent, as the worker
+    `forge_token`: the helper's forge credential answers it (the token the scene's listener accepts), in place of a mint from
+    the generation's host secret file, which a published scene does not write. `worker=True`: the helper is started by a process of its own (the worker's stand-in: a plain parent, as the worker
     spawns the helper) and an argv value `"@worker"` is that process' pid; `worker_pid`/`helper_pid` name them."""
 
-    def __init__(self, scene: HelperScene, root: Path, argv: list[str], *, worker: bool = False) -> None:
+    def __init__(self, scene: HelperScene, root: Path, argv: list[str], *, worker: bool = False,
+                 forge_token: str | None = None) -> None:
         self.state = root / "shim-state"
         bin_dir = root / "shim-bin"
         self.state.mkdir(parents=True)
@@ -1079,8 +1091,9 @@ class ProcessHelper:
         investigation = (flag_values(argv, "--kind") or [""])[0] == "investigation"
         if investigation:  # #1546: the worker's claim transaction precedes the helper (design: Claim)
             claim_for(scene, argv)
-        cfg = json.dumps({"argv": argv, "commit": scene.t.commit, "requests": str(self.state / "requests.log"),
-                          "exit": str(self.state / "helper-exit"),
+        cfg = json.dumps({"argv": argv, "commit": scene.t.commit, "tenant": scene.tenant, "origin": scene.t.origin,
+                          "data_root": str(scene.root), "requests": str(self.state / "requests.log"),
+                          "exit": str(self.state / "helper-exit"), "forge_token": forge_token,
                           "store": _process_store(scene) if investigation else None})
         command = [sys.executable, "-c", _PARENT, cfg, _DRIVER] if worker else [sys.executable, "-c", _DRIVER, cfg]
         self.proc = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,

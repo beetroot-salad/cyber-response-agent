@@ -8,9 +8,10 @@ the typed refusal), and refuses every other request `unknown-request`. Every req
 
 It injects inputs and records calls; it decides nothing the entries' tests are about. The helper's own answers (its
 policy) are pinned over the real helper in `tests/jobs/test_job_helper_learning.py` and
-`tests/jobs/test_learning_container_entry.py`. `materialise(tenant_id)` is the answer `export.materialise` gets from the
-real helper's side: the tenant's export of the commit, materialised from its clone on the host (`materialise_export`),
-refused `delivery` when it cannot be."""
+`tests/jobs/test_learning_container_entry.py`. `copy_make(tenant_id)` is the answer `copy.make(commit=)` gets from the
+real helper's side (#1618 F3, K5: `export.materialise` merged into it): a copy of that commit's (else `main`'s) `agent/`
+and `settings/`, made by the product's fetch from the tenant's Forgejo repository into a fresh folder, refused `delivery`
+when it cannot be."""
 from __future__ import annotations
 
 import contextlib
@@ -129,20 +130,27 @@ def stubbed_port() -> Iterator[StubPort]:
         yield stub
 
 
-def materialise(tenant_id: str) -> Callable[[dict[str, Any]], dict[str, Any]]:
-    """`export.materialise(commit=)` answered as the helper's side does it: the tenant's export of `commit` made from its
-    clone on the host, or refused `delivery`."""
+def copy_make(tenant_id: str, remote: Path | str | None = None) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """`copy.make(commit=)` answered as the helper's side does it (#1618 F3): the product's fetch
+    (`_fetch_standin_1618.fetch_line`) of `commit` (else `main`) from the tenant's bare `remote` (default: the data root's
+    served remote) into a fresh folder this stand-in owns, answered `{path, commit}`; refused `delivery`, naming why,
+    when the fetch is refused or brings another commit."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import fetch_line
 
     def answer(fields: dict[str, Any]) -> dict[str, Any]:
         from defender import tenancy
-        from defender.learning.author.version_control import DeliveryRefused, LockBusy, materialise_export
+        from defender.tenancy import run_knowledge
 
-        tenant = tenancy.requested_tenant(tenancy.resolve_data_root(), tenant_id)
-        try:
-            export = materialise_export(tenant, str(fields.get("commit")))
-        except (DeliveryRefused, LockBusy) as refused:
-            raise job_socket.Refused(f"the export could not be materialised: {refused}", "delivery") from None
-        return {"commit": export.commit, "path": str(export.path)}
+        commit = fields.get("commit")
+        dest = Path(tempfile.mkdtemp(prefix="copy-make-"))
+        line = fetch_line(tenant_id, dest, data_root=tenancy.resolve_data_root(), commit=commit,
+                          remote=None if remote is None else Path(str(remote)))
+        report = run_knowledge.read_publish_report(line)
+        if report.kind != run_knowledge.OK or (commit is not None and report.commit != commit):
+            shutil.rmtree(dest, ignore_errors=True)
+            why = report.reason if report.kind != run_knowledge.OK else f"the fetch brought {report.commit}"
+            raise job_socket.Refused(f"the knowledge of {commit or 'main'} could not be fetched: {why}", "delivery")
+        return {"commit": report.commit, "path": str(dest)}
 
     return answer
 

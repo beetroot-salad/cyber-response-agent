@@ -639,3 +639,13 @@ def queued_run(t: Any, paths: Any, label: str) -> Path:
     call(store_dsn(), "enqueue_request", str(paths.tenant.id), run_dir.name, case,
          curation_row(case, run_dir))
     return run_dir
+
+
+def without_clone(t: Any) -> None:
+    """#1618 design "Upgrade": delete `<T>/knowledge`, `<T>/exports/` and `<T>/knowledge.lock` from a tenant the `world` made, so
+    a case that follows shows what the drain does with no clone (a fixture that still carries one would hide a reader of it)."""
+    root = Path(location_path(t.tenant.tenant_root))
+    for name in ("knowledge", "exports"):
+        shutil.rmtree(root / name, ignore_errors=True)
+    (root / "knowledge.lock").unlink(missing_ok=True)
+    assert not (root / "knowledge").exists(), "premise: the clone is gone"

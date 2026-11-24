@@ -1,0 +1,92 @@
+"""#1618 (flow 5): the host actor's prepare reads the tenant's knowledge through the fetch child, not a clone.
+
+FORCED: the seam name `HostActor(..., fetch=)` replaces `publish=`; its one shape and the whole seam list are in
+`knowledge_1618._support`. Here the seam is `K.Fetch` over the REAL fetch child, served the lifecycle forge's own bare repositories
+over a real git listener (`GitHTTP`, which accepts the issuer fake's token for the tenant being fetched). Faults are made by remote
+state only: `refuse_next_fetch("down")` points the next ask at a closed port (Forgejo unreachable), `("auth")` makes the listener
+reject the next upload-pack; each heals after that one ask.
+"""
+from __future__ import annotations
+
+import os
+import signal
+import socket
+from pathlib import Path
+from typing import Any
+
+from defender.tests.tenancy.knowledge_1618 import _support as K
+from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld
+from defender.tests.tenancy.tenant_1108_delivery._identity import token as issuer_token
+from defender.tests.tenancy.tenant_1108_delivery._support import GitHTTP
+
+
+def _closed_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _kill_the_fetch_child(_service: str) -> None:
+    """SIGKILL this process's fetch child (the wrapper `K.child_report` spawned) while it is fetching: it never reaches its report."""
+    me = os.getpid()
+    for stat in Path("/proc").glob("[0-9]*/stat"):
+        try:
+            pid, rest = stat.parent.name, stat.read_text(encoding="utf-8").rpartition(")")[2].split()
+            if int(rest[1]) == me and b"fetch_child_wrapper" in (stat.parent / "cmdline").read_bytes():
+                os.kill(int(pid), signal.SIGKILL)
+        except (OSError, ValueError, IndexError):
+            continue
+
+
+def _listener(world: Any) -> GitHTTP:
+    if getattr(world, "git_listener", None) is None:
+        world.git_listener = GitHTTP(world.forge.root, token="unset")
+    return world.git_listener
+
+
+def _origin(world: Any, tenant_id: str) -> str:
+    """The tenant's recorded repository (its forge wiring's `repo`, as prepare reads it), served by the git listener over
+    the forge fake's bare repositories; `tenants/<id>` before any wiring is recorded."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    rows = execute(world.dsn, "SELECT repo FROM tenancy.forge_wiring WHERE tenant_id = %s", (tenant_id,))
+    repo = rows[0][0] if rows else f"tenants/{tenant_id}"
+    return f"{_listener(world).url}/{repo}.git"
+
+
+def fetch_seam_of(world: Any) -> K.Fetch:
+    """The world's one fetch seam (made once): `K.Fetch` over the real child, its origin the tenant's recorded repository on
+    the world's listener, which accepts the issuer fake's token for the tenant being fetched."""
+    if getattr(world, "fetch", None) is None:
+        server = _listener(world)
+
+        def accept(tenant: str) -> None:
+            server.token = issuer_token(tenant)
+        world.fetch = K.fetch_seam(None, world.tmp_path / "fetch-work", origin_of=lambda t: _origin(world, t), before=accept)
+    return world.fetch
+
+
+class FetchWorld(LifecycleWorld):
+    """`LifecycleWorld` (whose host actor has the fetch seam, `fetch=`, in place of the first-publish seam) with the seam's
+    remote-state faults."""
+
+    def refuse_next_fetch(self, how: str) -> None:
+        """Arm one remote-state fault for the next fetch ask: `down` (the forge's git port is closed), `auth` (the listener rejects it)
+        or `crash` (the child is killed while it fetches, so it reports nothing)."""
+        server = _listener(self)
+        if how == "crash":
+            def arm() -> None:
+                server.rearm()
+                server.on_service = _kill_the_fetch_child
+
+            self.fetch.once(arm, lambda: setattr(server, "on_service", None))
+        elif how == "down":
+            # A well-formed recorded origin (`http://host:port/<owner>/<repo>.git`, as every forge wiring is) whose port is closed:
+            # the fetch reaches git and finds Forgejo unreachable, rather than refusing the URL's shape.
+            self.fetch.once(lambda: self._aim(lambda t: f"http://127.0.0.1:{_closed_port()}/tenants/{t}.git"),
+                            lambda: self._aim(lambda t: _origin(self, t)))
+        else:
+            self.fetch.once(lambda: server.refuse.add("git-upload-pack"), lambda: server.refuse.discard("git-upload-pack"))
+
+    def _aim(self, origin_of: Any) -> None:
+        self.fetch.origin_of = origin_of

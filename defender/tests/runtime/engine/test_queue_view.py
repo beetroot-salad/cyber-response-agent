@@ -469,7 +469,11 @@ def test_main_publishes_the_four_pages_into_the_tenants_publish_area(
     (area / "queues.html").write_text("STALE", encoding="utf-8")
     before = _in_tree_pages()
     try:
-        assert build.build(tenant) == 0  # the builder takes the accepted tenant (r10.1 C1); `main` accepts it
+        # The builder takes the accepted tenant (r10.1 C1; `main` accepts it) and the agent root it shows (#1618 F4: `main`
+        # hands it a fetched copy of `main`); here the tenant's knowledge as the test seeded it (`knowledge_half`).
+        from defender.tests.support.tenancy._tenants1106 import knowledge_half
+
+        assert build.build(tenant, knowledge_half(tenant, "agent")) == 0
 
         assert sorted(p.name for p in area.iterdir()) == sorted(_PAGE_NAMES)
         queues = json.loads((area / "queues.json").read_text(encoding="utf-8"))

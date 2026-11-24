@@ -13,7 +13,6 @@ working tree was then edited; and `exports/K1/` was deleted, so the launcher mus
 from __future__ import annotations
 
 import json
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,15 +21,15 @@ import pytest
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.tenancy.knowledge_1618 import _support as K
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.support.tenancy import _tenants1106 as tenants
 
 from ._support import (
     FIXTURE_SETTINGS,
-    current_commit,
     export_dir,
     files_under,
-    git,
+    plant_old_clone,
     published_tenant,
 )
 
@@ -94,9 +93,9 @@ def scene(tmp_path, data_root):
         k1 = t.commit
         _base, src = S.source_run(tmp_path, est, calls=_calls(), tenant_id=t.tenant_id)
         k2 = t.merge({QPATH: _questioner_lesson(Q_CURRENT)}, message="a later questioner lesson")
-        assert t.publish().commit == k2
-        (t.clone / QPATH).write_text(_questioner_lesson(Q_WORKTREE), encoding="utf-8")
-        shutil.rmtree(export_dir(t.tenant, k1))
+        assert t.origin_main() == k2, "premise: main is the later commit"
+        # #1618: a decoy where the old clone's working tree was (no reader may look there); no export exists.
+        plant_old_clone(t, {QPATH: _questioner_lesson(Q_WORKTREE)})
         yield Scene(t=t, est=est, k1=k1, k2=k2, src=Path(src))
 
 
@@ -114,27 +113,39 @@ class Launch:
     message: str
     spawn: object
     questioner: object
+    minted: int = 0
+    fetches: tuple = ()
 
 
 def _launch(scene: Scene, *, argv_extra=(), **seams) -> Launch:
     """The real launcher over the scene's tenant and source run (the `S.launch` recipe, with
     the scene's own tenant and stamp)."""
-    spawn = T.FakeSpawn()
+    spawn = seams.pop("spawn", None) or T.FakeSpawn()  # lint-default: ok — a test builder's fresh per-call double
     questioner = S.questioner_for()
     seams.setdefault("preflight", S.no_preflight)
     seams.setdefault("roster", scene.est.roster())
     seams.setdefault("judge", S.quiet_judge())
     seams.setdefault("oracle", S.oracle(then=S.submit()).model)
     seams.setdefault("verifier", S.passing_verifier().model)
+    # #1618 FORCED (`knowledge_1618._support`'s seam list): every launch reads Forgejo through the one fetch seam, the real
+    # child over the scene's remote; the launcher's own default child would need the host's database to admit the tenant
+    seams.setdefault("fetch", K.fetch_seam(scene.t))
     message = ""
+    minted = None
     argv = ["--tenant", scene.t.tenant_id, scene.src.name, str(T.BRANCH_MESSAGE_ID), *argv_extra]
+    from defender.learning.author.version_control.auth import ForgejoIdentity
+    from defender.tests.support.tenancy._host1214 import counting_calls
+
+    fetch = seams.get("fetch")
     try:
-        rc = S.mod("cli.learning.branch").main(
-            argv, spawn=spawn, questioner=questioner, directory=directory_for_argv(argv, records=R.bare_records(*scene.est.systems)), **seams)
+        with counting_calls(mint=ForgejoIdentity.token) as minted:
+            rc = S.mod("cli.learning.branch").main(
+                argv, spawn=spawn, questioner=questioner, directory=directory_for_argv(argv, records=R.bare_records(*scene.est.systems)), **seams)
     except SystemExit as stop:
         rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
     S.log_refusal(rc, message)
-    return Launch(rc=rc, message=message, spawn=spawn, questioner=questioner)
+    return Launch(rc=rc, message=message, spawn=spawn, questioner=questioner, minted=minted.counts["mint"] if minted is not None else 0,
+                  fetches=tuple(fetch.calls) if fetch is not None else ())
 
 
 def _pins(argv: list[str]) -> list[str]:
@@ -151,17 +162,13 @@ def _assert_siblings_pinned(launch: Launch, commit: str) -> None:
 
 
 def test_flow7_siblings_are_pinned_to_the_source_knowledge_commit_materialised_first(scene):
-    """Every sibling carries the source's `K1`, not `current`'s `K2`; the deleted `exports/K1/`
-    is materialised first, and `current` does not move."""
+    """Every sibling carries the source's `K1`, not `current`'s `K2`; no `exports/K1/` is made (#1618 K8)."""
     t = scene.t
     _stamp_source(scene, knowledge={"commit": scene.k1})
     launch = _launch(scene, live_tree=T.source_capture(knowledge={"commit": scene.k1}))
 
     _assert_siblings_pinned(launch, scene.k1)
-    rebuilt = export_dir(t.tenant, scene.k1) / QPATH
-    assert rebuilt.is_file(), "the source's knowledge export was not materialised"
-    assert rebuilt.read_text(encoding="utf-8") == _questioner_lesson(Q_EXPORT)
-    assert current_commit(t.tenant) == scene.k2, "the branch launch moved `current`"
+    assert not export_dir(t.tenant, scene.k1).exists(), "an export was made: #1618 K8 has no exports"
 
 
 def test_flow7_the_questioner_reads_its_corpus_from_the_pinned_export(scene):
@@ -190,7 +197,7 @@ def test_o_b_the_live_capture_stamps_the_pinned_export_so_the_anchor_survives_a_
     assert code.commit, f"fixture bug: the checkout's code commit is unreadable ({code})"
     _stamp_source(scene, knowledge={"commit": scene.k1}, commit=code.commit, dirty=False,
                   scope=code.scope)
-    assert git(scene.t.clone, "rev-parse", "HEAD") == scene.k2, "fixture bug: HEAD is K1"
+    assert scene.t.origin_main() == scene.k2, "fixture bug: main is K1"
 
     launch = _launch(scene, argv_extra=("--allow-dirty",) if code.dirty else ())
 
@@ -229,3 +236,80 @@ def test_od9_a_source_with_no_knowledge_commit_refuses_naming_why_even_with_allo
     assert cause in launch.message, f"the refusal does not name why ({cause!r}): {launch.message!r}"
     assert not launch.spawn.launches, "a sibling started with no knowledge commit to pin"
     assert not launch.questioner.prompts, "the questioner was paid for before the refusal"
+
+
+# --- #1618: the launcher reads Forgejo's commit (F4, K4, K5) ---------------------------------------
+
+def _asking_forgejo(scene: Scene, **seams):
+    """The launch with the one fetch seam (`fetch=`, the real child over the scene's remote; #1618 FORCED): the launcher's own
+    process holds no credential, so there is no `identity=`."""
+    return _launch(scene, fetch=K.fetch_seam(scene.t), **seams)
+
+
+def test_1618_k5_the_questioner_corpus_is_the_pinned_commit_fetched_by_id_from_forgejo(scene):
+    """Call 1 shows the questioner lesson at the source's `K1` while the git listener served the launch (the fetch by id),
+    and no export folder, clone read or `current` stands behind it. (F4, K5)"""
+    _stamp_source(scene, knowledge={"commit": scene.k1})
+    served = len(scene.t.server.seen)
+
+    launch = _asking_forgejo(scene, live_tree=T.source_capture(knowledge={"commit": scene.k1}))
+
+    assert launch.questioner.prompts, f"the questioner was never called (rc={launch.rc!r}, refusal={launch.message!r})"
+    assert Q_EXPORT in launch.questioner.prompts[0]
+    assert not [m for m in (Q_CURRENT, Q_WORKTREE) if m in launch.questioner.prompts[0]]
+    assert len(scene.t.server.seen) > served, "the corpus was not fetched from Forgejo"
+    assert {c["commit"] for c in launch.fetches if c["commit"]} == {scene.k1}, "the corpus was not asked for by id"
+    assert launch.minted == 0, "the launcher's own process minted a credential (O8)"
+    assert not export_dir(scene.t.tenant, scene.k1).exists(), "an export was made"
+
+
+def test_1618_k3_the_launchers_tenant_check_reads_mains_settings_not_the_clone(scene):
+    """The tenant check judges a copy of main's tip: a merge that removes `settings/verb-grants.yaml` (the clone, `current`
+    and the kept export still hold it) refuses the launch naming that file, before anything is spent. (F4, K8)"""
+    _stamp_source(scene, knowledge={"commit": scene.k1})
+    scene.t.merge({"settings/verb-grants.yaml": None}, message="a merge that drops the grant table")
+
+    launch = _asking_forgejo(scene, live_tree=T.source_capture(knowledge={"commit": scene.k1}))
+
+    assert launch.rc not in (0, None), "the launch ran over a tenant whose main has no grant table"
+    assert "verb-grants" in launch.message, f"the refusal does not name the file: {launch.message!r}"
+    assert not launch.questioner.prompts
+    assert not launch.spawn.launches
+
+
+# --- #1618 r5.1-b: an old run (no host knowledge record, a stamp naming no knowledge) cannot be branched --------------------
+
+def _host_record(scene: Scene, commit: str | None) -> Path:
+    """The source run's host-held knowledge record: naming `commit` (`fresh`), or removed (a run from before records)."""
+    from defender.records import RunPaths
+
+    path = Path(RunPaths(scene.src).knowledge_source())
+    if commit is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_text(json.dumps({"kind": "fresh", "commit": commit, "reason": None}), encoding="utf-8")
+    return path
+
+
+def test_1618_r51b_a_source_with_no_host_record_and_a_stamp_naming_no_knowledge_refuses_naming_why_spends_nothing_and_never_fetches(scene):
+    """The launch is refused naming why: no questioner call, no sibling, no fetch (no child ask, no git request), no fallback to
+    main; the recorded-source launch on the same channel is the control. (r5.1-b, K5, D3)"""
+    _host_record(scene, scene.k1)
+    _stamp_source(scene, knowledge={"commit": scene.k1})
+    control = _asking_forgejo(scene, live_tree=T.source_capture(knowledge={"commit": scene.k1}))
+    assert control.questioner.prompts, f"control: the recorded source did not reach the questioner ({control.message!r})"
+    assert control.spawn.launches, "control: no sibling started"
+    assert control.fetches, "control: the launch never asked the fetch child"
+
+    _host_record(scene, None)
+    _stamp_source(scene, knowledge=T.NO_KNOWLEDGE_KEY)
+    served = len(scene.t.server.seen)
+    launch = _asking_forgejo(scene, live_tree=T.source_capture(knowledge={"commit": scene.k1}))
+
+    assert launch.rc not in (0, None), "an old run with no knowledge to pin was branched"
+    assert "knowledge" in launch.message.lower(), f"the refusal does not say why: {launch.message!r}"
+    assert not launch.questioner.prompts, "the questioner was paid for before the refusal"
+    assert not launch.spawn.launches, "a sibling started with no knowledge to pin"
+    assert launch.fetches == (), f"the launch fetched with nothing to pin: {launch.fetches}"
+    assert len(scene.t.server.seen) == served, "the launch made a git request (a fallback to main?)"
+    assert launch.minted == 0

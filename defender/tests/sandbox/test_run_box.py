@@ -28,7 +28,6 @@ from defender.tests.tenancy.tenant_1108_delivery._support import (
     LANES,
     ForgeHTTP,
     build_tenant,
-    configured_origin,
     fixture_identity,
 )
 from defender.tests.tenancy.tenant_1108_delivery._support import target as p3_target
@@ -647,9 +646,8 @@ def _batch(base: Path) -> Iterator[Any]:
     code = base / "product" / "defender"
     with build_tenant(base / "tenant") as built:
         http = ForgeHTTP(remote=built[1])
-        origin = configured_origin(built[0].knowledge)
-        if origin is not None:
-            http.serve(origin)
+        origin = built.origin  # #1618 K8: no tenant clone to read it from; the served origin the seed's remote names
+        http.serve(origin)
         delivery = p3_target().TenantDelivery.open(
             built[0], defender_dir=code, client=http.client,
             identity=fixture_identity(str(built[0].id)), origin=origin)
@@ -733,7 +731,7 @@ def _the_box_life(  # noqa: PLR0915 — one box's whole life
         stack: contextlib.ExitStack, live_worktree_base: Path, monkeypatch: Any) -> None:
     # A startup fault must fail this test, never degrade to a host executor no stop holds.
     X.clear_opt_out(monkeypatch)
-    batch, tenant = stack.enter_context(_batch(live_worktree_base))
+    batch, _tenant = stack.enter_context(_batch(live_worktree_base))
     assert box_mod.image_tag(batch.defender_dir) == box_mod.image_tag(DEFENDER)
     request = batch.box_request()
     writable = [m for m in request.mounts if m.writable]
@@ -797,5 +795,6 @@ def _the_box_life(  # noqa: PLR0915 — one box's whole life
     assert [c.path for c in changes.changes] == [rel], changes
     sha = batch.commit(changes, "learning(lead-author): what run 1 left")
     assert sha, "nothing was committed"
-    assert _git.git_show_file(tenant.knowledge, sha, rel) == judged
+    # #1618 K8: no tenant clone; the batch's commit lives in its delivery's private repository.
+    assert _git.git_show_file(Path(batch.repository.path), sha, rel) == judged
     assert left.read_text(encoding="utf-8") == judged, "the file changed after the commit"

@@ -133,7 +133,11 @@ def _judge_prompts(ep: Path) -> dict[str, str]:
 
     (ep / "judge.yaml").unlink(missing_ok=True)
     judge = P.quiet_judge()
-    P.J.grade_at(ep, judge=judge, store=MemoryStore())
+    # #1618 K8: a set-up tenant holds no knowledge folder, so the runs come from the tenant by id rather than through
+    # `episode_runs_for`'s folder-shaped guard.
+    P.J.ensure_closings(ep)
+    runs = P.J.judge_runs(ep.parent.parent.name, data_root=ep.parent.parent.parent)
+    P.J.grade_at(ep, runs=runs, judge=judge, store=MemoryStore())
     assert len(judge.agent_ids) == len(judge.prompts)
     assert len(set(judge.agent_ids)) == len(judge.agent_ids)
     return {agent: _SALT.sub("run-SALT-", prompt)

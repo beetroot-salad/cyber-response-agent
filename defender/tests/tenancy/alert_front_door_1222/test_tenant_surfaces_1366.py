@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: the tool's one fetch
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared.contracts._data_root_1078 import tenant_directory
 from defender.tests.support.tenancy import _systems1366 as R
@@ -100,7 +101,7 @@ def test_1366_o1_the_workspace_map_command_lists_the_tenants_systems_not_the_che
         drive, directory = _scene(tmp_path, name, with_cmdb=with_cmdb)
         capsys.readouterr()
         rc = workspace_map.main(["workspace_map.py", "--tenant", drive.tenant.tenant_id, drive.run_dir.name],
-                                directory=directory)
+                                directory=directory, fetch=in_process_fetch())
         maps[name] = (rc, capsys.readouterr().out)
 
     listed = {name: [line for line in text.splitlines() if re.match(r"- [a-z-]+ ", line)] for name, (_, text) in maps.items()}

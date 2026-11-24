@@ -12,7 +12,7 @@ from defender.records import _provenance
 from defender.records import RunPaths
 from defender.records._family import Family, parse_family
 from defender.tests.support.learning.branch import _triplet_947 as T
-from defender.tests.support.tenancy._launch_publish_p4 import RunWithPublish
+from defender.tests.support.tenancy._launch_publish_p4 import RunWithFetch
 
 LEARNING_LOOP_PAGE = "skills/handbook/content/learning-loop.md"
 PAGE_SPELLINGS = (LEARNING_LOOP_PAGE,
@@ -61,8 +61,8 @@ def _launch_arm(tmp_path: Path, world: str) -> tuple[Path, Path, Path]:
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     T.plant_roster(ep)
     lifecycle = _Lifecycle()
-    # run.main handed the in-process launch-time publish.
-    rc = RunWithPublish(run_mod).main(
+    # run.main handed the in-process launch-time fetch.
+    rc = RunWithFetch(run_mod).main(
         ["--tenant", T.SOURCE_TENANT, "--episode", ep.name, "--world", world],
         lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
         preflight=lambda *_a, **_k: 0)

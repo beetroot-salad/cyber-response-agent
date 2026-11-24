@@ -32,7 +32,6 @@ from defender.tests.tenancy.tenant_1108_delivery._support import (
     LANES,
     ForgeHTTP,
     build_tenant,
-    configured_origin,
     fixture_identity,
 )
 from defender.tests.tenancy.tenant_1108_delivery._support import target as p3_target
@@ -242,7 +241,7 @@ def test_the_rootfs_runner_names_the_derived_image_with_pull_never_and_its_failu
 def _tenant_batch(tmp_path: Path, defender_dir: Path) -> Iterator[tuple[Any, Any]]:
     with build_tenant(tmp_path / "tenant") as built:
         http = ForgeHTTP(remote=built[1])
-        origin = configured_origin(built[0].knowledge)
+        origin = built.origin  # #1618 K8: no clone on the host; the served origin the remote is wired to
         if origin is not None:
             http.serve(origin)
         delivery = p3_target().TenantDelivery.open(

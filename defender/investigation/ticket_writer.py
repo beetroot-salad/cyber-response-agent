@@ -261,7 +261,7 @@ def stale_sentence(run_dir: Path) -> str | None:
     beyond whether a record should exist (OD22')."""
     paths = RunPaths(run_dir)
     status = formats.read_knowledge_status(paths.knowledge_source(), paths.provenance)
-    if status is None or not status.stale:
+    if status is None or not (status.stale or status.unreadable):
         return None
     if status.commit is None:
         return UNREADABLE_SENTENCE

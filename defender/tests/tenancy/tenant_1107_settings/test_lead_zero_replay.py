@@ -125,7 +125,7 @@ def test_d_agentdeps_record(tmp_path):
         assert calls, f"the {lead} lead's verb was never called: {res.rec.verbs}"
         for call in calls:
             record = S.record_on(call.ctx)
-            assert record.settings == tenant.settings, (lead, record.settings)
+            assert record.settings == T1106.placed_half(tenant, "settings"), (lead, record.settings)  # #1618 K8
             assert record.systems["elastic"]["ELASTIC_ALERTS_INDEX"] == f"{marker}-alerts-*", (
                 lead, record.systems["elastic"])
             assert record.systems["ticket"]["TICKET_KEY_PATTERN"] == f"{marker.upper()}-[0-9]+", lead
@@ -188,8 +188,9 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
 
 def test_d_grants_through_tenant_config(tmp_path):
     _root, _folder, tenant = _plant(tmp_path, "gb1107", table=T1106.TABLE_B)
-    projected = T1106.run_grants(tenant.settings)
-    resolved = run_tenant.resolve_run_tenant(tenant.settings, defender_dir=S.DEFENDER,
+    settings = T1106.placed_half(tenant, "settings")  # #1618 K8: the placed half
+    projected = T1106.run_grants(settings)
+    resolved = run_tenant.resolve_run_tenant(settings, defender_dir=S.DEFENDER,
                                              dispatches_lead_zero=True)
     helper = T1106.run_tenant(tenant, defender_dir=S.DEFENDER, dispatches_lead_zero=True)
 
@@ -237,7 +238,8 @@ def test_d_record_settings_redacted(tmp_path, monkeypatch):
     root, _folder, tenant = _plant(tmp_path, "red1107")
     record = R.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                               dispatches_lead_zero=False)
-    assert record.settings == tenant.settings, (record.settings, tenant.settings)
+    placed = T1106.placed_half(tenant, "settings")  # #1618 K8: the placed half
+    assert record.settings == placed, (record.settings, placed)
     given, resolved = str(record.settings), str(Path(record.settings).resolve())
     spellings = {given, resolved}
 

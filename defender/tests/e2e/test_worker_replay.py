@@ -66,11 +66,13 @@ class Lane:
     dsn: str
     tenant: str
 
-    def child(self, launch, mode: str, commit: str, marks: Path, *, stderr_to: Path | None = None) -> list[str]:
-        """A worker's `child_argv` answer: the real helper over the store, in front of the replay job entry (`helper_child`'s shape)."""
+    def child(self, launch, mode: str, commit: str, marks: Path, *, remote: Path,
+              stderr_to: Path | None = None) -> list[str]:
+        """A worker's `child_argv` answer: the real helper over the store, in front of the replay job entry (`helper_child`'s
+        shape; `remote` is the tenant's bare repository the helper's knowledge fetch reads, #1618)."""
         ticket = [*(["--alert-digest", launch.alert_digest] if launch.alert_digest is not None else []),
                   *(["--post-ticket", "--ticket-link", launch.ticket_link] if launch.update_ticket else [])]
-        child = [sys.executable, str(CHILD), mode, commit, str(marks), "--job", launch.investigation_id,
+        child = [sys.executable, str(CHILD), mode, commit, str(marks), str(remote), "--job", launch.investigation_id,
                  "--tenant", launch.tenant_id, "--parent-pid", str(launch.parent_pid), *ticket]
         return ["/bin/sh", "-c", 'exec "$@" 2>>"$0"', str(stderr_to), *child] if stderr_to is not None else child
 
@@ -203,7 +205,7 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         lane = _lane(monkeypatch, migrated_database, t.tenant_id, openbao, garage, evidence_keys)
 
         def child(launch) -> list[str]:
-            return lane.child(launch, "replay", t.commit, tmp_path / "marks")
+            return lane.child(launch, "replay", t.commit, tmp_path / "marks", remote=t.remote)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=golden_bytes)
@@ -254,7 +256,7 @@ async def test_o8_a_raise_after_the_real_drivers_close_still_records_the_report_
         lane = _lane(monkeypatch, migrated_database, t.tenant_id, openbao, garage, evidence_keys)
 
         def child(launch) -> list[str]:
-            return lane.child(launch, "replay-fault-after-close", t.commit, tmp_path / "marks")
+            return lane.child(launch, "replay-fault-after-close", t.commit, tmp_path / "marks", remote=t.remote)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -291,7 +293,7 @@ async def test_1345_o4_a_queued_job_whose_tenant_has_no_mapping_ends_failed_setu
         lane = _lane(monkeypatch, migrated_database, t.tenant_id, openbao, garage, evidence_keys)
 
         def child(launch) -> list[str]:
-            return lane.child(launch, "replay", t.commit, tmp_path / "marks", stderr_to=err_file)
+            return lane.child(launch, "replay", t.commit, tmp_path / "marks", remote=t.remote, stderr_to=err_file)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -335,7 +337,7 @@ async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_alert_and_the_
         lane = _lane(monkeypatch, migrated_database, t.tenant_id, openbao, garage, evidence_keys)
 
         def child(launch) -> list[str]:
-            return lane.child(launch, "replay", t.commit, tmp_path / "marks")
+            return lane.child(launch, "replay", t.commit, tmp_path / "marks", remote=t.remote)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -416,7 +418,7 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(  # noqa
         lane = _lane(monkeypatch, migrated_database, t.tenant_id, openbao, garage, evidence_keys)
 
         def child(launch) -> list[str]:
-            return lane.child(launch, "replay-priced", t.commit, tmp_path / "marks")
+            return lane.child(launch, "replay-priced", t.commit, tmp_path / "marks", remote=t.remote)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -479,7 +481,7 @@ async def test_s2a_s5_r7_a_request_the_run_never_saw_the_end_of_marks_the_job_th
         lane = _lane(monkeypatch, migrated_database, t.tenant_id, openbao, garage, evidence_keys)
 
         def child(launch) -> list[str]:
-            return lane.child(launch, "replay-priced-unseen", t.commit, tmp_path / "marks")
+            return lane.child(launch, "replay-priced-unseen", t.commit, tmp_path / "marks", remote=t.remote)
 
         async with job_store(migrated_database) as store:
             alert = await an_alert(store, t.tenant_id, raw=(golden / "alert.json").read_bytes())
@@ -522,7 +524,7 @@ async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_rep
 
         def child(launch) -> list[str]:
             mode = modes[launch.investigation_id]
-            return lane.child(launch, mode, t.commit, tmp_path / mode,
+            return lane.child(launch, mode, t.commit, tmp_path / mode, remote=t.remote,
                                 stderr_to=err_file if mode.endswith("fault") else tmp_path / "control.stderr")
 
         async with job_store(migrated_database) as store:

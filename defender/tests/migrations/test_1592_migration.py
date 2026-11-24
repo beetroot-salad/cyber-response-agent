@@ -56,14 +56,14 @@ def _unchanged(dsn: str) -> None:
                         "('tenancy.tenants'::regclass, 'identity.memberships'::regclass, 'identity.users'::regclass)") == [(0,)]
 
 
-def test_the_revision_sits_directly_on_the_host_requests_revision_and_on_the_one_line_to_the_head():
-    """S1-19: 0027's down-revision is `0026_host_requests`, and it is the one head or on the one line to it (#1546's
-    revisions sit above it)."""
+def test_the_revision_sits_directly_on_the_host_requests_revision_and_is_the_head():
+    """S1-19: 0027's down-revision is `0026_host_requests`, and the one head is it or descends from it (#1618's
+    `0028_drop_publish_status` follows it, and #1546's revisions follow that)."""
     from defender.migrations import head, heads
 
     assert revisions.down_of(_revision()) == PRIOR
     assert heads() == (head(),)
-    assert _revision() == head() or _revision() in revisions.ancestors(head())
+    assert head() == _revision() or _revision() in revisions.ancestors(head())
 
 
 @pytest.mark.postgres

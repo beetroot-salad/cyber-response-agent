@@ -193,13 +193,17 @@ def test_1105_the_repository_answers_from_the_tenant_it_is_handed_and_reads_no_e
     H.tenant(other_root, t.id)
     monkeypatch.setenv(DATA_ROOT_ENV, str(other_root))
     assert answers() == expected, "answers moved with DEFENDER_DATA_ROOT elsewhere"
-    shutil.rmtree(t.knowledge)
+    placed = Path(location_path(t.tenant_root)) / "knowledge"  # #1618 K8: a `Tenant` names no knowledge path
+    assert placed.is_dir(), f"premise: {placed} was placed"
+    shutil.rmtree(placed)
     assert answers() == expected, "answers moved with the knowledge folder gone"
     created = t.runs_repository().create()
     assert created.run_dir.parent == location_path(t.runs), f"runs.create landed at {created.run_dir}"
     assert not (other_root / t.id / "runs").exists(), "something reached the env's data root"
-    err = H.raised(_tenant.accept_tenant, fixture_data_root(root), t.id, defender_dir=H.DEFENDER)
-    assert H.is_a(err, TenantRefused), f"acceptance at the edge did not refuse: {err!r}"
+    # #1618 K8: acceptance judges `<T>` alone (a tenant holds no knowledge folder), so with the placed folder gone it
+    # still accepts (was: refused, the knowledge folder missing); the handed tenant's answers above never depended on it.
+    again = _tenant.accept_tenant(fixture_data_root(root), t.id, defender_dir=H.DEFENDER)
+    assert again.id == t.id, f"re-acceptance without a knowledge folder named another tenant: {again!r}"
 
 
 def test_1105_a_copied_or_pickled_tenant_is_served_like_the_original(tmp_path):

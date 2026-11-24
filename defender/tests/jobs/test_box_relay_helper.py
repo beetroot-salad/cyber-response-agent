@@ -371,7 +371,7 @@ def test_o10_a_box_past_the_limit_ends_only_its_own_job_and_another_helpers_rela
     state.mkdir()
     other_inv = str(uuid.uuid4())
     scene.plant(other_inv)
-    cfg = {"state": str(state), "inv": other_inv, "commit": scene.t.commit,
+    cfg = {"state": str(state), "inv": other_inv, "commit": scene.t.commit, "remote": str(scene.t.remote),
            "argv": scene.argv("investigation", other_inv, parent=os.getpid())}
     checkout = str(WORKTREE)
     env = {**os.environ, box.CLAIM_ENV: uuid.uuid4().hex,

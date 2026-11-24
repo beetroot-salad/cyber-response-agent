@@ -23,7 +23,7 @@ ID_COLUMNS = {
     ("tenancy", "tenants", "id"), ("identity", "users", "id"),
     *(("identity", "memberships", c) for c in ("id", "user_id", "tenant_id", "invited_by", "ended_by")),
     ("identity", "sessions", "user_id"),
-    *(("tenancy", t, "tenant_id") for t in ("forge_wiring", "generations", "publish_status")),
+    *(("tenancy", t, "tenant_id") for t in ("forge_wiring", "generations")),  # #1618: 0027 drops publish_status
     *(("jobs", "alerts", c) for c in ("id", "tenant_id")),
     *(("jobs", "investigations", c) for c in ("id", "tenant_id", "alert_id")),
 }

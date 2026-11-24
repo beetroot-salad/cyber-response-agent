@@ -258,11 +258,11 @@ def _main(**seams: Callable[..., Any]) -> int:
 
     from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID
 
-    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
-    # Plus the in-process launch-time publish.
+    # Plus the in-process launch-time fetch.
     argv = [str(GOLDEN / "alert.json"), "--tenant", D9_TENANT_ID, "--no-learn"]
-    return run_py.main(argv, preflight=lambda _model: 0, **with_publish(dict(seams), argv))
+    return run_py.main(argv, preflight=lambda _model: 0, **with_fetch(dict(seams), argv))
 
 
 def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(
@@ -513,7 +513,7 @@ def test_1279_a_and_b_run_the_same_fixture_get_two_minted_ids_and_two_pages_in_t
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
     from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID
-    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_fetch
 
     monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
     b_id = fixture_uuid("tenant:second-run-1279")
@@ -524,7 +524,7 @@ def test_1279_a_and_b_run_the_same_fixture_get_two_minted_ids_and_two_pages_in_t
         argv = [str(GOLDEN / "alert.json"), "--tenant", tenant_id, "--no-learn"]
         rc = run_py.main(argv, directory=directory_for_argv(argv),
                          preflight=lambda _model: 0, lifecycle=ran[tenant_id],
-                         publish=in_process_publish())
+                         fetch=in_process_fetch())
         assert rc == 0
 
     ids = {t: lc.run_dirs[0].name for t, lc in ran.items()}

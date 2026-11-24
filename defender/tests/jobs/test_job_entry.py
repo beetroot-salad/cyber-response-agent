@@ -6,6 +6,8 @@ never running unsandboxed (R2) are the entry's. The host-mode death tie (`--pare
 container cases are in `test_job_container_entry.py`. The tenant is a `tenancy.tenants` row (r6): a migrated database; no worker here."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an entry's one knowledge fetch, in-process
+
 import ast
 import contextlib
 import functools
@@ -637,57 +639,12 @@ def test_r6_6_a_failed_run_also_writes_its_job_end_record_before_the_helper_give
     assert seen["free_after_helper"], "the helper left the tenant's lock held"
 
 
-def _remove_working_tree(scene: Scene) -> Path:
-    """Take the tenant's knowledge working tree away and keep its git objects (the folder rules then judge only what remains, as main's run-start acceptance does with `clone_tree=False`)."""
-    import shutil
-
-    from defender.tenancy._tenants import AGENT_HALF, SETTINGS_HALF
-
-    knowledge = scene.root / scene.t.tenant_id / "knowledge"
-    for half in (SETTINGS_HALF, AGENT_HALF):
-        shutil.rmtree(knowledge / half)
-    assert (knowledge / ".git").exists(), "premise: the git objects are kept"
-    assert not (knowledge / SETTINGS_HALF).exists()
-    assert not (knowledge / AGENT_HALF).exists()
-    return knowledge
-
-
-def test_r6_6_a_tenant_folder_without_its_working_tree_is_accepted_by_the_job_entry(scene):
-    """A tenant whose knowledge folder keeps its git objects but has no working tree is accepted (run start does not need the tree: it exports from the objects): the job sets up and runs. (R6-3, R6-6)"""
-    run_id = str(uuid.uuid4())
-    scene.plant(run_id)
-    _remove_working_tree(scene)
-
-    ran = run_job(scene, run_id)
-
-    assert ran.raised is None, ran
-    assert ran.calls["lifecycle"] == 1, ran.message
-    assert scene.job_end(run_id) == SETTLED
-
-
-def test_r6_6_the_tree_less_folder_is_refused_by_the_acceptance_that_wants_the_tree(scene):
-    """Control for the two tests around it: the same folder IS refused by `host_tenant(..., clone_tree=True)`, so `clone_tree=False` is what lets it through. (R6-6)"""
-    from defender import tenancy
-    from defender.records.formats import TenantRefused
-    from defender.run import DEFENDER_DIR
-    from defender.systems.run_tenant import host_tenant
-
-    _remove_working_tree(scene)
-
-    with pytest.raises(TenantRefused):
-        host_tenant(tenancy.resolve_data_root(), scene.t.tenant_id, defender_dir=DEFENDER_DIR, clone_tree=True)
-
-
-def test_r6_3_a_tenant_folder_without_its_working_tree_is_accepted_by_the_operator_run(scene, tmp_path):
-    """The same folder, `run.main`: accepted, the run starts. (R6-3, R6-6: `main` and `job_main` pass the same acceptance arguments)"""
-    _remove_working_tree(scene)
-
-    out = B.launch(scene.t, tmp_path, publish=lambda *a, **k: B.fresh(scene.t.commit))
-
-    assert out.raised is None, out.raised
-    assert out.refusal is None, out.refusal
-    assert out.rc == 0, out.rc
-    assert out.seen, "the operator run did not start"
+# Retired (#1618 design r5 census: "the clone" and `clone_tree` are deleted; K8 "No clone, no exports, no `current`"):
+# test_r6_6_a_tenant_folder_without_its_working_tree_is_accepted_by_the_job_entry,
+# test_r6_6_the_tree_less_folder_is_refused_by_the_acceptance_that_wants_the_tree and
+# test_r6_3_a_tenant_folder_without_its_working_tree_is_accepted_by_the_operator_run pinned how acceptance treats a
+# clone's git objects without its working tree; a tenant folder holds no knowledge folder at all now, and every run reads
+# the copy its one fetch made (`knowledge_1618`'s cases).
 
 
 def test_m1_a_preflight_that_returns_non_zero_is_a_refusal(scene):
@@ -825,7 +782,7 @@ def test_m3_beneath_the_names_nothing_listed_or_opened_the_run_folder_before_the
             rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id],
                              lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=spies.seam,
                              enqueue=lambda *a, **k: False,
-                             publish=lambda *a, **k: B.fresh(scene.t.commit))
+                             fetch=in_process_fetch(scene.t.remote))
             assert rc == 0
     finally:
         watch.stop()
@@ -1415,7 +1372,7 @@ def test_c2_the_holder_is_the_job_entrys_and_the_investigation_is_handed_it(scen
 
     rc = run_py.main([str(B.plant_alert(scene.work / "op-alert")), "--tenant", scene.t.tenant_id],
                      lifecycle=operator_lifecycle, preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
-                     enqueue=lambda *a, **k: False, publish=lambda *a, **k: B.fresh(scene.t.commit))
+                     enqueue=lambda *a, **k: False, fetch=in_process_fetch(scene.t.remote))
     assert rc == 0
     assert operator.get("job_facts") is None, "the operator path was handed a job facts holder"
 
@@ -1453,7 +1410,7 @@ def test_c1_the_job_lanes_box_is_started_by_the_helper_with_the_launch_records_t
     rc = run_py.main([str(B.plant_alert(scene.work / "op-alert")), "--tenant", scene.t.tenant_id],
                      lifecycle=_lifecycle(scene, investigate=_investigate(ran), start_box=starts_into(operator)),
                      preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
-                     enqueue=lambda *a, **k: False, publish=lambda *a, **k: B.fresh(scene.t.commit))
+                     enqueue=lambda *a, **k: False, fetch=in_process_fetch(scene.t.remote))
     assert rc == 0
     assert len(operator) == 1, operator
     assert not operator[0].get("start_token"), operator
@@ -1581,7 +1538,7 @@ def test_r2_control_the_operator_path_with_the_same_environment_and_seams_does_r
     start = functools.partial(box_mod.start_box, docker=RH._no_docker_daemon)
     operator = Ran()
 
-    launched = B.launch(scene.t, tmp_path, publish=lambda *a, **k: B.fresh(scene.t.commit),
+    launched = B.launch(scene.t, tmp_path, publish=None, fetch=in_process_fetch(scene.t.remote),
                         lifecycle=_lifecycle(scene, investigate=_investigate(operator), start_box=start))
 
     assert launched.raised is None, launched.text()
@@ -1623,7 +1580,7 @@ def _operator_composition_still_enqueues_and_never_records(scene: Scene, tmp_pat
     rc = run_py.main([str(alert), "--tenant", scene.t.tenant_id],
                      lifecycle=lambda **kw: summary(), preflight=lambda *a, **k: 0,
                      visualize=lambda *a, **k: None, enqueue=enq,
-                     publish=lambda *a, **k: B.fresh(scene.t.commit))
+                     fetch=in_process_fetch(scene.t.remote))
     assert rc == 0
     assert [step for step in seen if step != "clear"] == ["enqueue"], seen
 
@@ -1835,7 +1792,7 @@ def test_m4_the_store_check_sees_the_operator_default_enqueue(scene, tmp_path):
     before = set(tree(scene.root))
     rc = run_py.main([str(B.plant_alert(tmp_path / "op-alert")), "--tenant", scene.t.tenant_id],
                      lifecycle=lifecycle, preflight=lambda *a, **k: 0, visualize=lambda *a, **k: None,
-                     publish=lambda *a, **k: B.fresh(scene.t.commit))
+                     fetch=in_process_fetch(scene.t.remote))
     assert rc == 0
     assert len(waiting()) == 1, "the operator default enqueue left no request row the store check can see"
     assert not [k for k in set(tree(scene.root)) - before if re.search(r"learning", k)], "the request left a file under a learning folder"

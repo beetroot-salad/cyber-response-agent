@@ -422,7 +422,9 @@ def _knowledge(status: str, commit: str | None, stale_kind: str | None = None) -
     return {"status": status, "commit": commit, "stale_kind": stale_kind}
 
 
-STALE_OPERATOR = _knowledge("stale", None, "operator")
+#: #1618 K9 (stale retired): the unreadable-knowledge marker is `unreadable`, no commit, no stale kind (was:
+#: `{stale, operator, null}`); #1546's `lesser` ending carries it in place of the knowledge.
+UNREADABLE = _knowledge("unreadable", None)
 
 
 @pytest.mark.parametrize("served", [_knowledge("current", COMMIT), _knowledge("stale", OTHER_COMMIT, "transient"),
@@ -435,6 +437,11 @@ async def test_o8_knowledge_is_the_staged_served_shape(world, served):
     _, stored = await _run_one(world, child)
     assert stored["knowledge"] == served
     _no_run_text(stored)
+
+
+# #1546 A-O2 retired #1618's `test_o8_a_started_run_with_no_record_is_unreadable` (K9: a started run's missing record
+# file reads `unreadable`): the worker reads no record file in the run folder; the row's knowledge is the staged
+# `knowledge` fact, guard `test_o8_knowledge_is_the_staged_served_shape` above (a decoy record file is never read).
 
 
 async def test_o8_a_failed_run_that_started_still_shows_the_knowledge_it_read(world):
@@ -1055,11 +1062,11 @@ async def test_o6_a_decided_ending_whose_write_is_refused_is_written_again_with_
     assert (tries[0]["cost_usd"], tries[0]["cost_is_lower_limit"]) == (pytest.approx(8.0), True), "premise: a marked figure"
     assert tries[1]["cost_is_lower_limit"] is True, "the second try kept the cost and dropped its mark"
     assert [(t["stage"], t["failure_reason"]) for t in tries] == [("completed", None)] * 2, "the decided ending was replaced"
-    assert tries[0]["knowledge"] != STALE_OPERATOR, "premise: the first try carried the run's knowledge"
-    assert tries[1]["knowledge"] == STALE_OPERATOR  # the unreadable marker: stale, operator, no commit
+    assert tries[0]["knowledge"] != UNREADABLE, "premise: the first try carried the run's knowledge"
+    assert tries[1]["knowledge"] == UNREADABLE  # the unreadable marker (#1618 K9: `unreadable`, no commit)
     assert tries[1]["cost_usd"] == tries[0]["cost_usd"], "the second try lost the cost"
     final = row(world["dsn"], bad)
-    assert (final["stage"], final["knowledge"]) == ("completed", STALE_OPERATOR)
+    assert (final["stage"], final["knowledge"]) == ("completed", UNREADABLE)
     assert execute(world["dsn"], "SELECT count(*) FROM jobs.investigations WHERE request_key = 'k1'") == [(1,)], \
         "a refused write re-ran the job"
     assert any(r.levelno >= logging.ERROR and bad in r.getMessage() for r in caplog.records

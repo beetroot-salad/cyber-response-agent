@@ -1,35 +1,39 @@
 """#1471 A3, R13-1.3/.4: the adoption container entry `defender.adoption.main(argv, *, environ=, client=)` over a socket stand-in answering
-`launch` (with the forge origin and repo, surface §4) and `forge.token`, the tenant's clone and a real bare remote, and a forge double as
-`client`. Every outcome it writes is the entry's own; the fakes record and inject."""
+`launch` (with the forge origin and repo, surface §4) and `forge.token`, a real bare remote served at the tenant's recorded wiring, and a
+forge double as `client`. Every outcome it writes is the entry's own; the fakes record and inject.
+
+#1618: the entry opens the operation's own private repository against the launch facts' `forge_origin` (K4, K8: no host clone).
+Retired with the clone (design "Retired promises": adoption's ref-lock collision and its `repository_busy` writer):
+`test_a_ref_lock_held_on_the_clones_main_is_repository_busy_not_delivery_failed`; with one private repository per operation no
+other writer can hold a ref lock in it (a stored `repository_busy` stays readable)."""
 from __future__ import annotations
 
 import base64
 import os
 import uuid
-from pathlib import Path
 
 import pytest
 
 from defender.tests.support.jobs._socket_standin1170 import SocketStandIn
 from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.tenancy.tenant_1108_delivery._identity import identity as fixture_identity
-from defender.tests.tenancy.tenant_1108_delivery._support import configured_origin, git, push_to_remote
+from defender.tests.tenancy.tenant_1108_delivery._support import git, origin_of
 
 from ._forge import DIGEST, RENDERING, SYSTEM, AdoptionForge, branch_for
 
 
-#: A remote no forge answers at (G3, repair 5): the clone's own `remote.origin.url` is set to it, unlike the wiring.
+#: A remote no forge answers at (G3, repair 5): an origin other than the recorded wiring.
 DEAD_ORIGIN = "http://127.0.0.1:9/dead/clone-remote.git"
 
 
 @pytest.fixture
 def forge(repo):
-    """The forge double at the tenant's recorded wiring (`wired`), the clone's own remote then pointed at a dead address,
-    so every case here shows the entry fetches, pushes and opens at the wiring, never at the clone's remote."""
+    """The forge double at the tenant's recorded wiring (`wired`): the origin the tenant's remote is served at, which the
+    helper's launch facts hand the entry as `forge_origin`."""
     http = AdoptionForge(remote=repo[1])
-    http.wired = configured_origin(repo[0].knowledge)
+    http.wired = origin_of(repo)
+    assert http.wired, "premise: the tenant's remote is served at an origin"
     http.serve(http.wired)
-    git(location_path(repo[0].knowledge), "config", "remote.origin.url", DEAD_ORIGIN)
     return http
 
 
@@ -112,15 +116,19 @@ def test_an_unprotected_main_is_delivery_failed_and_nothing_is_pushed_or_opened(
     assert git(repo[1], "for-each-ref", "refs/heads/adopt").strip() == ""
 
 
-def test_a_ref_lock_held_on_the_clones_main_is_repository_busy_not_delivery_failed(repo, forge, tmp_path):
-    """`refs/remotes/origin/main.lock` planted in the clone while the remote has moved: the fetch's ref update collides, `{failed, repository_busy}`; nothing sent. (A3, surface §7)"""
-    def advance(writer):
-        (writer / "agent" / "lessons" / "later.md").write_text("landed after the clone fetched\n", encoding="utf-8")
-    push_to_remote(repo, tmp_path, advance)
-    lock = Path(location_path(repo[0].knowledge)) / ".git" / "refs" / "remotes" / "origin" / "main.lock"
-    lock.write_text("", encoding="utf-8")
-    assert _enter(repo, forge, tmp_path) == {"outcome": "failed", "reason": "repository_busy"}
+def test_the_entry_fetches_pushes_and_opens_only_at_the_facts_forge_origin(repo, forge, tmp_path):
+    """The entry opens its repository at the launch facts' `forge_origin`, nowhere else: handed an origin no forge answers
+    at, it is `{failed, delivery_failed}` and the forge at the wiring sees no request and gets no branch or PR. Control: the
+    helper's own facts (the wiring) open the offer. (G3, A3; #1618 K4: the operation's own repository, no host clone)"""
+    record = _enter(repo, forge, tmp_path, facts=lambda facts: {**facts, "forge_origin": DEAD_ORIGIN})
+    assert record == {"outcome": "failed", "reason": "delivery_failed"}, record
+    at_wiring = [r for r in forge.requests if forge._ours(r)]
+    assert forge.requests, "premise: the entry asked a forge (the one its facts named)"
+    assert at_wiring == [], f"the entry reached the wiring's forge though its facts named another origin: {at_wiring}"
     assert forge.creates == []
+    assert git(repo[1], "for-each-ref", "refs/heads/adopt").strip() == ""
+    control = _enter(repo, forge, tmp_path)
+    assert control["outcome"] == "opened", control
 
 
 # Retired param `silent` (#1546 A-O2): the adoption `result` reaches the store only through the helper, so a container with no

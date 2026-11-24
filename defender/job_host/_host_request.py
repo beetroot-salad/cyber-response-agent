@@ -51,13 +51,13 @@ def request_id(session: Session) -> str:
         raise HelperFault(f"{session.job_id!r} is not a host request's id (a UUID)") from None
 
 
-def admit_host_tenant(session: Session, hold: contextlib.ExitStack, *, clone_tree: bool = True) -> Any:
+def admit_host_tenant(session: Session, hold: contextlib.ExitStack) -> Any:
     """The tenant's lock and admission through the helper's records (`host_tenant(directory=session.directory)`),
     entered on `hold`; `TenantRefused` is the caller's to word."""
     from defender.systems.run_tenant import host_tenant
 
     admitted = host_tenant(session.root, session.tenant_id, directory=session.directory,
-                           defender_dir=session.defender_dir, clone_tree=clone_tree)
+                           defender_dir=session.defender_dir)
     hold.enter_context(admitted)
     session.tenant_accepted(admitted.tenant)
     return admitted

@@ -16,7 +16,6 @@ from typing import Any
 
 import pytest
 
-from defender.tests.support.shared.contracts._repo import seed_repo
 from defender.tests.support.shared._postgres1339 import empty_database, migrated_database  # noqa: F401 — fixtures
 from defender.tests.support.tenancy import _host1214 as H
 from defender.tests.support.tenancy._active1214 import (
@@ -406,42 +405,53 @@ class _WiringReads:
         return getattr(self.inner, name)
 
 
-def test_the_publish_child_works_under_an_exclusive_hold_where_the_host_acceptance_waits(placed):
-    """With T's lock held exclusive (prepare's), the publish child still gets past acceptance for a `creating` tenant
-    to its wiring read and reports what an `active` tenant's child reports, while the host acceptance on the same lock
-    blocks (r10 A3, O-A4; the control shows the hold bites)."""
-    from defender import tenancy
+def _fetch_line(placed: Path, directory: object, dest: Path) -> str:
+    """The fetch child's in-process entry (`fetch_copy`) as its one report line: `ok <commit>`, else `refused <reason>`."""
     from defender.learning.author import version_control as vc
+
+    try:
+        return f"ok {vc.fetch_copy(TENANT, dest, data_root=placed, directory=directory, budget=None)}"
+    except vc.DeliveryRefused as refused:
+        return f"refused {refused}"
+
+
+def test_the_fetch_child_works_under_an_exclusive_hold_where_the_host_acceptance_waits(placed, tmp_path):
+    """With T's lock held exclusive (prepare's), the fetch child (#1618 flow 1, which replaced the publish child under
+    the same starter) still gets past acceptance for a `creating` tenant to its wiring read and reports what an
+    `active` tenant's child reports, while the host acceptance on the same lock blocks (r10 A3, O-A4; the control shows
+    the hold bites)."""
+    from defender import tenancy
     from defender.tenancy import host_lock
 
     root = tenancy.resolve_data_root()
-    seed_repo(placed / TENANT / "knowledge")  # a real git repository, as a tenant's clone is
     # budget=None on both: the creating child runs in a thread, where the deadline's signal handler cannot be set, so a
     # budget would put "signal only works in main thread" in its line alone. A closed port is the fast-failing origin.
     origin = "http://127.0.0.1:1/x.git"
     active = _WiringReads(active_directory(placed, TENANT, origin=origin))
-    control = vc.publish_for_run(TENANT, data_root=placed, directory=active, budget=None)
+    (tmp_path / "control").mkdir()
+    control = _fetch_line(placed, active, tmp_path / "control")
     assert active.wiring_reads == [TENANT], f"control: the active tenant's child never read its wiring: {control}"
     creating = _WiringReads(active_directory(placed, TENANT, state="creating", origin=origin))
     fd = host_lock.acquire(placed, TENANT, exclusive=True, timeout=0)
     assert fd is not None
     lines: list[str] = []
     gate = threading.Event()
+    (tmp_path / "creating").mkdir()
 
-    def publish() -> None:
-        lines.append(vc.publish_for_run(TENANT, data_root=placed, directory=creating, budget=None))
+    def fetch() -> None:
+        lines.append(_fetch_line(placed, creating, tmp_path / "creating"))
 
     def accept() -> None:
         with host_tenant(root, TENANT, directory=active_directory(placed, TENANT)):
             gate.set()
 
-    child = threading.Thread(target=publish, daemon=True)
+    child = threading.Thread(target=fetch, daemon=True)
     waiter = threading.Thread(target=accept, daemon=True)
     try:
         child.start()
         waiter.start()
         child.join(60)
-        assert not child.is_alive(), "the publish child waited for the exclusive hold"
+        assert not child.is_alive(), "the fetch child waited for the exclusive hold"
         assert waiter.is_alive(), "control: the host acceptance gave up on an exclusive hold"
         assert not gate.is_set(), "control: the host acceptance went past an exclusive hold"
     finally:
@@ -452,7 +462,8 @@ def test_the_publish_child_works_under_an_exclusive_hold_where_the_host_acceptan
     assert creating.wiring_reads == [TENANT], f"the child of a creating tenant never reached its wiring read: {line}"
     assert "was not accepted" not in line, line
     assert not any(w in line.lower() for w in ("creating", "offboarding", "not active")), line
-    assert line == control, "a creating tenant's child reported differently from an active tenant's"
+    assert line.replace(str(tmp_path / "creating"), "<dest>") == control.replace(str(tmp_path / "control"), "<dest>"), \
+        "a creating tenant's child reported differently from an active tenant's"
 
 
 # --- repair round 1: the order, the line, the mark and the record seen at their boundaries ----------------------

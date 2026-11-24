@@ -1,17 +1,20 @@
 """#1108 P4 operator CLIs, each case a wrong-but-green production variant: every CLI that logs in
-reads the host secret file its tenant's live generation records (no flag, no default), and the CLIs
-that show a tenant's knowledge read an export (the run's, or `current`), never the clone."""
+reads the host secret file its tenant's live generation records (no flag, no default), and (#1618) the CLIs
+that show a tenant's knowledge read a copy of Forgejo's commit (main, or the run's own), never the clone."""
 from __future__ import annotations
 
 from pathlib import Path
+
+import pytest
 
 
 from defender.tests.support.learning.core._store1278 import (
     migrated_database,  # noqa: F401 — fixture the world needs
     world,  # noqa: F401 — fixture
 )
-from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
-from defender.tests.tenancy.tenant_1108_p4._support import bind_forge, export_dir
+from defender.tests.tenancy.knowledge_1618 import _readers_1618 as RD
+from defender.tests.tenancy.knowledge_1618 import _support as K
+from defender.tests.tenancy.tenant_1108_p4._support import bind_forge
 
 
 def _tenant_cli():
@@ -19,41 +22,115 @@ def _tenant_cli():
     return tenant
 
 
-# --- the run's map reads the export that run read ----------------------------------------------
+# --- #1618: the tools that show knowledge read Forgejo's commit and leave nothing (F4, K4, K5) ------------------
 
-def test_r6_the_workspace_map_of_a_run_reads_the_export_that_run_read(tmp_path, data_root, capsys):
+@pytest.fixture
+def k_scene(tmp_path, data_root):
+    """The upgraded tenant (no clone, `exports/`, `current`); `main` at the seed."""
+    with K.scene(tmp_path, data_root) as scene:
+        yield scene
+
+
+@pytest.fixture
+def k_decoy(tmp_path, data_root):
+    """A stale clone, `exports/<seed>/` and `current` the tools must ignore; `main` moved on (`MERGED_MARK`)."""
+    with K.scene(tmp_path, data_root, decoy=True) as scene:
+        yield scene
+
+
+def _tracer(tenant):
+    from defender.cli.learning import trace_lesson
+    return trace_lesson.main, ["--tenant", tenant, "--all"]
+
+
+def _page(tenant):
+    from defender.learning.frontend import serialize
+    return serialize.main, ["lessons_page.py", "--tenant", tenant]
+
+
+def _policy(tenant, tmp_path):
+    from defender.cli import policy_cli
+    return policy_cli.main, ["show", "gather", "--run-dir", str(tmp_path / "policy-run"), "--tenant", tenant]
+
+
+def _map(tenant, run_id):
     from defender.cli import workspace_map
-
-    with B.run_tenant(tmp_path, data_root) as t:
-        first = t.commit
-        out = B.launch(t, tmp_path, publish=lambda *a, **k: B.fresh(first))
-        assert out.rc == 0, out.text()
-        t.merge(B.MERGE_FILES)
-        second = t.publish().commit
-        assert second != first
-        # The map must show neither the later export nor the clone.
-        capsys.readouterr()
-        rc = workspace_map.main(["workspace_map.py", "--tenant", t.tenant_id, out.run_dir.name], directory=t.directory)
-        text = capsys.readouterr().out
-    assert rc == 0
-    expected = export_dir(t.tenant, first) / "agent"
-    agent_line = next(line for line in text.splitlines() if line.startswith("- AGENT_DIR:"))
-    assert agent_line == f"- AGENT_DIR: `{expected}`", agent_line
-    assert second not in text
-    assert str(t.clone) not in text
+    return workspace_map.main, ["workspace_map.py", "--tenant", tenant, run_id]
 
 
-# --- the CLIs that show knowledge read `current`'s export, not the clone ------------------------
+def test_1618_c5_the_lessons_page_and_the_tracer_show_mains_tip_not_the_clone_or_exports(k_decoy, tmp_path, capsys):
+    """Both print the lesson as `main` holds it (`MERGED_MARK`) while the clone and the kept export hold the seed and a
+    clone-only edit; each leaves nothing in the temporary folder and reached Forgejo. (F4, K8)"""
+    t = k_decoy
+    for make in (_page, _tracer):
+        main, argv = make(t.tenant_id)
+        ran = RD.run_tool(t, tmp_path, capsys, main, argv)
+        assert ran.rc == 0, ran.err
+        assert K.MERGED_MARK in ran.out, f"{make.__name__}: not main's tip"
+        assert K.SEEDED_MARK not in ran.out
+        assert K.CLONE_ONLY_MARK not in ran.out
+        assert ran.requests > 0, "nothing was fetched from Forgejo"
+        assert ran.fetches, "the tool never asked the fetch child for its copy"
+        assert ran.minted == 0, f"{make.__name__}'s own process minted a credential (O8)"
+        assert ran.left == [], f"{make.__name__} left {ran.left} in the temporary folder"
 
-def test_r6_the_trace_and_frontend_defaults_read_currents_export_not_the_clone(p4_tenant):
-    from defender.cli.learning.trace_lesson import published_lessons_dir
-    from defender.learning.frontend.serialize import published_agent_root
 
-    t = p4_tenant
-    export_agent = export_dir(t.tenant, t.commit) / "agent"
-    assert published_agent_root(t.tenant) == export_agent
-    assert published_lessons_dir(t.tenant) == export_agent / "lessons"  # C1: takes the accepted tenant
-    assert Path(t.clone) not in published_agent_root(t.tenant).parents
+def test_1618_c5_the_policy_cli_projects_mains_grant_table_each_time_it_runs(k_scene, tmp_path, capsys):
+    """`defender-policy show gather --tenant` shows `cmdb` while main grants it and not after a merge withholds it: the table
+    is main's at each run, from a copy handed to the CLI, not a kept one. (F4, K8)"""
+    from defender.tests.support.jobs._readiness1471 import grants_text
+
+    def withhold(d: dict) -> None:
+        for verb in d["cmdb"]:
+            d["cmdb"][verb] = {"roles": [], "reason": "withheld for #1618"}
+
+    t = k_scene
+    main, argv = _policy(t.tenant_id, tmp_path)
+    before = RD.run_tool(t, tmp_path, capsys, main, argv)
+    assert before.rc == 0, before.err
+    assert "cmdb" in before.out, "control: the table grants cmdb at the seed"
+
+    K.advance_main(t, files={"settings/verb-grants.yaml": grants_text(withhold)})
+    after = RD.run_tool(t, tmp_path, capsys, main, argv)
+
+    assert after.rc == 0, after.err
+    assert "cmdb" not in after.out, "the policy still shows a grant main withheld"
+    assert before.left == [] == after.left
+
+
+def test_1618_c6_the_workspace_map_of_a_run_shows_the_agent_tree_at_the_commit_that_run_read(k_scene, tmp_path, capsys):
+    """The map is drawn over a copy of the run's recorded commit fetched by id (`cmdb` still has its `SKILL.md`), not main's
+    later tip (where it is deleted); the copy is gone afterwards. (F4, K5)"""
+    t = k_scene
+    seed = t.commit
+    run_id = RD.plant_run(t, seed)
+    K.advance_main(t, files={"agent/skills/cmdb/SKILL.md": None})
+
+    main, argv = _map(t.tenant_id, run_id)
+    ran = RD.run_tool(t, tmp_path, capsys, main, argv)
+
+    assert ran.rc == 0, ran.err
+    lines = ran.out.splitlines()
+    assert "- cmdb (SKILL.md)" in lines, "not the tree at the run's commit"
+    assert "- cmdb" not in lines, "main's later tip was read"
+    assert ran.requests > 0
+    assert ran.left == [], f"left {ran.left}"
+
+
+def test_1618_c6_k5_a_run_whose_recorded_commit_forgejo_does_not_serve_gets_no_map_and_a_reason_naming_it(k_scene, tmp_path,
+                                                                                                          capsys):
+    """The map for a run recorded at a commit Forgejo does not hold exits non-zero naming the commit (no empty map);
+    the served commit above is the control. (F4, K5)"""
+    t = k_scene
+    run_id = RD.plant_run(t, K.ABSENT_COMMIT)
+    main, argv = _map(t.tenant_id, run_id)
+
+    ran = RD.run_tool(t, tmp_path, capsys, main, argv)
+
+    assert ran.rc != 0
+    assert K.ABSENT_COMMIT in ran.err, ran.err
+    assert "System skills" not in ran.out
+    assert ran.left == []
 
 
 # --- every login reads the secret file the live generation records ---------------------------
@@ -71,16 +148,21 @@ def _bind_missing_secret(t, tmp_path) -> Path:
     return missing
 
 
-def test_r6_the_publish_child_logs_in_from_the_secret_file_the_generation_records(p4_tenant, tmp_path,
-                                                                                 capsys):
-    """The child is handed identifiers only: the secret file comes from the tenant's live generation."""
-    from defender.learning.author import version_control as vc
+def test_r6_the_fetch_child_logs_in_from_the_secret_file_the_generation_records(p4_tenant, tmp_path, capsys):
+    """The child is handed identifiers only: the secret file comes from the tenant's live generation. (#1618: the fetch
+    child replaces the retired publish child, flows 1-4; a credential it cannot read is a `lasting` refusal, D11.)"""
+    import importlib
 
+    from defender.tests.tenancy.knowledge_1618 import _support as K
+
+    child = importlib.import_module(K.CHILD_MODULE)
     t = p4_tenant
     missing = _bind_missing_secret(t, tmp_path)
+    dest = tmp_path / "fetch-dest"
+    dest.mkdir()
     capsys.readouterr()
-    rc = vc.publish_child_main([t.tenant_id, "--data-root", str(t.data_root)], directory=t.directory)
+    rc = child.fetch_child_main([t.tenant_id, "--data-root", str(t.data_root), "--dest", str(dest)], directory=t.directory)
     line = capsys.readouterr().out.strip().splitlines()[-1]
     assert rc == 0
-    assert line.startswith("misconfigured"), line
+    assert line.startswith("refused lasting "), line
     assert str(missing) in line, line

@@ -88,8 +88,15 @@ def _head_bytes(repo: Path, rel: str, rev: str = "HEAD") -> bytes:
 
 
 def _nothing_staged(repo: Path) -> bool:
-    """The index equals HEAD: no refusal or fault left a half-made commit staged."""
-    return _git.git(["diff", "--cached", "--name-only", "-z"], cwd=repo) == ""
+    """No refusal or fault left a half-made commit staged. #1618 K8: the batch's branch lives in its
+    delivery's private bare repository, which has no index of its own (`diff --cached` there lists
+    every file of HEAD); the commit-maker stages in a private index under the git dir
+    (`commit-maker-<hex>.index`, `LocalRepository._stage`) and removes it, so any index left there
+    is a half-made commit."""
+    assert _git.git(["rev-parse", "--is-bare-repository"], cwd=repo).strip() == "true", (
+        f"{repo} is not the delivery's bare repository (the scene's premise)")
+    git_dir = Path(_git.git(["rev-parse", "--absolute-git-dir"], cwd=repo).strip())
+    return not [p.name for p in git_dir.iterdir() if p.name.startswith("index") or ".index" in p.name]
 
 
 class BoxSeenLeadSpawn(LeadAuthorSpawn):

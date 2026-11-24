@@ -633,8 +633,8 @@ def test_o5_a_publish_between_the_claim_and_a_later_pass_leaves_the_jobs_export_
 
     def job(c) -> int:
         got["first"] = A.grant_of(claims_of(signer, c.request("pass", id=inv)["token"]))
-        scene.t.merge({"settings/verb-grants.yaml": _ungranted("identity")})
-        got["published"] = scene.t.publish().commit
+        # #1618: merged is `main`, what the next fetch reads; nothing publishes.
+        got["published"] = scene.t.merge({"settings/verb-grants.yaml": _ungranted("identity")})
         got["launch"] = c.request("launch")
         got["later"] = A.grant_of(claims_of(signer, c.request("pass", id=inv)["token"]))
         return 0
@@ -810,6 +810,11 @@ def test_a6_h9_a_helper_run_leaves_on_the_data_root_only_its_run_folder_its_reco
     # #1214's own: the tenant's lock file and its holder folder, left with no holder recorded.
     locks = f".host-locks/{scene.tenant}"
     owned = {".host-locks", locks, f"{locks}/lock", f"{locks}/processes"}
+    # #1618 flow 1 / K7: the fetch's private repository lives in the host's shared scratch root `.repo-scratch/`
+    # (`tenancy._owner.private_folder`), left with no entry once the fetch is done. (#1546 r10 (b): the run copy is in the
+    # claim's inputs, so `<T>/run-knowledge` is not among what a helper run adds.)
+    owned.add(".repo-scratch")
+    assert listing(scene.root / ".repo-scratch") == [], "a fetch's private repository outlived the helper"
     assert listing(scene.root / locks / "processes") == [], "a holder record outlived the helper"
     stray = sorted(p for p in added if p not in parents and p not in owned)
     assert stray == [], f"the helper left behind more than the shared parents and the lock's files: {stray}"

@@ -1,7 +1,7 @@
 """The execution-host actor (#1214 Q1, Flows 1-3): the host's steps (install, prepare,
 remove_old_file, teardown). It holds no management login and no forge admin token (DC-12, F-1):
 it unwraps the single-use secret the service wrapped for it, logs in with the AppRole pair and acts
-as the tenant's bot. Blocking work (git, files, signals, the publish child, waiting for the host
+as the tenant's bot. Blocking work (git, files, signals, the fetch child, waiting for the host
 lock) runs in a worker thread; the tenant's lock and its writes stay on the actor's own loop (RC-5).
 
 Secret files (DC-2): `<secrets dir>/<T>/<accessor>`, mode 0600, the AppRole secret id and a newline,
@@ -18,6 +18,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -29,7 +30,7 @@ from defender import _io
 from defender.configuration import publish_root
 from defender.configuration.issuer import TRANSIT_MOUNT
 from defender.credential_proxy import transit_key_for
-from defender.lifecycle._bot import Minted, log_in, mint
+from defender.lifecycle._bot import log_in, mint
 from defender.lifecycle._job import (
     HOST,
     SERVICE,
@@ -43,13 +44,12 @@ from defender.lifecycle._job import (
 )
 from defender.lifecycle._teardown import Containers, stop_containers, take_exclusive
 from defender.lifecycle.config import LifecycleConfig
-from defender.tenancy import FenceMissed, Generation, HeldTenant, TenantRepository, host_lock
+from defender.tenancy import REPO_SCRATCH, FenceMissed, Generation, HeldTenant, TenantRepository, host_lock
 
 _logger = logging.getLogger(__name__)
 
 #: Where an install that failed restarts: its wrapped secret may be spent (DC-4).
 _REWRAP = ("wrap", SERVICE)
-_KNOWLEDGE = "knowledge"
 #: The tenant's runs folder (R13-0): made here and by the one-time upgrade step, never by the job lane.
 _RUNS = "runs"
 #: The sign secret file's name is its accessor after this prefix, beside the delivery file.
@@ -58,23 +58,23 @@ _SIGN_FILE = "sign-"
 _PROBE = base64.b64encode(b"defender install sign proof").decode("ascii")
 
 Git = Callable[..., subprocess.CompletedProcess[str]]
-Publish = Callable[..., str]
+Fetch = Callable[..., str]
 
 
 class HostActor(Actor):
     """The host's half of every tenant's job. `forge` is an HTTP client for the forge carrying NO
     credential (each call presents the bot's JWT); `openbao_login` reaches only unwrap, AppRole
-    login, token reads and install's one sign as the tenant's sign login; `git` is the sealed-transport git runner; `publish` launches the first
-    publish (`launch_publish`'s shape) and answers its report line; `containers` removes a tenant's
+    login, token reads and install's one sign as the tenant's sign login; `git` is the sealed-transport git runner; `fetch` is the one fetch seam
+    (`fetch(tenant_id, dest, *, data_root, commit=None) -> report line`); `containers` removes a tenant's
     box containers (default: docker by label)."""
 
     actor = HOST
 
     def __init__(self, tenants: TenantRepository, *, forge: httpx.AsyncClient,  # noqa: PLR0913 — the pinned constructor
-                 openbao_login: httpx.AsyncClient, git: Git, publish: Publish, config: LifecycleConfig,
+                 openbao_login: httpx.AsyncClient, git: Git, fetch: Fetch, config: LifecycleConfig,
                  clock: Callable[[], _dt.datetime], containers: Containers = stop_containers) -> None:
         super().__init__(tenants, clock=clock)
-        self._forge, self._bao, self._git, self._publish = forge, openbao_login, git, publish
+        self._forge, self._bao, self._git, self._fetch = forge, openbao_login, git, fetch
         self._config, self._containers = config, containers
         self._root: Path = config.data_root
 
@@ -137,14 +137,7 @@ class HostActor(Actor):
             paths.append(await asyncio.to_thread(self._write_secret, held.tenant_id, sign_accessor, sign_secret_id,
                                                  prefix=_SIGN_FILE))
             jwt = await self._bot_jwt(gen, secret_id)
-            bearer = {"Authorization": f"Bearer {jwt}"}
-            answered(await self._forge.get(f"/api/v1/repos/{wiring.repo}", headers=bearer))
-            branch = answered(await self._forge.get(f"/api/v1/repos/{wiring.repo}/branches/main", headers=bearer)).json()
-            if not (isinstance(branch, dict) and branch.get("protected") is True and branch.get("user_can_push") is False
-                    and branch.get("user_can_merge") is False):
-                seen = branch if isinstance(branch, dict) else {}
-                raise StepFailed(f"the bot could push to or merge main of {wiring.repo} (protected={seen.get('protected')!r}, "
-                                 f"user_can_push={seen.get('user_can_push')!r}, user_can_merge={seen.get('user_can_merge')!r})")
+            await self._require_protected_main(wiring.repo, jwt)
             await self._prove_sign(held.tenant_id, gen, sign_secret_id)
             step, actor = next_step(held)
             await held.commit(step=step, actor=actor, update_generations={gen.salt: {
@@ -201,9 +194,9 @@ class HostActor(Actor):
     # --- prepare --------------------------------------------------------------------------------
 
     async def _prepare(self, held: HeldTenant) -> None:
-        """The host folder: `<data root>/<T>/` with the tenant's clone (an existing clone of the
-        recorded repo is kept, any other refuses) and its `runs/` folder (R13-0); then the first
-        publish, which must answer `fresh <commit>` (Flow 1.9, RC-7, GAP-Re-4)."""
+        """The host folder: `<data root>/<T>/` with its `runs/` folder (R13-0), no clone (#1618 D1); `main` read as the bot
+        and its protection checked (D9); then `main` fetched into a temporary folder that is thrown away, which must answer
+        `ok <commit>` (Flow 5, D2)."""
         gens = await held.generations()
         gen = only(gens, "live")
         wiring = await held.forge_wiring()
@@ -212,18 +205,26 @@ class HostActor(Actor):
         tenant = held.tenant_id
         async with self._host_lock(tenant, exclusive=True):
             await asyncio.to_thread(self._drop_unrecorded_secrets, tenant, gens)
-            clone = await asyncio.to_thread(self._existing_clone, tenant, wiring.origin)
-            if clone is None:
-                secret_id = self.secret(await asyncio.to_thread(_read_secret, Path(gen.host_secret_file)))
-                credential = Minted(tenant, await self._bot_jwt(gen, secret_id))
-                await asyncio.to_thread(self._clone, tenant, wiring.origin, credential)
             await asyncio.to_thread(self._make_runs, tenant)
-            line = (await asyncio.to_thread(self._publish, tenant, data_root=self._root)).strip()
+            secret_id = self.secret(await asyncio.to_thread(_read_secret, Path(gen.host_secret_file)))
+            await self._require_protected_main(wiring.repo, await self._bot_jwt(gen, secret_id))
+            line = (await asyncio.to_thread(self._fetch_main, tenant)).strip()
             head, _sep, commit = line.partition(" ")
-            if head != "fresh" or not commit or " " in commit:
-                raise StepFailed(f"the first publish answered {line!r}, not 'fresh <commit>'")
+            if head != "ok" or not commit or " " in commit:
+                raise StepFailed(f"the first fetch answered {line!r}, not 'ok <commit>'")
             step, actor = next_step(held)
             await held.commit(step=step, actor=actor)
+
+    async def _require_protected_main(self, repo: str, jwt: str) -> None:
+        """D9, as the bot: it reads the repo and `main` refuses its pushes and merges (`GET branches/main`)."""
+        bearer = {"Authorization": f"Bearer {jwt}"}
+        answered(await self._forge.get(f"/api/v1/repos/{repo}", headers=bearer))
+        branch = answered(await self._forge.get(f"/api/v1/repos/{repo}/branches/main", headers=bearer)).json()
+        if not (isinstance(branch, dict) and branch.get("protected") is True and branch.get("user_can_push") is False
+                and branch.get("user_can_merge") is False):
+            seen = branch if isinstance(branch, dict) else {}
+            raise StepFailed(f"the bot could push to or merge main of {repo} (protected={seen.get('protected')!r}, "
+                             f"user_can_push={seen.get('user_can_push')!r}, user_can_merge={seen.get('user_can_merge')!r})")
 
     def _folder(self, tenant: str) -> Path:
         folder = self._root / tenant
@@ -232,40 +233,17 @@ class HostActor(Actor):
         return folder
 
     def _make_runs(self, tenant: str) -> None:
-        """`<T>/runs` (R13-0), on a new clone and a kept one alike, before the first publish: guarded, so a link at any
-        level refuses the step as one at `knowledge/` does."""
+        """`<T>/runs` (R13-0), before the first fetch: guarded, so a link at any level refuses the step."""
         _io.guarded_mkdir(self._folder(tenant) / _RUNS, base=self._root)
 
-    def _existing_clone(self, tenant: str, origin: str) -> Path | None:
-        """The tenant's clone if one is there (`<T>/knowledge`, where every entry point accepts it),
-        after checking its origin is the recorded one; None when there is none to keep."""
-        clone = self._folder(tenant) / _KNOWLEDGE
-        if clone.is_symlink():
-            raise StepFailed(f"{clone} is a link; the tenant's clone must be a real directory")
-        if not (clone / ".git").exists() or (clone / ".git").is_symlink():
-            return None
-        found = self._git_out(["remote", "get-url", "origin"], clone)
-        if found != origin and found != self._git_out(["ls-remote", "--get-url", origin], clone):
-            raise StepFailed(f"{clone} is a clone of {found}, not of the recorded {origin}")
-        return clone
-
-    def _git_out(self, args: list[str], clone: Path) -> str:
-        """What a local git call in `clone` prints (`ls-remote --get-url` names a URL as git resolves
-        it, without a network call)."""
-        done = self._git(["-C", str(clone), *args], cwd=clone)
-        if done.returncode != 0:
-            raise StepFailed(f"git {args[0]} in {clone} failed: {done.stderr.strip()}")
-        return done.stdout.strip()
-
-    def _clone(self, tenant: str, origin: str, credential: Minted) -> None:
-        folder = self._folder(tenant)
-        _io.guarded_mkdir(folder, base=self._root)
-        target = folder / _KNOWLEDGE
-        if target.exists() or target.is_symlink():
-            raise StepFailed(f"{target} is there but is not a clone; remove it to prepare the tenant")
-        done = self._git(["clone", "-q", origin, str(target)], cwd=folder, origin=origin, identity=credential)
-        if done.returncode != 0:
-            raise StepFailed(f"git clone failed: {done.stderr.strip()}")
+    def _fetch_main(self, tenant: str) -> str:
+        """The fetch child's report for `main`, into an empty temporary folder (outside `<T>`) that is removed after: onboarding's
+        fetch validates, its copy is thrown away."""
+        dest = Path(tempfile.mkdtemp(prefix="defender-onboarding-"))
+        try:
+            return self._fetch(tenant, dest=dest, data_root=self._root)
+        finally:
+            shutil.rmtree(dest, ignore_errors=True)
 
     # --- rotate's end, offboard -------------------------------------------------------------------
 
@@ -311,6 +289,10 @@ class HostActor(Actor):
 
     def _remove_tenant_files(self, tenant: str) -> None:
         targets = [self._root / tenant, self._tenant_secrets(tenant)]
+        # K7: the tenant's private git repositories (`<data root>/.repo-scratch/<tenant>.owner-...`) go by name, whoever owns them.
+        scratch = self._root / REPO_SCRATCH
+        if scratch.is_dir():
+            targets += sorted(scratch / name for name in os.listdir(scratch) if name.startswith(f"{tenant}."))
         root = publish_root.publish_root()
         if isinstance(root, Path):
             targets.append(root / tenant)

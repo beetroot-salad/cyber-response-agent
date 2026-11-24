@@ -19,8 +19,7 @@ from defender.tests.support.learning.core._store1278 import ONE, call, lapse_lea
 from defender.tests.support.shared import _revisions1485 as revisions
 from defender.tests.support.shared._postgres1339 import empty_database, execute, migrated_database  # noqa: F401 — fixtures
 from defender.tests.tenancy.tenant_1108_delivery._support import close_on_remote, merge_on_remote, pr_row
-from defender.tests.tenancy.tenant_1108_p4._drain_support import LESSON_NAME, drafts_dir, remote_branches
-from defender.tests.tenancy.tenant_1108_p4._support import git
+from defender.tests.tenancy.tenant_1108_p4._drain_support import LESSON_NAME, remote_branches
 
 pytestmark = pytest.mark.postgres
 
@@ -71,23 +70,18 @@ def _stranded(w) -> tuple[Any, str]:
 
 
 def _foreign_commits_remote(w, caplog, tmp_path):
-    from defender.tests.support.learning.core._store1278 import foreign_commit_on, forget_local_branch
+    from defender.tests.support.learning.core._store1278 import foreign_commit_on
 
     writer, branch = _stranded(w)
     foreign_commit_on(w.t.remote, branch, w.scratch)
-    forget_local_branch(w.t.clone, branch, drafts=drafts_dir(w.t))
+    # #1618: no clone keeps a local branch; the next tick's private repository fetches the forge's
     tick(w, writer)
     return "batch", None, "needs_person"
 
 
-def _foreign_commits_local(w, caplog, tmp_path):
-    writer, branch = _stranded(w)
-    git(w.t.remote, "branch", "-D", branch)
-    # a commit on the local branch that the commit-maker did not make, made with plumbing so no worktree is needed
-    foreign = git(w.t.clone, "-c", "user.name=x", "-c", "user.email=x@y.z", "commit-tree", f"{branch}^{{tree}}", "-p", branch, "-m", "by hand")
-    git(w.t.clone, "update-ref", f"refs/heads/{branch}", foreign.strip())
-    tick(w, writer)
-    return "batch", None, "needs_person"
+# #1618 (design r5 "Retired promises": `test_causes_1537::foreign_commits_local`, the writer): with no host clone there is
+# no local branch for a foreign commit to land on, so the `foreign_commits_local` writer and its two cases are retired; a
+# stored `foreign_commits_local` cause still reads back (it is history).
 
 
 # --- the store's transitions (its own verbs) --------------------------------------------------------------------------
@@ -151,7 +145,6 @@ def _replacement_committed_nothing(w, caplog, tmp_path):
 CASES = {
     "foreign_pr": (_foreign_pr, "foreign_pr"),
     "foreign_commits_remote": (_foreign_commits_remote, "foreign_commits_remote"),
-    "foreign_commits_local": (_foreign_commits_local, "foreign_commits_local"),
     "closed_without_feedback": (_closed_without_feedback, "closed_without_feedback"),
     "cut_from_merge": (_cut_from_merge, "cut_from_merge"),
     "replacement_ceiling": (_replacement_ceiling, "replacement_ceiling"),
@@ -192,10 +185,10 @@ def test_pr1_a_row_the_code_writes_has_the_cause_the_backfill_gives_its_own_text
     assert backfilled != "unrecorded"
 
 
-@pytest.mark.parametrize("name", ["foreign_pr", "foreign_commits_remote", "foreign_commits_local"])
+@pytest.mark.parametrize("name", ["foreign_pr", "foreign_commits_remote"])
 def test_o5_a_batch_the_loop_parks_for_a_foreign_cause_records_when_not_before_it_was_created(
         name, p4_tenant, migrated_database, monkeypatch, tmp_path, caplog):  # noqa: F811 — fixtures
-    """The real tick's park (the store's `needs_person`) for a foreign PR, foreign commits on the remote or foreign commits on the local branch sets `parked_at`, and not earlier than the batch's `created_at`. (O5)"""
+    """The real tick's park (the store's `needs_person`) for a foreign PR, or foreign commits on the remote sets `parked_at`, and not earlier than the batch's `created_at`. (O5)"""
     w = make_scene(p4_tenant, migrated_database, tmp_path, monkeypatch)
     drive, cause = CASES[name]
     drive(w, caplog, tmp_path)

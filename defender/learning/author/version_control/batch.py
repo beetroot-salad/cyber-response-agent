@@ -14,7 +14,7 @@ from defender._model_view import ModelView
 from defender.investigation.permission.grant import path_operands
 
 from .commits import CommitMaker, _Line
-from .exports import TenantExport, agent_blobs
+from .exports import agent_blobs
 from .files import _folders_of, _resync
 from .model import AgentChange, ChangeSet, _refusals, _require_in_lanes
 from .repository import GitRepository
@@ -24,13 +24,14 @@ _logger = logging.getLogger(__name__)
 
 @dataclass(eq=False)
 class Batch:
-    """One drain batch: a branch of the tenant clone (`branch`, made by the batch's first
-    commit, from `export`'s commit) and the git-free draft under `draft_root` its box writes
-    into, through `lanes` only. No checkout is made for it."""
+    """One drain batch: a branch in its delivery's private repository (`branch`, made by the
+    batch's first commit, from `base_commit`) and the git-free draft under `draft_root` its
+    box writes into, through `lanes` only. No checkout is made for it."""
 
     id: str
     branch: str
-    export: TenantExport
+    #: The commit the batch starts from: `main` as its delivery fetched it, or the helper's answer in a job container.
+    base_commit: str
     draft_root: Path
     lanes: tuple[str, ...]
     tenant: Tenant = field(repr=False)
@@ -78,8 +79,8 @@ class Batch:
         )
 
     def change_set(self) -> ChangeSet:
-        """The claim: the draft's `agent/` against the blobs of the batch's base (its branch's
-        last commit, or the export commit before the first), as changes. The base is read from
+        """The claim: the draft's `agent/` against the blobs of the batch's head (its branch's
+        last commit, or the base before the first), as changes. The base is read from
         git's objects, never a checkout, so attributes on `main` (`eol`, `ident`, a filter)
         never show a change the box did not make. Only regular files in the lanes may differ;
         any other entry anywhere in the draft, an oversized file, a change outside the lanes or
@@ -97,7 +98,7 @@ class Batch:
             return ChangeSet(tuple(changes))
 
     def base(self) -> dict[str, bytes]:
-        """The batch's base (its branch's last commit, or the export commit before the first):
+        """The batch's head (its branch's last commit, or the base before the first):
         `agent/` as `{repo-relative path: exact bytes}`, read from git's objects — what
         `change_set` derives against and `reset` restores."""
         with _refusals():

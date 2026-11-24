@@ -150,8 +150,7 @@ def file_level_problem(text: str) -> str | None:
 def main_registry(delivery: Any) -> tuple[str, list[dict[str, str]]]:
     """The registry text on the remote `main`, and the entries the reader loads from it."""
     repo = delivery.repository
-    repo.fetch()
-    oid = repo.regular_blob_on("refs/remotes/origin/main", REGISTRY)
+    oid = repo.regular_blob_on("refs/heads/main", REGISTRY)
     text = repo.blobs([oid])[oid].decode("utf-8") if oid else ""
     return text, list(_parse_registry(text).entries) if text else []
 

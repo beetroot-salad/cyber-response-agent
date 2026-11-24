@@ -1,11 +1,14 @@
-"""Run-start and launch-time publish helpers for #1108 P4, built on `_support`.
+"""Run-start helpers for #1108 P4, built on `_support`, as #1618 leaves them.
 
-Nothing here implements P4 policy: it launches `run.main` through its seams (`publish=` is called
-once per unpinned launch with identifiers only), records what the seams were handed, and spells
-the child's report vocabulary once: `fresh <commit>`, `stale:transient|operator <reason>`, and
-`misconfigured <reason>`, on which the parent refuses the run. The child runs in-process through
-`version_control.publish_for_run`, either really logging in through `issuer_transport=` or
-handed an `identity=` for cases whose subject is not the login.
+Nothing here implements P4 policy: it launches `run.main` through its seams and records what they were handed. Under
+#1618 (flow 1) run start asks the one fetch seam (`fetch(tenant_id, dest, *, data_root, commit=None) -> line`) to fill
+an owned empty folder and reads its line, `ok <commit>` or `refused <transient|lasting> <reason>` (D11), on which the
+run refuses (D3: no stale fallback). `fetching(t)` is that seam over the product's in-process fetch of the tenant's
+served remote; `refusing(...)` answers a refusal without filling anything.
+
+The retired launch-time publish vocabulary (`fresh`, `stale:*`, `misconfigured`), `outcome_class`, the publish launcher
+(`launcher`) and its child wrapper (`child_command`) stay importable for the callers that still spell them while they
+migrate; no case of this directory reads them any more.
 """
 from __future__ import annotations
 
@@ -155,6 +158,58 @@ def export_half(t: Any, commit: str, half: str) -> dict[str, bytes]:
     return tree_bytes(export_dir(t.tenant, commit) / half)
 
 
+def committed_half(t: Any, commit: str, half: str) -> dict[str, bytes]:
+    """`half` (`agent` or `settings`) of `commit` on the tenant's Forgejo remote, read by git plumbing into the test's
+    scratch (never through the code under test): what a run that read `commit` holds, byte for byte (#1618: the export
+    `current` named is gone; the commit on the remote is the one source)."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import halves_at
+
+    into = Path(t.scratch) / "committed-halves" / commit
+    if not into.is_dir():
+        halves_at(Path(t.remote), commit, into)
+    return tree_bytes(into / half)
+
+
+class Recorded:
+    """A fetch seam wrapped to record every ask (`calls`: `(args, kwargs)`) and its line (`lines`)."""
+
+    def __init__(self, inner: Callable[..., str]) -> None:
+        self.inner, self.calls, self.lines = inner, [], []  # type: Callable[..., str], list[tuple[tuple, dict]], list[str]
+
+    def __call__(self, *args: Any, **kwargs: Any) -> str:
+        self.calls.append((args, dict(kwargs)))
+        line = self.inner(*args, **kwargs)
+        self.lines.append(line)
+        return line
+
+
+def fetching(t: Any) -> Recorded:
+    """The fetch seam over `t`'s served remote (SUP's in-process stand-in: the product's `fetch_copy` over a real git
+    listener, the content validated as the child validates it), recording each ask."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
+
+    return Recorded(in_process_fetch(Path(t.remote)))
+
+
+def fetch_now(t: Any, where: Path) -> str:
+    """One fetch of `t`'s `main` (another reader's, e.g. a later run start's) into a fresh empty folder under `where`
+    (outside `<T>`), asserted `ok`: every fetch starts by sweeping the tenant's dead owners (#1618 flow 8), so this is
+    the "next publish" of the retired run-copy sweep cases. Returns the line."""
+    import uuid
+
+    dest = Path(where) / f"fetch-now-{uuid.uuid4().hex[:8]}"
+    dest.mkdir(parents=True)
+    line = fetching(t)(t.tenant_id, dest, data_root=t.data_root)
+    assert line.startswith("ok "), f"premise: the next fetch succeeded: {line}"
+    return line
+
+
+def refusing(word: str, reason: str) -> Recorded:
+    """A fetch seam that answers `refused <word> <reason>` (D11: `transient` or `lasting`) and fills nothing."""
+    assert word in ("transient", "lasting"), word
+    return Recorded(lambda *_a, **_k: f"refused {word} {reason}")
+
+
 # --- issuer config ----------------------------------------------------------------------------
 
 ISSUER_SECRET_ID = "s-b-secret-id-5f0c1a9e-never-in-a-run"
@@ -232,6 +287,8 @@ class Seen:
 @dataclass
 class Launch:
     rc: int | None = None
+    #: The process exit status a `SystemExit` out of `main` stands for (None: `main` returned or raised otherwise).
+    exit_status: int | None = None
     refusal: str | None = None
     raised: BaseException | None = None
     publish_calls: list[tuple[tuple, dict]] = field(default_factory=list)
@@ -257,13 +314,14 @@ def read_stamp(run_dir: Path) -> dict[str, Any] | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def launch(t: Any, tmp_path: Path, *, publish: Callable[..., Any] | None,
+def launch(t: Any, tmp_path: Path, *, publish: Callable[..., Any] | None = None,
            argv_extra: tuple[str, ...] = (), during: Callable[[Seen], Any] | None = None,
            lifecycle: Callable[..., Any] | None = None, alert_dir: Path | None = None,
            **seams: Any) -> Launch:
     """`run.main` for `t` with the REAL `materialize` (run start: resolve the export, copy,
     stamp) and a recording lifecycle that snapshots the run's tenant and copy while live.
-    `publish=None` passes no publish seam (a pinned launch must not need one). `directory=` is `t.directory`
+    `publish=None` passes no publish seam (#1618: `run.main` takes none; a caller that still passes one is refused by
+    `run.main` itself); a `fetch=` seam goes in `seams` (`fetching(t)` records its asks). `directory=` is `t.directory`
     (#1214 Flow 4) unless the case passes one in `seams`."""
     from defender import run as run_py
 
@@ -306,6 +364,7 @@ def launch(t: Any, tmp_path: Path, *, publish: Callable[..., Any] | None,
     except SystemExit as exit_:
         # argparse exits with a code and writes its reason to stderr: keep both.
         out.refusal = f"{exit_.code}\n{err.getvalue()}".strip()
+        out.exit_status = 0 if exit_.code is None else (exit_.code if isinstance(exit_.code, int) else 1)
     except Exception as e:  # noqa: BLE001 — kept for the assertions to name
         out.raised = e
     if out.seen:
@@ -415,11 +474,7 @@ def drive_main(t: Any, tmp_path: Path, monkeypatch: Any, *, main: Any, gather: A
     (alert_dir / "alert.json").write_text(json.dumps({
         "rule": {"id": signature, "description": "slice S-B e2e"},
         "alert_timestamp": "2026-10-20T00:00:00Z"}), encoding="utf-8")
-    commit = t.commit
-
-    def publish(*_a: Any, **_k: Any) -> str:
-        return fresh(commit)
-    return launch(t, tmp_path, publish=publish, lifecycle=lifecycle, alert_dir=alert_dir)
+    return launch(t, tmp_path, fetch=fetching(t), lifecycle=lifecycle, alert_dir=alert_dir)
 
 
 # --- the publish launcher's budget (parent half) -----------------------------------------------

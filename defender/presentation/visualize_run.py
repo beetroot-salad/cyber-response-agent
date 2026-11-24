@@ -473,14 +473,14 @@ def render_knowledge_banner(run_dir: Path) -> str:
     """The banner a run whose tenant knowledge was stale carries (#1108 P4, O-WARN): its kind,
     the commit it read and the publish's reason, escaped. Read from the HOST record beside the
     run dir (U12), never the stamp in it, which the box can rewrite; an unreadable record where
-    one should exist reads stale/operator (OD22'). Nothing for a fresh, pinned or pre-P4 run.
+    one should exist reads unreadable (OD22'). Nothing for a fresh, pinned or pre-P4 run.
     This page is an operator surface written after the box stops (OD21), so the raw reason is
     shown here and nowhere the box or a customer can read."""
     paths = RunPaths(run_dir)
     status = formats.read_knowledge_status(paths.knowledge_source(), paths.provenance)
-    if status is None or not status.stale:
+    if status is None or not (status.stale or status.unreadable):
         return ""
-    parts = [f"stale knowledge ({esc(status.stale_kind or '')})"]
+    parts = [f"stale knowledge ({esc(status.stale_kind or '')})" if status.stale else "knowledge unreadable"]
     if status.commit is not None:
         parts.append(f"the run read commit <code>{esc(status.commit)}</code>")
     if status.reason:

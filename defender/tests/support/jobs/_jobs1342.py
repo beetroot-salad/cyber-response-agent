@@ -103,7 +103,7 @@ def drop_tenant(dsn: str, tenant_id: str) -> None:
     drop_records(dsn, tenant_id)
     if execute(dsn, "SELECT to_regclass('tenancy.evidence_retention')::text")[0][0] is not None:  # #1546: the row the tenant's
         execute(dsn, "DELETE FROM tenancy.evidence_retention WHERE tenant_id = %s", (tenant_id,))  # investigations name
-    for table in ("alert_mappings", "generations", "publish_status", "forge_wiring"):
+    for table in ("alert_mappings", "generations", "forge_wiring"):  # #1618: `publish_status` is dropped
         execute(dsn, f'DELETE FROM tenancy."{table}" WHERE tenant_id = %s', (tenant_id,))  # noqa: S608
     execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (tenant_id,))
 

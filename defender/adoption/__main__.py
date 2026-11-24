@@ -96,8 +96,9 @@ def _deliver(container: JobContainer, ns: argparse.Namespace, root: Any, client:
                 import httpx
 
                 client = owned.enter_context(httpx.Client())
-            repository = GitRepository.open(tenant.knowledge, tenant_id=str(tenant.id), origin=str(facts["forge_origin"]),
-                                            identity=container.forge_credential(), client=client)
+            repository = owned.enter_context(contextlib.closing(GitRepository.open(  # lint-text-io: ok — a repository's constructor
+                tenant_id=str(tenant.id), origin=str(facts["forge_origin"]), identity=container.forge_credential(),
+                client=client)))
             return adopt(repository, system=str(facts["system"]), rendering=rendering, digest=str(facts["digest"]))
         except Exception:  # noqa: BLE001 — A3: whatever the opening or the delivery raised, a fixed reason and a record
             _logger.exception("adoption %s: the delivery failed", ns.job)

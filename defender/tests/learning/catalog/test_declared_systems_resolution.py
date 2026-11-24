@@ -222,7 +222,7 @@ def test_the_lead_lane_hands_the_resolver_the_batch_base_never_the_draft(tmp_pat
     # An unresolvable committed tree refuses the deps; it never degrades to the adapter half.
     _p2, broken = lead_lane(tmp_path, adapters=("elastic",), markers=("elastic", "basesys"),
                             name="broken")
-    shutil.rmtree(broken.clone / ".git" / "objects")
+    shutil.rmtree(Path(broken.clone) / "objects")  # #1618 K8: the batch's private bare repository
     with pytest.raises((DeliveryRefused, LeadAuthorError)):
         draft_lead_deps(broken)
 

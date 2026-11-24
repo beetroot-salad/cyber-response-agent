@@ -6,18 +6,13 @@ import contextlib
 import re
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from enum import StrEnum
 
 from defender import _git
 from defender.tenancy import DeliveryRefused
 from defender.records.formats import TenantRefused
 
 from .auth import ForgejoAuthError
-from .forgejo import ForgeError, PullRequest
-
-
-class LockBusy(DeliveryRefused):
-    """Another process holds the tenant's knowledge lock: raised at once, naming its pid."""
+from .forgejo import ForgeError
 
 
 @contextlib.contextmanager
@@ -45,7 +40,7 @@ def _refusals() -> Iterator[None]:
 #: how git reads a tree (amendment 2, O-C). Compared without case, as a case-folding checkout
 #: would read them.
 _GIT_CONTROL_NAMES = frozenset({".git", ".gitattributes", ".gitignore", ".gitmodules"})
-#: The tenant's identity marker, checked once at publish and never changed by a commit.
+#: The tenant's identity marker, checked at every fetch and never changed by a commit.
 _TENANT_ID_PARTS = ("agent", ".tenant-id")
 #: What a batch id or a reverted lesson's name may be: one word that is at once a branch-name
 #: component, a folder name and a container-name part.
@@ -193,38 +188,3 @@ class ChangeSet:
         return len(self.changes)
 
 
-class DeliveryStatus(StrEnum):
-    """Where a batch (or a revert) stands with the forge."""
-
-    OPENED = "opened"
-    """A PR this call opened."""
-    OPEN = "open"
-    """An open PR this call found; nothing was pushed or opened."""
-    MERGED = "merged"
-    CLOSED = "closed"
-    """Closed unmerged: a rejection (D-closed)."""
-    NOTHING = "nothing to deliver"
-    """No branch, or a branch holding nothing past its base."""
-
-
-@dataclass(frozen=True)
-class Delivered:
-    """`status`, and the PR's `url` for `opened` and `open` (also kept for `merged` and
-    `closed`)."""
-
-    status: DeliveryStatus
-    url: str | None = None
-
-
-#: When several of the forge's PRs carry a batch's commits, the one answered: an open one
-#: first (the live review), then a merged one, then a closed one.
-_PRECEDENCE = {"open": 0, "merged": 1, "closed": 2}
-
-
-def _answer(pr: PullRequest) -> Delivered:
-    statuses = {
-        "open": DeliveryStatus.OPEN,
-        "merged": DeliveryStatus.MERGED,
-        "closed": DeliveryStatus.CLOSED,
-    }
-    return Delivered(status=statuses[pr.status], url=pr.url)

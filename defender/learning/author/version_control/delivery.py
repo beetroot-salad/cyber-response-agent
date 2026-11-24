@@ -1,7 +1,7 @@
-"""Tenant knowledge delivery: publish, batch and deliver.
+"""Tenant knowledge delivery: one operation's private repository, its batches and their boxes.
 
 GitRepository owns git and Forgejo operations. The orchestrator supplies a tenant-bound
-Vault identity; boxes receive only host-made copies. Production drain/run wiring is P4.
+Vault identity; boxes receive only host-made drafts.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from defender.tenancy import TenantDirectory
 from defender import _io
-from defender.tenancy import Tenant
+from defender.tenancy import Tenant, sweep_dead_owners
 from defender.records.formats import TenantRefused
 from defender import box
 from defender.box import DockerFn, run_docker
@@ -27,28 +27,16 @@ from defender.box import DockerFn, run_docker
 from .auth import ForgeCredential
 from .batch import Batch
 from .commits import CommitMaker, Recorder, _Line
-from .exports import (
-    DRAFT_STAGE,
-    draft_path,
-    TenantExport,
-    build_draft,
-    publish_locked,
-    tenant_lock,
-)
+from .exports import DRAFT_STAGE, build_draft, draft_path
 from .credential import forge_credential
 from .model import (
-    _PRECEDENCE,
-    Delivered,
     DeliveryRefused,
-    DeliveryStatus,
-    _answer,
     _lanes,
     _one_word,
     _refusals,
 )
 from .record import _BatchKey
 from .repository import NETWORK_TIMEOUT, GitRepository
-from .status import record_published, recording
 
 #: The lessons lane's branch prefix on the tenant repository (a lane passes its own).
 LESSONS_BRANCH_PREFIX = "lessons/"
@@ -72,9 +60,9 @@ def opened_delivery(  # noqa: PLR0913 — the tenant, its records, and the in-pr
     (`forge_credential`, minting through its live generation; `credential_config` and
     `issuer_transport` are the host's issuer configuration and an in-process stand-in transport);
     `client`, else a new forge client; `relay`, inside a job container, the job socket's client (#1170: the batch's
-    publish, draft and box are the per-job host helper's, `TenantDelivery.relay`). A client or credential made here is closed on exit; a
-    given one stays its caller's. No wiring recorded is `TenantRefused`; a refused open,
-    `DeliveryRefused` or `ForgejoAuthError`. Publish outcomes are recorded through `directory`."""
+    draft and box are the per-job host helper's, `TenantDelivery.relay`). The delivery's private repository, and a
+    client or credential made here, are closed on exit; a given one stays its caller's. No wiring recorded is
+    `TenantRefused`; a refused open, `DeliveryRefused` or `ForgejoAuthError`."""
     wiring = directory.forge_wiring(tenant.id)
     if wiring is None:
         raise TenantRefused(f"tenant {tenant.id} has no forge wiring recorded: its repository is not bound to "
@@ -89,24 +77,25 @@ def opened_delivery(  # noqa: PLR0913 — the tenant, its records, and the in-pr
             import httpx
 
             client = owned.enter_context(httpx.Client())
-        yield TenantDelivery.open(tenant, defender_dir=defender_dir, client=client,
-                                  identity=identity, origin=wiring.origin, directory=directory, relay=relay)
+        yield owned.enter_context(TenantDelivery.open(
+            tenant, defender_dir=defender_dir, client=client, identity=identity, origin=wiring.origin,
+            directory=directory, relay=relay))
 
 
 @dataclass(frozen=True, eq=False)
 class TenantDelivery:
-    """Host-side delivery for one tenant, opened with its explicit Vault identity."""
+    """Delivery for one tenant, opened with its explicit Vault identity over one private repository (its operation's:
+    a context manager, whose exit removes it)."""
 
     tenant: Tenant
     defender_dir: Path
     repository: GitRepository = field(repr=False)
     branch_prefix: str = LESSONS_BRANCH_PREFIX
-    #: Where this delivery's publish outcomes are recorded (`None`: an in-process caller with no
-    #: tenant records records none).
+    #: The tenant's records (`None`: an in-process caller with none).
     directory: TenantDirectory | None = field(default=None, repr=False)
-    #: Inside a job container (#1170 C23, A6): the job socket's client. The batch's publish and draft are then the
-    #: per-job host helper's (`batch.start`: it publishes, builds the draft and owns it), and so is its box
-    #: (`box.start` of the `batch` kind at the draft's id); this process makes no draft or owner record.
+    #: Inside a job container (#1170 C23, A6): the job socket's client. The batch's draft is then the per-job host
+    #: helper's (`batch.start`: it builds the draft from its own delivery and owns it), and so is its box (`box.start`
+    #: of the `batch` kind at the draft's id); this process makes no draft or owner record.
     relay: Callable[..., dict[str, Any]] | None = field(default=None, repr=False)
 
     @property
@@ -126,45 +115,49 @@ class TenantDelivery:
         directory: TenantDirectory | None = None,
         relay: Callable[..., dict[str, Any]] | None = None,
     ) -> TenantDelivery:
-        with recording(directory, accepted_tenant.id, by="delivery"), _refusals():
-            repository = GitRepository.open(
-                accepted_tenant.knowledge,
+        with _refusals():
+            # One private repository for this delivery's life: history and every branch fetched once, here (D4/K12); a job
+            # container's in its own temporary folder (it never makes an owned folder), a host's under `.repo-scratch/`.
+            repository = GitRepository.open(  # lint-text-io: ok — a repository's constructor, not a file open
                 tenant_id=str(accepted_tenant.id),
                 identity=identity,
                 origin=origin,
                 client=client,
                 network_timeout=network_timeout,
+                data_root=None if relay is not None else accepted_tenant.data_root_path,
             )
-            return cls(
-                tenant=accepted_tenant, defender_dir=defender_dir, repository=repository,
-                directory=directory, relay=relay,
-            )
+            try:
+                return cls(
+                    tenant=accepted_tenant, defender_dir=defender_dir, repository=repository,
+                    directory=directory, relay=relay,
+                )
+            except BaseException:
+                repository.close()
+                raise
 
-    def publish(self) -> TenantExport:
-        """Flow 1: fetch (no lock), then under the lock fast-forward the clone to `origin/main`
-        and publish its export. Refuses, publishing nothing, a dirty, untracked or diverged
-        clone, a tree entry under `agent/` or `settings/` that is not a regular blob, and an
-        `agent/.tenant-id` not naming this tenant."""
-        with recording(self.directory, self.tenant.id, by="delivery"), _refusals():
-            self.repository.fetch()
-            with tenant_lock(self.tenant):
-                export = publish_locked(self.tenant, self.repository)
-        record_published(self.directory, self.tenant.id, export.commit, by="delivery")
-        return export
+    def close(self) -> None:
+        """Remove the delivery's private repository (its operation's: a tick's ends with the tick)."""
+        self.repository.close()
+
+    def __enter__(self) -> TenantDelivery:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
 
     def start_batch(self, batch_id: str, *, lanes: Sequence[str], branch: str | None = None,
                     recorder: Recorder | None = None) -> Batch:
         """Flow 3: refuse at once an id whose draft or branch exists (ids are never retried, so
-        a reused one is caught before any box runs); publish; then, under the same lock hold,
-        build the git-free draft of the export commit's `agent/` in a dot-named temporary
-        under `<T>/drafts/` and rename it to `<T>/drafts/<batch_id>`. A build that fails leaves
-        nothing. No checkout is made, and the branch exists from the first commit on. With a
-        `relay` the helper does all of this at an id it mints (`batch_id` is not sent).
+        a reused one is caught before any box runs); sweep dead owners' folders (flow 8, host
+        side only); then build the git-free draft of `agent/` at this delivery's fetched `main`
+        (the batch's base) in an owned temporary under `<T>/drafts/` and rename it to
+        `<T>/drafts/<batch_id>`. A build that fails leaves nothing. No checkout is made, and the
+        branch exists from the first commit on. With a `relay` the helper does all of this at an
+        id it mints (`batch_id` is not sent).
 
         `branch` is the learning store's (#1278 D5: set at claim, never re-derived; else the
         prefix and the id), and `recorder` where each commit is recorded before its branch
-        moves (else the commit-maker keeps its commits in memory for `finish`); a relayed batch
-        takes both too, its commits being made in this process."""
+        moves; a relayed batch takes both too, its commits being made in this process."""
         if self.relay is not None:
             return self._relayed_batch(lanes, branch=branch, recorder=recorder)
         with _refusals():
@@ -172,28 +165,18 @@ class TenantDelivery:
             declared = _lanes(lanes)
             branch = branch if branch is not None else f"{self.branch_prefix}{batch_id}"
             self._refuse_taken(batch_id, branch)
-            with recording(self.directory, self.tenant.id, by="delivery"), _refusals():
-                self.repository.fetch()
-            with tenant_lock(self.tenant):
-                with recording(self.directory, self.tenant.id, by="delivery"), _refusals():
-                    export = publish_locked(
-                        self.tenant, self.repository, temporaries_only=True
-                    )
-                record_published(self.directory, self.tenant.id, export.commit, by="delivery")
-                self._refuse_taken(batch_id, branch)
-                build_draft(
-                    self.tenant, self.repository, batch_id, export.commit, declared
-                )
+            sweep_dead_owners(self.tenant.data_root_path, self.tenant.id)  # flow 8: a batch start sweeps
+            # The draft is the tick's own fetch of `main` (D4): nothing is fetched here.
+            commit = self.repository.revision("refs/heads/main")
+            build_draft(self.tenant, self.repository, batch_id, commit, declared)
             line = _Line(
-                batch=_BatchKey(
-                    branch=branch, base=export.commit, start=secrets.token_hex(8)
-                ),
+                batch=_BatchKey(branch=branch, base=commit, start=secrets.token_hex(8)),
                 lanes=declared,
             )
             return Batch(
                 id=batch_id,
                 branch=branch,
-                export=export,
+                base_commit=commit,
                 draft_root=draft_path(self.tenant, batch_id) / DRAFT_STAGE,
                 lanes=declared,
                 tenant=self.tenant,
@@ -221,8 +204,10 @@ class TenantDelivery:
         if folder != draft_path(self.tenant, batch_id):
             raise DeliveryRefused(f"the helper's draft {folder} is not batch {batch_id}'s")
         branch = branch if branch is not None else f"{self.branch_prefix}{batch_id}"
+        with _refusals():
+            self.repository.require_commit(commit)  # the helper's base, fetched by id when this tick's fetch lacks it
         line = _Line(batch=_BatchKey(branch=branch, base=commit, start=secrets.token_hex(8)), lanes=declared)
-        return Batch(id=batch_id, branch=branch, export=TenantExport(commit=commit, path=Path(answer["export"])),
+        return Batch(id=batch_id, branch=branch, base_commit=commit,
                      draft_root=folder / DRAFT_STAGE, lanes=declared, tenant=self.tenant,
                      defender_dir=self.defender_dir, repository=self.repository,
                      committer=CommitMaker(self.tenant, self.repository, recorder), _line=line)
@@ -242,9 +227,8 @@ class TenantDelivery:
             )
         if self.repository.branch_tip(branch) is not None:
             raise DeliveryRefused(
-                f"the branch {branch} already exists in the tenant clone: "
-                "its commits are deliver's to pick up, and its id is not used "
-                "again"
+                f"the branch {branch} already exists (on the forge, or committed by this delivery): "
+                "its commits are a takeover's to pick up, and its id is not used again"
             )
 
     def start_box(
@@ -263,73 +247,3 @@ class TenantDelivery:
                     "holds agent/ alone"
                 )
         return box.start_box(replace(request, require_sandbox=True), docker=docker)
-
-    def _deliver(
-        self, batch: _BatchKey, tip: str, *, mine: frozenset[str], title: str, body: str
-    ) -> Delivered:
-        """The push route. Each commit between the batch's base and `tip` must be one the
-        commit-maker made for this batch (`mine`, checked before anything else, so a branch
-        holding only a foreign commit refuses rather than having nothing to deliver). Then the
-        batch's PR is looked up, before any push: one found (open, merged or closed) is
-        answered and nothing is pushed or opened (D-closed). With none, a branch at its base
-        has nothing to deliver; otherwise `tip` (by id, so a branch moved meanwhile sends
-        nothing new) is pushed to the remote branch alone and a PR opened against `main`."""
-        if tip != batch.base:
-            sent = self.repository.commits_since(batch.base, tip)
-            foreign = [commit for commit in sent if commit not in mine]
-            if foreign or not sent:
-                raise DeliveryRefused(
-                    f"the branch {batch.branch} at {tip} holds {len(foreign) or 'no'} commit(s) "
-                    f"past its base {batch.base} that the commit-maker did not make for it "
-                    f"({', '.join(foreign) or 'it does not descend from its base'}): nothing "
-                    "is pushed"
-                )
-        found = sorted(
-            self.repository.pull_requests(mine) if mine else (),
-            key=lambda pr: (_PRECEDENCE[pr.status], -pr.number),
-        )
-        if found:
-            return _answer(found[0])
-        if tip == batch.base:
-            return Delivered(status=DeliveryStatus.NOTHING)
-        self.repository.push(tip, batch.branch)
-        opened = self.repository.open_pr(branch=batch.branch, title=title, body=body)
-        return Delivered(status=DeliveryStatus.OPENED, url=opened.url)
-
-    def _body(self, tip: str, from_commit: bool) -> str | None:
-        """The PR body the tip commit's message holds, when the lane's PRs are described by it (#1414 A2)."""
-        return self.repository.commit_message(tip) if from_commit else None
-
-    def finish(self, batch: Batch, *, body_from_commit: bool = False) -> Delivered:
-        """Deliver the batch: `nothing to deliver` when it made no commit (it has no branch);
-        otherwise its PR's status when the forge has one, or its branch pushed and a PR
-        opened. A branch moved from the commit-maker's last commit, or holding any commit it
-        did not make for this batch, is refused before any push."""
-        with _refusals():
-            line = batch._line
-            tip = self.repository.branch_tip(line.batch.branch)
-            if tip != line.tip:
-                raise DeliveryRefused(
-                    f"the branch {line.batch.branch} is at {tip or 'nothing'}, not the "
-                    f"commit-maker's last commit {line.tip or '(none yet)'}: nothing is pushed"
-                )
-            if tip is None:
-                return Delivered(status=DeliveryStatus.NOTHING)
-            return self._deliver(
-                line.batch,
-                tip,
-                mine=frozenset(m.commit for m in batch.committer.made if m.batch == line.batch),
-                title=_batch_title(batch.id),
-                body=self._body(tip, body_from_commit) or _batch_body(line.batch.branch, line.batch.base),
-            )
-
-
-def _batch_title(batch_id: str) -> str:
-    return f"learning: tenant knowledge batch {batch_id}"
-
-
-def _batch_body(branch: str, base: str) -> str:
-    return (
-        f"Tenant agent knowledge batch `{branch}`, based on `{base[:12]}`. Changes `agent/` "
-        "only, every commit made by the host's commit-maker."
-    )

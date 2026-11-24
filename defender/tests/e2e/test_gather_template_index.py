@@ -54,10 +54,12 @@ _TEMPLATES = {
 def _tenant_catalog() -> tuple[object, Path]:
     """The fixture tenant (accepted under this test's data root) with `_TEMPLATES` added to its
     own `agent/` catalog; returns the tenant and that catalog directory."""
+    from defender.tests.support.shared._locations_1210 import location_path
     from defender.tests.support.tenancy import _tenants1106
 
     tenant = _tenants1106.fixture_tenant()
-    catalog = Path(tenant.agent) / _CATALOG_REL
+    # The placed agent half (#1618 K8: a `Tenant` names no knowledge path); the harness commits and reads it.
+    catalog = Path(location_path(tenant.tenant_root)) / "knowledge" / "agent" / _CATALOG_REL
     for rel, text in _TEMPLATES.items():
         (catalog / rel).parent.mkdir(parents=True, exist_ok=True)
         (catalog / rel).write_text(text, encoding="utf-8")

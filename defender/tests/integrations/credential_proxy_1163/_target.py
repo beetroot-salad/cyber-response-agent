@@ -40,7 +40,7 @@ def request_signer(tenant_id: str, *, directory: Any, transport: Any = None) -> 
 SEAM_ADDR = "openbao_addr"
 SEAM_TRANSPORT = "transport"
 #: The config keys r8.2 A26 and #1412 remove: unknown keys now.
-REMOVED_CONFIG_KEYS = ("tenant_keys", "tenant_exports", "transit_mount", "openbao_addr",
+REMOVED_CONFIG_KEYS = ("tenant_keys", "tenant_exports", "transit_mount", "openbao_addr",  # lint-stale-ref: ok — the retired #1163 proxy config key, not the removed function
                        "max_response_bytes", "data_root")  # #1366: `data_root` is replaced by `records_dsn`
 
 

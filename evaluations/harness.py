@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from evaluations._harness_util import LocalTenant
+from evaluations._harness_util import LocalTenant, deliver
 
 from defender import _git
 from defender._model import model
@@ -128,8 +128,7 @@ def run_author(tmp: Path, *, invoke_agent: Any = None) -> tuple[AuthorRun, float
                 {f"{kind}:{key}": {"fate": fate.name, "reason": fate.reason}
                  for (kind, key), fate in outcomes.items()}, indent=2),
                 encoding="utf-8")
-            delivered = delivery.finish(batch)
-            out.write(f"\ndelivery: {delivered.status}\n")
+            out.write(f"\ndelivery: {deliver(batch)}\n")
         finally:
             batch.discard()
     except Exception as e:  # noqa: BLE001 — an eval harness reports the fault, never re-raises

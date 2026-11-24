@@ -28,6 +28,7 @@ from defender.tests.support.sandbox._spec791 import (
 )
 from defender.tests.support.sandbox._curation_store1278 import reach_store
 from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+from defender.tests.support.tenancy._tenants1106 import placed_half
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 from defender.tests.support.storage import _feedback1414 as F
@@ -74,7 +75,7 @@ def _requests(paths) -> dict[str, dict]:
 
 
 def _set(tenant, outcomes: list[str] | None) -> None:
-    path = Path(location_path(tenant.settings)) / S.SETTING_FILE
+    path = placed_half(tenant, "settings") / S.SETTING_FILE  # #1618 K8: the placed half
     if outcomes is None:
         path.unlink(missing_ok=True)
     else:
@@ -264,7 +265,7 @@ def _drive_sibling(tmp_path, tenant, tail: F.FeedbackTail) -> None:
     """The sibling's door (`--episode <id> --world b`) over a held episode of the run's own tenant."""
     from defender.records._episode_handle import Episode
     from defender.tests.support.learning.branch import _triplet_947 as T
-    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_fetch
     from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as P
 
     source = P.source_run(Path(location_path(tenant.runs)))
@@ -272,7 +273,7 @@ def _drive_sibling(tmp_path, tenant, tail: F.FeedbackTail) -> None:
     with Episode.open(manifest.parent) as held:
         T.episode_view(held, tenant=tenant).close()
     argv = ["--tenant", str(tenant.id), "--episode", manifest.parent.name, "--world", "b"]
-    run_py.main(argv, lifecycle=tail.lifecycle, visualize=tail.visualize, preflight=lambda *a, **k: 0, publish=in_process_publish(), directory=directory_for_argv(argv))
+    run_py.main(argv, lifecycle=tail.lifecycle, visualize=tail.visualize, preflight=lambda *a, **k: 0, fetch=in_process_fetch(), directory=directory_for_argv(argv))
 
 
 _REFUSED_ENDS = ["sibling world", "--no-learn", "held-out by path", "held-out by digest", "unverified tree"]
@@ -374,7 +375,7 @@ def test_1414_a_setting_with_a_duplicate_or_unknown_key_is_refused_at_run_end(tm
     import logging
 
     text, key = _BAD_KEYS[why]
-    (Path(location_path(tenant.settings)) / S.SETTING_FILE).write_text(text, encoding="utf-8")
+    (placed_half(tenant, "settings") / S.SETTING_FILE).write_text(text, encoding="utf-8")
     with caplog.at_level(logging.INFO):
         _drive(tmp_path, state, "bad-keys", plan=F.plan_for("aborted"))
     assert _requests(state) == {}
@@ -403,7 +404,7 @@ def test_1414_the_setting_is_read_from_the_runs_copy_not_the_working_tree(
     tail = _drive(tmp_path, state, "edited", plan=F.plan_for("aborted"), mid_run=lambda: _set(tenant, edit))
 
     assert tail.copy_text == S.setting_text(before), "premise: the run's copy holds the pre-launch setting"
-    assert (Path(location_path(tenant.settings)) / S.SETTING_FILE).read_text(encoding="utf-8") == S.setting_text(edit)
+    assert (placed_half(tenant, "settings") / S.SETTING_FILE).read_text(encoding="utf-8") == S.setting_text(edit)
     assert _outcomes(state) == (["aborted"] if opens else [])
 
 
@@ -600,7 +601,7 @@ def _enqueue(tmp_path, tenant, run_dir: Path, **kw) -> bool:
                                      defender_dir=_paths.process_defender_dir())
     copy = tmp_path / "settings-copy"
     shutil.rmtree(copy, ignore_errors=True)
-    shutil.copytree(location_path(tenant.settings), copy)
+    shutil.copytree(placed_half(tenant, "settings"), copy)  # #1618 K8: the placed half
     return S.enqueue_feedback_issue(run, RunPaths(run_dir).alert,
                                     tenant=T1106.run_tenant(accepted, settings_root=copy), **kw)
 
@@ -635,7 +636,7 @@ def test_1414_a_request_for_another_tenant_than_the_runs_or_for_a_handle_with_no
     other = set_up_tenant(current_data_root(), fixture_uuid("feedback-other-tenant"))
     reach_store(os.environ["DEFENDER_DATABASE_DSN"], monkeypatch, other)
     copy = tmp_path / "settings-copy"
-    shutil.copytree(location_path(tenant.settings), copy)
+    shutil.copytree(placed_half(tenant, "settings"), copy)  # #1618 K8: the placed half
 
     def ask(run, accepted) -> bool:
         return S.enqueue_feedback_issue(run, RunPaths(run.run_dir).alert,

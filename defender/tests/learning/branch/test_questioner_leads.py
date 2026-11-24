@@ -1,6 +1,7 @@
 """#1032 — the questioner's "joined leads" section is a NAMED projection, not a `__dict__` dump."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618 flow 4: the launch's one fetch
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -313,7 +314,7 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     questioner = S.questioner_for()
     rc = T.mod("cli.learning.branch").main(
         ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID)],
-        spawn=T.FakeSpawn(), questioner=questioner,
+        spawn=T.FakeSpawn(), questioner=questioner, fetch=in_process_fetch(),
         oracle=S.oracle(then=S.submit()).model,
         verifier=S.passing_verifier().model, roster=est.roster(),
         judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(bucket="none", systems=[]))),
