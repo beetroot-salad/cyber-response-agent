@@ -520,10 +520,11 @@ def box_mounted_episodes(data_root: DataRoot, raw_id: object) -> EpisodesRoot:
     return EpisodesRoot(_TenantPaths(data_root, TenantId(raw_id)).episodes)
 
 
-def job_tenant_folder(tenant: Tenant) -> Path:
+def job_tenant_folder(tenant: Tenant | JobTenant) -> Path:
     """`<data root>/<T>/` of an accepted tenant, as a plain folder: the explicit owner mount export
     for the per-job host helper (#1170), which binds it whole into its job's container at its own
-    path (O1) and judges every path it derives below it with no link followed (H10). A join:
+    path (O1) and judges every path it derives below it with no link followed (H10); of a `JobTenant`,
+    its own folder in the job's root (the adoption entry's clone lives there, #1546). A join:
     nothing is read or made."""
     return unwrap_tenant_root(tenant.tenant_root)
 
@@ -833,12 +834,14 @@ ISSUER_ROLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 # The data root (D2): typed selection and explicit owner comparisons/display.
 # ==========================================================================================
 
-def resolve_data_root() -> DataRoot:
+def resolve_data_root(environ: Mapping[str, str] | None = None) -> DataRoot:
     """The one path from `DEFENDER_DATA_ROOT` to an absolute, symlink-resolved root. No
     default: an unset or empty value is refused, naming the variable (settled by the user).
     Called once by an entry point; the root is handed inward from there. Learning state now
-    belongs to the selected tenant below this root; there is no ambient state-root override."""
-    raw = os.environ.get(_DATA_ROOT_ENV, "")
+    belongs to the selected tenant below this root; there is no ambient state-root override.
+    `environ`: the environment the entry was handed (a job container's, #1546: the claim's own
+    root), default this process's."""
+    raw = (os.environ if environ is None else environ).get(_DATA_ROOT_ENV, "")
     if not raw:
         raise TenantRefused(f"{_DATA_ROOT_ENV} is not set — there is no default data root")
     root = Path(raw)

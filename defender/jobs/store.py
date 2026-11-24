@@ -848,7 +848,7 @@ class JobStore:
                 id=LearningJobId.mint(), tenant_id=record.tenant_id, alert_id=record.alert_id,
                 investigation_id=record.investigation_id,
                 request_key=f"{AUTO_REQUEST_KEY_PREFIX}{record.investigation_id}", attempt=1, trigger="auto",
-                status="queued", created_at=self._clock()))
+                status="queued", created_at=func.now()))  # its queue age is the database's clock (#1546 D10)
         if decided.follow_ons.arm_check_clock:
             await arm_learning_check(s, record.tenant_id)
         if retry:
@@ -1116,8 +1116,10 @@ class JobStore:
             row = LearningJobRow(
                 id=LearningJobId.mint(), tenant_id=tenant_id, alert_id=named.alert_id, investigation_id=named.id,
                 request_key=client_request_id, attempt=1, trigger="explicit", status="queued",
-                created_at=self._clock())
+                created_at=func.now())  # its queue age is the database's clock, the expiry's (#1546 D10)
             s.add(row)
+            await s.flush()
+            await s.refresh(row, ["created_at"])
             await arm_learning_check(s, tenant_id)
             record = learning_job_record(row)
         announce("learning_job.start", actor=actor, tenant_id=tenant_id, target=record.learning_job_id,

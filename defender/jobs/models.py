@@ -11,7 +11,7 @@ import dataclasses
 import datetime as _dt
 from typing import Any, Protocol
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKeyConstraint, Index, Integer, LargeBinary, Text, UniqueConstraint, false, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKeyConstraint, Index, Integer, LargeBinary, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Mapped, mapped_column
@@ -203,8 +203,8 @@ class LearningJobRow(Base, kw_only=True):
     #: `EVIDENCE_STATES` once ended (#1546 A-O4), null while live.
     evidence_state: Mapped[str | None] = mapped_column(Text, default=None)
     #: The sibling cost is only a lower limit (#1546 D15): after an offboard or a take-over it is the last staged progress.
-    #: The one column with a server default (false), which `0027_run_evidence` gave every existing row.
-    sibling_cost_is_lower_limit: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    #: No server default (#1339 P4): every insert supplies it; `0027_run_evidence` filled the existing rows with false.
+    sibling_cost_is_lower_limit: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class LearningCheckRow(Base, kw_only=True):

@@ -16,6 +16,11 @@ What it decided before the container it stages under the check's claim (#1546), 
 - otherwise nothing: the readiness container (`run.py --readiness <id>`, `run.readiness_main`) sends its `knowledge`
   (the launch facts' source) and its `result`, answered `launch` and those verbs alone (C4).
 
+The tenant's evidence key is the helper's own check (#1546 A-O7, amendment r9: produced host-side): once the tenant-level
+steps passed, the key login (the seam, else the one the live generation records) is proven by a datakey/unwrap probe of
+`evidence-<T>`; a key it cannot prove adds one `evidence_key_missing` warning to the container's `ready` result as it is
+staged (`with_host_warnings`), beside the check's own warnings.
+
 The runs folder gone after the worker's pre-open, or a knowledge record that cannot be written, is the helper's own
 failure (`HelperFault`): no record, and a non-zero exit the worker reads (R13-1.1, .2)."""
 from __future__ import annotations
@@ -91,6 +96,43 @@ def _readiness_refused(session: Session, facts: LaunchFacts, refused: StepRefuse
     _host_request.write_once(session, _LANE, job_lane.ReadinessRecord.refused(refused.step, _readiness_sentence(refused)))
 
 
+#: The one warning the helper adds (#1546 A-O7).
+KEY_WARNING = "evidence_key_missing"
+
+
+def _key_sentence(session: Session) -> str | None:
+    """Why the tenant's evidence key is not proven, or None when a datakey of `evidence-<T>` unwraps to itself under the
+    tenant's key login: the login is the jobs' own, so what it cannot do no job can."""
+    from defender import evidence
+
+    from . import _evidence
+
+    keys = session.evidence_keys if session.evidence_keys is not None else _evidence.keys_from_generation(session)
+    if keys is None:
+        return ("the tenant's evidence key login is not recorded on its live generation, so no job could key the "
+                "evidence it keeps")
+    tenant = str(session.tenant_id)
+    try:
+        made = keys.datakey(tenant)
+        proven = keys.unwrap(tenant, made.wrapped) == made.plaintext
+    except evidence.EvidenceKeyMissing:
+        return (f"the tenant's evidence key {evidence.key_name(tenant)} does not exist in OpenBao, so no job could "
+                "keep its evidence")
+    except evidence.EvidenceKeyError as fault:
+        return f"the tenant's evidence key could not be proven ({fault}), so a job may not be able to keep its evidence"
+    if not proven:
+        return "the tenant's evidence key did not unwrap the data key it made, so no job could read its evidence back"
+    return None
+
+
+def with_host_warnings(session: Session, body: dict[str, Any]) -> dict[str, Any]:
+    """The container's result `body` as staged: a `ready` one gains the helper's own warning (module doc), if any."""
+    sentence = session.prepared.state if session.prepared is not None else None
+    if not isinstance(sentence, str) or body.get("outcome") != "ready" or not isinstance(body.get("warnings"), list):
+        return body
+    return {**body, "warnings": [*body["warnings"], {"kind": KEY_WARNING, "sentence": sentence}]}
+
+
 def _prepare_readiness(session: Session, hold: contextlib.ExitStack) -> Prepared:
     """The host half (module doc): the shared steps, the knowledge record, then the container's launch facts."""
     from defender import tenancy
@@ -120,8 +162,10 @@ def _prepare_readiness(session: Session, hold: contextlib.ExitStack) -> Prepared
             # The records read above (#1366 O6), which the container builds its tenant from (it reads no database).
             "records": current.as_wire(),
         }
-        # The first pass was signed and is thrown away (R12-1): the container is handed no pass and answered none.
-        return Prepared(launch=launch, command=list(command), passes=None, cleanup=facts.cleanup, exited=_host_request.after_container(_LANE))
+        # The first pass was signed and is thrown away (R12-1): the container is handed no pass and answered none. The
+        # kind's state is the evidence key's warning sentence, or None (`with_host_warnings`).
+        return Prepared(launch=launch, command=list(command), passes=None, state=_key_sentence(session),
+                        cleanup=facts.cleanup, exited=_host_request.after_container(_LANE))
     except BaseException:
         facts.cleanup.close()
         raise

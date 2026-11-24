@@ -403,7 +403,8 @@ def main(  # noqa: PLR0913 — the entry's inputs plus the launcher's seams
     except NotInContainer as outside:
         sys.exit(f"[learning job] job {ns.job}: {outside}; nothing was done")
     try:
-        data_root = tenancy.data_root_for_child(tenancy.resolve_data_root())
+        # The container's own root (#1546: the claim's), from the environment the entry was handed.
+        data_root = tenancy.data_root_for_child(tenancy.resolve_data_root(environ))
     except TenantRefused as refused:
         sys.exit(f"[learning job] job {ns.job}: its root cannot be used: {refused}")
     on_main = threading.current_thread() is threading.main_thread()
@@ -415,7 +416,7 @@ def main(  # noqa: PLR0913 — the entry's inputs plus the launcher's seams
         if watch_stdin:
             sigterm_on_stdin_eof()
         pulled = _pull_source(ask, data_root, ns)
-        _run(job, ns, ask, candidates=candidates, grade=grade, preflight=preflight, **seams)
+        _run(job, ns, ask, candidates=candidates, grade=grade, preflight=preflight, environ=environ, **seams)
     except BaseException as caught:  # noqa: BLE001 — every exit is recorded, then decided below
         raised = caught
     finally:

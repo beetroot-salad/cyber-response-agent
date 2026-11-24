@@ -78,6 +78,8 @@ def _owner_columns() -> None:
     op.add_column("learning_jobs", sa.Column("evidence_state", sa.Text(), nullable=True), schema=SCHEMA)
     op.add_column("learning_jobs", sa.Column("sibling_cost_is_lower_limit", sa.Boolean(), nullable=False,
                                              server_default=sa.false()), schema=SCHEMA)
+    # The default only fills the rows that exist: no column of the jobs schema keeps a server default (#1339 P4).
+    op.alter_column("learning_jobs", "sibling_cost_is_lower_limit", server_default=None, schema=SCHEMA)
     op.execute(f"UPDATE {SCHEMA}.learning_jobs SET evidence_state = 'none' WHERE status NOT IN ({_LIVE})")
     op.create_check_constraint(op.f("ck_learning_jobs_evidence_state"), "learning_jobs",
                                f"evidence_state IN ({_EVIDENCE})", schema=SCHEMA)

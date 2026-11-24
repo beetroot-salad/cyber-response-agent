@@ -408,6 +408,10 @@ def _progress(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
 
 def _result(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
     parse = _records.RESULTS[session.kind]
+    if session.kind == "readiness":
+        from ._readiness import with_host_warnings  # here: the readiness kind imports this module
+
+        return _record_verb("result", lambda _ev, r: with_host_warnings(session, parse(r)))(session, fields)
     return _record_verb("result", lambda _ev, r: parse(r))(session, fields)
 
 

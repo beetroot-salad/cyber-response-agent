@@ -49,7 +49,7 @@ import sqlite3
 import sys
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -784,6 +784,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     signer: Any = None, proxy_url: str | None = None, issuer_transport: Any = None,
     container: JobContainer | None = None,
     clock: Callable[[], float] = time.time,
+    environ: Mapping[str, str] | None = None,
 ) -> int:
     # Injected seams are resolved once and threaded inward non-`None`, so no two frames can
     # disagree about which preflight, roster or model an episode used.
@@ -791,7 +792,9 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     # the source run and the siblings all resolve through it.
     try:
         tenant_id = tenancy.requested_tenant_id(ns.tenant)
-        data_root = tenancy.resolve_data_root()
+        # A job entry hands in its container's environment (#1546: its root is the claim's); an operator's launch
+        # reads this process's.
+        data_root = tenancy.resolve_data_root(environ)
     except TenantRefused as refusal:
         raise ending(f"[branch] {refusal}", reason=LAUNCH_REFUSED,
                      brief=f"the job's tenant was refused ({type(refusal).__name__})",
