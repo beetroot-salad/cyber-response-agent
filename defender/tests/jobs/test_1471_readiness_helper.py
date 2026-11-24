@@ -7,6 +7,7 @@ from __future__ import annotations
 import dataclasses
 import shutil
 import sys
+import json
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -759,7 +760,8 @@ def test_d10_readiness_fetches_main_once_into_an_empty_temporary_and_the_copy_is
         assert call["line"].startswith("ok "), call
         known = ran.knowledge
         assert isinstance(known, dict), ran.said()
-        assert (known["kind"], known["commit"]) == ("fresh", scene.t.commit), known
+        # #1546 PR2: the staged served shape (`fresh` is served `current`)
+        assert (known["status"], known["commit"]) == ("current", scene.t.commit), known
         assert known.get("stale_kind") is None
         assert not call["dest"].exists(), "the temporary copy outlived the helper"
 
@@ -796,8 +798,10 @@ def test_d10_a_refused_fetch_is_refused_at_publish_naming_its_class_never_the_re
         [call] = fetch.calls
         assert call["line"].split()[:2] == ["refused", klass], f"the armed fault did not make the child say {klass}: {call['line']!r}"
         assert klass in norm(sentence), f"the sentence does not name its class: {sentence!r}"
-        assert "FORGE-REPLY-CANARY" not in ran.record_path.read_text(encoding="utf-8")
-        assert "/srv/forge" not in ran.record_path.read_text(encoding="utf-8")
+        assert not ran.record_path.exists(), "the record went through the tenant folder (#1546 A-O2: a staged fact)"
+        staged = json.dumps(ran.record)  # the result as the helper staged it
+        assert "FORGE-REPLY-CANARY" not in staged
+        assert "/srv/forge" not in staged
         assert ran.knowledge is None, "a refused fetch settled a source"
         assert ran.docker.boxes == []
         assert ran.ran.rc == 0
@@ -821,6 +825,7 @@ def test_f9_the_publish_step_reads_the_copy_it_fetched_not_the_kept_export_or_cl
         control = readiness_fetching(scene, fetch=_ready_fetch(scene), signer=signer, container=lambda c: 0)
         assert control.docker.job_ran, control.said()
         assert [A.grant_of(A.claims_of_payload(p)) for p in signer.payloads] == [[("identity", "r")]], "control: seed grants identity"
+        assert isinstance(control.knowledge, dict), f"no knowledge was staged (r10 U-3: the helper stages its own): {control.said()}"
         assert control.knowledge["commit"] == scene.t.commit
 
         moved = K.advance_main(scene.t, files={"settings/verb-grants.yaml": grants_text(withhold_identity)})
@@ -828,6 +833,7 @@ def test_f9_the_publish_step_reads_the_copy_it_fetched_not_the_kept_export_or_cl
         ran = readiness_fetching(scene, fetch=_ready_fetch(scene), signer=signer, container=lambda c: 0)
 
         assert ran.docker.job_ran, ran.said()
+        assert isinstance(ran.knowledge, dict), ran.said()
         assert ran.knowledge["commit"] == moved != scene.t.commit, ran.knowledge
         assert signer.payloads == [], "the check signed a grant the fetched main withholds (it read the kept export or clone)"
 

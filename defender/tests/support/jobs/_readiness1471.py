@@ -214,7 +214,8 @@ def entry_of(scene: HelperScene, rid: str, done: Readied, *, roster: Any = None,
 def readiness(  # noqa: PLR0913 — one keyword per seam the helper takes
               scene: HelperScene, *, signer: Any = None, docker: ContainerStandIn | None = None, rid: str | None = None,
               container: Callable[[Any], int] | None = None, roster: Any = None, fetch: Callable[..., str] | None = None,
-              defender_dir: Path | None = None, directory: Any = None, staged: dict[str, Any] | None = None) -> Readied:
+              defender_dir: Path | None = None, directory: Any = None, staged: dict[str, Any] | None = None,
+              client: Any = None) -> Readied:
     """The helper for a readiness check of the scene's tenant (kind `readiness`, job id `rid`), its container the real
     `readiness_main` unless `container(Container) -> rc` says otherwise. `fetch` is the one knowledge fetch seam (#1618:
     default the real fetch child over the scene's remote, `drive_helper`'s). `defender_dir`: the code tree the container entry reads. `directory`: the tenant records the helper is handed (`job_host.main(directory=)`),
@@ -240,6 +241,8 @@ def readiness(  # noqa: PLR0913 — one keyword per seam the helper takes
     seams: dict[str, Any] = {} if fetch is None else {"fetch": fetch}
     if directory is not None:
         seams["directory"] = directory
+    if client is not None:  # #1618 D9: the forge client the branch-protection read uses (`job_host.main(client=)`)
+        seams["client"] = client
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
         done.ran = drive_helper(scene, scene.argv("readiness", rid), docker=stand_in,

@@ -6,14 +6,11 @@ FORCED: the seam `job_host.main(..., fetch=)` replaces `publish=`; its one shape
 `readiness_fetching` is `_readiness1471.readiness` with that seam in place of `publish` (which `drive_helper` always adds)."""
 from __future__ import annotations
 
-import contextlib
-import io
-import uuid
 from collections.abc import Callable
 from typing import Any
 
-from defender.tests.support.jobs._job_helper import ContainerStandIn, HelperRan, HelperScene, make_signer
-from defender.tests.support.jobs._readiness1471 import Readied, entry_of
+from defender.tests.support.jobs._job_helper import HelperScene
+from defender.tests.support.jobs._readiness1471 import Readied
 
 
 def fetching(scene: HelperScene) -> Any:
@@ -26,31 +23,8 @@ def fetching(scene: HelperScene) -> Any:
 def readiness_fetching(scene: HelperScene, *, fetch: Callable[..., str], client: Any = None, signer: Any = None,
                        rid: str | None = None, container: Callable[[Any], int] | None = None) -> Readied:
     """The helper for a readiness check of the scene's tenant with `fetch` (and `client`, when given) as its seams; like
-    `_readiness1471.readiness` it never raises for the subject's absence."""
-    from defender import job_host
+    `_readiness1471.readiness` it never raises for the subject's absence. #1546: it is that driver (the request row and its
+    claim planted first, the real evidence store configured; the records are staged facts, `Readied.record`/`.knowledge`)."""
+    from defender.tests.support.jobs._readiness1471 import readiness
 
-    rid = rid or str(uuid.uuid4())
-    done = Readied(scene, rid, HelperRan(), ContainerStandIn(), "")
-    stand_in = ContainerStandIn()
-
-    def captured(c: Any) -> int:
-        with contextlib.suppress(Exception):
-            done.facts = c.request("launch")
-        return (container or entry_of(scene, rid, done))(c)
-
-    stand_in.job = captured
-    done.docker = stand_in
-    seams: dict[str, Any] = {"fetch": fetch}
-    if client is not None:
-        seams["client"] = client
-    err = io.StringIO()
-    with contextlib.redirect_stderr(err):
-        try:
-            done.ran.rc = job_host.main(scene.argv("readiness", rid), docker=stand_in,
-                                        signer=signer if signer is not None else make_signer(), **seams)
-        except SystemExit as exited:
-            done.ran.rc = exited.code if isinstance(exited.code, int) else 1
-        except BaseException as crashed:  # noqa: BLE001 — kept for the case to name
-            done.ran.raised = crashed
-    done.err = err.getvalue()
-    return done
+    return readiness(scene, fetch=fetch, client=client, signer=signer, rid=rid, container=container)
