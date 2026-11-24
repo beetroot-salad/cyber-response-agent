@@ -65,7 +65,6 @@ ENTRY_POINT_MODULES = (
     "cli/policy_cli.py",
     # #1471 B3: `cli/tenant.py` left this set: `check --folder`, its one command, reads no tenant
     "learning/core/cli.py",
-    "cli/learning/revert_lesson.py",
     "cli/learning/lessons_page.py",
     # retired: "learning/leads/lead_author/__init__.py" — the by-hand lead-author entry is deleted (#1278 A3)
     "presentation/visualize_run.py",
@@ -127,7 +126,6 @@ COMMANDS: dict[str, tuple[str, Callable[[str], list[str]]]] = {
     "retirement": ("defender.cli.retire_legacy_runs", lambda t: ["--tenant", t]),
     # retired: "lead_author_opener" — the by-hand lead-author entry (`lead_author.main`) is deleted (#1278 A3)
     "lessons_page": ("defender.cli.learning.lessons_page", lambda t: ["--tenant", t]),
-    "revert": ("defender.cli.learning.revert_lesson", lambda t: ["--tenant", t, "some-lesson"]),
     "policy_view": ("defender.cli.policy_cli",
                     lambda t: ["show", "gather", "--run-dir", os.devnull, "--tenant", t]),
 }

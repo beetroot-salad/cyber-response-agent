@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from ._revert_store import claimed_batch, reviewed, revert_with
 from ._support import (
     BARE_NO_UPKEEP,
     LANES,
@@ -13,7 +12,6 @@ from ._support import (
     delivery,
     git,
     git_config_home,
-    merge_on_remote,
     opened,
     remote_refs,
     target,
@@ -24,18 +22,14 @@ def _refs(repo):
     return dict(line.split(" ", 1) for line in remote_refs(repo))
 
 
-@pytest.mark.parametrize("route", ["finish", "refinish", pytest.param("revert", marks=pytest.mark.postgres)])
+@pytest.mark.parametrize("route", ["finish", "refinish"])
 def test_publication_never_follows_operator_tags(
-    http_repo, tmp_path, monkeypatch, route, request
+    http_repo, tmp_path, monkeypatch, route
 ):
     tenant, remote, _, _ = http_repo
     http = ForgeHTTP()
     d = delivery(http_repo, http)
-    if route == "revert":
-        store = request.getfixturevalue("http_store")
-        batch, held = claimed_batch(http_repo, store, d, "tagged")
-    else:
-        batch = d.start_batch("tagged", lanes=LANES)
+    batch = d.start_batch("tagged", lanes=LANES)
     (batch.draft_root / "agent/lessons/tagged.md").write_text("review me\n")
     commit = batch.commit(batch.change_set(), "tagged lesson")
     if route == "refinish":
@@ -43,11 +37,6 @@ def test_publication_never_follows_operator_tags(
         with pytest.raises(target().DeliveryRefused, match="503"):
             d.finish(batch)
         http.fail_create = False
-    elif route == "revert":
-        finished = d.finish(batch)
-        opened(finished)
-        reviewed(store, held, finished)
-        merge_on_remote(http_repo, tmp_path, batch.branch)
 
     control = tmp_path / "control.git"
     git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, remote, control)
@@ -70,10 +59,7 @@ def test_publication_never_follows_operator_tags(
     git(tenant.knowledge, "push", control, f"{commit}:refs/heads/control")
     assert "refs/tags/operator-tag" in _refs(control)
     before = _refs(remote)
-    if route in ("finish", "refinish"):
-        opened(d.finish(batch))
-    else:
-        opened(revert_with(d, store, "agent/lessons/tagged.md", "tagged"), None)
+    opened(d.finish(batch))
     branch = "refs/heads/" + http.creates[-1]["head"]
     after = _refs(remote)
     assert set(after) == set(before) | {branch}

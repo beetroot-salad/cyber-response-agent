@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from defender import _io
+from defender._url import split_http_url
 from defender.configuration.issuer import ISSUER_URL, OPENBAO_URL
 
 #: The environment `from_env` reads (the dev container and the hosted units set them). The issuer
@@ -18,12 +19,19 @@ from defender.configuration.issuer import ISSUER_URL, OPENBAO_URL
 #: read from the environment; OpenBao's certificate is trusted where the TLS client looks by
 #: default, as for every other host process (no setting of the lifecycle's own).
 FORGE_URL_ENV = "DEFENDER_LIFECYCLE_FORGE_URL"
+FORGE_PUBLIC_URL_ENV = "DEFENDER_LIFECYCLE_FORGE_PUBLIC_URL"
 FORGE_TOKEN_FILE_ENV = "DEFENDER_LIFECYCLE_FORGE_ADMIN_TOKEN_FILE"
 OPENBAO_LOGIN_FILE_ENV = "DEFENDER_LIFECYCLE_OPENBAO_LOGIN_FILE"
 INTEGRATION_ENV = "DEFENDER_LIFECYCLE_INTEGRATION_CONTAINER"
 SECRETS_DIR_ENV = "DEFENDER_LIFECYCLE_SECRETS_DIR"
 POLL_ENV = "DEFENDER_LIFECYCLE_POLL_INTERVAL"
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
+#: The people worker's two required settings (#1592): the id of Forgejo's sign-in login source, and the DSN of a
+#: login that is a member of `fs_lifecycle` on the Forgejo sessions database (it holds a password).
+KEYCLOAK_SOURCE_ID_ENV = "DEFENDER_LIFECYCLE_KEYCLOAK_SOURCE_ID"
+FORGE_SESSIONS_DSN_ENV = "DEFENDER_LIFECYCLE_FORGE_SESSIONS_DSN"
+#: The people worker's durations (seconds), which no variable sets (#1592 Settings).
+PEOPLE_DURATIONS = ("people_poll", "people_call_timeout", "forge_session_cap", "forge_cap_every")
 
 
 class ConfigRefused(Exception):
@@ -47,7 +55,17 @@ class LifecycleConfig:
     long teardown waits for the host lock after SIGTERM before SIGKILL, and how long it then keeps removing a folder
     that late writes keep filling before it fails the step (seconds each, #1360). `oidc_key` is the
     deployment's OIDC signing key; `token_policy` and `sign_policy` are its two templated policies,
-    of each generation's delivery AppRole and of its sign-only AppRole (#1163 A24')."""
+    of each generation's delivery AppRole and of its sign-only AppRole (#1163 A24').
+
+    `forge_public_url` is the forge's address as a browser reaches it (since #1592 the edge's Forgejo site), required
+    because `forge_url` (which the lifecycle's own calls and the clone's origin use) may be an internal service name a
+    browser cannot reach: a tenant's recorded repository page, `repo_url`, is `<forge_public_url>/<repo>`, which the
+    app's Knowledge repo link opens (home redesign) and an adoption's pull-request link extends.
+
+    The people worker (#1592): `keycloak_source_id` is Forgejo's sign-in login source, `forge_sessions_dsn` a login of
+    `fs_lifecycle` on the Forgejo sessions database; `people_poll` the wait between its polls, `people_concurrency` the
+    users it works at once, `people_call_timeout` each Forgejo call's and session statement's bound, `forge_session_cap`
+    the longest a Forgejo session lives after sign-in and `forge_cap_every` how often the cap job runs (seconds each)."""
 
     issuer_url: str = ISSUER_URL
     forge_url: str
@@ -64,21 +82,20 @@ class LifecycleConfig:
     oidc_key: str = "default"
     token_policy: str = "defender-tenant-token"
     sign_policy: str = "defender-tenant-sign"
+    forge_public_url: str
+    keycloak_source_id: int
+    forge_sessions_dsn: str = field(repr=False)
+    people_poll: float = 2.0
+    people_concurrency: int = 4
+    people_call_timeout: float = 5.0
+    forge_session_cap: float = 3600.0
+    forge_cap_every: float = 60.0
 
     def __post_init__(self) -> None:
         for name in ("template_dir", "secrets_dir", "data_root"):
             object.__setattr__(self, name, Path(getattr(self, name)))
-        issuer = urlsplit(self.issuer_url)
-        if issuer.scheme != "https" or not issuer.hostname or self.issuer_url.endswith("/"):
-            raise ConfigRefused(f"the issuer URL {self.issuer_url!r} must be https, with no trailing slash")
-        for name, schemes in (("forge_url", ("http", "https")), ("openbao_url", ("https",))):
-            parsed = urlsplit(getattr(self, name))
-            if parsed.scheme not in schemes or not parsed.hostname or parsed.username or parsed.password:
-                raise ConfigRefused(f"{name} {getattr(self, name)!r} must be an {'/'.join(schemes)} address with no credentials")
-        if not self.forge_admin_token or not self.openbao_login or not self.integration_command:
-            raise ConfigRefused("the forge admin token, the OpenBao login and the integration command are required")
-        if not (self.poll_interval > 0 and self.lock_keepalive > 0 and self.teardown_wait > 0):
-            raise ConfigRefused("poll_interval, lock_keepalive and teardown_wait are positive numbers of seconds")
+        self._refuse_bad_addresses()
+        self._refuse_bad_numbers()
         root = self.data_root
         if not (self.secrets_dir.is_absolute() and root.is_absolute()):
             raise ConfigRefused("the secrets directory and the data root are absolute paths")
@@ -87,12 +104,37 @@ class LifecycleConfig:
         if secrets == tenants_root or tenants_root in secrets.parents:
             raise ConfigRefused(f"the secrets directory {self.secrets_dir} must lie outside the data root {root}")
 
+    def _refuse_bad_addresses(self) -> None:
+        issuer = urlsplit(self.issuer_url)
+        if issuer.scheme != "https" or not issuer.hostname or self.issuer_url.endswith("/"):
+            raise ConfigRefused(f"the issuer URL {self.issuer_url!r} must be https, with no trailing slash")
+        for name, schemes in (("forge_url", ("http", "https")), ("openbao_url", ("https",))):
+            parsed = urlsplit(getattr(self, name))
+            if parsed.scheme not in schemes or not parsed.hostname or parsed.username or parsed.password:
+                raise ConfigRefused(f"{name} {getattr(self, name)!r} must be an {'/'.join(schemes)} address with no credentials")
+        _check_public_url(self.forge_public_url)
+        if not self.forge_admin_token or not self.openbao_login or not self.integration_command:
+            raise ConfigRefused("the forge admin token, the OpenBao login and the integration command are required")
+        if not self.forge_sessions_dsn:
+            raise ConfigRefused("the Forgejo sessions database's login (forge_sessions_dsn) is required")
+
+    def _refuse_bad_numbers(self) -> None:
+        if not (self.poll_interval > 0 and self.lock_keepalive > 0 and self.teardown_wait > 0):
+            raise ConfigRefused("poll_interval, lock_keepalive and teardown_wait are positive numbers of seconds")
+        if not all(getattr(self, name) > 0 for name in PEOPLE_DURATIONS):
+            raise ConfigRefused(f"{', '.join(PEOPLE_DURATIONS)} are positive numbers of seconds")
+        if not _is_positive_whole(self.people_concurrency):
+            raise ConfigRefused("people_concurrency is a positive whole number of users")
+        if not _is_positive_whole(self.keycloak_source_id):
+            raise ConfigRefused("keycloak_source_id is the positive id of Forgejo's sign-in login source")
+
     @classmethod
     def from_env(cls, *, template_dir: Path) -> LifecycleConfig:
         """The config of `python -m defender.lifecycle`, from the environment (secrets from the
         files it names)."""
         missing = [n for n in (FORGE_URL_ENV, FORGE_TOKEN_FILE_ENV, OPENBAO_LOGIN_FILE_ENV, INTEGRATION_ENV,
-                               SECRETS_DIR_ENV, DATA_ROOT_ENV)
+                               SECRETS_DIR_ENV, DATA_ROOT_ENV, KEYCLOAK_SOURCE_ID_ENV, FORGE_SESSIONS_DSN_ENV,
+                               FORGE_PUBLIC_URL_ENV)
                    if not os.environ.get(n)]
         if missing:
             raise ConfigRefused(f"set {', '.join(missing)}")
@@ -106,7 +148,39 @@ class LifecycleConfig:
             openbao_login=_secret_file(os.environ[OPENBAO_LOGIN_FILE_ENV], OPENBAO_LOGIN_FILE_ENV),
             integration_command=os.environ[INTEGRATION_ENV], template_dir=template_dir,
             secrets_dir=Path(os.environ[SECRETS_DIR_ENV]), data_root=Path(os.environ[DATA_ROOT_ENV]),
-            poll_interval=poll)
+            poll_interval=poll, forge_public_url=os.environ[FORGE_PUBLIC_URL_ENV],
+            keycloak_source_id=source_id_from_env(), forge_sessions_dsn=os.environ[FORGE_SESSIONS_DSN_ENV])
+
+    @property
+    def forge_page_base(self) -> str:
+        """Where a browser reaches the forge: `forge_public_url` without a trailing slash."""
+        return self.forge_public_url.rstrip("/")
+
+
+def _check_public_url(value: str) -> None:
+    """`forge_public_url` is an absolute http(s) URL with a host and no credentials, query, fragment or whitespace (a
+    path is allowed): the one rule for such a URL."""
+    try:
+        split_http_url(value)
+    except ValueError as refused:
+        raise ConfigRefused(f"{FORGE_PUBLIC_URL_ENV} {value!r} {refused}") from None
+
+
+def source_id_from_env() -> int:
+    """`KEYCLOAK_SOURCE_ID_ENV` as the login source's id; refused naming the variable when it is not a positive whole
+    number."""
+    raw = os.environ.get(KEYCLOAK_SOURCE_ID_ENV, "")
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if not _is_positive_whole(value):
+        raise ConfigRefused(f"{KEYCLOAK_SOURCE_ID_ENV} is not the id of a login source: {raw!r}")
+    return value
+
+
+def _is_positive_whole(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
 def _secret_file(path: str, variable: str) -> str:

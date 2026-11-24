@@ -208,8 +208,9 @@ class Adoption(SavedAdoption):
     """An adoption as served: the pull request's address is built from the tenant's forge wiring."""
 
     pr_url: str | None = Field(
-        description="The pull request's page on the tenant's forge; null without a number, or when the tenant has no "
-                    "forge wiring.")
+        description="The pull request's page on the public Forgejo site: the tenant's repository page, as its "
+                    "Knowledge repo link opens it, plus `/pulls/<n>`; null without a number, or when the tenant has no "
+                    "repository page a browser may open.")
 
 
 class Investigation(BaseModel):
@@ -559,6 +560,15 @@ class MeUser(BaseModel):
 
 class TenantRef(BaseModel):
     tenant_id: TenantId
+
+
+class Repository(BaseModel):
+    """Where a browser opens the tenant's knowledge repository on the forge."""
+
+    repo_url: str | None = Field(
+        description="The repository's page the lifecycle recorded on the tenant (`<forge public url>/<repo>`), when "
+                    "it is an http or https address with a host and no user part, query or fragment, on another origin "
+                    "than the app's. Null when none is recorded or it is not such an address.")
 
 
 class TenantItem(BaseModel):

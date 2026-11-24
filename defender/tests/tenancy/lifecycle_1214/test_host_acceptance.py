@@ -1062,12 +1062,12 @@ def test_the_admitted_value_carries_the_recorded_wiring_and_the_directory_it_was
 
     root = tenancy.resolve_data_root()
     origin = "http://forge.test/elsewhere/special.git"
-    directory = active_directory(placed, TENANT, repo="tenants/special", origin=origin)
+    directory = active_directory(placed, TENANT, repo=f"t-{TENANT}/knowledge", origin=origin)
     recorded_wiring = directory.forge_wiring(TENANT)
-    assert (recorded_wiring.repo, recorded_wiring.origin) == ("tenants/special", origin), "control: the seed's wiring"
+    assert (recorded_wiring.repo, recorded_wiring.origin) == (f"t-{TENANT}/knowledge", origin), "control: the seed's wiring"
     with host_tenant(root, TENANT, directory=directory) as admitted:
         wiring = getattr(admitted, H.ADMITTED_WIRING)
-        assert (wiring.repo, wiring.origin) == ("tenants/special", origin)
+        assert (wiring.repo, wiring.origin) == (f"t-{TENANT}/knowledge", origin)
         assert getattr(admitted, H.ADMITTED_DIRECTORY) is directory
 
 
@@ -1077,7 +1077,7 @@ def test_an_acceptance_with_no_directory_handed_in_carries_a_usable_directory(pl
     it answers the tenant's state and wiring (r10 A1: `admitted` carries the directory for the drain's per-claim check)."""
     from defender import tenancy
 
-    insert_active_tenant(migrated_database, TENANT, data_root=placed, repo="tenants/pg", origin="http://forge.test/pg.git")
+    insert_active_tenant(migrated_database, TENANT, data_root=placed, repo=f"t-{TENANT}/knowledge", origin="http://forge.test/pg.git")
     monkeypatch.setenv(DSN_ENV, migrated_database)
     root = tenancy.resolve_data_root()
     with host_tenant(root, TENANT) as admitted:
@@ -1085,7 +1085,7 @@ def test_an_acceptance_with_no_directory_handed_in_carries_a_usable_directory(pl
         assert directory is not None, "no directory was carried"
         assert directory.state(TENANT) == "active"
         wiring = directory.forge_wiring(TENANT)
-        assert (wiring.repo, wiring.origin) == ("tenants/pg", "http://forge.test/pg.git")
+        assert (wiring.repo, wiring.origin) == (f"t-{TENANT}/knowledge", "http://forge.test/pg.git")
         assert (getattr(admitted, H.ADMITTED_WIRING).origin) == "http://forge.test/pg.git"
 
 

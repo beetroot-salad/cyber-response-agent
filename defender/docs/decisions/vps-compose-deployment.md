@@ -2,9 +2,10 @@
 title: Deployment, service architecture, and identity
 status: >-
   2026-11-14 revision: deployment boundaries decided (#1491): k3s, interchangeable hosts, a job that holds its pass
-  and the deployment's provider key (2026-11-21 amendment: model calls go direct). Target shape, not yet
-  implemented; the #1170 shape below is current until the work order lands. Sequenced after the API checkpoint.
-date: 2026-11-21
+  and the deployment's provider key (2026-11-21 amendment: model calls go direct; 2026-11-22 amendment, #1592: the
+  edge publishes a Forgejo site for tenant people). Target shape, not yet implemented; the #1170 shape below is
+  current until the work order lands. Sequenced after the API checkpoint.
+date: 2026-11-22
 supersedes: 2026-10-22b revision (Compose per host, one execution machine)
 ---
 
@@ -103,8 +104,10 @@ and failures visible. Budget constraints do not weaken tenant authorization or i
 - **B6. Tenants are separated by credential first and network second.** Pod-to-pod traffic is denied by default
   (Kubernetes cheat sheet: "By default, Pods are non-isolated for ingress and egress").
 - **B7. Replicas where state can live in PostgreSQL; named singletons elsewhere.** Replicas: API, credential proxy,
-  worker. Singletons, with downtime accepted: PostgreSQL, OpenBao, Forgejo, blob store, identity provider, and the
-  k3s server with its datastore and cluster CA.
+  worker. Singletons, with downtime accepted: PostgreSQL, OpenBao, Forgejo, blob store, identity provider, the
+  lifecycle (management service; #1592 OD-7: its people-request worker never runs two passes for one person, and a
+  second process waits as a logged standby on its database lock), and the k3s server with its datastore and cluster
+  CA.
 - **B8. Attacker bytes are read only where reading them is harmless.** Privileged processes (worker, helper, proxy)
   move job-written content unread, or read only small typed records under a schema and a size cap. Anything heavier
   (renderer, learning consumers, SQLite) runs in a confined job-shaped pod holding only its input (threat model class
@@ -194,6 +197,7 @@ flowchart LR
     Browser --> Edge[Edge: Cloudflare, ingress, TLS]
     Edge --> API[Application: API replicas]
     Edge --> Art[Artifact serving, own domain]
+    Edge -->|allowlist only| Forge
     subgraph Control[Control nodes]
         API
         Art
@@ -215,6 +219,7 @@ flowchart LR
     Worker -->|create pods, exec into boxes| K3s
     Proxy --> Systems[Customer systems]
     Proxy --> Forge
+    Forge --> FSess[(Forgejo sessions database)]
     API -->|write-only credential role| Bao
     API -->|caller's cookie or credential| Minter[Token minter]
     Minter --> DB
@@ -222,7 +227,8 @@ flowchart LR
 
 | Zone | Holds | Reaches |
 |---|---|---|
-| Edge | TLS keys | API, artifact serving |
+| Edge | TLS keys | API, artifact serving, Forgejo's allowlisted web pages (its own domain, #1592) |
+| Forgejo | its admin and bot accounts, repositories, its sessions-database login (`fs_forgejo`) | its sessions database (`forgejo_sessions`, row rights on its one table); the identity provider's token endpoints for sign-in |
 | Application | API database role (row-level security keyed on the minter's token; it cannot mint), identity-provider client secret, blob signing key, page-grant signing key, OpenBao write-only role for system credentials (create and update a set, read metadata, look its own token up, never read a value; #1470, #1532) | PostgreSQL, blob, identity provider, OpenBao |
 | Token minter (#1547) | session store, program-credential hashes, minter database role (identity tables only), the tenant-token signing keys | PostgreSQL |
 | Artifact server | page-grant verifier, its own page-cookie key, blob read | blob |
@@ -262,12 +268,23 @@ cluster administration.
 
 **Two layers of network policy (2026-11-21).** Each pod's outgoing rules (B3, O4) are matched by incoming rules on
 the services: PostgreSQL, OpenBao, the forge, blob and the worker pods each accept connections only from the pods that
-section 1's table says reach them, so a gap in a job pod's outgoing policy alone opens nothing. Incoming rules see
+section 1's table says reach them, so a gap in a job pod's outgoing policy alone opens nothing. Forgejo's incoming rule
+admits the credential proxy, the lifecycle and, for its public site, the ingress controller (#1592). Incoming rules see
 the connecting pod only for traffic inside the cluster; a connection that leaves and comes back through the public
-edge arrives from the ingress controller. So **the public edge publishes only the frontend, the API's public routes
-and artifact serving.** Forgejo, OpenBao, Keycloak's administration and the cluster API have no public route; they
-are reached inside the cluster and, by operators, over the tailnet. A job that leaves for the internet and comes back
-in therefore finds only what any anonymous caller finds, behind the same authentication.
+edge arrives from the ingress controller. So **the public edge publishes only the frontend, the API's public routes,
+artifact serving and the Forgejo site.** OpenBao, Keycloak's administration and the cluster API have no public route,
+nor has Forgejo beyond that site; they are reached inside the cluster and, by operators, over the tailnet. A job that
+leaves for the internet and comes back in therefore finds only what any anonymous caller finds, behind the same
+authentication. O4's refusal of the forge at its in-cluster address stands.
+
+**The Forgejo site (#1592, OD-1, OD-1a).** Tenant people review, edit and merge their tenant's knowledge in Forgejo's
+own web interface, signed in with their product account, on its own registrable domain (`DEFENDER_FORGE_DOMAIN`). The
+ingress matches that host and forwards only an allowlist of Forgejo's pages, refusing every other path with 404: no git
+transport, no `/api`, no administration, account, token, key or linking pages. It drops the Cookie header on the
+sign-in start, so a signed-in session cannot link another account. Job pods reach the public edge, so they are
+anonymous callers of the site: every allowlisted path asked with no session answers a sign-in redirect, a public
+asset or a refusal, never tenant content. Who is in a tenant's team, who is suspended and whose sessions end is the
+product's membership, carried to Forgejo by the lifecycle's people requests.
 
 ### 2. Human identity and backend-held sessions
 
@@ -302,6 +319,13 @@ immediately, so logout and forced sign-out take effect at once. A membership cha
 because membership is read per request, not carried in a token. One exception, accepted (#1161): a page already opened
 from the artifact domain stays readable in that browser until its page cookie expires, at most 15 minutes and only
 that page (§5).
+
+Forgejo's own sessions (#1592, OD-4) are Forgejo's, in their own database; the product may only end them. Forgejo's
+sign-in always asks the identity provider for the password, and keeps no remember cookie. While the lifecycle runs, a
+person's Forgejo sessions end within seconds of a product sign-out, or of their last active membership ending; a
+session revived by requests in flight at that delete ends within one cap period. Every Forgejo session ends at most one
+hour after its sign-in, plus the cap job's period (a minute). While the lifecycle or Forgejo is down, these fail open:
+the requests wait and are retried (§9).
 
 Cookie authentication requires request-forgery protection. Use `SameSite` session cookies and reject state-changing
 requests whose `Origin` header is not the application origin. This matters because browsers treat subdomains of one
@@ -463,6 +487,7 @@ guarantee.
 | Published lessons, queries, agent knowledge, reviews, retained branches | Tenant repositories in Forgejo |
 | Run and episode outputs and large immutable evidence | Blob storage, under claim-scoped keys |
 | System secrets, tenant login secrets, workload grants | OpenBao |
+| Forgejo's web sessions | Forgejo, in the `forgejo_sessions` database on the product's PostgreSQL server (#1592): its table is owned by a role nobody logs in as; Forgejo's login has row rights on it, the lifecycle's may read and delete; no other product login can connect |
 | The deployment's provider key | A cluster Secret in the jobs namespace (encrypted at rest), written by the deploy |
 | Job scratch | The job's ephemeral volume, deleted with its pod |
 
@@ -630,6 +655,11 @@ cleanup, model spend, adapter failures, disk and memory, and service availabilit
 in logs and traces rather than metric labels. Start with alerts for unavailable services, stranded work, resource
 exhaustion, and unexpected spend.
 
+A written gap under stranded work (#1592 OD-13): no alert yet on ageing Forgejo people requests. A request the
+lifecycle cannot carry out (Forgejo or the sessions database down, a call failing) keeps the person's Forgejo access
+until it succeeds, and today shows only in the lifecycle's error logs, on each attempt. The alert, when built, reads
+the requests' `requested_at` and designs its own signal for the session cap job.
+
 Bound collector queues and local log rotation. Telemetry loss must be visible without filling disks or silently
 blocking work. Do not log credentials, passes, signed URLs, or raw customer prompts and payloads into general
 telemetry. This deployment does not promise tamper-proof evidence against a compromised administrator.
@@ -716,7 +746,6 @@ claim-scoped keys with confined readers.
 - One namespace for every tenant's jobs, or one per tenant (2026-11-21). Per tenant buys orchestrator-enforced
   resource limits and network rules per tenant; it costs the launcher rights across namespaces and a namespace per
   tenant to create and delete. Revisit when there are several live tenants.
-- How tenant reviewers reach the forge, if they need its web pages: Forgejo has no public route (section 1).
 - The adapter boundary (#1172) must keep adapters off the job pod's network: a sidecar in the job pod would share its
   internet egress (the same ground as decision E's rejected alternative).
 - Resumable learning episodes, needed to pause between siblings or to survive restarts.

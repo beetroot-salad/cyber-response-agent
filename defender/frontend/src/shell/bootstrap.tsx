@@ -122,6 +122,7 @@ function shellFor(view: View, load: Load, { routed, address, me }: Opened): Shel
       signOut: () => {
         runAction(view, load, load.client.signOut());
       },
+      outbound: (address) => load.outbound(address),
       // Not `runAction`: its error is the screen's to show beside the invitation, not the error state. A fault of the
       // shell's own still is the error state's.
       acceptInvitation: (id) =>

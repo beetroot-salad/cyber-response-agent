@@ -878,7 +878,8 @@ class World:
                 self._learning_store = LearningStore(self.dsn)
             learning = StoreLearningWork(self._learning_store)
         return api_deps(identity=self.service, tenants=self.tenants, ports=self.offboarding,
-                        frontend_origin=FRONTEND_ORIGIN, systems=no_records, secrets=no_records, learning_work=learning)
+                        frontend_origin=FRONTEND_ORIGIN, systems=no_records, secrets=no_records,
+                        learning_work=learning)
 
     def restart(self, *, administrators: Sequence[str] = (),
                 tenants: Mapping[str, Sequence[str]] | None = None) -> None:

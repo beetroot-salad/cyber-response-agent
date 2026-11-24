@@ -1,12 +1,16 @@
 """The ingress launcher (#1161 S5, B9): `python -m defender.api_server.ingress`.
 
-One entry point for dev, CI's browser check and the deployment. It reads four inputs, all required and none defaulted,
+One entry point for dev, CI's browser check and the deployment. It reads six inputs, all required and none defaulted,
 refuses (non-zero exit, naming the setting) before Caddy starts when one is unset or misshapen, then replaces itself
 with Caddy (exec), so signals reach Caddy and nothing of ours stands between. The Caddyfile, `defender/frontend/Caddyfile`,
 reads them from the environment, the listen address split into its host and port (`caddy_environment`).
 
 The ingress always serves plain HTTP on `DEFENDER_INGRESS_LISTEN`: TLS, when there is any, ends in front of it. It never
-learns the public origin, so Caddy's automatic HTTPS has nothing to act on (and is off besides)."""
+learns the public origin, so Caddy's automatic HTTPS has nothing to act on (and is off besides).
+
+Two of the inputs are the Forgejo site's (#1592 OD-1, OD-3): `DEFENDER_FORGE_DOMAIN`, the host it answers on (parsed as the
+artifact domain is), and `DEFENDER_INGRESS_FORGE_UPSTREAM`, Forgejo's private `host:port`. On that
+host the Caddyfile forwards only its allowlist; on any other host the app is served as before."""
 
 from __future__ import annotations
 
@@ -53,6 +57,8 @@ INPUTS: dict[str, Callable[[str], str]] = {
     "DEFENDER_ARTIFACT_DOMAIN": artifact_domain,
     "DEFENDER_INGRESS_API_UPSTREAM": _upstream,
     "DEFENDER_INGRESS_FRONTEND_DIR": _directory,
+    "DEFENDER_FORGE_DOMAIN": artifact_domain,
+    "DEFENDER_INGRESS_FORGE_UPSTREAM": _upstream,
 }
 
 

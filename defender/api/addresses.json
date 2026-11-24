@@ -4,4 +4,5 @@
             {"name": "home", "template": "/home", "returnable": true},
             {"name": "investigation", "template": "/t/{uuid}/investigations/{uuid}", "returnable": true},
             {"name": "alerts", "template": "/t/{uuid}/alerts", "returnable": true},
+            {"name": "repo", "template": "/t/{uuid}/repo", "returnable": true},
             {"name": "sign-in-failed", "template": "/sign-in-failed", "returnable": false}]}

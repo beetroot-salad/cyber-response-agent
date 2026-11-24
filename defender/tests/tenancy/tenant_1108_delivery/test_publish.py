@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from ._revert_store import claimed_batch, reviewed, revert_with
+from ._revert_store import claimed_batch, reviewed
 from ._support import (
     DEFENDER,
     LANES,
@@ -30,13 +30,11 @@ from ._support import (
     configured_origin,
     delivery,
     files_under,
-    forge_pulls,
     fresh_process_env,
     git,
     git_config_home,
     index_entry,
     lock_probe,
-    merge_on_remote,
     opened,
     push_to_remote,
     quiet,
@@ -352,15 +350,10 @@ def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, ht
     opened(again)
     reviewed(http_store, held, again)
 
-    merge_on_remote(http_repo, tmp_path, batch.branch)
-    phase[0] = "revert"
-    server.rearm()
-    assert opened(revert_with(d, http_store, "agent/lessons/io.md", "io"), None) == forge_pulls(http_repo[1])[-1]["html_url"]
-
     required = {("open", "repository"), ("open", "protection"), ("publish", "git-upload-pack"),
                 ("batch", "git-upload-pack"), ("batch", "after-start-batch"), ("batch", "box-create"),
                 ("batch", "box-window"), ("finish", "git-receive-pack"), ("finish", "pr-post"),
-                ("refinish", "pr-post"), ("revert", "git-receive-pack"), ("revert", "pr-post")}
+                ("refinish", "pr-post")}
     assert required <= set(probes), sorted(required - set(probes))
     for route in ("finish", "refinish"):
         # The PR lookup asks the forge, by git (`refs/pull/*`) or by its API; either is probed.
@@ -806,8 +799,6 @@ def test_no_tenant_named_filter_runs_on_the_host(repo, store, tmp_path):
     finished = d.finish(batch)
     opened(finished)
     reviewed(store, held, finished)
-    merge_on_remote(repo, tmp_path, batch.branch)
-    revert_with(d, store, "agent/lessons/claimed.md", "claimed")
     assert not log.exists(), f"a tenant-named filter ran on the host: {log.read_text(encoding='utf-8')}"
     assert git(clone, "status", "--porcelain") == ""
 

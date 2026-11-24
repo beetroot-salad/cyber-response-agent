@@ -18,6 +18,7 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from defender import identity as _identity
+from defender._url import browser_origin, split_http_url
 from defender._vocab import Disposition, NoOutcome
 from defender import system_records as _records
 from defender import tenancy as _tenancy
@@ -75,6 +76,7 @@ from .models import (
     SystemCheck,
     SystemPut,
     TenantItem,
+    Repository,
     TenantRef,
 )
 from . import addresses
@@ -544,6 +546,30 @@ async def get_alert(deps: Deps, caller: WorkReader, alert_id: AlertId) -> Alert:
     return alert
 
 
+repository = _router(prefix="/repository", tags=["repository"], responses=_EVERY_ROUTE)
+
+
+def _browser_page(recorded: str | None, app_origin: str) -> str | None:
+    """`recorded` when a browser may be sent there: the one rule for an absolute http(s) URL (a host, no credentials,
+    query, fragment or whitespace), on another origin than the app's (so never one of the app's own addresses, `/api`
+    among them). Otherwise None. `app_origin` is canonical (`check_origin`), so origins compare as strings."""
+    if recorded is None:
+        return None
+    try:
+        parts = split_http_url(recorded)
+    except ValueError:
+        return None
+    return None if browser_origin(parts) == app_origin else recorded
+
+
+@repository.get("")
+async def read_repository(deps: Deps, caller: WorkReader) -> Repository:
+    """Where a browser opens the tenant's knowledge repository: the page the lifecycle recorded on the tenant. The app's
+    `/t/<tenant>/repo` address reads it and sends the person there."""
+    record = await deps.tenants.tenant(caller.tenant_id)
+    return Repository(repo_url=_browser_page(None if record is None else record.repo_url, deps.frontend_origin))
+
+
 investigations = _router(prefix="/investigations", tags=["investigations"], responses=_EVERY_ROUTE)
 
 
@@ -847,15 +873,17 @@ async def _read_readiness(deps: ApiDeps, tenant_id: TenantId, readiness_id: Host
 
 
 async def _read_adoption(deps: ApiDeps, tenant_id: TenantId, adoption_id: HostRequestId) -> Adoption:
-    """The adoption served. The pull request's address is built here from the tenant's recorded forge wiring and the
-    number, never taken from the job record (A3); a tenant with no wiring gives none (R13-2)."""
+    """The adoption served. The pull request's address is built here, never taken from the job record (A3): the tenant's
+    repository page as the lifecycle recorded it (the page the Knowledge repo link opens, under the forge's public URL),
+    plus `/pulls/<n>` (#1592). A tenant with no page a browser may open (none recorded, as with no wiring, R13-2) gives
+    none."""
     saved = await deps.host_requests.get_adoption(tenant_id, adoption_id)
     if saved is None:
         raise _not_found("adoption", adoption_id)
     number = None if saved.result is None else saved.result.pr_number
-    wiring = None if number is None else await deps.tenants.forge_wiring(tenant_id)
-    url = None if wiring is None else f"{wiring.origin.removesuffix('.git')}/pulls/{number}"
-    return Adoption(**dict(saved), pr_url=url)
+    record = None if number is None else await deps.tenants.tenant(tenant_id)
+    page = None if record is None else _browser_page(record.repo_url, deps.frontend_origin)
+    return Adoption(**dict(saved), pr_url=None if page is None else f"{page.rstrip('/')}/pulls/{number}")
 
 
 async def _readiness_started(
@@ -1382,7 +1410,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.add_middleware(_FrontendOriginOnly, origin=deps.frontend_origin)
     in_tenant = _router(prefix="/tenants/{tenant_id}", responses=responses(404))
     for router in (alerts, investigations, learning_jobs, learning_work, lessons, adapters, systems, case_record,
-                   alert_mapping, readiness, adoptions, people, programs):
+                   alert_mapping, readiness, adoptions, people, programs, repository):
         in_tenant.include_router(router)
     for router in (auth, in_tenant, admin):
         app.include_router(router, prefix=API_PREFIX)

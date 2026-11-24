@@ -6,7 +6,6 @@ readers below read what the code under test wrote.
 """
 from __future__ import annotations
 
-import asyncio
 import datetime as dt
 import importlib
 import re
@@ -14,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._locations_1210 import location_path
 
 # ---------------------------------------------------------------- forced names (see the report)
@@ -178,8 +178,26 @@ class Decider:
 #: A lookup a run made: what a drafted entry copies (P3).
 LOOKUP = {"actor": "svc-backup", "host": "db-07.prod", "pattern": "pg_dump --all as root"}
 LOOKUP_2 = {"actor": "svc-backup", "host": "db-07.prod", "pattern": "read /etc/pgpass"}
-#: Two eligible people (the service's record, D13); `mallory` is on no record (the forge's own rule names her: a decoy).
-OWNER, NAMED, OUTSIDER = "ann", "bea", "mallory"
+#: Two people wanted in the tenant (#1592 OD-6: a comment counts by its author's login `p-<product user id>`); the
+#: outsider is a well-formed `p-` login of a user wanted nowhere.
+_OWNER_ID, _NAMED_ID, _OUTSIDER_ID = (fixture_uuid(f"user:1414-{n}") for n in ("ann", "bea", "mallory"))
+OWNER, NAMED, OUTSIDER = f"p-{_OWNER_ID}", f"p-{_NAMED_ID}", f"p-{_OUTSIDER_ID}"
+
+
+class People:
+    """The `people=` seam (#1592 OD-6): a synchronous `wanted_users(tenant_id)` returning the ids wanted in the tenant,
+    as the identity wrapper does. Records each read; `fail` makes the next reads raise."""
+
+    def __init__(self, *users: str) -> None:
+        self.users = set(users)
+        self.reads: list[str] = []
+        self.error: BaseException | None = None
+
+    def wanted_users(self, tenant_id: Any) -> set[str]:
+        self.reads.append(str(tenant_id))
+        if self.error is not None:
+            raise self.error
+        return set(self.users)
 
 
 @dataclass
@@ -194,13 +212,12 @@ class Feedback:
     runs_made: int = 0
     #: case id -> the run ids its requests carried, in order (what the host may write on an issue's head).
     run_ids: dict = field(default_factory=dict)
+    #: The membership read every tick makes unless a case hands its own `people=`.
+    people: People = field(default_factory=People)
 
-    def eligible(self, *logins: str, age: dt.timedelta = dt.timedelta(0)) -> None:
-        """What the lifecycle service wrote to the tenant's row (D13): `logins` read `age` ago.
-        """
-        repo = self.t.repository
-        asyncio.run(repo.record_merge_eligibility(
-            self.t.tenant_id, logins=frozenset(logins), read_at=dt.datetime.now(dt.UTC) - age))
+    def wanted(self, *logins: str) -> None:
+        """The people the tick's membership read answers with: the `p-<id>` logins' ids (#1592 OD-6)."""
+        self.people.users = {login.removeprefix("p-") for login in logins}
 
     def at(self, seconds: float) -> str:
         """Forgejo's timestamp `seconds` from now (negative: the past), whole seconds."""
@@ -252,6 +269,7 @@ class Feedback:
         return self.t.tenant_id
 
     def tick(self, decide: Any, **seams: Any) -> int:
+        seams.setdefault("people", self.people)
         return feedback_drain(self.t, self.paths, decide=decide, **seams)
 
     def issues(self, case_id: str) -> list[dict]:
@@ -294,19 +312,6 @@ def today() -> dt.date:
 # ---------------------------------------------------------------- r5 shared names (orchestrator-owned)
 # Fixed by the orchestrator before the thorough pass so the four slices agree. A slice that needs a
 # change asks the orchestrator; it does not edit this block.
-
-#: D13: the tenant row's eligibility record, written by the lifecycle service on every pass and read
-#: by the feedback tick. FC names:
-#:   `await TenantRepository.record_merge_eligibility(tenant_id, *, logins: frozenset[str], read_at: datetime)`
-#:   `await TenantRepository.merge_eligibility(tenant_id) -> MergeEligibility | None`
-#:   `TenantDirectory.merge_eligibility(tenant_id) -> MergeEligibility | None`
-#: with `MergeEligibility(logins: frozenset[str], read_at: datetime)` exported from `defender.tenancy`.
-#: Bot logins are the tenant's generations' `bot_login` (already on the row).
-ELIGIBILITY_RECORD = "merge_eligibility"
-
-#: D13: the tick's staleness bound. FC: `feedback_drain(..., eligibility_max_age=timedelta)`; default
-#: from env `LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE` (seconds), default 60 (human ruling 2026-11-09).
-ELIGIBILITY_MAX_AGE_ENV = "LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE"
 
 #: D11 (A4): the lessons author's feedback channel is the store's `feedback_instruction` work items: key = the Forgejo
 #: comment id as a decimal string; payload = {"comment_id", "issue", "author", "case_id", "instruction"}; `source_run` =

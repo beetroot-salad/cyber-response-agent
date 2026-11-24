@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess
 import re
+from fnmatch import fnmatchcase
 
 import pytest
 import httpx
@@ -18,7 +19,7 @@ pytest.importorskip('httpx')
 
 from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.support.api._identity1306 import NEW, AuditLog, user_id  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._fakes import ORG, FakeForge  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, FakeForge, org_of, repo_of  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import (  # noqa: E402
     REPOS,
     as_bot,
@@ -34,6 +35,7 @@ from defender.tests.tenancy.lifecycle_1214._support import (  # noqa: E402
     REPO_ROOT,
     LifecycleWorld,
     is_uuid4,
+    lifecycle_config,
     tenant_ids,
 )
 from defender.tenancy import template_dir  # noqa: E402
@@ -77,7 +79,7 @@ def test_the_job_leaves_an_active_tenant_with_repo_bot_credential_folder_and_no_
     item = world.item(tenant)
     assert {k: item[k] for k in ("state", "pending_action", "step", "step_actor", "failure")} == {
         "state": "active", "pending_action": None, "step": None, "step_actor": None, "failure": None}
-    full = f"{ORG}/{tenant}"
+    full = repo_of(tenant)
     gen = world.live(tenant)
     assert world.forge.repos[full]["private"] is True
     assert world.forge.collaborators(full) == {gen.bot_login: "write"}
@@ -99,10 +101,24 @@ def test_the_job_leaves_an_active_tenant_with_repo_bot_credential_folder_and_no_
     assert not list(world.data_root.rglob("publish-status.json"))
 
 
+def test_the_repo_step_makes_a_private_organisation_then_the_repository_knowledge_in_it(world):
+    """Create POSTs private organisation `t-<T>`, then repository `knowledge` in it; nothing is made under `tenants`
+    (#1592 OD-5, S3-21)."""
+    tenant = world.active_tenant()
+    org = org_of(tenant)
+    order = [(c.method, c.path, (c.body or {}).get("username") or (c.body or {}).get("name")) for c in world.forge.calls
+             if c.method == "POST" and c.path in ("/api/v1/orgs", f"/api/v1/orgs/{org}/repos")]
+    assert order == [("POST", "/api/v1/orgs", org), ("POST", f"/api/v1/orgs/{org}/repos", "knowledge")]
+    assert world.forge.org_visibility == {org: "private"}
+    assert list(world.forge.repos) == [repo_of(tenant)]
+    assert world.forge.repos[repo_of(tenant)]["private"] is True
+    assert world.call(world.tenants.forge_wiring, tenant).repo == repo_of(tenant)
+
+
 def test_the_repo_is_made_from_the_template_and_the_tenant_id_file(world):
     """`main` holds the template's files plus `agent/.tenant-id` carrying the tenant id (O1, Flow 1.7)."""
     tenant = world.active_tenant()
-    bare = world.forge.bare(f"{ORG}/{tenant}")
+    bare = world.forge.bare(repo_of(tenant))
 
     def git(*args: str) -> bytes:
         return subprocess.run(["git", *args], cwd=bare, capture_output=True, check=True).stdout  # noqa: S603, S607
@@ -126,7 +142,7 @@ def test_the_bot_is_created_able_to_sign_in_through_its_integration_and_cannot_p
     assert gen.bot_login not in world.forge.prohibit_login
     own_calls = list(world.forge.integration_calls)
     [jwt, *_] = reversed(jwts(world, gen))
-    repo = f"repos/{ORG}/{tenant}"
+    repo = f"repos/{repo_of(tenant)}"
     assert as_bot(world, jwt, repo).status_code == 200
     branch = as_bot(world, jwt, f"{repo}/branches/main")
     assert (branch.status_code, branch.json()["protected"], branch.json()["user_can_push"]) == (200, True, False)
@@ -142,7 +158,7 @@ def test_the_install_check_reads_branch_main_after_protection_and_no_push_to_mai
     paths = [(c.method, c.path) for c in world.forge.calls]
     protect = max(i for i, c in enumerate(paths) if c[1].endswith("/branch_protections"))
     checks = [i for i, c in enumerate(world.forge.calls)
-              if c.path == f"/api/v1/repos/{ORG}/{tenant}/branches/main" and c.headers.get("authorization", "").startswith("Bearer ")]
+              if c.path == f"/api/v1/repos/{repo_of(tenant)}/branches/main" and c.headers.get("authorization", "").startswith("Bearer ")]
     assert checks and checks[-1] > protect, "no branches/main check after protection"
     assert any(b == gen.bot_login and p.endswith("/branches/main") and s == 200
                for b, _m, p, s in world.forge.integration_calls)
@@ -294,7 +310,7 @@ def test_a_second_tenant_is_created_beside_the_first(world):
     assert len(set(bots.values())) == 3
     for t in tenants:
         assert world.item(t)["state"] == "active"
-        assert world.forge.collaborators(f"{ORG}/{t}") == {bots[t]: "write"}
+        assert world.forge.collaborators(repo_of(t)) == {bots[t]: "write"}
         assert (world.data_root / t).is_dir()
 
 
@@ -317,7 +333,7 @@ def test_a_non_active_tenant_takes_no_invitation_and_an_active_one_does(world):
 
 
 def _post(path):
-    return lambda r: r.method == "POST" and r.url.path == path
+    return lambda r: r.method == "POST" and fnmatchcase(r.url.path, path)
 
 
 def _get_prefix(prefix):
@@ -326,7 +342,7 @@ def _get_prefix(prefix):
 
 #: name -> (actor, client, step the failure names, which request is answered with the echo)
 CASES = {
-    "admin token": ("service", "forge", "repo", _post("/api/v1/orgs/tenants/repos")),
+    "admin token": ("service", "forge", "repo", _post(REPOS)),
     "bot password": ("service", "forge", "bot", _post("/api/v1/admin/users")),
     "management login": ("service", "openbao", "provider",
                          lambda r: r.method == "POST" and re.fullmatch(r"/v1/auth/approle/role/[^/]+", r.url.path)),
@@ -389,3 +405,16 @@ def test_a_failure_text_carries_no_minted_token_a_git_server_repeats(world):
     failure = world.item(tenant)["failure"]
     assert failure is not None
     _assert_clean(failure, git.tokens, "template")
+
+
+# --- Home redesign: the repository page a browser opens -----------------------------------------------------------
+
+def test_create_records_the_repository_page_on_the_public_forge_address(world):
+    """`repo_url` is `<forge_public_url>/<repo>` (the forge as a browser reaches it, required since the #1592 finalize),
+    a trailing slash dropped, while the clone's origin stays on `forge_url`."""
+    public = lifecycle_config(world.tmp_path, world.data_root, forge_public_url="https://forge.example/")
+    world.service_actor = world.new_service(world.tenants, identity=world.service, config=public)
+    second = world.active_tenant()
+    wiring = world.call(world.tenants.forge_wiring, second)
+    assert world.record(second).repo_url == f"https://forge.example/{wiring.repo}"
+    assert wiring.origin == f"{FORGE_URL}/{wiring.repo}.git"

@@ -41,6 +41,13 @@ def is_hostname(value: str) -> bool:
     return all(_LABEL.fullmatch(label) for label in labels) and labels[-1][:1].isalpha()
 
 
+def browser_origin(parts: urllib.parse.SplitResult) -> str:
+    """The origin of `parts` (an http(s) URL `split_http_url` accepted), as a browser writes it: scheme, lower-case
+    host, and the port only when it is not the scheme's default."""
+    port = "" if parts.port in (None, _DEFAULT_PORTS[parts.scheme]) else f":{parts.port}"
+    return f"{parts.scheme}://{parts.hostname}{port}"
+
+
 def check_origin(value: str) -> str:
     """Scheme, host and optional port: no path (a trailing slash too), query or fragment. Written exactly as a
     browser sends it in `Origin` (lower case, no default port, an ASCII host), since requests are compared to it
@@ -55,10 +62,7 @@ def check_origin(value: str) -> str:
     if not is_hostname(host):
         raise ValueError("must name a domain: lowercase labels of letters, digits and inner hyphens, the last starting "
                          "with a letter (no IP address)")
-    netloc = host
-    if parts.port is not None and parts.port != _DEFAULT_PORTS[parts.scheme]:
-        netloc += f":{parts.port}"
-    canonical = f"{parts.scheme}://{netloc}"
+    canonical = browser_origin(parts)
     if value != canonical:
         raise ValueError(f"must be written as a browser sends it: {canonical}")
     return value
