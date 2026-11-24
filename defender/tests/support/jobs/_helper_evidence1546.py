@@ -192,9 +192,9 @@ def plant(scene: HelperScene, kind: str, *, inputs: list[dict[str, str]] | None 
                      "evidence_state = 'complete', scrub = 'clean' WHERE id = %s", (source,))
         job = owner or str(uuid.uuid4())
         execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, "
-                     "trigger, status, created_at, started_at, lease_expires_at, sibling_cost_usd, publish_state) "
+                     "trigger, status, created_at, started_at, lease_expires_at, sibling_cost_usd, sibling_cost_is_lower_limit, publish_state) "
                      "VALUES (%s, %s, %s, %s, 'k-learn', 1, 'auto', 'running', now(), now(), "
-                     "now() + interval '1 hour', 0, 'none')", (job, t, alert, source))
+                     "now() + interval '1 hour', 0, false, 'none')", (job, t, alert, source))
         execute(dsn, "INSERT INTO jobs.claims (token, tenant_id, kind, learning_job_id, launch, inputs) "
                      "VALUES (%s, %s, 'learning', %s, %s::jsonb, %s::jsonb)",
                 (claim, t, job, json.dumps({} if pin is NO_PIN else {"knowledge_commit": scene.t.commit if pin is None else pin}),

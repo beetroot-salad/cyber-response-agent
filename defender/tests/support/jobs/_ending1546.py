@@ -169,8 +169,8 @@ async def plant_complete_source(dsn: str, store: Any, tenant: str, *, ticket: st
 async def queue_learning_job(dsn: str, tenant: str, alert_id: str, source: str, *, key: str = "k-learn") -> str:
     job = str(uuid.uuid4())
     execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, "
-                 "trigger, status, created_at, sibling_cost_usd, publish_state) VALUES (%s, %s, %s, %s, %s, 1, "
-                 "'auto', 'queued', now(), 0, 'none')", (job, tenant, alert_id, source, key))
+                 "trigger, status, created_at, sibling_cost_usd, sibling_cost_is_lower_limit, publish_state) VALUES (%s, %s, %s, %s, %s, 1, "
+                 "'auto', 'queued', now(), 0, false, 'none')", (job, tenant, alert_id, source, key))
     return job
 
 

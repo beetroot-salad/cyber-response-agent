@@ -105,8 +105,8 @@ def make_owner(dsn: str, garage: Garage, tenant: str, ticket: str, *, kind: str 
         execute(dsn, "UPDATE jobs.investigations SET stage = 'completed', disposition = 'benign', finished_at = now(), "
                      "evidence_state = 'none', scrub = 'clean' WHERE id = %s", (inv_id,))
         execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, "
-                     "trigger, status, created_at, sibling_cost_usd, publish_state, evidence_state, finished_at) "
-                     "VALUES (%s, %s, %s, %s, %s, 1, 'explicit', 'completed', now(), 0, 'none', %s, "
+                     "trigger, status, created_at, sibling_cost_usd, sibling_cost_is_lower_limit, publish_state, evidence_state, finished_at) "
+                     "VALUES (%s, %s, %s, %s, %s, 1, 'explicit', 'completed', now(), 0, false, 'none', %s, "
                      "now() - %s * interval '1 day')", (owner_id, tenant, alert, inv_id, f"k-{ticket}-l", state, ended_days_ago))
         insert_claim(dsn, token=claim, tenant=tenant, kind="learning", ref=owner_id)
     else:

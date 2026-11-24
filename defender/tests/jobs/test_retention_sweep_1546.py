@@ -157,8 +157,8 @@ def _learning_job(dsn: str, investigation_id: str, status: str, ticket: str) -> 
     done = "now()" if status in ("completed", "failed", "skipped") else "NULL"
     evidence = "'none'" if status in ("completed", "failed", "skipped") else "NULL"
     execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, "  # noqa: S608
-                 "status, created_at, sibling_cost_usd, publish_state, started_at, finished_at, lease_expires_at, evidence_state) "
-                 f"SELECT %s, tenant_id, alert_id, id, %s, 1, 'explicit', %s, now(), 0, 'none', NULL, {done}, {lease}, {evidence} "
+                 "status, created_at, sibling_cost_usd, sibling_cost_is_lower_limit, publish_state, started_at, finished_at, lease_expires_at, evidence_state) "
+                 f"SELECT %s, tenant_id, alert_id, id, %s, 1, 'explicit', %s, now(), 0, false, 'none', NULL, {done}, {lease}, {evidence} "
                  "FROM jobs.investigations WHERE id = %s",
             (str(uuid.uuid4()), f"k-{ticket}", status, investigation_id))
 
@@ -207,8 +207,8 @@ async def test_a_learning_insert_in_flight_when_the_sweep_arrives_keeps_its_sour
         async with _holding(dsn, "SHARE", source["owner"]) as conn:
             await conn.execute(
                 "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, "
-                "status, created_at, sibling_cost_usd, publish_state) SELECT %s, tenant_id, alert_id, id, 'k-race', 1, "
-                "'explicit', 'queued', now(), 0, 'none' FROM jobs.investigations WHERE id = %s",
+                "status, created_at, sibling_cost_usd, sibling_cost_is_lower_limit, publish_state) SELECT %s, tenant_id, alert_id, id, 'k-race', 1, "
+                "'explicit', 'queued', now(), 0, false, 'none' FROM jobs.investigations WHERE id = %s",
                 (str(uuid.uuid4()), source["owner"]))
             sweeping = asyncio.ensure_future(_run(store, garage))
             await pglocks.until_blocked(dsn, 1)
