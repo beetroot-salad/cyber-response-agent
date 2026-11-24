@@ -52,7 +52,13 @@ def test_b1_the_run_box_uses_only_the_model_view(tmp_path):
     assert create.target_of(run_dir) is not None, (
         f"the run folder {run_dir} is not a bind source at all: {create.mounts}")
     assert create.target_of(run_dir) == V.MODEL_RUN, create.mounts
-    assert not create.readonly_of(run_dir), "the run folder must stay the box's one writable tree"
+    # #1546 D4 (design "The box": "Run lane binds the run folder read-only"; census "Box run mount rw → read-only; probe
+    # at /tmp"): the run folder is bound read-only, and the box's one writable place is its own `/tmp` tmpfs.
+    assert create.readonly_of(run_dir), "the run folder is bound read-only (#1546 D4)"
+    assert all(ro for _s, _t, ro in create.mounts), f"a bind is writable, past the box's /tmp: {create.mounts}"
+    tmpfs = [create.argv[i + 1] for i, tok in enumerate(create.argv[:-1]) if tok == "--tmpfs"]
+    assert [t.partition(":")[0] for t in tmpfs] == ["/tmp"], f"the box's writable place is not its /tmp alone: {tmpfs}"
+    assert "rw" in tmpfs[0].partition(":")[2].split(","), f"the box's /tmp is not writable: {tmpfs}"
     assert create.target_of(input_dir) == f"{V.MODEL_RUN}/{RUN_LAYOUT.alert_input_dir}", (
         create.mounts)
     assert create.readonly_of(input_dir)

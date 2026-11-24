@@ -53,9 +53,11 @@ _no_database_address_in_the_workers_environment = _shared._no_database_address_i
 
 BUNDLE = b"bundle bytes (opaque to the worker)"
 PAGE = b"<html>the renderer's page</html>"
-#: What a job leaves in the tenant's runs folder that contradicts its staged rows (the worker must read none of it).
+#: What a job leaves in the tenant's runs folder that contradicts its staged rows (the worker must read none of it). The
+#: retired report file (#1534) is one of them: a job could still leave one, and its line carries the census's exemption
+#: (`verdict_1534/test_report_file_gone.py`, "every other deliberate decoy ... carries EXEMPT").
 DECOYS = {"{id}.job-end.json": job_end(report_committed=False),
-          "{id}/report.md": MALICIOUS_REPORT.read_text(encoding="utf-8"),
+          "{id}/report.md": MALICIOUS_REPORT.read_text(encoding="utf-8"),  # lint-report-file: ok — a decoy the worker must not read
           "{id}.knowledge-source.json": '{"kind": "stale", "commit": "' + "d" * 40 + '", "stale_kind": "operator", "reason": "x"}'}
 
 

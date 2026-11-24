@@ -237,7 +237,13 @@ async def test_a_record_reads_exact_only_after_an_exit_with_a_final_cost(migrate
         plant_uploads(dsn, token, BOTH)
         await end_row(store, dsn, kind="investigation", tenant=T1, owner=inv, token=token, by="exited")
         exact = await store.get_investigation(T1, inv)
-        job, jtoken, _ = await _running_job(store, dsn)
+        # The complete exit above queued its auto learning job (r9 Flows, investigation end 5: "A learning job is queued
+        # from an investigation only when its state is `complete`"): the oldest queued job, so the one a claim takes.
+        claimed = await store.claim_learning_job()
+        assert claimed is not None, "premise: the auto job is queued"
+        assert str(claimed.record.investigation_id) == str(inv), "premise: the auto job is the one claimed"
+        job = str(claimed.record.learning_job_id)
+        jtoken = token_of(dsn, "learning", job)
         plant_facts(dsn, jtoken, {"started": STARTED, "arms": roster(), "outcome": learning_outcome(cost=4.0)})
         plant_uploads(dsn, jtoken, {BUNDLE: up(), EPISODE_PAGE: up()})
         await end_row(store, dsn, kind="learning", tenant=T1, owner=job, token=jtoken, by="exited")

@@ -3618,6 +3618,10 @@ async def test_1083_the_store_lists_one_tenants_rows_as_its_own_record_types_wit
 
     async with job_store(dsn) as store:
         ids = await _three_each(store)
+        # #1546 (code-record owner decision D10, repair round 1): a learning job's `created_at` is the database's clock, not
+        # the store's injected one, so the auto jobs no longer tie by construction; they are made to tie here, as every
+        # other row does under the fixed clock, so the order below is decided by the id tie-break alone.
+        execute(dsn, "UPDATE jobs.learning_jobs SET created_at = %s WHERE tenant_id = %s", (NOW, T1))
         window: dict[str, Any] = {"fired_after": None, "fired_before": None, "outcome": None, "after": None, "limit": 50}
         alerts = await store.list_alerts(T1, **window)
         investigations = await store.list_investigations(T1, alert_id=None, after=None, limit=50)

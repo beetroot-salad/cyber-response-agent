@@ -99,12 +99,15 @@ def _investigation_reads(plan: dict[str, Any], *, above: tuple[str, ...] = ()) -
 
 
 def _plant_investigations(dsn: str, tenant: str, *, every: int) -> None:
-    """Two investigations (an earlier failed one, a later completed one) for every `every`th alert of the tenant, by SQL."""
+    """Two investigations (an earlier failed one, a later completed one) for every `every`th alert of the tenant, by SQL.
+    #1546 (design "Evidence state": "A terminal row with no outcome reads `none`, `scrub = not_run`"): both ended rows carry
+    them, as `_identity1306.World.plant_investigation` plants one."""
     execute(dsn, f"""
         INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, disposition, cost_usd,
-                                         cost_is_lower_limit, update_ticket)
+                                         cost_is_lower_limit, update_ticket, evidence_state, scrub)
         SELECT gen_random_uuid(), a.tenant_id, a.id, 'k' || n, n, CASE n WHEN 1 THEN 'failed' ELSE 'completed' END,
-               a.fired_at + n * interval '1 second', CASE n WHEN 1 THEN NULL ELSE 'benign' END, 0, false, false
+               a.fired_at + n * interval '1 second', CASE n WHEN 1 THEN NULL ELSE 'benign' END, 0, false, false,
+               'none', 'not_run'
         FROM (SELECT *, row_number() OVER (ORDER BY fired_at) AS r FROM jobs.alerts WHERE tenant_id = %s) a,
              generate_series(1, 2) n
         WHERE a.r %% {every} = 0""",  # noqa: S608 — constant

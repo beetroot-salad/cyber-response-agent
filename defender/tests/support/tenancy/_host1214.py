@@ -99,14 +99,15 @@ HELPER_HOST_HALVES: dict[str, frozenset[str]] = {
 #: acceptance and does not pass the reach on to its callers.
 IN_BOX_ENTRIES = frozenset({
     # #1546 A-O2/A-O9 (census row "`accept_tenant` in every container entry -> `JobTenant`"): the investigation job's entry
-    # (`run.py --job`: `_container_tenant`), learning's `run.py --episode` sibling (`_sibling_set_up`) and the learning job's
-    # in-container branch (`learning/branch/cli.py: _admitted`) build a `JobTenant` from the launch facts and no longer take
-    # the folder rules; they are out of this set, so a unit that goes back to `accept_tenant` is an offender.
+    # (`run.py --job`: `_container_tenant`), learning's `run.py --episode` sibling (`_sibling_set_up`), the learning job's
+    # in-container branch (`learning/branch/cli.py: _admitted`) and, r10 (b) ("Who builds a `JobTenant`: every container
+    # entry, uniformly ... Adoption reads no knowledge, but it builds a `JobTenant` like the others"), the adoption job's
+    # entry (`adoption/__main__.py: _deliver`) build a `JobTenant` from the launch facts and no longer take the folder
+    # rules; they are out of this set, so a unit that goes back to `accept_tenant` is an offender.
     ("learning/branch/post_step.py", "main"),    # the post-step (keeps the tenant-folder mount, #1487)
     # #1546 D7: the drain (a host request kind) runs the post-step's tenant-folder mount, so its entry takes the tenant by
     # the folder rules as the post-step's does.
     ("learning/branch/drain_job.py", "main"),
-    ("adoption/__main__.py", "_deliver"),        # #1471: the adoption job's entry (`-m defender.adoption`)
 })
 
 

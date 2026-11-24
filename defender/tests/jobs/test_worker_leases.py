@@ -1564,8 +1564,8 @@ async def test_1170_the_worker_starts_a_learning_job_and_its_post_step_as_their_
     The flag order is a pick (the exact argv); the `spawn` door records it and starts the scripted child instead."""
     from defender.tests.jobs.test_1344_learning_jobs import (
         END,
+        ended_child,
         investigation_of,
-        job_child,
         job_row,
         learning_end,
         learning_worker,
@@ -1574,7 +1574,9 @@ async def test_1170_the_worker_starts_a_learning_job_and_its_post_step_as_their_
     )
     from defender.worker import LearningLaunch, PostStepLaunch, job_entry_argv, post_step_argv
 
-    jobs = job_child(world, files={END: learning_end("completed")})
+    # #1546 (A-O2, PR2): the child's end is the `outcome` the helper stages under the job's claim, which the worker reads; a
+    # `learning-end.json` beside the runs is a file it never reads (`ended_child` stages END as the helper stand-in does).
+    jobs = ended_child(world, files={END: learning_end("completed")})
     post = post_child(world)
     real_spawn = asyncio.create_subprocess_exec
     asked: list[list[str]] = []

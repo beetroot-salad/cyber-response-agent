@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from defender._vocab import DISPOSITION_VALUES
+from defender.tests.support.jobs._ending1546 import complete_through_the_store
 from defender.tests.support.jobs._jobs1342 import NOW, T1, T2, lapse_lease, register_tenant
 from defender.tests.support.jobs._outcome1581 import (
     expected_copy,
@@ -426,10 +427,13 @@ async def test_ap1_after_any_sequence_of_store_operations_each_tenants_listing_i
 # --- a finish and a delete of one alert, each commit order, on two real transactions (AP1) -------------------------------
 
 async def _alert_with_source_a_and_b_running(store: Any, clock: Clock) -> tuple[str, str, str]:
-    """An alert whose completed investigation A (k1, benign) is the stored source and whose rerun B (k2) is running."""
+    """An alert whose completed investigation A (k1, benign) is the stored source and whose rerun B (k2) is running. #1546
+    (r9: a learning job is queued from an investigation only when its state is `complete`): A's completed end is decided and
+    applied (`complete_through_the_store`), so its follow-ons, the auto learning job the delete below parks on among them, are
+    the store's own; a stated `finish` queues none."""
     alert_id = await _alert(store, "R-1")
     a = await _running(store, alert_id, "k1")
-    await store.finish(T1, a, stage="completed", disposition="benign", cost_usd=0.0)
+    await complete_through_the_store(store, T1, a, disposition="benign")
     clock.at += HOUR
     return alert_id, a, await _running(store, alert_id, "k2")
 
@@ -444,7 +448,7 @@ async def test_ap1_a_delete_that_commits_first_and_missed_the_finish_leaves_the_
         async with holding(dsn, "SELECT id FROM jobs.learning_jobs WHERE investigation_id = %s FOR UPDATE", (a,)):
             delete = asyncio.ensure_future(store.delete_investigation(T1, a, actor="u-1"))  # parks on A's job, alert lock taken
             await until_blocked(dsn, 1)
-            finish = asyncio.ensure_future(store.finish(T1, b, stage="completed", disposition="malicious", cost_usd=0.0))
+            finish = asyncio.ensure_future(complete_through_the_store(store, T1, b, disposition="malicious"))
             await _settled(dsn, delete, finish)
         await asyncio.wait_for(asyncio.gather(delete, finish), timeout=15)
         [(created_b,)] = execute(dsn, "SELECT created_at FROM jobs.investigations WHERE id = %s", (b,))
@@ -462,9 +466,9 @@ async def test_ap1_a_finish_that_commits_first_leaves_a_delete_of_the_old_source
     try:
         alert_id, a, b = await _alert_with_source_a_and_b_running(store, clock)
         other = await _alert(store, "R-2")
-        await store.finish(T1, await _running(store, other, "k1"), stage="completed", disposition="benign", cost_usd=0.0)  # arms the check clock row
+        await complete_through_the_store(store, T1, await _running(store, other, "k1"), disposition="benign")  # arms the check clock row (#1546: a complete end's follow-on)
         async with holding(dsn, "SELECT tenant_id FROM jobs.learning_checks WHERE tenant_id = %s FOR UPDATE", (T1,)):
-            finish = asyncio.ensure_future(store.finish(T1, b, stage="completed", disposition="malicious", cost_usd=0.0))
+            finish = asyncio.ensure_future(complete_through_the_store(store, T1, b, disposition="malicious"))
             await until_blocked(dsn, 1)  # parked on the check clock, after its other writes
             delete = asyncio.ensure_future(store.delete_investigation(T1, a, actor="u-1"))
             await _settled(dsn, finish, delete)

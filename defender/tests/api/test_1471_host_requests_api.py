@@ -20,7 +20,6 @@ from defender.tests.support.jobs._host_requests1471 import (
     READY_RESULT,
     SHIPS_BASE_FILES,
     adopted,
-    host_child,
     host_row,
     host_rows,
     host_worker,
@@ -428,6 +427,10 @@ async def test_the_result_a_worker_stores_is_what_the_poll_serves_for_both_kinds
     assert (await scripted.put_system(TICKET, 0)).status_code == 201
     r = (await start_readiness(scripted)).json()["readiness_id"]
     a = (await start_adoption(scripted, system)).json()["adoption_id"]
+    # #1546 (A-O2, PR2): what the helper leaves is staged rows under the request's claim, which the worker reads; record
+    # files beside the runs are never read (`StagedHostChild` stages these records as the helper stand-in does).
+    from defender.tests.jobs.test_1471_host_request_worker import host_child
+
     child = host_child(world, files={READINESS: refused("systems", "no usable system"), KNOWLEDGE: FRESH,
                                      ADOPTION: adopted("opened", 12)})
     async with job_store(scripted.dsn) as store:

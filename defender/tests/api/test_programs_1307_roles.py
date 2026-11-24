@@ -88,6 +88,9 @@ PERMISSION_OF = {
     ("POST", f"{TENANT}/systems/{{}}/check"): "config.write",
     ("GET", f"{TENANT}/alert-mapping"): "config.read",
     ("PUT", f"{TENANT}/alert-mapping"): "config.write",
+    # #1546 r9 "Retention setting": "written through the API (`config.write`, audited)"; read as the other config records are
+    ("GET", f"{TENANT}/evidence-retention"): "config.read",
+    ("PUT", f"{TENANT}/evidence-retention"): "config.write",
     ("GET", f"{TENANT}/repository"): "work.read",  # home redesign: where the knowledge repo opens
     ("GET", f"{TENANT}/learning/items"): "work.read",  # #1485 O3
     ("GET", f"{TENANT}/learning/parked-batches"): "work.read",  # #1485 O3
@@ -129,6 +132,8 @@ BODIES: dict[tuple[str, str], dict[str, object]] = {
     ("PUT", f"{TENANT}/systems/{{}}/credentials"): {"for_version": 1, "credentials": {"api_key": "v" * 40}},
     ("PUT", f"{TENANT}/case-record"): {"replaces": 0, "system_id": "ticket"},
     ("PUT", f"{TENANT}/alert-mapping"): dict(PLANTED_ALERT_MAPPING),
+    # #1546: both values together, each 30-730 days (`test_1546_retention_route`'s accepted write)
+    ("PUT", f"{TENANT}/evidence-retention"): {"investigation_days": 91, "learning_days": 366},
     ("POST", f"{TENANT}/invitations"): {"email": NEW},
     ("POST", f"{TENANT}/programs"): {"display_name": "child"},
     ("POST", f"{TENANT}/programs/{{}}/credentials"): {"kind": "key", "name": "k"},

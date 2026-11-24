@@ -13,24 +13,39 @@ import pytest
 
 from defender.tests.e2e.test_job_box_boundary_e2e import requires_box
 from defender.tests.support.jobs import _real_containers1487 as R
+from defender.tests.support.jobs._ending1546 import complete_through_the_store
 from defender.tests.support.jobs._job_helper import ensure_job_network, helper_scene
 from defender.tests.support.jobs._jobs1342 import StandInContainers, an_alert, job_store, make_worker
 from defender.tests.support.learning.core._store1278 import AUTHOR_LANE, batches, call
 from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: F401 — fixture
 
-pytestmark = [pytest.mark.e2e, pytest.mark.box, pytest.mark.postgres, requires_box]
+pytestmark = [pytest.mark.e2e, pytest.mark.box, pytest.mark.postgres, pytest.mark.garage, pytest.mark.openbao, requires_box]
 
 R.compiled()
 
 
 @pytest.fixture
-def flow(tmp_path, monkeypatch, migrated_database):  # noqa: F811
-    """The worker's run over one completed investigation: what the host reads after it, what each container saw."""
+def flow(tmp_path, monkeypatch, migrated_database, garage, openbao, evidence_keys):  # noqa: F811
+    """The worker's run over one completed investigation: what the host reads after it, what each container saw. #1546
+    (design Flows: "an unconfigured store or evidence-key login is refused at helper setup, terminally"): the learning
+    job's helper is configured with the real store (`DEFENDER_EVIDENCE_*`, in the worker's environment, which its helpers
+    inherit) and the tenant's key login (`_real_container_child1487.py`'s `evidence_keys` seam, from
+    `DEFENDER_TEST_EVIDENCE_LOGIN`), as `test_1546_evidence_replay`'s worker configures its helpers."""
+    import json
+
     import anyio
 
     from defender.box import run_docker
+    from defender.tests.support.evidence._facts1546 import evidence_env
+    from defender.tests.support.jobs._helper_evidence1546 import evidence_login
 
     with helper_scene(tmp_path, monkeypatch, migrated_database) as scene:
+        evidence_keys.make(scene.tenant)
+        garage.tenant_prefix(scene.tenant)
+        for name, value in evidence_env(garage).items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setenv("DEFENDER_TEST_EVIDENCE_LOGIN",
+                           json.dumps({"addr": openbao.addr, **evidence_login(openbao, scene.tenant)}))
         monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")
         monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")  # the helper binds the thresholds: one finding is due
         monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
@@ -44,8 +59,9 @@ def flow(tmp_path, monkeypatch, migrated_database):  # noqa: F811
                 inv, _ = await store.create_investigation(scene.tenant, alert.alert_id, "k1", actor="u-1")
                 claim = await store.claim()
                 assert claim.record.investigation_id == inv.investigation_id, "premise: only this one was queued"
-                await store.finish(scene.tenant, inv.investigation_id, stage="completed", disposition="malicious",
-                                   cost_usd=0.0)
+                # #1546 (r9: a learning job is queued from an investigation only when its state is `complete`): the end is
+                # decided and applied under the claim just taken (`complete_through_the_store`); a stated `finish` queues none.
+                await complete_through_the_store(store, scene.tenant, inv.investigation_id, disposition="malicious")
                 ((job,),) = execute(scene.dsn, "SELECT id FROM jobs.learning_jobs WHERE investigation_id = %s",
                                     (inv.investigation_id,))
                 job = str(job)

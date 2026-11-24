@@ -139,12 +139,17 @@ async def _alerts(dsn: str, tenant: str, *fired: dt.datetime, raw: bytes = ALERT
 
 
 async def _completed(dsn: str, tenant: str, alert_id: str) -> str:
-    """An investigation of `alert_id` brought to `completed` by the store's own claim and finish."""
+    """An investigation of `alert_id` brought to `completed` by the store's own claim and end. #1546 (design Flows
+    "Investigation end" 5: "A learning job is queued from an investigation only when its state is `complete`"): the end is
+    the worker's normal one, `decide` + `apply` over the claim's facts and an uploaded bundle, so the evidence is `complete`
+    and the investigation can be learned from, as `finish` once made it."""
+    from defender.tests.support.jobs._ending1546 import complete_through_the_store
+
     async with job_store(dsn) as store:
         inv, _ = await store.create_investigation(tenant, alert_id, "seed", actor="seed")
         claim = await store.claim()
         assert claim.record.investigation_id == inv.investigation_id, "premise: nothing else was queued"
-        await store.finish(tenant, inv.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
+        assert await complete_through_the_store(store, tenant, str(inv.investigation_id), disposition="malicious")
     return str(inv.investigation_id)
 
 

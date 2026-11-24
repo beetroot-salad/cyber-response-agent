@@ -16,6 +16,11 @@ from defender.tests.support.shared._openbao1163 import (  # noqa: F401
     pytest_configure_node,
 )
 
+# #1546: the real evidence store's fixtures (markers `garage`, `openbao`), resolvable from every test, so the helper rigs'
+# default store (`_helper_evidence1546.store_for`) is found by lookup, never by a module happening to import them.
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — fixtures
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
+
 
 #: What `-n auto` means off CI. xdist's one worker per core suits a runner that owns its box,
 #: not a developer machine several sessions share (each worker grows to hundreds of MB). A set
@@ -128,6 +133,21 @@ def deployment_unset(monkeypatch) -> None:
     not depend on where it runs. A dev-copy test sets `dev` with its own `monkeypatch.setenv`,
     which wins (same function-scoped instance, later)."""
     monkeypatch.delenv(DEPLOYMENT_ENV, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _running_request(request) -> Iterator[None]:
+    """The running test's request, for support code that resolves the evidence-store fixtures below on its behalf
+    (`support/shared/_running_request`: `_job_helper.drive_helper` and `ProcessHelper` configure every helper with the real
+    store, #1546 design Flows), whatever module the test is in and whether or not it imported them (R17)."""
+    from defender.tests.support.shared import _running_request as running
+
+    running.REQUEST[:] = [request]
+    try:
+        yield
+    finally:
+        running.REQUEST.clear()
+
 
 
 @pytest.fixture(autouse=True)

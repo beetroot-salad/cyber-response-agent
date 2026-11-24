@@ -571,14 +571,17 @@ def test_alert_list_o5_a_later_page_answered_200_with_a_body_that_is_not_a_page_
 
 async def _plant_completed_without_outcome(dsn: str, tickets: list[str]) -> None:
     """For each ticket (its alert already stored), an investigation that is `completed` with its disposition set, written by
-    SQL so the store's own finish does not set the alert's stored outcome: the alert's outcome stays null."""
+    SQL so the store's own finish does not set the alert's stored outcome: the alert's outcome stays null. #1546 (design
+    "Evidence state": "A terminal row with no outcome reads `none`, `scrub = not_run`"): the ended row carries both, as
+    `_identity1306.World.plant_investigation` plants one."""
     from defender.tests.support.shared._postgres1339 import execute
 
     for ticket in tickets:
         execute(dsn, """
             INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, finished_at,
-                                             disposition, cost_usd, cost_is_lower_limit, update_ticket)
-            SELECT gen_random_uuid(), tenant_id, id, 'planted', 1, 'completed', now(), now(), 'benign', 0, false, false
+                                             disposition, cost_usd, cost_is_lower_limit, update_ticket, evidence_state, scrub)
+            SELECT gen_random_uuid(), tenant_id, id, 'planted', 1, 'completed', now(), now(), 'benign', 0, false, false,
+                   'none', 'not_run'
             FROM jobs.alerts WHERE vendor_ticket_id = %s""", (ticket,))
         [(outcome,)] = execute(dsn, "SELECT outcome FROM jobs.alerts WHERE vendor_ticket_id = %s", (ticket,))
         assert outcome is None, "premise: the planted alert has no stored outcome"

@@ -833,11 +833,19 @@ def claim_for(scene: HelperScene, argv: list[str]) -> None:
     from defender.tests.support.jobs import _helper_evidence1546 as H
     from defender.tests.support.shared._postgres1339 import execute
 
-    if execute(scene.dsn, "SELECT 1 FROM jobs.claims WHERE token = %s", (scene.claim,)):
-        return
     kind = (flag_values(argv, "--kind") or [""])[0]
     job = (flag_values(argv, "--job") or [None])[0]
     source = (flag_values(argv, "--source") or [None])[0]
+    found = execute(scene.dsn, "SELECT kind, investigation_id, learning_job_id FROM jobs.claims WHERE token = %s",
+                    (scene.claim,))
+    if found:
+        if scene.claim not in _AUTO_CLAIMED or _claims_this_job(found[0], kind, job):
+            return  # a claim the test planted itself (it keeps it, a wrong one included), or this job's own
+        # The scene's claim is the one this function planted for an earlier job of the same scene: the worker claims
+        # each job on its own ("a row is claimed at most once; retries are new rows"), so this job gets a claim of its
+        # own, in the scene and in the environment the helper reads it from (`CLAIM_ENV`), as `next_claim` gives one.
+        _fresh_claim(scene)
+    _AUTO_CLAIMED.add(scene.claim)
     if kind == "investigation" and job is not None:
         record = _worker_file(scene.runs / f"{job}.launch.json")
         try:
@@ -853,6 +861,30 @@ def claim_for(scene: HelperScene, argv: list[str]) -> None:
         H.plant(scene, kind, owner=job, source=source if source and _is_uuid(source) else None)
     elif kind == "post-step":
         H.plant(scene, kind)
+
+
+#: The claim tokens `claim_for` planted itself (never a claim a test planted through `_helper_evidence1546.plant`).
+_AUTO_CLAIMED: set[str] = set()
+
+
+def _claims_this_job(row: tuple, kind: str, job: str | None) -> bool:
+    """Whether a claim row `(kind, investigation_id, learning_job_id)` is the one this job's argv names (a post-step's
+    hold claim is the tenant's, reused by every post-step helper of the scene)."""
+    claim_kind, investigation, learning = row
+    if claim_kind != kind:
+        return False
+    if kind == "investigation":
+        return str(investigation) == str(job)
+    if kind == "learning":
+        return str(learning) == str(job)
+    return True
+
+
+def _fresh_claim(scene: HelperScene) -> None:
+    from defender.box import CLAIM_ENV
+
+    scene.claim = uuid.uuid4().hex
+    os.environ[CLAIM_ENV] = scene.claim  # the test's monkeypatch restores the value it set at teardown
 
 
 def _is_uuid(text: str) -> bool:
@@ -876,6 +908,25 @@ class HelperRan:
         return len(self.fetch.calls) if self.fetch is not None else 0
 
 
+def _default_store(scene: HelperScene) -> Any:
+    """The real evidence store for `scene`'s tenant (`_helper_evidence1546.store_for`) over the running test's fixtures
+    (the root conftest holds the request and the `garage`, `openbao` and `evidence_keys` fixtures). A test with no request
+    held, or whose store fixtures cannot be found, fails here, loudly: a helper left unconfigured would be refused at
+    setup and the case would test that refusal instead of its own subject."""
+    from defender.tests.support.jobs._helper_evidence1546 import store_for
+    from defender.tests.support.shared import _running_request as running
+
+    request = running.current() or (_REQUEST[0] if _REQUEST else None)
+    if request is None:
+        pytest.fail("a helper rig ran with no test request held (the root conftest's `_running_request`): its evidence "
+                    "store cannot be configured; pass `default_store=False` for a case that leaves it unconfigured")
+    try:
+        return store_for(request, scene)
+    except pytest.FixtureLookupError as missing:
+        pytest.fail(f"the helper's evidence store cannot be configured: {missing.msg or missing!r}; pass "
+                    "`default_store=False` for a case that leaves it unconfigured")
+
+
 def drive_helper(scene: HelperScene, argv: list[str], *, docker: ContainerStandIn, signer: Any, default_store: bool = True,
                  **seams: Any) -> HelperRan:
     """`job_host.main` on this thread (it takes SIGTERM here); its knowledge comes through the one fetch seam (#1618 FORCED, see
@@ -887,16 +938,11 @@ def drive_helper(scene: HelperScene, argv: list[str], *, docker: ContainerStandI
 
     ran = HelperRan()
     claim_for(scene, argv)
-    if default_store and "evidence" not in seams and _REQUEST:
+    if default_store and "evidence" not in seams:
         # #1546 (design Flows: "an unconfigured store or evidence-key login is refused at helper setup, terminally"): every
-        # helper run is configured with the real store and the tenant's evidence key (markers `garage`, `openbao`).
-        from defender.tests.support.jobs._helper_evidence1546 import store_for
-
-        try:
-            store = store_for(_REQUEST[0], scene)
-        except pytest.FixtureLookupError:  # a module without the store fixtures (`garage`, `openbao`): as the case wrote it
-            store = None
-        for name, seam in (store.seams.items() if store is not None else ()):
+        # helper run is configured with the real store and the tenant's evidence key (markers `garage`, `openbao`), found
+        # through the root conftest's fixtures for any module; `default_store=False` is the only way out.
+        for name, seam in _default_store(scene).seams.items():
             seams.setdefault(name, seam)
     seams.setdefault("fetch", K.fetch_seam(scene.t))
     ran.fetch = seams["fetch"]
@@ -1054,15 +1100,11 @@ _PARENT = textwrap.dedent("""\
 
 def _process_store(scene: HelperScene) -> dict[str, Any] | None:
     """#1546 (design Flows: an unconfigured store or key login is refused at helper setup): the store and key-login values a
-    helper process is configured with, as `drive_helper` configures one in-process (None in a module without the fixtures)."""
-    if not _REQUEST:
-        return None
-    from defender.tests.support.jobs._helper_evidence1546 import evidence_login, store_for
+    helper process is configured with, as `drive_helper` configures one in-process (`_default_store`: loud when the store
+    cannot be configured)."""
+    from defender.tests.support.jobs._helper_evidence1546 import evidence_login
 
-    try:
-        store = store_for(_REQUEST[0], scene)
-    except pytest.FixtureLookupError:
-        return None
+    store = _default_store(scene)
     g = store.garage
     return {"blob": {"endpoint": g.endpoint, "bucket": g.bucket, "access_key": g.access_key, "secret_key": g.secret_key,
                      "region": g.region},
@@ -1087,14 +1129,18 @@ class ProcessHelper:
         shim = bin_dir / "docker"
         shim.write_text(_SHIM.replace("PYTHON", sys.executable).replace("STATE", str(self.state)), encoding="utf-8")
         shim.chmod(0o755)
+        # #1546: the worker's claim transaction precedes the helper for every kind it launches (design: Claim, "inserted
+        # in the claim's own transaction for every launched child"), as `drive_helper` plants it; before the helper's
+        # environment is taken, since a further job of the scene is given a claim of its own there (`claim_for`).
+        claim_for(scene, argv)
         env = child_env({**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"})
-        investigation = (flag_values(argv, "--kind") or [""])[0] == "investigation"
-        if investigation:  # #1546: the worker's claim transaction precedes the helper (design: Claim)
-            claim_for(scene, argv)
+        # a kind that pushes evidence (`job_host._evidence.EVIDENCE_KINDS`) is configured with the real store, as
+        # `drive_helper` configures it in-process; an unconfigured one is refused at setup (design Flows)
+        pushes = (flag_values(argv, "--kind") or [""])[0] in ("investigation", "learning")
         cfg = json.dumps({"argv": argv, "commit": scene.t.commit, "tenant": scene.tenant, "origin": scene.t.origin,
                           "data_root": str(scene.root), "requests": str(self.state / "requests.log"),
                           "exit": str(self.state / "helper-exit"), "forge_token": forge_token,
-                          "store": _process_store(scene) if investigation else None})
+                          "store": _process_store(scene) if pushes else None})
         command = [sys.executable, "-c", _PARENT, cfg, _DRIVER] if worker else [sys.executable, "-c", _DRIVER, cfg]
         self.proc = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE)

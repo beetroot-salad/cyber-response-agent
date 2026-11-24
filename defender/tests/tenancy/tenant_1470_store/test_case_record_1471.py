@@ -84,9 +84,11 @@ def test_1471_w7_the_upgrade_drops_the_template_column_and_keeps_every_case_vers
         execute(dsn, "INSERT INTO tenancy.case_versions (tenant_id, version, system_id, comment_body, deleted, author, "
                      "written_at) VALUES (%s, 1, 'ticket', 'Hello {disposition}', false, 'x', now()), "
                      "(%s, 2, 'ticket', 'Hello', true, 'x', now())", (tenant, tenant))
-        from defender.migrations import upgrade
+        # #1546 r9 B: `*_retention_required` refuses an active tenant with no retention row; the tenant planted here
+        # gets the one creating a tenant writes since #1546, before that revision (what the upgrade under test meets).
+        from defender.tests.migrations._marked1470 import upgrade_with_retention
 
-        upgrade(dsn)
+        upgrade_with_retention(dsn)
         columns = {c for (c,) in execute(dsn, "SELECT column_name FROM information_schema.columns "
                                          "WHERE table_schema = 'tenancy' AND table_name = 'case_versions'")}
         assert "comment_body" not in columns, columns

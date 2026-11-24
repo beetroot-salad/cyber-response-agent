@@ -118,12 +118,12 @@ def in_container(entry):
     return entry if os.environ.get(job_socket.SOCKET_ENV) else helper_in_front
 
 
-def _socket(tenant: str, *, signing: dict | None = None, **launch):
+def _socket(tenant: str, *, signing: dict | None = None, answers: dict | None = None, **launch):
     """The learning kinds' job socket stand-in (module doc); with `signing` (`passes`' keywords), it signs the job's
-    passes as the helper does."""
+    passes as the helper does; `answers` adds to (or replaces) its own."""
     from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, copy_make, passes
 
-    answers = {"copy.make": copy_make(tenant, remote)}
+    answers = {"copy.make": copy_make(tenant, remote), **(answers or {})}
     if signing is not None:
         launch["proxy_url"], answers["pass"] = passes(tenant, **signing)
     return SocketStandIn(tenant, launch=launch, answers=answers)
@@ -193,14 +193,33 @@ def family() -> int:
     (marks / "runs").write_text(str(runs), encoding="utf-8")
     if os.environ.get("FLOW_DAMAGE") == "store-version":
         _store_from_a_newer_format(runs, source)
+    # #1546: the helper's side of a learning claim (`test_1344_job_lane._1546_helper_side`): the claim's pin (the source
+    # row's knowledge commit, r10 (a): here the source's stamped one, as the store writes it) and inputs folder in the
+    # launch facts, `copy.make` of the pin only, the source served as the accepted bundle `evidence.pull` returns (the
+    # job's one input, r9; its host folder then gone, A-O1), the pushes taken, and the `outcome` record kept: the job's
+    # end, written to `<marks>/outcomes.jsonl` (one JSON line per outcome sent) whatever way the entry ends.
+    from defender.tests.learning.branch.test_1344_job_lane import _1546_helper_side, _stamped_commit
+    from defender.tests.support.jobs._socket_standin1170 import copy_make
+
+    src = runs / source
+    assert src.is_dir(), f"premise: the source run is on this host, to be served as its bundle: {src}"
+    pin = _stamped_commit(src)
+    assert pin is not None, f"premise: the source's stamp names a knowledge commit (the claim's pin): {src}"
+    launch = {"kind": "learning", "job": argv[argv.index("--job") + 1],
+              "records": handed_records(seams["directory"], tenant)}
+    answers = {"copy.make": copy_make(tenant, remote, pin=pin)}
+    sent = _1546_helper_side(marks / "helper-side", tenant, src, launch, answers, pin=pin)
     try:
         # Pre-flight signs its pass up front (#1363): the helper signs it, over the tenant's one proxied system.
         signing = dict(reads=("elastic",), directory=seams["directory"], proxy_url=PROXY_URL, signer=seams["signer"])
-        with _socket(tenant, kind="learning", job=argv[argv.index("--job") + 1], signing=signing,
-                     records=handed_records(seams["directory"], tenant)) as helper:
+        with _socket(tenant, signing=signing, answers=answers, **launch) as helper:
             job_entry.main(_in_container_argv(), environ=helper.environ(), **seams)
     except SystemExit as stop:
         return stop.code if isinstance(stop.code, int) else 1
+    finally:
+        with (marks / "outcomes.jsonl").open("w", encoding="utf-8") as out:
+            for record in sent["outcome"]:
+                print(json.dumps(record), file=out)
     return 0
 
 
