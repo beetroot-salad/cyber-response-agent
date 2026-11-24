@@ -1,16 +1,17 @@
 """#1546 (design r8) the helper's folders and binds: a container's binds are exactly its kind's allowlist, the job's root,
 inputs and spool exist during the job and are gone after (another live claim's are left alone), box binds are judged under
-the root and inputs, every file the helper places has link count 1, adoption's clone is the helper's own, and
-`export.materialise` refuses any commit but the pin. (A-O1, A-O9; adoption, export pin, arm settings check.)"""
+the root and inputs, every file the helper places has link count 1, adoption's root holds no repository, and
+`copy.make(commit=)` answers the claim's pin only. (A-O1, A-O9; adoption, the pin, arm settings check; design r10 (a), (b),
+(f): knowledge comes from the forge, no clone and no `exports/`.)"""
 from __future__ import annotations
 
 import contextlib
 import os
 import stat
-import subprocess
 import sys
 import uuid
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -107,55 +108,68 @@ def _walk(folder: Path) -> list[tuple[Path, os.stat_result]]:
     return [(p, p.lstat()) for p in sorted(folder.rglob("*"))]
 
 
+def _stage_roster(scene, c, planted) -> tuple[Path, dict[str, str], dict[str, str]]:
+    """What a learning job's pre-flight leaves, made from inside the container: the source's run folder and the episode in
+    the job's own root, and its roster sent as the `arms` record. Returns (episode, world id by label, run id by label)."""
+    from defender.tests.support.evidence._facts1546 import sent_arms
+    from defender.tests.support.jobs._helper_evidence1546 import send
+    from defender.tests.support.learning.branch import _triplet_947 as T
+
+    owner, source = str(planted.owner), str(planted.source)  # repair-brief D1: plain `str` (YAML cannot dump an id subclass)
+    folder = J.host_path(c.mounts, str(job_root(scene) / scene.tenant))  # the job's own root, where its episode is made
+    (folder / "runs" / source).mkdir(parents=True, exist_ok=True)
+    doc = T.family_doc(episode_id=owner, source_run_dir=str(folder / "runs" / source), source_run_id=source)
+    ep = T.episode(scene.root, doc=doc, root=folder / "episodes", episode_id=owner)
+    worlds = {w: T.world_id(ep, w) for w in T.WORLDS}
+    runs = {w: str(uuid.uuid4()) for w in T.WORLDS}
+    send(c, "arms", record=sent_arms(*[(runs[w], worlds[w]) for w in T.WORLDS]))
+    return ep, worlds, runs
+
+
 @pytest.mark.parametrize("kind", ["investigation", "learning", "readiness", "adoption"])
 def test_every_file_the_helper_places_in_a_root_or_inputs_has_link_count_one_and_no_link(request, scene, checkout, kind):
-    """At launch, every regular file under the job's root and inputs has `st_nlink == 1` and nothing is a symlink or special
-    file; the folders are not empty (the control). (A-O9, review r7: shared inodes)"""
+    """Every regular file under the job's root and inputs has `st_nlink == 1` and nothing is a symlink or special file, and
+    no `exports/` exists: at launch, and for a learning job also after the helper fetched a sibling's run copy into the
+    inputs (`copy.make(world=)`, the fetch stand-in's copy of the claim's pin). Adoption's root and inputs hold no file at all
+    (the helper places none: no clone). The control: for every other kind something was placed. (A-O9, review r7: shared
+    inodes; r10 (b) "Helper-placed files": every placed file is created fresh; no helper path links a host file into a bind)"""
     planted = plant(scene, kind)
     seen: dict = {}
 
+    def entries() -> list[tuple[Path, os.stat_result]]:
+        return [(p, st) for folder in (job_root(scene), job_inputs(scene)) for p, st in _walk(folder)]
+
     def job(c) -> int:
-        seen["entries"] = [(p, st) for folder in (job_root(scene), job_inputs(scene)) for p, st in _walk(folder)]
+        seen["entries"] = entries()
+        if kind == "learning":
+            _ep, worlds, runs = _stage_roster(scene, c, planted)
+            seen["copy"] = c.request("copy.make", world=worlds["b"])
+            seen["entries"] += entries()
         return 0
 
     drive(scene, planted, job, **_seams(request, kind))
-    assert seen["entries"], "control: nothing was placed in root or inputs"
+    files = [p for p, st in seen["entries"] if stat.S_ISREG(st.st_mode)]
+    if kind == "adoption":
+        assert files == [], f"the helper placed files in adoption's root or inputs: {files}"
+    else:
+        assert files, "control: nothing was placed in root or inputs"
+    if kind == "learning":
+        copy = Path(seen["copy"]["path"])
+        assert copy.is_relative_to(job_inputs(scene)), f"the sibling's copy is not in the inputs: {copy}"
+        assert [p for p in files if p.is_relative_to(copy)], "control: the sibling's copy placed no file"
+    assert not [p for p, _st in seen["entries"] if p.name == "exports"], "an exports folder exists"
     for p, st in seen["entries"]:
         assert not stat.S_ISLNK(st.st_mode), f"{p} is a link"
+        assert stat.S_ISREG(st.st_mode) or stat.S_ISDIR(st.st_mode), f"{p} is a special file"
         if stat.S_ISREG(st.st_mode):
             assert st.st_nlink == 1, f"{p} has link count {st.st_nlink}"
 
 
-def test_adoptions_clone_is_the_helpers_own_with_no_shared_objects_and_the_forge_as_origin(scene, checkout):
-    """The root holds exactly one git clone made by the helper from the tenant's knowledge clone: its object files have link
-    count 1 (`--no-hardlinks`; a plain local clone shares them), it names no alternates, its `origin` is the forge the tenant's
-    clone names, and it holds the tenant's `main`. (A-O9, adoption, G11)"""
-    planted = plant(scene, "adoption")
-    seen: dict = {}
-
-    def job(c) -> int:
-        repos = sorted(p.parent for p in job_root(scene).rglob(".git") if p.is_dir())
-        seen["repos"] = repos
-        if len(repos) == 1:
-            repo = repos[0]
-            seen["objects"] = [p.lstat().st_nlink for p in (repo / ".git" / "objects").rglob("*") if p.is_file()]
-            seen["alternates"] = (repo / ".git" / "objects" / "info" / "alternates").exists()
-            seen["origin"] = _git(repo, "remote", "get-url", "origin")
-            seen["main"] = _git(repo, "rev-parse", "refs/remotes/origin/main")
-        return 0
-
-    drive(scene, planted, job)
-    assert len(seen["repos"]) == 1, seen["repos"]
-    assert seen["objects"], "control: the clone has objects"
-    assert set(seen["objects"]) == {1}, f"shared object files: {seen['objects']}"
-    assert not seen["alternates"]
-    assert seen["origin"] == _git(scene.t.clone, "remote", "get-url", "origin")
-    assert seen["main"] == scene.t.commit
-
-
-def _git(repo: Path, *args: str) -> str:
-    done = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True)  # noqa: S603, S607
-    return done.stdout.strip()
+# r10 (f) bucket 1 retired `test_adoptions_clone_is_the_helpers_own_with_no_shared_objects_and_the_forge_as_origin`: there is
+# no adoption clone (#1618 flow 7: the container opens a private repository in its tmpfs against the forge with
+# `forge.token`). What survives (adoption's root holds no repository; the delivery opens against the forge origin) is
+# `test_1546_helper_mounts.py::test_an_adoption_container_gets_allowlisted_binds_and_no_repository_in_its_root` and the
+# adoption row above.
 
 
 # --- helper bind judging covers the root and the inputs -----------------------------------------------------------------------------
@@ -210,64 +224,111 @@ def test_a_box_bind_under_the_root_or_the_inputs_replaced_by_a_link_is_refused_c
     assert (scene.root / J.OTHER_TENANT / "canary").read_text(encoding="utf-8") == J.CANARY
 
 
-# --- the pinned export ----------------------------------------------------------------------------------------------------------------
+# --- the pin: `copy.make(commit=)` answers the claim's pin only ---------------------------------------------------------------
 
-def test_export_materialise_answers_the_pin_and_refuses_every_other_commit_the_clone_holds(scene, evidence_store):
-    """A learning job's `export.materialise(commit=<the launch facts' pin>)` is answered; a later commit the clone holds
-    (merged and fetched), and one it lacks, are refused and no export is made for them. (design: `export.materialise` refuses
-    any commit but the pin; the stamp branch is gone)"""
-    from defender.tests.tenancy.tenant_1108_p4._support import git
+def _recording_fetch(scene) -> tuple[Any, list[tuple[str, str | None]]]:
+    """The real fetch seam over the scene's remote, each ask's `(dest, commit)` also recorded."""
+    from defender.tests.tenancy.knowledge_1618 import _support as K
+
+    seam, asked = K.fetch_seam(scene.t), []
+
+    def fetch(tenant_id, dest, **kw) -> str:
+        asked.append((str(dest), kw.get("commit")))
+        return seam(tenant_id, dest, **kw)
+
+    fetch.calls = seam.calls  # type: ignore[attr-defined]
+    return fetch, asked
+
+
+def _shared(scene) -> Path:
+    return scene.root / H.SCRATCH / scene.claim / "shared"
+
+
+def test_copy_make_with_a_commit_answers_the_claims_pin_and_refuses_every_other_commit_with_no_fetch_and_no_folder(
+        scene, evidence_store):
+    """A learning job's `copy.make(commit=<the claim's knowledge_commit>)` is answered a copy of the pin; `copy.make()` is
+    answered `main`'s tip; `copy.make(commit=)` of any other commit, a full commit the forge serves (`main`'s later tip
+    among them) or one it does not, is refused `not-for-kind` naming that commit, before any fetch, and no folder is made.
+    (r10 (a), owner decision H1: least privilege; the helper compares against the claim's pin only and never asks the forge
+    what `main` is to judge a `commit=`)"""
+    from defender.tests.tenancy.knowledge_1618 import _support as K
 
     t = scene.t
-    later = t.merge({"agent/lessons/merged-not-yet-published.md": "merged on origin, fetched, never published\n"})
-    git(t.clone, "fetch", str(t.remote), "+refs/heads/main:refs/remotes/origin/main")
-    planted = plant(scene, "learning")
-    seen: dict = {}
+    pin = t.commit
+    later = t.merge({"agent/lessons/merged-after-the-pin.md": "merged on main after the pinned commit\n"})
+    assert later != pin, "premise: main moved past the pin"
+    planted = plant(scene, "learning", pin=pin)
+    fetch, asked = _recording_fetch(scene)
+    seen: dict = {"refused": {}}
+
+    def listing() -> list[str]:
+        return sorted(p.name for p in _shared(scene).iterdir()) if _shared(scene).is_dir() else []
 
     def job(c) -> int:
-        seen["pin"] = c.request("export.materialise", commit=t.commit)
-        seen["later"] = c.refused("export.materialise", commit=later)
-        seen["absent"] = c.refused("export.materialise", commit="fedcba9876543210" * 2 + "fedcba98")
+        seen["pin"] = c.request("copy.make", commit=pin)
+        seen["main"] = c.request("copy.make")
+        before_asks, before_dirs = len(asked), listing()
+        for name, commit in (("later", later), ("absent", K.ABSENT_COMMIT)):
+            seen["refused"][name] = c.refused("copy.make", commit=commit)
+        seen["asks_after"], seen["dirs_after"] = asked[before_asks:], listing()
+        seen["dirs_before"] = before_dirs
         return 0
 
-    drive(scene, planted, job, **evidence_store.seams)
-    assert seen["pin"]["commit"] == t.commit
-    assert seen["later"].code
-    assert seen["absent"].code
-    assert not (scene.root / scene.tenant / "exports" / later).exists()
+    drive(scene, planted, job, fetch=fetch, **evidence_store.seams)
+    assert seen["pin"]["commit"] == pin, seen["pin"]
+    assert seen["main"]["commit"] == later, f"`copy.make()` did not answer main's tip: {seen['main']}"
+    for name, commit in (("later", later), ("absent", K.ABSENT_COMMIT)):
+        refusal = seen["refused"][name]
+        assert refusal.code == "not-for-kind", f"{name}: {refusal.code}"
+        assert commit in str(refusal), f"the refusal does not name the commit {commit}: {refusal}"
+    assert seen["asks_after"] == [], f"a refused `copy.make(commit=)` fetched: {seen['asks_after']}"
+    assert seen["dirs_after"] == seen["dirs_before"], "a refused `copy.make(commit=)` made a folder"
+    assert (pin in [c for _d, c in asked]), "control: the pin's copy was fetched by id"
+
+
+def _damaging_fetch(scene, nth: int) -> Any:
+    """The real fetch seam, which for the `nth` fetch into the claim's inputs `run-knowledge/` (the `nth` sibling's copy)
+    also writes a link into the copy's `settings/` once the child has filled it: damage only the copy check can see."""
+    fetch, _asked = _recording_fetch(scene)
+    count = {"n": 0}
+
+    def damaging(tenant_id, dest, **kw) -> str:
+        line = fetch(tenant_id, dest, **kw)
+        if Path(dest).is_relative_to(J.run_copies(scene)):
+            count["n"] += 1
+            if count["n"] == nth and (Path(dest) / "settings").is_dir():
+                (Path(dest) / "settings" / "linked.yaml").symlink_to("/etc/passwd")
+        return line
+
+    damaging.calls = fetch.calls  # type: ignore[attr-defined]
+    return damaging
 
 
 def test_an_arms_run_copy_goes_through_the_same_settings_check_as_the_parents(scene, evidence_store):
-    """The job stages its `arms` roster (the staged fact names each arm's run, no roster file exists); with the pinned export's
-    settings damaged (a link planted in them) after one arm's copy was made, the next arm's `copy.make` is refused and no copy
-    or arm folder is made for it; the first arm's copy (control) was answered under the staged roster's run id. (design: arm
-    run copies get the settings check, today skipped; `arms` fact, PR2)"""
-    from defender.tests.support.evidence._facts1546 import sent_arms
-    from defender.tests.support.jobs._helper_evidence1546 import send
-    from defender.tests.support.learning.branch import _triplet_947 as T
-
+    """The job stages its `arms` roster (the staged fact names each arm's run, no roster file exists); each sibling's copy is
+    a fetch of the claim's pin into the inputs. The first sibling's `copy.make` is answered under the staged roster's run id
+    (control: its copy in `.job-inputs/<claim>/run-knowledge/<run>/`, its `run_dir` the episode's `runs/<run>` the container
+    will make); when the fetch stand-in writes a link into the second sibling's `settings/`, that sibling's `copy.make` is
+    refused and it gets no copy and no run folder. (design r9:289-290 "arm run copies go through the same settings check as
+    the parent's", discharged by `resolve_knowledge`'s copy check, r10 (a) "Who validates"; `arms` fact, PR2; D-2: the helper
+    makes no `runs/<run>/`)"""
     planted = plant(scene, "learning")
-    runs = {w: str(uuid.uuid4()) for w in T.WORLDS}
     seen: dict = {}
 
     def job(c) -> int:
-        folder = J.host_path(c.mounts, str(job_root(scene) / scene.tenant))  # the job's own root, where its episode is made
-        (folder / "runs" / planted.source).mkdir(parents=True, exist_ok=True)
-        doc = T.family_doc(episode_id=planted.owner, source_run_dir=str(folder / "runs" / planted.source),
-                           source_run_id=planted.source)
-        ep = T.episode(scene.root, doc=doc, root=folder / "episodes", episode_id=planted.owner)
-        worlds = {w: T.world_id(ep, w) for w in T.WORLDS}
-        send(c, "arms", record=sent_arms(*[(runs[w], worlds[w]) for w in T.WORLDS]))
-        export = c.request("export.materialise", commit=scene.t.commit)
+        ep, worlds, runs = _stage_roster(scene, c, planted)
+        seen["runs"], seen["ep"] = runs, ep
         seen["first"] = c.request("copy.make", world=worlds["b"])
-        stray = next(p for p in (Path(export["path"]) / "settings").rglob("*") if p.is_file())
-        stray.unlink()
-        stray.symlink_to("/etc/passwd")
         seen["second"] = c.refused("copy.make", world=worlds["c"])
-        seen["folders"] = sorted(p.name for p in (ep / "runs").iterdir() if p.is_dir())
+        seen["copies"] = sorted(p.name for p in J.run_copies(scene).iterdir()) if J.run_copies(scene).is_dir() else []
+        seen["folders"] = sorted(p.name for p in (ep / "runs").iterdir()) if (ep / "runs").is_dir() else []
         return 0
 
-    drive(scene, planted, job, **evidence_store.seams)
+    drive(scene, planted, job, fetch=_damaging_fetch(scene, 2), **evidence_store.seams)
+    runs = seen["runs"]
     assert seen["first"]["run"] == runs["b"], "the arm's run is the staged roster's"
-    assert seen["second"].code
-    assert seen["folders"] == [runs["b"]]
+    assert Path(seen["first"]["path"]) == J.run_copies(scene) / runs["b"], seen["first"]
+    assert Path(seen["first"]["run_dir"]) == seen["ep"] / "runs" / runs["b"], seen["first"]
+    assert seen["second"].code, "a sibling whose copy carries a link in its settings was answered"
+    assert runs["c"] not in seen["copies"], f"the refused sibling got a copy: {seen['copies']}"
+    assert runs["c"] not in seen["folders"], f"the refused sibling got a run folder: {seen['folders']}"
