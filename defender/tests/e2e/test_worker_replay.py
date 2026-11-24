@@ -16,6 +16,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
@@ -81,8 +82,10 @@ class Lane:
         if not found:
             return None
         [(wrapped, digest)] = found
-        body = self.garage.get(f"t/{self.tenant}/investigation/{investigation}/{token}/bundle",
-                               sse_key=self.keys.unwrap(self.tenant, wrapped)).content
+        got = self.garage.get(f"t/{self.tenant}/investigation/{investigation}/{token}/bundle",
+                              sse_key=self.keys.unwrap(self.tenant, wrapped))
+        assert got.status_code == 200, f"the stored bundle could not be read back: {got.status_code} {got.text[:300]!r}"
+        body = got.content
         assert sha(body) == digest, "the stored bundle is not the bytes its row recorded"
         return body
 
@@ -112,6 +115,13 @@ def _relocate_pointers(runs: Path, tenant_root: Path) -> None:
     pattern = re.compile(r"[^\"]*/\.job-roots/[0-9a-f]+/[^/\"]+(?=/)")
     for pointer in runs.glob("*.session-pointer.json"):
         pointer.write_text(pattern.sub(lambda _m: str(tenant_root), pointer.read_text(encoding="utf-8")), encoding="utf-8")
+
+
+def fresh_tenant() -> str:
+    """A tenant id of this test alone. The store's objects live under `t/<tenant>/`, which the `garage` fixture empties at
+    every test's end (`Garage.tenant_prefix`); the published fixture's id is shared by every helper suite running beside this
+    one, whose teardown would empty this lane's prefix under it, so a lane publishes its tenant under its own id."""
+    return str(uuid.uuid4())
 
 
 def _lane(monkeypatch, dsn: str, tenant: str, openbao, garage, evidence_keys) -> Lane:  # noqa: F811 — the fixtures
@@ -187,7 +197,7 @@ async def test_o16_a_replay_through_the_worker_lane_completes_with_its_dispositi
         bom = b"\xef\xbb\xbf"
         for shape in (b'"' + bom, bom + b'"', bom + bom, b"m" + bom + b"n", b'"k' + bom + b'ey":'):
             assert shape in golden_bytes, ("premise", shape)
-    with B.run_tenant(tmp_path, root) as t:
+    with B.run_tenant(tmp_path, root, tenant_id=fresh_tenant()) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root, records=no_proxy_records())
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)  # R1: a set-up tenant has runs/
         lane = _lane(monkeypatch, migrated_database, t.tenant_id, openbao, garage, evidence_keys)
@@ -238,7 +248,7 @@ async def test_o8_a_raise_after_the_real_drivers_close_still_records_the_report_
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", migrated_database)  # the child reads tenant records here (r6 R6-2)
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
-    with B.run_tenant(tmp_path, root) as t:
+    with B.run_tenant(tmp_path, root, tenant_id=fresh_tenant()) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root, records=no_proxy_records())
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
         lane = _lane(monkeypatch, migrated_database, t.tenant_id, openbao, garage, evidence_keys)
@@ -275,7 +285,7 @@ async def test_1345_o4_a_queued_job_whose_tenant_has_no_mapping_ends_failed_setu
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     err_file = tmp_path / "child.stderr"
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
-    with B.run_tenant(tmp_path, root) as t:
+    with B.run_tenant(tmp_path, root, tenant_id=fresh_tenant()) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root, records=no_proxy_records())
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
         lane = _lane(monkeypatch, migrated_database, t.tenant_id, openbao, garage, evidence_keys)
@@ -319,7 +329,7 @@ async def test_1345_o2_a_mapping_replaced_after_launch_leaves_the_alert_and_the_
     # The title as launched: the mapped text, cut (#1345 O2).
     launched_with, later = document["rule"]["description"][:DISPLAY_CAPS["title"]], document["rule"]["id"]
     assert launched_with != later, "premise: the two titles differ"
-    with B.run_tenant(tmp_path, root) as t:
+    with B.run_tenant(tmp_path, root, tenant_id=fresh_tenant()) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root, records=no_proxy_records())
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
         lane = _lane(monkeypatch, migrated_database, t.tenant_id, openbao, garage, evidence_keys)
@@ -400,7 +410,7 @@ async def test_s1_s5_a_priced_job_costs_every_response_the_run_received(  # noqa
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
     # Every system declared, as published: the priced run gathers from elastic, and a system with no access
     # declaration is down by design (`no_proxy_records()` would leave nothing to gather). The helper signs with its seam.
-    with B.run_tenant(tmp_path, root) as t:
+    with B.run_tenant(tmp_path, root, tenant_id=fresh_tenant()) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
         lane = _lane(monkeypatch, migrated_database, t.tenant_id, openbao, garage, evidence_keys)
@@ -463,7 +473,7 @@ async def test_s2a_s5_r7_a_request_the_run_never_saw_the_end_of_marks_the_job_th
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
     # Every system declared, as published: the priced run gathers from elastic, and a system with no access
     # declaration is down by design (`no_proxy_records()` would leave nothing to gather). The helper signs with its seam.
-    with B.run_tenant(tmp_path, root) as t:
+    with B.run_tenant(tmp_path, root, tenant_id=fresh_tenant()) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
         lane = _lane(monkeypatch, migrated_database, t.tenant_id, openbao, garage, evidence_keys)
@@ -505,7 +515,7 @@ async def test_s3_a_ledger_write_that_fails_in_review_leaves_the_verdict_and_rep
     modes: dict[str, str] = {}
     # Every system declared, as published: the priced run gathers from elastic, and a system with no access
     # declaration is down by design (`no_proxy_records()` would leave nothing to gather). The helper signs with its seam.
-    with B.run_tenant(tmp_path, root) as t:
+    with B.run_tenant(tmp_path, root, tenant_id=fresh_tenant()) as t:
         register_tenant(migrated_database, t.tenant_id, data_root=root)
         (root / t.tenant_id / "runs").mkdir(exist_ok=True)
         lane = _lane(monkeypatch, migrated_database, t.tenant_id, openbao, garage, evidence_keys)

@@ -98,9 +98,12 @@ class Investigated:
         return self.docker.job_ran and self.end is None
 
 
-def investigate(scene: HelperScene, *, signer: Any = None, docker: ContainerStandIn | None = None,
-                **seams: Any) -> Investigated:
-    """The helper for a planted investigation of the scene's tenant. Green at the base: a premise, never the subject."""
+def plant_premise(scene: HelperScene) -> str:
+    """A premise investigation's row and its claim under `scene.claim`, as the worker's claim transaction leaves them; its id.
+    #1546 (design: Claim, "inserted in the claim's own transaction for every launched child"): a worker claims a job of an
+    active tenant before anything refuses it, so a case whose fault makes the tenant unclaimable (offboarding, creating)
+    plants this BEFORE the fault. Asserted present: a premise never runs unclaimed (`claim_for` plants nothing for a tenant the
+    store takes no job for, and the helper then fails for the missing claim, not for the fault)."""
     from defender.tests.support.shared._postgres1339 import execute
 
     inv = str(uuid.uuid4())
@@ -108,6 +111,17 @@ def investigate(scene: HelperScene, *, signer: Any = None, docker: ContainerStan
     for table in ("uploads", "staged_facts", "claims"):
         execute(scene.dsn, f"DELETE FROM jobs.{table} WHERE token = %s", (scene.claim,))  # noqa: S608
     scene.plant(inv)
+    J.claim_for(scene, scene.argv("investigation", inv))
+    assert execute(scene.dsn, "SELECT 1 FROM jobs.claims WHERE token = %s AND investigation_id = %s", (scene.claim, inv)), (
+        "premise: the investigation's claim was not planted (plant it while the tenant is still claimable)")
+    return inv
+
+
+def investigate(scene: HelperScene, *, signer: Any = None, docker: ContainerStandIn | None = None, inv: str | None = None,
+                **seams: Any) -> Investigated:
+    """The helper for a planted investigation of the scene's tenant (`inv`: one `plant_premise` planted already, else
+    planted now). Green at the base: a premise, never the subject."""
+    inv = inv if inv is not None else plant_premise(scene)
     docker = docker if docker is not None else ContainerStandIn(lambda c: 0)  # lint-default: ok — a test seam resolving its own default
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
@@ -267,7 +281,7 @@ def claim_check(scene: HelperScene, rid: str) -> None:
 
 class RestatingDirectory:
     """The real Postgres `TenantDirectory` (as a production host process builds it from `DEFENDER_DATABASE_DSN`), delegating
-    everything; once `admission()` has answered `active` for the scene's tenant it restates the tenant to `state`, so the
+    everything; once `admission()` has answered `active` for the scene's tenant it moves the tenant to `state`, so the
     next real read of the tenant's records refuses (an offboarding racing the check). Records what it was asked."""
 
     def __init__(self, scene: HelperScene, *, state: str = "offboarding") -> None:
@@ -280,13 +294,14 @@ class RestatingDirectory:
         self.records_asked: list[str] = []
 
     def admission(self, tenant_id: Any) -> Any:
-        from defender.tests.support.jobs._jobs1342 import restate_tenant
+        from defender.tests.support.jobs._jobs1342 import move_tenant
 
         answer = self._real.admission(tenant_id)
         if answer[0] == "active" and not self.restated:
             self.admitted_active = True
             self.restated = True
-            restate_tenant(self._scene.dsn, self._scene.tenant, state=self._state, data_root=self._scene.root)
+            # In place, as the lifecycle moves it (#1546: the claimed job's row and claim name the tenant, so it is not replaced).
+            move_tenant(self._scene.dsn, self._scene.tenant, state=self._state)
         return answer
 
     def current_records(self, tenant_id: Any) -> Any:
