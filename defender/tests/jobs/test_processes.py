@@ -28,6 +28,7 @@ from defender.tests.support.jobs._jobs1342 import (
     closing_plan,
     job_end,
     job_store,
+    launch_facts,
     planter,
     register_tenant,
     row,
@@ -96,7 +97,8 @@ async def test_o15_a_worker_in_another_process_runs_what_this_one_queued(migrate
         alert = await an_alert(store, T1)
         config = {"dsn": dsn, "data_root": str(root), "child": "scripted", "where": str(tmp_path / "child"),
                   "runs": str(runs), "wait_for": str(release), "containers": str(tmp_path / "containers"),
-                  "files": {"{id}.job-end.json": job_end(), CLOSING_KEY: closing_plan("a1" * 16, {"disposition": "inconclusive"})}}
+                  "files": {"{id}.job-end.json": job_end(), CLOSING_KEY: closing_plan("a1" * 16, {"disposition": "inconclusive"})},
+                  "options": {"dsn": dsn}}  # #1546 (A-O2): the child stages what its records stand for under the worker's claim
         with worker_process(tmp_path, config) as proc:
             # M10/D-p: the worker is up and idle for a few poll intervals before anything is queued.
             await anyio.sleep(IDLE_BEFORE_QUEUING)
@@ -144,9 +146,11 @@ def _box_of(containers: Path, inv: str) -> Path:
 
 
 def _scripted_config(dsn: str, root: Path, runs: Path, tmp_path: Path, **options) -> dict:
+    # #1546 (A-O2): the scripted child plays the helper and stages its records under the worker's claim (its `dsn`); a box it
+    # leaves is stamped with the box token read off its claim row.
     return {"dsn": dsn, "data_root": str(root), "child": "scripted", "where": str(tmp_path / "child"),
             "runs": str(runs), "wait_for": str(tmp_path / "never"), "containers": str(tmp_path / "containers"),
-            "options": options, "stop_grace": 2.0}
+            "options": {"dsn": dsn, **options}, "stop_grace": 2.0}
 
 
 @pytest.mark.parametrize("stop", [signal.SIGTERM, signal.SIGINT])
@@ -175,7 +179,8 @@ async def test_o7_a_deliberate_stop_sends_sigterm_to_every_child_and_writes_no_r
             boxes = {i: _box_of(containers, i) for i in ids}
             for i, box in boxes.items():
                 _wait(lambda b=box: b.read_text(encoding="utf-8") != "", timeout=30, what="the child's box token")
-                launch = json.loads((runs / f"{i}.launch.json").read_text(encoding="utf-8"))
+                launch = launch_facts(dsn, i)  # #1546: the launch facts are the claim row's, not a file beside the run
+                assert launch is not None, "premise: the worker's claim wrote the launch facts"
                 assert box.read_text(encoding="utf-8") == launch["box_token"], "the box carries another claim's token"
             assert len({b.read_text(encoding="utf-8") for b in boxes.values()}) == 2
             proc.send_signal(stop)
