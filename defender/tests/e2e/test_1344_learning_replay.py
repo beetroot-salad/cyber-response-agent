@@ -93,6 +93,10 @@ def _admitted_gathers(lane, run_id: str, dest: Path) -> tuple[list[int], list[in
     return gathers, admitted
 
 
+#: The bound on one flow's drain (an investigation, its learning job and the job's post-step): about 25 s on CI.
+_DRAIN_BOUND = 240.0
+
+
 async def _run_flow(migrated_database, tmp_path, monkeypatch, request, *, investigate_mode, damage=None):  # noqa: F811
     """The worker over one queued investigation, learning slot on: returns what the cases read back. #1546: the lane has
     the store every job needs (`test_worker_replay._lane`: Garage by the helper's environment names, the tenant's
@@ -100,6 +104,7 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, request, *, invest
     this test's alone (`fresh_tenant`: the store's objects live under `t/<tenant>/`, which the `garage` fixture empties at
     each test's end)."""
     from defender.tests.e2e.test_worker_replay import _lane, fresh_tenant
+    from defender.tests.support.jobs._bounded1546 import drained_within
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
     openbao, garage, evidence_keys = (request.getfixturevalue(name) for name in ("openbao", "garage", "evidence_keys"))
@@ -148,7 +153,10 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, request, *, invest
 
             worker = make_worker(store, root, investigation, containers=StandInContainers(tmp_path / "containers"),
                                  slots=3, learning_slots=1, learning_argv=learning, post_step_argv=post_step)
-            await worker.drain()
+            # Bounded (#1546): a drain that never ends (an L5 hang in CI ran to the shard's 35-minute cap) is a failure
+            # naming what was in flight, not the job's cap. A whole flow takes about 25 s on CI.
+            await drained_within(worker.drain(), _DRAIN_BOUND, what="the worker's drain of the investigation and its "
+                                 "learning job", dsn=migrated_database, tenant=t.tenant_id)
         if damage is None:  # a damaged store is one current code refuses to open, by design
             flow["gathers"] = _admitted_gathers(lane, str(inv.investigation_id), tmp_path / "stored")
         else:  # the source as the learning job's pull was served it: the stored bundle, read back here
