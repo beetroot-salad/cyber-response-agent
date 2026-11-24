@@ -328,7 +328,7 @@ CHILD_SCRIPT = textwrap.dedent("""
             path = runs / fill(rel)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
-        if closing is not None:
+        if closing is not None and not spec.get("stage"):  # a staging child's close is its staged outcome's `closing`
             plant_closing(closing)
         for rel, hexbytes in spec.get("binary", {}).items():
             path = runs / fill(rel)
@@ -351,6 +351,27 @@ CHILD_SCRIPT = textwrap.dedent("""
             path = runs / fill(rel)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.symlink_to(target)
+        stage_rows(spec.get("stage"))
+
+    def claim_token(stage):
+        sys.path.insert(0, spec["worktree"])
+        from defender.tests.support.jobs._evidence_flows1546 import claim_of
+        token = claim_of(stage["dsn"], stage["kind"], run_id)
+        if not token:
+            raise RuntimeError(f"the stand-in helper found no {stage['kind']} claim row for {run_id}")
+        return token
+
+    def stage_rows(stage):
+        # #1546 PR2: the helper stand-in stages, under the claim the worker's claim made, the typed facts and upload rows
+        # the case names, as the job leaves its records (the worker decides from these rows, never from a file).
+        if not stage:
+            return
+        token = claim_token(stage)  # puts the checkout on the path first
+        from defender.tests.support.jobs._evidence_flows1546 import stage_fact, stage_upload
+        for name, body in stage["facts"].items():
+            stage_fact(stage["dsn"], token, name, body)
+        for name, text in stage["objects"].items():
+            stage_upload(stage["dsn"], token, name, None if text is None else text.encode("utf-8"))
 
     sealed_by = {}  # r7.3 T1: what a child that ends cleanly seals: set once its ledger rows are being written
 
@@ -443,6 +464,18 @@ CHILD_SCRIPT = textwrap.dedent("""
                 while not (marks / f"go-{n}").exists() and time.monotonic() < until:
                     time.sleep(0.02)
             sealing()
+    steps = (spec.get("stage") or {}).get("progress")
+    if steps:  # #1546: cost so far is the helper's staged `progress` (replaced in place), one per step
+        token = claim_token(spec["stage"])  # puts the checkout on the path first
+        from defender.tests.support.jobs._evidence_flows1546 import stage_progress
+        marks = Path(steps["marks"])
+        marks.mkdir(parents=True, exist_ok=True)
+        for n, body in enumerate(steps["bodies"]):
+            stage_progress(spec["stage"]["dsn"], token, body)
+            (marks / f"wrote-{n}").write_text("0", encoding="utf-8")
+            until = time.monotonic() + 60
+            while not (marks / f"go-{n}").exists() and time.monotonic() < until:
+                time.sleep(0.02)
     release = spec.get("wait_for")
     deadline = time.monotonic() + 60
     while release and not Path(release).exists() and time.monotonic() < deadline:
@@ -640,6 +673,31 @@ class ScriptedChild:
     #: The planter that plants this child's closing record (`planter`): this process's unless named. A worker run in its
     #: own process names the test process's, so stopping or killing that worker never interrupts a plant.
     planter_name: str | None = None
+    #: #1546 (A-O2, PR2): the helper stand-in. With `dsn`, the child stages under its claim row (`jobs.claims` by
+    #: `stage_kind` and its `--job` id), as it leaves its records: `started`, the facts its host records in `files` stand
+    #: for (`facts_of_records`), then `staged` (name -> body; a `None` body leaves that fact out) and `objects` (name ->
+    #: text uploaded, `None` refused; by default an uploaded bundle beside a staged outcome). `progress`: `{"bodies":
+    #: [...], "marks": dir}`, one staged `progress` per step, each awaiting `marks/go-<n>`. The files stay as decoys.
+    dsn: str | None = None
+    stage_kind: str = "investigation"
+    staged: dict[str, Any] | None = None
+    objects: dict[str, str | None] | None = None
+    progress: dict[str, Any] | None = None
+
+    def stage_spec(self) -> dict[str, Any] | None:
+        if self.dsn is None:
+            return None
+        facts: dict[str, Any] = {"started": {"container": "started"}}
+        if self.stage_kind == "investigation":
+            facts.update(facts_of_records(self.files))
+            if self.progress and "outcome" in facts:  # the job's outcome carries what it spent, as its last progress said
+                facts["outcome"] = {**facts["outcome"], "cost_usd": self.progress["bodies"][-1]["cost_usd"],
+                                    "cost_is_lower_limit": not self.progress.get("sealed", True)}
+        facts.update(self.staged or {})
+        facts = {name: body for name, body in facts.items() if body is not None}
+        objects = self.objects if self.objects is not None else (
+            {"bundle": "bundle bytes (opaque to the worker)"} if "outcome" in facts else {})
+        return {"dsn": self.dsn, "kind": self.stage_kind, "facts": facts, "objects": objects, "progress": self.progress}
 
     def __post_init__(self) -> None:
         self.where.mkdir(parents=True, exist_ok=True)
@@ -662,6 +720,7 @@ class ScriptedChild:
                                                                "names": list(self.claimed_names)},
             "wait_for": None if self.wait_for is None else str(self.wait_for),
             "sessions": None if self.sessions is None else {**self.sessions, "path": str(WORKTREE)},
+            "stage": self.stage_spec(),
         }
 
     def __call__(self, launch: Any) -> list[str]:
@@ -749,7 +808,7 @@ class FaultyContainers(StandInContainers):
 
 class FaultableStore:
     """The real store, except for faults the test switches on: `renew_down` makes every renewal raise
-    a connection error, `finish_fails` makes that many `finish` calls raise one (counted in
+    a connection error, `finish_fails` makes that many end writes (`apply`, #1546) raise one (counted in
     `finish_tries`). Counts renewals that raised (`renews_failed`) and that answered (`renews_ok`).
     Notes the held ids each renewal that succeeded left out (`omitted`, and
     `omitted_event` for a thread that waits for the worker to see a fence)."""
@@ -781,12 +840,13 @@ class FaultableStore:
             self.omitted_event.set()
         return covered
 
-    async def finish(self, *args: Any, **kw: Any) -> Any:
+    async def apply(self, *args: Any, **kw: Any) -> Any:
+        """#1546 PR9: `apply` is the end write (the only writer of terminal columns), so `finish_fails` faults it."""
         self.finish_tries += 1
         if self.finish_fails > 0:
             self.finish_fails -= 1
             raise ConnectionError("the database is gone")
-        return await self._store.finish(*args, **kw)
+        return await self._store.apply(*args, **kw)
 
 
 class LaneLanding:
@@ -901,6 +961,61 @@ def job_end(*, setup: str = "done", box: str = "started", report_committed: bool
     rides on it; the ledger's seal says whether the run's spend is complete."""
     return json.dumps({"setup": setup, "box": box, "report_committed": report_committed,
                        "scrub_verified": scrub_verified, "cut_short": cut_short})
+
+
+JOB_END_FACTS = ("setup", "box", "report_committed", "scrub_verified", "cut_short")
+
+
+def closing_found_of(plan_text: str | None) -> dict[str, Any]:
+    """The `closing` an outcome carries for a `CLOSING_KEY` plan (the job's own lookup, #1534, re-checked by the helper):
+    no plan or a store with no row or no pointer is `never_closed`; a fault is `could_not_look` with its kind's fixed
+    words; a row is `found` with its disposition."""
+    from defender.tests.support.evidence._facts1546 import closing_found
+
+    if plan_text is None:
+        return {"found": "never_closed"}
+    plan = json.loads(plan_text)
+    if plan.get("fault") == "no-pointer" or (plan.get("fault") is None and plan.get("fields") is None):
+        return {"found": "never_closed"}
+    if plan.get("fault") is not None:
+        from defender.records import closing as C
+
+        return {"found": "could_not_look", "wording": C.FAULT_WORDING[plan["fault"]]}
+    return closing_found(plan["fields"]["disposition"])
+
+
+def staged_outcome_of(job_end_text: str, closing_plan_text: str | None = None, **over: Any) -> dict[str, Any]:
+    """#1546: the `outcome` the helper stages for what a job-end record said (its five facts; `scrub_verified` false is a
+    scrub that did not verify, `not_run`) and the closing lookup's result; cost 0, exact, unless `over`. Only a record of
+    the five facts translates: a malformed one is the helper's to refuse (`refused/outcome`, test_1546_helper_records)."""
+    body = json.loads(job_end_text)
+    assert isinstance(body, dict), f"a job-end record that is no object has no staged outcome: {job_end_text!r}"
+    assert set(body) == set(JOB_END_FACTS), (
+        f"a malformed job-end record has no staged outcome (#1546 PR2: the helper stages `refused/outcome`): {job_end_text!r}")
+    return {"setup": body["setup"], "box": body["box"], "report_committed": body["report_committed"],
+            "scrub": "clean" if body["scrub_verified"] is True else "not_run", "cut_short": body["cut_short"],
+            "closing": closing_found_of(closing_plan_text), "cost_usd": 0.0, "cost_is_lower_limit": False, **over}
+
+
+def staged_knowledge_of(record_text: str) -> dict[str, Any]:
+    """The served `knowledge` the helper stages for a fresh publish's host record (the helper maps it once, #1546 PR2)."""
+    record = json.loads(record_text)
+    assert record.get("kind") == "fresh", f"the stand-in maps only a fresh publish's record: {record_text!r}"
+    return {"status": "current", "commit": record["commit"], "stale_kind": None}
+
+
+def facts_of_records(files: Mapping[str, str]) -> dict[str, Any]:
+    """The facts a helper stages for the host records a case's `files` name: an `outcome` (and `page = none`, no page
+    rendered) for a job-end record, `knowledge` for a knowledge-source record. Other files are decoys."""
+    facts: dict[str, Any] = {}
+    end = files.get("{id}.job-end.json")
+    if end is not None:
+        facts["outcome"] = staged_outcome_of(end, files.get(CLOSING_KEY))
+        facts["page"] = {"page": "none"}
+    knowledge = files.get("{id}.knowledge-source.json")
+    if knowledge is not None:
+        facts["knowledge"] = staged_knowledge_of(knowledge)
+    return facts
 
 
 def scrub_verdict(*, ran: bool) -> str:

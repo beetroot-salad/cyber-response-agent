@@ -161,13 +161,13 @@ def test_an_already_terminal_learning_job_is_backfilled_none_and_a_queued_runnin
 
 @pytest.mark.postgres
 def test_a_learning_job_gains_the_lower_limit_mark_of_its_sibling_cost_and_an_investigation_keeps_its_own(empty_database):
-    """`learning_jobs.sibling_cost_is_lower_limit` is a boolean, NOT NULL, false by default (existing rows read exact);
-    `investigations.cost_is_lower_limit` stays, still needing a cost. (D15)"""
+    """`learning_jobs.sibling_cost_is_lower_limit` is a boolean, NOT NULL, no server default (#1339 P4; existing rows read exact,
+    above); `investigations.cost_is_lower_limit` stays, still needing a cost. (D15)"""
     dsn = empty_database
     _upgrade_to(dsn, _revision())
     [(kind, nullable, default)] = execute(
         dsn, "SELECT data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'jobs' "
              "AND table_name = 'learning_jobs' AND column_name = 'sibling_cost_is_lower_limit'")
     assert (kind, nullable) == ("boolean", "NO")
-    assert "false" in (default or "").lower()
+    assert default is None, "a server default (#1339 P4): the migration fills existing rows, then drops it"
     assert "cost_is_lower_limit" in _columns(dsn, "investigations")

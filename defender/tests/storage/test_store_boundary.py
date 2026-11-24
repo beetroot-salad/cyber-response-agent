@@ -119,12 +119,22 @@ except OSError as e:
     print(json.dumps({"read": None, "exc": type(e).__name__, "errno": e.errno}))
 '''
 
+#: #1546 D4 (A-O9): the run dir is bound read-only, so creating a file there is refused (EROFS).
+_WRITE_PATH = '''
+import json, sys
+try:
+    open(sys.argv[1], "wb").write(b"forged")
+    print(json.dumps({"errno": None}))
+except OSError as e:
+    print(json.dumps({"errno": e.errno}))
+'''
+
 
 @requires_box
 @pytest.mark.box
 def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
     """Neither the bash lane nor `defender-sql` can open or read the store from inside the
-    box, while the run dir remains readable AND writable from there."""
+    box, while the run dir remains readable (and, since #1546 D4, read-only) from there."""
     from defender.execution.bash_exec import parse
     from defender.box import start_box, stop_box
 
@@ -159,10 +169,17 @@ def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
         out = box.run_parsed(parse(cat), command=cat, cwd=Path("/runs/current"), timeout=60)
         assert SECRET not in out.out.decode("utf-8", "replace")
 
-        # positive control: the run dir IS reachable and writable from inside the box
+        # positive control: the run dir IS reachable from inside the box, read-only (#1546 D4)
         ctl = "cat /runs/current/sentinel.txt"
         control = box.run_parsed(parse(ctl), command=ctl, cwd=Path("/runs/current"), timeout=60)
         assert "RUN-DIR-IS-READABLE" in control.out.decode("utf-8")
+        writer = run_dir / "_probe_write.py"
+        writer.write_text(_WRITE_PATH, encoding="utf-8")
+        wcmd = f"python3 /runs/current/{writer.name} /runs/current/forged.txt"
+        refused = box.run_parsed(parse(wcmd), command=wcmd, cwd=Path("/runs/current"), timeout=60)
+        assert refused.rc == 0, refused.err
+        assert json.loads(refused.out.decode("utf-8"))["errno"] == errno_mod.EROFS, refused.out
+        assert not (run_dir / "forged.txt").exists(), "a file the box was refused landed on the host"
     finally:
         stop_box(box)
 

@@ -2,9 +2,9 @@
 test program in place of its kind's entry (`job_host.main(command=)`). NOT RUN WITHOUT A NATIVE DOCKER DAEMON: CI's `test`
 job runs it (the job image is built there, `defender-job:latest`).
 
-- `LEARNING`: a learning job's container. It records what it can reach, then writes the job's create-only end record
-  with product code (`JobLane.write_learning_end`, `LearningEnd(findings=...)`), `completed` with the findings the host
-  planted for it (`obs1487/rows.json`). The real
+- `LEARNING`: a learning job's container. It records what it can reach, then sends the job's `outcome` over its socket
+  with product code (`job_socket.from_environ`, #1546 PR2: the helper screens and stages it; no end record is left for
+  the worker), `completed` with the findings the host planted for it (`obs1487/rows.json`). The real
   entry's own read of the episode's held rows is not run here (it is `tests/learning/branch/test_1487_hand_in.py`'s).
 - `POST_STEP`: a post-step container. It records what it can reach, then runs the real `post_step.main` with only its
   tick replaced (no curator is woken: the tick claims and stops): the tick records the store it was handed (it must be the
@@ -83,13 +83,13 @@ tenant, job = sys.argv[1], sys.argv[2]
 folder, seen = observe(tenant, "learning")
 try:
     rows = json.loads((folder / "obs1487" / "rows.json").read_text(encoding="utf-8"))
-    from defender import tenancy
-    from defender.records.job_lane import JobLane, LearningEnd
-    end = LearningEnd(status="completed", reason=None, message="the judge graded the family: 1 finding(s) wait in the episode",
-                      fork_message_id=None, stage=None, sibling_cost_usd=0.0,
-                      findings={"state": "ok", "text": json.dumps({"finding": rows, "questioner_finding": []})})
-    with JobLane.open(tenancy.resolve_data_root(), tenant) as lane:
-        lane.write_learning_end(job, end)
+    import os
+    from defender import job_socket
+    ask = job_socket.from_environ(os.environ)
+    ask("outcome", record={"status": "completed", "reason": None,
+                           "message": "the judge graded the family: 1 finding(s) wait in the episode",
+                           "fork_message_id": None, "stage": None, "sibling_cost_usd": 0.0,
+                           "findings": {"state": "ok", "text": json.dumps({"finding": rows, "questioner_finding": []})}})
 except BaseException:
     seen["error"] = traceback.format_exc()
 leave(folder, "learning", seen)

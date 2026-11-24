@@ -27,11 +27,13 @@ from defender.tests.support.jobs import _box_relay as R
 from defender.tests.support.jobs import _helper_evidence1546 as H
 from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
 from defender.tests.support.jobs._job_helper import OTHER_TENANT, claims_of, helper_scene, listing, until
+from defender.tests.support.jobs._job_helper import process_state  # noqa: F401 — autouse: the helper runs here (its store seams)
 from defender.tests.support.jobs._jobs1342 import DEFENDER, WORKTREE
 
 evidence_store = H.evidence_store
 
-pytestmark = [pytest.mark.postgres, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
+
+pytestmark = [pytest.mark.postgres, pytest.mark.garage, pytest.mark.openbao, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
 
 PROXY = "http://proxy.invalid"
 
@@ -230,7 +232,7 @@ def test_a10_the_run_page_stored_is_the_bytes_the_job_pushed_not_a_file_in_its_f
 
     def job(c: Any) -> int:
         folder = host_path(c.mounts, str(H.job_root(scene) / scene.tenant)) / "runs" / planted.owner
-        shutil.copytree(golden, folder)
+        shutil.copytree(golden, folder, dirs_exist_ok=True)  # the helper made the run folder already (#1170 A6)
         (folder / "runtime.html").write_bytes(left)  # never read back
         H.send(c, "outcome", record=H.inv_outcome())
         H.send(c, "page", record=sent_page())

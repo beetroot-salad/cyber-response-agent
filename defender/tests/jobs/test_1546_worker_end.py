@@ -205,16 +205,14 @@ async def test_the_claims_root_inputs_and_spool_are_gone_after_the_end(world):
 
 
 async def test_another_claims_uploads_for_the_same_owner_are_never_promoted(world):
-    """A second claim naming the same owner has a bundle uploaded: the end promotes only the row's own claim's. (A-O3)"""
-    stale = "f" * 32
+    """Another claim of the tenant (an ended row's: a row is claimed at most once) has an uploaded, unpromoted bundle: the end
+    promotes only the row's own claim's. (A-O3)"""
+    async with job_store(world["dsn"]) as store:
+        _, other = await plant_complete_source(world["dsn"], store, T1)
+    stale = plant_claim(world["dsn"], tenant=T1, kind="investigation", ref=other)
+    stage_upload(world["dsn"], stale, "bundle", b"another claim's bundle")
 
-    def plant_stale(token: str) -> None:
-        execute(world["dsn"], "INSERT INTO jobs.claims (token, tenant_id, kind, investigation_id, inputs) "
-                              "SELECT %s, tenant_id, kind, investigation_id, inputs FROM jobs.claims WHERE token = %s",
-                (stale, token))
-        stage_upload(world["dsn"], stale, "bundle", b"stale claim's bundle")
-
-    staging = _staging(world, _child(world), outcome=inv_outcome(), before=plant_stale)
+    staging = _staging(world, _child(world), outcome=inv_outcome())
     await _drain(world, staging)
     assert accepted(world["dsn"], stale) == []
     assert accepted(world["dsn"], staging.token) == sorted(["bundle", RUN_PAGE])

@@ -129,7 +129,7 @@ class Recorder:
 
 def adopt_scene(t: Any, dsn: str, monkeypatch: Any) -> Any:
     """A helper scene over a tenant a case already published and registered active in `dsn` (the tick tests' `world`),
-    for a `PostStepHelper`: the worker's claim in the environment, the tenant's runs folder. What `helper_scene` builds
+    for a `PostStepHelper`: the worker's claim in the environment (and in the job store, #1546), the tenant's runs folder. What `helper_scene` builds
     around a tenant of its own, without making another. The helper's job socket lives under the tenant's data root, so a
     root that is not from the short-root provider is refused at once (`require_short_root`), before anything starts."""
     from defender.box import CLAIM_ENV
@@ -144,7 +144,13 @@ def adopt_scene(t: Any, dsn: str, monkeypatch: Any) -> Any:
     monkeypatch.setenv("DEFENDER_DATABASE_DSN", dsn)  # the helper holds the database login (N7)
     runs = Path(t.data_root) / t.tenant_id / "runs"
     runs.mkdir(parents=True, exist_ok=True)
-    return HelperScene(Path(t.data_root), t, runs, dsn, claim)
+    scene = HelperScene(Path(t.data_root), t, runs, dsn, claim)
+    # #1546 PR7: the claim is the store's, minted in the claim's own transaction; the helper refuses a post-step whose claim is
+    # not in the job store. The hold row and claim a worker's claim leaves for a post-step, planted as `plant` does.
+    from defender.tests.support.jobs._helper_evidence1546 import plant
+
+    plant(scene, "post-step")
+    return scene
 
 
 class PostStepHelper:

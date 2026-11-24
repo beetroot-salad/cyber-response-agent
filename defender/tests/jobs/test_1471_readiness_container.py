@@ -5,7 +5,6 @@ of the same tenant (green at the base)."""
 from __future__ import annotations
 
 import dataclasses
-import json
 import sys
 import uuid
 from pathlib import Path
@@ -30,7 +29,11 @@ from defender.tests.support.jobs._readiness1471 import (
 )
 
 process_state = J.process_state
-pytestmark = [pytest.mark.postgres, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: E402, F401 — fixtures the helper's store seams take
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: E402, F401 — fixture
+
+pytestmark = [pytest.mark.postgres, pytest.mark.garage, pytest.mark.openbao,
+              pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
 
 ALL = J.ALL_SYSTEMS
 
@@ -60,10 +63,10 @@ def _of(warnings: list[dict[str, str]], kind: str) -> str:
     return "\n".join(w["sentence"] for w in warnings if w["kind"] == kind)
 
 
-def test_r3_a_tenant_whose_launch_is_clean_reads_ready_with_no_warnings_and_leaves_only_its_two_records(
+def test_r3_a_tenant_whose_launch_is_clean_reads_ready_with_no_warnings_and_leaves_no_file_in_its_runs_folder(
         tmp_path, monkeypatch, migrated_database):
     """A tenant everything of which is usable: `ready` with an empty list, the launch publish run once, the knowledge
-    record at the published commit, and a runs folder holding only the two records, still listed. (R3, R13-1.7, P-1)"""
+    record at the published commit, and a runs folder holding nothing of the check's (its two records are staged facts, A-O2, D5), still listed. (R3, R13-1.7, P-1)"""
     from defender import run_common
     from defender.records import job_lane
     from defender.tests.support.jobs._container_entry1170 import ThreadCalls
@@ -81,11 +84,12 @@ def test_r3_a_tenant_whose_launch_is_clean_reads_ready_with_no_warnings_and_leav
         assert _warnings(ran) == [], ran.said()
         assert ran.ran.publishes == 1, "readiness publishes at launch"
         assert ran.knowledge["commit"] == scene.t.commit
-        assert ran.knowledge["kind"] == "fresh"
+        assert ran.knowledge["status"] == "current"  # the staged served shape (#1546: `fresh` maps to `current`)
         assert (calls.helper("materialize_run"), calls.container("materialize_run"),
                 calls.helper("check_launch"), calls.container("check_launch")) == (0, 0, 0, 0)
         added = sorted(set(listing(scene.runs)) - set(runs_before))
-        assert added == sorted([f"{ran.rid}.knowledge-source.json", f"{ran.rid}.readiness.json"]), added
+        assert added == [], f"a check wrote a file into the runs folder (A-O2, D5: its two records are staged facts): {added}"
+        assert set(ran.staged()) >= {"result", "knowledge"}, ran.said()
         assert not list((scene.root / scene.tenant / "run-knowledge").glob("*")), "the check's copy was left behind"
         assert [r for r in listed_runs(scene) if r == ran.rid] == [], "a check is not a run"
         (scene.runs / "stray.unknown.json").write_text("{}", encoding="utf-8")
@@ -286,7 +290,7 @@ def test_p2_d7_a_tenant_value_with_markup_in_a_warning_reaches_its_sentence_verb
     with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL, files=files) as scene:
         ran = readiness(scene)
         ran.result()
-        record = json.loads(ran.record_path.read_text(encoding="utf-8"))
+        record = ran.result()
         assert set(record) == {"outcome", "warnings"}
         assert record["outcome"] == "ready", ran.said()
         assert [w["kind"] for w in record["warnings"]] == ["feedback_setting"]
@@ -344,7 +348,7 @@ def _hand(scene: Any, rid: str, mutate: Any) -> Any:
         handed = set(facts)
         if mutate is not None:
             mutate(facts)
-        with SocketStandIn(scene.tenant, launch=facts) as stand_in:
+        with SocketStandIn(scene.tenant, launch=facts, forward=c.request) as stand_in:  # the rest of the verbs: the real helper's
             for gone in handed - set(facts):  # the stand-in fills `tenant`/`tenant_state` by default: serve the removal
                 stand_in.launch.pop(gone, None)
             env = {**c.env, SOCKET_ENV: str(stand_in.path)}
@@ -356,8 +360,10 @@ def _set(key: str, value: Any) -> Any:
     return lambda facts: facts.__setitem__(key, value)
 
 
+# Retired param `silent-helper` (#1546 A-O2): a record reaches the store only through the helper, so a container with no helper
+# to answer stages nothing; the worker's end over a missing `result` is pinned by
+# `test_1546_host_request_rows.py::test_a_result_the_helper_refused_reads_bad_record_and_a_missing_one_no_record`.
 HANDOVER = {
-    "silent-helper": "silent",
     "other-kind": _set("kind", "investigation"),
     "other-tenant": _set("tenant", str(uuid.UUID(int=1471))),
     "other-job": _set("job", str(uuid.UUID(int=1472))),
@@ -383,9 +389,12 @@ def test_r13_1_4_an_exit_that_judges_whether_the_helper_and_container_agree_is_f
 
 
 #: The keys of the readiness launch facts (surface §4), spelled once; the helper's own facts are checked against them.
-FACT_KEYS = ("kind", "tenant", "job", "tenant_state", "export_commit", "knowledge", "run_copy", "records")
+FACT_KEYS = ("kind", "tenant", "job", "tenant_state", "export_commit", "knowledge", "run_copy", "records", "inputs_dir")
 #: Keys the design's handover list does not name (R13-1.4): the honest entry may read them or not.
 UNNAMED_KEYS = ("export_commit", "knowledge")
+#: Keys the container's `JobTenant` is built from (#1546 design "JobTenant ... from the launch facts"): a missing or
+#: wrong-typed one may also be the container's refusal of its tenant, at `container_tenant`.
+TENANT_KEYS = ("tenant_state", "inputs_dir")
 
 
 def _wrong_typed(value: Any) -> Any:
@@ -412,7 +421,7 @@ def test_r13_1_4_launch_facts_missing_a_key_or_holding_a_value_of_another_type_e
         result = ran.result()
 
     handover = {"outcome": "failed", "reason": "handover"}
-    if key == "tenant_state":
+    if key in TENANT_KEYS:
         assert result == handover or (result["outcome"], result.get("step")) == ("refused", "container_tenant"), ran.said()
     elif key in UNNAMED_KEYS:
         assert result == handover or result["outcome"] == "ready", ran.said()
@@ -432,36 +441,12 @@ def test_r13_1_4_launch_facts_saying_the_tenant_is_not_active_are_refused_at_the
         assert isinstance(ran.knowledge, dict)
 
 
-def test_r13_1_4_launch_facts_saying_active_over_a_tenant_folder_the_container_refuses_are_refused_at_container_tenant(
-        tmp_path, monkeypatch, migrated_database):
-    """The container's own read of its tenant folder (the one it mounts) refuses it though the helper's admission passed:
-    `refused` at `container_tenant`, carrying the knowledge record; the same route over the sound folder reads `ready`.
-    (R13-1.4, C5)"""
-    from defender import run as run_py
-    from defender import tenancy
-
-    def entering(scene: Any, rid: str, damage: bool) -> Any:
-        def container(c: Any) -> int:
-            if damage:
-                (scene.root / scene.tenant / "knowledge" / "stray-1471.txt").write_text("not a tenant file", encoding="utf-8")
-            return int(run_py.readiness_main(["--readiness", rid, "--tenant", scene.tenant], environ=c.env))
-        return container
-
-    with readiness_scene(tmp_path / "ctl", monkeypatch, migrated_database, proxied=ALL) as scene:
-        rid = str(uuid.uuid4())
-        assert readiness(scene, rid=rid, container=entering(scene, rid, False)).result()["outcome"] == "ready"
-    with readiness_scene(tmp_path, monkeypatch, migrated_database, proxied=ALL, tenant_id=SECOND_TENANT) as scene:
-        rid = str(uuid.uuid4())
-        ran = readiness(scene, rid=rid, container=entering(scene, rid, True))
-
-        assert ran.facts is not None
-        assert ran.facts["tenant_state"] == "active", "the helper's admission passed: its facts say active"
-        from defender.records.formats import TenantRefused
-
-        with pytest.raises(TenantRefused):  # repair 5: the refusal's home is `records.formats`, not `tenancy`
-            tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=run_py.DEFENDER_DIR, clone_tree=False)
-        assert_refused_shape(ran.result(), "container_tenant")
-        assert isinstance(ran.knowledge, dict), "a refusal at a container step carries the helper's knowledge record"
+# Retired (#1546 D4/A-O9): `test_r13_1_4_launch_facts_saying_active_over_a_tenant_folder_the_container_refuses_are_refused_at_
+# container_tenant`. The container no longer reads the host's tenant folder: it builds a `JobTenant` over its job root and
+# inputs, and "`accept_tenant` stays the host's ... the knowledge-clone, `.tenant-id` and settings-vs-mount checks have no
+# job-side counterpart" (design, JobTenant). That no in-box entry reaches `accept_tenant` is pinned by
+# `tenancy/lifecycle_1214/test_entry_boundaries.py` (`IN_BOX_ENTRIES`); the host's own refusals by this file's and
+# `test_1471_readiness_helper.py`'s tenant-step cases.
 
 
 @pytest.mark.parametrize("blind", [True, False], ids=["blind-adapter", "readable-tree"])

@@ -125,7 +125,10 @@ class Planted:
     owner_kind: str = ""   # the key layout's owner kind word (`investigation` / `learning`)
 
 
-def _make_investigation(scene: HelperScene, tenant: str | None = None) -> tuple[str, str]:
+def _make_investigation(scene: HelperScene, tenant: str | None = None, *, as_id: str | None = None,
+                        raw: bytes | None = None) -> tuple[str, str]:
+    """A new investigation row of `tenant` (and its alert, `raw` its bytes when given); `as_id`: the row then carries that id
+    (an older test's own chosen id), before anything references it."""
     from defender.tests.support.jobs._jobs1342 import an_alert, job_store, register_tenant
 
     tenant = tenant or scene.tenant
@@ -134,11 +137,16 @@ def _make_investigation(scene: HelperScene, tenant: str | None = None) -> tuple[
 
     async def make() -> tuple[str, str]:
         async with job_store(scene.dsn) as store:
-            alert = await an_alert(store, tenant, ticket=f"T-{uuid.uuid4().hex[:6]}")
+            extra = {} if raw is None else {"raw": raw}
+            alert = await an_alert(store, tenant, ticket=f"T-{uuid.uuid4().hex[:6]}", **extra)
             inv, _ = await store.create_investigation(tenant, alert.alert_id, f"k-{uuid.uuid4().hex[:6]}", actor="u-1")
-            return inv.investigation_id, alert.alert_id
+            return str(inv.investigation_id), str(alert.alert_id)  # plain text: the ids go into YAML/JSON documents
 
-    return asyncio.run(make())
+    inv, alert = asyncio.run(make())
+    if as_id is not None and as_id != inv:
+        execute(scene.dsn, "UPDATE jobs.investigations SET id = %s WHERE id = %s", (as_id, inv))
+        inv = as_id
+    return inv, alert
 
 
 def another_investigation(scene: HelperScene, tenant: str | None = None, *, tainted: bool = False) -> str:
@@ -153,8 +161,9 @@ def another_investigation(scene: HelperScene, tenant: str | None = None, *, tain
     return other
 
 
-def plant(scene: HelperScene, kind: str, *, inputs: list[dict[str, str]] | None = None, system: str = "identity",
-          claim: str | None = None) -> Planted:
+def plant(scene: HelperScene, kind: str, *, inputs: list[dict[str, str]] | None = None, system: str = "identity",  # noqa: PLR0913
+          claim: str | None = None, owner: str | None = None, source: str | None = None,
+          launch: dict[str, Any] | None = None, alert: bytes | None = None) -> Planted:
     """The owner row (running, with a lease) and the claim row for `kind`, as the worker's claim transaction leaves them.
     FORCED CHOICES: the claim's `launch` for an investigation is the launch record `HelperScene.plant` writes today
     (design: "launch facts (admission facts; knowledge pin...; alert reference)"), for a learning job `{"knowledge_commit":
@@ -162,19 +171,19 @@ def plant(scene: HelperScene, kind: str, *, inputs: list[dict[str, str]] | None 
     claim = claim or scene.claim
     t, dsn = scene.tenant, scene.dsn
     if kind == "investigation":
-        inv, alert = _make_investigation(scene)
-        launch = {"investigation_id": inv, "tenant_id": t, "alert_id": alert, "digest": _alert_digest(),
-                  "label": _alert_title(), "box_token": uuid.uuid4().hex}
+        inv, alert_id = _make_investigation(scene, as_id=owner, raw=alert)
+        launch = {**{"investigation_id": inv, "tenant_id": t, "digest": _alert_digest(), "label": _alert_title(),
+                     "box_token": uuid.uuid4().hex}, **(launch or {}), "alert_id": alert_id}
         execute(dsn, "UPDATE jobs.investigations SET stage = 'running', started_at = now(), "
                      "lease_expires_at = now() + interval '1 hour' WHERE id = %s", (inv,))
         execute(dsn, "INSERT INTO jobs.claims (token, tenant_id, kind, investigation_id, launch, inputs) "
                      "VALUES (%s, %s, 'investigation', %s, %s::jsonb, '[]'::jsonb)", (claim, t, inv, json.dumps(launch)))
         return Planted(kind, inv, claim, None, "investigations", "investigation")
     if kind == "learning":
-        source, alert = _make_investigation(scene)
+        source, alert = _make_investigation(scene, as_id=source)
         execute(dsn, "UPDATE jobs.investigations SET stage = 'completed', disposition = 'benign', finished_at = now(), "
                      "evidence_state = 'complete', scrub = 'clean' WHERE id = %s", (source,))
-        job = str(uuid.uuid4())
+        job = owner or str(uuid.uuid4())
         execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, "
                      "trigger, status, created_at, started_at, lease_expires_at, sibling_cost_usd, publish_state) "
                      "VALUES (%s, %s, %s, %s, 'k-learn', 1, 'auto', 'running', now(), now(), "
@@ -248,7 +257,8 @@ def drive(scene: HelperScene, planted: Planted, job: Callable[[Any], int] | None
         seams = {**forge, **seams}
     else:
         seams.setdefault("forge", ForgeCredentialRecorder())
-    ran = drive_helper(scene, argv_for(scene, planted), docker=docker, signer=signer or make_signer(), **seams)
+    ran = drive_helper(scene, argv_for(scene, planted), docker=docker, signer=signer or make_signer(), default_store=False,
+                       **seams)  # the #1546 cases hand their own store seams (or leave one out on purpose)
     if check:
         assert ran.raised is None, ran.raised
         assert docker.job_error is None, docker.job_error
@@ -315,12 +325,51 @@ class Store:
                            "WHERE id = %s", (state, scrub, owner))
         return claim
 
+    def plant_source_bundle(self, scene: HelperScene, source: str, workdir: Path) -> str:
+        """A learning source's accepted `bundle`: a real finished source run of the scene's tenant (`source_bundle`, its
+        knowledge stamp the scene's published commit, which `plant` pins the claim to) planted accepted under `source`;
+        returns its claim token."""
+        data = source_bundle(scene.tenant, source, workdir, knowledge_commit=scene.t.commit)
+        return self.plant_accepted(scene, scene.tenant, source, "bundle", data)
+
     def read(self, tenant: str, owner_kind: str, owner: str, claim: str, obj: str, wrapped: str) -> bytes:
         """The stored object read back with the data key its upload row's wrapped key unwraps to (this oracle's own read)."""
         key = self.keys.unwrap(tenant, wrapped)
         response = self.garage.get(object_key(tenant, owner_kind, owner, claim, obj), sse_key=key)
         assert response.status_code == 200, (response.status_code, response.text[:200])
         return response.content
+
+
+def source_files(tenant_dir: Path, src: Path) -> dict[str, bytes]:
+    """A source run's files as its bundle holds them, tenant-relative: its run folder and the tenant's session stores."""
+    found = {str(p.relative_to(tenant_dir)): p.read_bytes() for p in sorted(src.rglob("*")) if p.is_file()}
+    sessions = tenant_dir / "sessions"
+    for db in sorted(sessions.glob("*.db")) if sessions.is_dir() else []:
+        found[str(db.relative_to(tenant_dir))] = db.read_bytes()
+    return found
+
+
+def source_bundle(tenant: str, source: str, workdir: Path, *, knowledge_commit: str | None = None) -> bytes:
+    """The bundle of a real finished source run (`_triplet_947.runs_base`: run folder, captured call, provenance stamp, session
+    store) of `tenant` with run id `source`, built in a data root of its own under `workdir` (never the scene's), packed as the
+    job's packer lays it out (tenant-relative members)."""
+    from defender.tests.support.jobs._evidence_flows1546 import pack
+    from defender.tests.support.learning.branch import _triplet_947 as T
+
+    build = workdir / f"source-{source[:8]}"
+    build.mkdir(parents=True)
+    with pytest.MonkeyPatch.context() as env:
+        env.setenv("DEFENDER_DATA_ROOT", str(build))
+        _base, src = T.runs_base(workdir, source_run_id=source, tenant_id=tenant)
+        if knowledge_commit is not None:  # the source row's knowledge commit, which the claim pins (design: The pin)
+            stamp = src / "provenance.json"
+            doc = json.loads(stamp.read_text(encoding="utf-8"))
+            stamp.write_text(json.dumps({**doc, "knowledge": {**doc.get("knowledge", {}), "commit": knowledge_commit}}),
+                             encoding="utf-8")
+        files = source_files(src.parent.parent, src)
+    assert any(name.startswith(f"runs/{source}/") for name in files), sorted(files)
+    assert any(name.startswith("sessions/") for name in files), "premise: the source has a session store"
+    return pack(files)
 
 
 # --- the job's side of the socket ----------------------------------------------------------------------------------------
@@ -538,6 +587,12 @@ def evidence_store(request: pytest.FixtureRequest, scene: HelperScene) -> Iterat
     from defender.tests.tenancy.tenant_1108_p4._support import FIXTURE_TENANT_ID
 
     assert scene.tenant != FIXTURE_TENANT_ID, "a scene on the shared fixture tenant lists other tests' objects: use `fresh_scene`"
+    return store_for(request, scene)
+
+
+def store_for(request: pytest.FixtureRequest, scene: HelperScene) -> Store:
+    """`evidence_store`'s body for any scene (the older helper suites' shared fixture tenant included, which list no prefix):
+    the real store and keys a helper is configured with, since an unconfigured store is refused at setup (design: Flows)."""
     evidence_module()
     openbao = request.getfixturevalue("openbao")
     garage = request.getfixturevalue("garage")

@@ -219,7 +219,7 @@ async def test_o7_a_family_less_check_asks_the_same_question(world, monkeypatch,
     check = CheckChild(world["tmp"] / "check", world["runs"], dsn=dsn)
     async with job_store(dsn) as store:
         job = await queued_job(world, store, ticket="J-1")
-        execute(dsn, "UPDATE jobs.learning_jobs SET status = 'failed', reason = 'judge_failed', message = 'm', "
+        execute(dsn, "UPDATE jobs.learning_jobs SET status = 'failed', reason = 'judge_failed', message = 'm', evidence_state = 'none', "
                      "finished_at = now(), lease_expires_at = NULL WHERE id = %s", (job,))
         worker = learning_worker(world, store, job=job_child(world), post=_either(post_child(world), check),
                                  learning_check_interval=0.5)

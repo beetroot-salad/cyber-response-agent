@@ -355,7 +355,11 @@ class _BoxSeen:
     record_shapes: dict[str, str] | None = None
     dir_shapes: dict[str, str] | None = None
     coined_error: BaseException | None = None
-    control_written: str | None = None
+    #: #1546 D4 (A-O9): the run folder is bound read-only: the name of a file the box tried to create there, the exit status
+    #: of that attempt, and what the box read back from the write it made to its own `/tmp` (the positive control).
+    run_write_name: str | None = None
+    run_write_rc: int | None = None
+    tmp_control: str | None = None
     box_sha: dict[str, str] | None = None
     transport_cat: Any = None
     raised: BaseException | None = None
@@ -369,11 +373,13 @@ def _write_probes(box: Any, run_dir: Path, seen: _BoxSeen) -> None:
     seen.sandboxed = bool(getattr(box, "sandboxed", False))
     alert = S.alert_file(run_dir)
     seen.alert_sha_before = S.sha256_hex(alert.read_bytes())
-    # Positive controls first, while both files are intact: a new file in the run folder lands
-    # on the host; the box reads the alert's real bytes, raw and through the agent's transport.
-    control = f"box-control-{uuid.uuid4().hex[:8]}.txt"
-    done = _exec(box, "sh", "-c", f"echo CONTROL > {control}")
-    seen.control_written = control if done.returncode == 0 else None
+    # Controls first, while both files are intact: the run folder is read-only, so a new file there is refused and the
+    # box's own `/tmp` takes a write (what proves the box's writes work at all); the box reads the alert's real bytes,
+    # raw and through the agent's transport.
+    seen.run_write_name = f"box-control-{uuid.uuid4().hex[:8]}.txt"
+    seen.run_write_rc = _exec(box, "sh", "-c", f"echo FORGED > {seen.run_write_name}").returncode
+    tmp = _exec(box, "sh", "-c", "echo CONTROL > /tmp/box-control.txt && cat /tmp/box-control.txt")
+    seen.tmp_control = tmp.stdout.strip() if tmp.returncode == 0 else None
     seen.box_sha = {"alert": _exec(box, "python3", "-c", _SHA_PROBE,
                                    _in_box(alert, run_dir)).stdout.strip()}
     bash_exec = S.mod("execution.bash_exec")
@@ -427,9 +433,10 @@ def _assert_box_held(seen: _BoxSeen, alert: bytes) -> None:
     assert S.sha256_hex(host_now) == seen.alert_sha_before == S.sha256_hex(alert), (
         "the host's alert changed while the box ran")
     # Positive controls: the channel that would have shown a landed write is live.
-    assert seen.control_written, "the box could not write its own run folder"
-    assert (seen.run_dir / seen.control_written).read_text(
-        encoding="utf-8").strip() == "CONTROL", "the box's own write in its run folder did not land"
+    assert seen.tmp_control == "CONTROL", "the box could not write its own /tmp, so no refusal below means anything"
+    assert seen.run_write_name, "the box's write into its run folder was never tried"
+    assert seen.run_write_rc != 0, "the box created a file in its run folder, which is bound read-only (#1546 D4)"
+    assert not (seen.run_dir / seen.run_write_name).exists(), "a file the box was refused landed on the host"
     assert (seen.box_sha or {}).get("alert") == S.sha256_hex(alert), (
         "the box does not read the alert's real bytes")
     cat = seen.transport_cat

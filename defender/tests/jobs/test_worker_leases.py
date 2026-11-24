@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import logging
 import os
 import signal
@@ -26,12 +25,7 @@ from defender.tests.support.jobs._jobs1342 import (
     job_end,
     job_store,
     lower_limit,
-    plant_sessions,
-    plant_spend,
     row,
-    session_pointer,
-    REFUSED,
-    UNSEEN,
 )
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.support.jobs._jobs1342 import (  # noqa: E402
@@ -41,10 +35,8 @@ from defender.tests.support.jobs._jobs1342 import (  # noqa: E402
     accounting_written,
     lapse_lease,
     lease_left,
-    session_database_held_locked,
 )
 from defender.tests.support.jobs._worker1342 import (
-    CASE,
     CASES,
     SONNET_IN,
     SONNET_OUT,
@@ -52,12 +44,11 @@ from defender.tests.support.jobs._worker1342 import (
     _NobodyPlannedThis,
     _StoreWhoseAlertReadFails,
     _StoreWhoseFinishFails,
-    _child,
+    _helper_child as _child,
     _committed,
     _gone,
     _handed_back,
     _kill_whatever_remains,
-    _lanes_failing,
     _queued,
     _until,
     _worker,
@@ -77,15 +68,25 @@ SONNET = "claude-sonnet-4-6"
 _SPEND = [(SONNET, {"input_tokens": 1_000_000})]  # priced SONNET_IN = 3.0 USD
 
 
+_PRICES = {SONNET: {"input_tokens": SONNET_IN, "output_tokens": SONNET_OUT}}  # USD per million tokens
+
+
 def _spending(world: dict, steps: list[tuple[str, dict]], *, released: bool = False, marks_name: str = "marks",
               seal: bool = True, **kw) -> tuple[ScriptedChild, Path]:
-    """A child that holds its session database open and appends one priced response per step, then waits for `marks/go-<n>` (`released`: they exist already); `seal=False`: the child never seals its ledger (a run killed before its seal, r7.3 T2)."""
+    """A child whose helper stages its cost so far (#1546: the `progress` fact, replaced per step; the worker reads no
+    session database) one priced step at a time, touching `marks/wrote-<n>` and waiting for `marks/go-<n>` (`released`: they
+    exist already). Its outcome, when its records name one, carries the last figure; `seal=False`: marked a lower limit (a
+    run whose spend write failed)."""
     marks = world["tmp"] / marks_name
     if released:
         marks.mkdir(exist_ok=True)
         for n in range(len(steps)):
             (marks / f"go-{n}").touch()
-    return _child(world, sessions={"case": CASE, "per_run": True, "steps": steps, "marks": str(marks), "seal": seal}, **kw), marks
+    bodies, total = [], 0.0
+    for model, usage in steps:
+        total += sum(_PRICES[model][k] * v / 1_000_000 for k, v in usage.items())
+        bodies.append({"cost_usd": total})
+    return _child(world, progress={"bodies": bodies, "marks": str(marks), "sealed": seal}, **kw), marks
 
 
 def _term_mark(world: dict) -> str:
@@ -296,8 +297,9 @@ async def test_b_drain_renews_its_rows_takes_nothing_over_and_ends_only_when_the
 
 # --- B2: cost so far ------------------------------------------------------------------------------------
 
-async def test_b2_b6_cost_so_far_is_copied_while_the_live_child_writes_its_session_database(world):
-    """Each response the live child appends shows as cost so far within the cost tick, knowledge stays unset, the child's writes are not blocked; finish sets the final figures. (B2, claim B6, B4)"""
+async def test_b2_b6_cost_so_far_is_copied_from_each_staged_progress_while_the_child_runs(world):
+    """Each `progress` the helper stages shows as cost so far within the cost tick, knowledge stays unset; the end sets
+    the final figures from the outcome. (B2, claim B6, B4; #1546: `progress` replaces the session-database read)"""
     child, marks = _spending(world, [(SONNET, {"input_tokens": 1_000_000}), (SONNET, {"output_tokens": 1_000_000})],
                              files=_committed())
     dsn = world["dsn"]
@@ -317,168 +319,21 @@ async def test_b2_b6_cost_so_far_is_copied_while_the_live_child_writes_its_sessi
                 (marks / f"go-{step}").touch()
             await asyncio.wait_for(drained, timeout=60)
 
-    assert not list(marks.glob("insert-failed-*")), [f.read_text(encoding="utf-8") for f in marks.glob("insert-failed-*")]
-    took = [float((marks / f"wrote-{n}").read_text(encoding="utf-8")) + float((marks / f"ledger-{n}").read_text(encoding="utf-8"))
-            for n in (0, 1)]  # the append, then the ledger insert
-    assert max(took) < 1.0, f"the worker's reads blocked the child's appends: {took}"
     final = row(dsn, inv)
     assert (final["stage"], final["cost_usd"]) == ("completed", pytest.approx(SONNET_IN + SONNET_OUT))
     assert final["knowledge"] is not None
     assert accounting_written(dsn, inv) is not None, "finish did not mark the final accounting written"
 
 
-async def test_r7_a_live_cost_so_far_read_beside_an_unseen_row_is_not_marked_and_the_final_read_is(world):
-    """A running job whose ledger holds one priced response and one unseen request: the live copy is the sum and reads
-    exact, stored and on the record; the final read over the same rows is "at least". (r7 S2 live reads, S2a)"""
-    release = world["tmp"] / "release"
-    dsn, runs = world["dsn"], world["runs"]
-    child = _child(world, files=_committed(), wait_for=release)
-    plant_sessions(runs, CASE, [("main", SONNET, {"input_tokens": 1_000_000})])
-    async with job_store(dsn) as store:
-        inv = await _queued(store)
-        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})], sealed=False)
-        plant_spend(runs, CASE, inv, [(SONNET, {})], outcome=UNSEEN)
-        (runs / f"{inv}.session-pointer.json").write_text(session_pointer(CASE), encoding="utf-8")
-        drained = asyncio.create_task(_worker(world, store, child, **_FAST).drain())
-        try:
-            await _until(lambda: child.seen(inv), "the child to start")
-            await _until(lambda: row(dsn, inv)["cost_usd"] == pytest.approx(SONNET_IN), "the live copy", timeout=5.0)
-            for _ in range(5):  # several cost ticks
-                await asyncio.sleep(0.3)
-                live = await store.get_investigation(T1, inv)
-                assert (live.stage, live.cost_usd) == ("running", pytest.approx(SONNET_IN)), "premise: a live row"
-                assert (lower_limit(dsn, inv), live.cost_is_lower_limit) == (False, False), "a live read was marked"
-        finally:
-            release.touch()
-            await asyncio.wait_for(drained, timeout=60)
-        final = await store.get_investigation(T1, inv)
+# #1546 (A-O2, PR2): the worker reads no session database, so the cases whose subject was its ledger read retired:
+# test_r7_a_live_cost_so_far_read_beside_an_unseen_row_is_not_marked_and_the_final_read_is,
+# test_r7_the_final_cost_reads_at_least_exactly_when_the_ledger_has_an_unpriced_row[*],
+# test_r7_s4_a_ledger_row_of_an_unknown_agent_id_leaves_the_finished_job_s_cost_unknown[*],
+# test_b2_a_failed_cost_read_keeps_the_last_good_figure_mid_run_and_writes_null_in_the_end_write[*] (a broken pointer),
+# test_b2_a_cost_read_that_hangs_never_delays_the_lease_renewal (a locked SQLite file). The cost so far is the helper's
+# staged `progress` (test_b2_b6 above); the final figure and its mark are the staged outcome's, or after a cut the last
+# `progress` marked (D15, test_ending_decide_1546.py); pricing and the seal are the job's.
 
-    assert (final.stage, final.cost_usd) == ("completed", pytest.approx(SONNET_IN))
-    assert (lower_limit(dsn, inv), final.cost_is_lower_limit) == (True, True), "an unseen row left the final cost exact"
-
-
-_EXTRA_ROWS = {
-    "none": (None, False),
-    "refused": (dict(outcome=REFUSED, agent_id="gather:l-00c", model="claude-haiku-4-5", usage={}), False),
-    "unpriced": (dict(outcome="response", agent_id="gather:l-001", model="claude-opus-9-0", usage={"input_tokens": 1_000_000}), True),
-}
-
-
-@pytest.mark.parametrize("extra", _EXTRA_ROWS)
-async def test_r7_the_final_cost_reads_at_least_exactly_when_the_ledger_has_an_unpriced_row(world, extra):
-    """A finished job whose ledger holds one priced response beside a refused ($0) row, an unpriced response, or nothing: the
-    sum is the priced response in all three, and only the unpriced row marks it. (r7 S2b, S5)"""
-    row, marked = _EXTRA_ROWS[extra]
-    dsn, runs = world["dsn"], world["runs"]
-    child = _child(world, files=_committed())
-    plant_sessions(runs, CASE, [("main", SONNET, {"input_tokens": 1_000_000})])
-    async with job_store(dsn) as store:
-        inv = await _queued(store)
-        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})], sealed=row is None)
-        if row is not None:
-            plant_spend(runs, CASE, inv, [(row["model"], row["usage"])], outcome=row["outcome"], agent_id=row["agent_id"])
-        (runs / f"{inv}.session-pointer.json").write_text(session_pointer(CASE), encoding="utf-8")
-        await _worker(world, store, child, **_FAST).drain()
-        final = await store.get_investigation(T1, inv)
-
-    assert (final.stage, final.cost_usd) == ("completed", pytest.approx(SONNET_IN))
-    assert (lower_limit(dsn, inv), final.cost_is_lower_limit) == (marked, marked)
-
-
-@pytest.mark.parametrize("agent_id", ["gather", "review", "planner"])
-async def test_r7_s4_a_ledger_row_of_an_unknown_agent_id_leaves_the_finished_job_s_cost_unknown(world, agent_id):
-    """A finished job whose ledger holds a priced MAIN response and one row of an id outside the four kinds: stage completed, cost None (unknown, not the priced sum), mark false. (r7.1 F, S4)"""
-    dsn, runs = world["dsn"], world["runs"]
-    child = _child(world, files=_committed())
-    plant_sessions(runs, CASE, [("main", SONNET, {"input_tokens": 1_000_000})])
-    async with job_store(dsn) as store:
-        inv = await _queued(store)
-        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})], sealed=False)
-        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})], agent_id=agent_id)
-        (runs / f"{inv}.session-pointer.json").write_text(session_pointer(CASE), encoding="utf-8")
-        await _worker(world, store, child, **_FAST).drain()
-        final = await store.get_investigation(T1, inv)
-
-    assert (final.stage, final.cost_usd) == ("completed", None)
-    assert (lower_limit(dsn, inv), final.cost_is_lower_limit) == (False, False)
-
-
-@pytest.mark.parametrize("broken", ["unreadable", "names-no-session"])
-@pytest.mark.parametrize("end", ["finish", "cancel", "stop"])
-async def test_b2_a_failed_cost_read_keeps_the_last_good_figure_mid_run_and_writes_null_in_the_end_write(world, end, broken):
-    """The pointer breaks after one copied figure: the row keeps 3.0 for several ticks while still renewed; the end write
-    (finish, final accounting or hand-back) then carries cost NULL, not 3.0. (B2, R2)"""
-    child, marks = _spending(world, _SPEND, files=_committed(), term="mark", term_mark=_term_mark(world))
-    dsn = world["dsn"]
-    async with job_store(dsn) as store:
-        inv = await _queued(store)
-        serving = asyncio.create_task(_worker(world, store, child, **_FAST).serve())
-        try:
-            await _until(lambda: (marks / "wrote-0").exists(), "the child's spend")
-            await _until(lambda: row(dsn, inv)["cost_usd"] == pytest.approx(SONNET_IN), "the first copy", timeout=5)
-            pointer = world["runs"] / f"{inv}.session-pointer.json"
-            if broken == "unreadable":
-                pointer.write_text("not json", encoding="utf-8")
-            else:  # the run's own case, a session it never opened: the cost read fails, the record still reads
-                case = json.loads(pointer.read_text(encoding="utf-8"))["case_id"]
-                pointer.write_text(session_pointer(case, session_id="no-such-session"), encoding="utf-8")
-            for _ in range(15):  # about five cost ticks
-                await asyncio.sleep(0.1)
-                assert row(dsn, inv)["cost_usd"] == pytest.approx(SONNET_IN), "a failed read replaced the last good figure"
-                assert (lease_left(dsn, inv) or 0) > 0
-            if end == "cancel":
-                await store.cancel_investigation(T1, inv, actor="u-1")
-            elif end == "finish":
-                (marks / "go-0").touch()
-            else:
-                assert not serving.done()
-                os.kill(os.getpid(), signal.SIGTERM)
-            await _until(lambda: accounting_written(dsn, inv) is not None, "the end write", timeout=10)
-        finally:
-            (marks / "go-0").touch()
-            if not serving.done():
-                os.kill(os.getpid(), signal.SIGTERM)
-            await _stop_all(serving)
-
-    final = row(dsn, inv)
-    assert final["cost_usd"] is None, "an unreadable final cost was written as a figure"
-    # CONFLICT-UPDATED (#1534; was: finish ends `completed`): the record is read through the same pointer, so a finish over
-    # an unreadable one is `unparseable` with that kind's words (V-READERS, worker row).
-    finished = "unparseable" if broken == "unreadable" else "completed"
-    assert final["stage"] == {"finish": finished, "cancel": "aborted", "stop": "running"}[end]
-    if end == "finish" and broken == "unreadable":
-        from defender.records import closing as C
-
-        assert C.FAULT_WORDING["pointer-unreadable"] in (final["failure_message"] or ""), final["failure_message"]
-
-
-async def test_b2_a_cost_read_that_hangs_never_delays_the_lease_renewal(world):
-    """The session database is locked, so the cost read waits on SQLite for the whole window: a 1 s lease is still fresh at every sample for 3 s; once unlocked the cost (the run's ledger rows, #1377 S1) shows. (B2, r5 item 4)"""
-    release = world["tmp"] / "release"
-    dsn, runs = world["dsn"], world["runs"]
-    child = _child(world, files=_committed(), wait_for=release)
-    plant_sessions(runs, CASE, [("main", SONNET, {"input_tokens": 1_000_000})])
-    async with job_store(dsn, lease=1.0) as store:
-        inv = await _queued(store)
-        plant_spend(runs, CASE, inv, [(SONNET, {"input_tokens": 1_000_000})])  # the cost is the run's ledger, not its conversation (S1)
-        (runs / f"{inv}.session-pointer.json").write_text(session_pointer(CASE), encoding="utf-8")
-        drained = asyncio.create_task(_worker(world, store, child, **_FAST).drain())
-        try:
-            with session_database_held_locked(runs, CASE):
-                await _until(lambda: child.seen(inv), "the child to start")
-                for _ in range(30):
-                    left = lease_left(dsn, inv)
-                    assert left is not None
-                    assert left > 0, f"a blocked cost read delayed the renewal: {left}"
-                    await asyncio.sleep(0.1)
-                assert row(dsn, inv)["cost_usd"] == 0, "premise: the read has not returned"
-            await _until(lambda: row(dsn, inv)["cost_usd"] == pytest.approx(SONNET_IN), "the cost once unlocked", timeout=10)
-        finally:
-            release.touch()
-            await asyncio.wait_for(drained, timeout=60)
-
-
-# --- B3/B4/B9: a fenced row ends its child; one end path -------------------------------------------------
 
 @pytest.mark.parametrize("how", ["cancel", "delete"])
 async def test_b9_b3_b4_a_cancelled_or_deleted_running_row_has_its_child_ended_within_a_renewal_and_the_holder_writes_what_is_left(
@@ -1581,97 +1436,22 @@ async def test_b5_an_outage_reading_the_alert_at_launch_hands_the_row_back_with_
     assert child.seen(inv) is None
 
 
-class _CostReads:
-    """Wraps a lane door and counts the lanes' `cost` calls: a run whose premise is "no live figure was read" proves it."""
-
-    def __init__(self, lanes) -> None:
-        self._lanes, self.reads = lanes, 0
-
-    def __call__(self, root, tenant):
-        outer, lane = self, self._lanes(root, tenant)
-
-        class _Counting:
-            def __getattr__(self, name):
-                real = getattr(lane, name)
-                if name != "cost":
-                    return real
-
-                def cost(*a, **k):
-                    outer.reads += 1
-                    return real(*a, **k)
-                return cost
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_exc) -> None:
-                lane.close()
-        return _Counting()
 
 
-_NO_TICK = {**_FAST, "cost_interval": 60.0}  # the cost tick never fires inside the test: no live figure is ever read
+# #1546 A-O2 retired the cases whose subject was a fault in the worker's read of a finished child's records file
+# (the job-end read through the job lane): test_b11_a_fault_reading_a_stopped_runs_ending_still_hands_the_row_back,
+# test_s2_an_outage_reading_a_finished_childs_records_hands_the_row_back_with_its_live_copy_marked,
+# test_s4_an_outage_reading_a_finished_childs_records_before_any_live_figure_hands_the_row_back_unknown. The worker reads
+# only rows; an undecided stop hands back (`HandBack`, test_ending_decide_1546.py) and the hand-back's cost is the last
+# staged `progress` (test_b11_a_deliberate_stop_hands_a_running_row_back_with_its_final_cost_and_its_retry_is_a_new_row).
 
 
-async def test_b11_a_fault_reading_a_stopped_runs_ending_still_hands_the_row_back(world):
-    """A stop signalled the child and reading its records then raises something nobody planned for: the stop cut the run short, so the row is handed back (cost unknown: no live figure was read), never failed `worker_error`. (#1343 review, B11; r6 S2/S4)"""
-    release = world["tmp"] / "release"
-    child = _child(world, files=_committed(), wait_for=release)
-    dsn = world["dsn"]
-    async with job_store(dsn) as store:
-        inv = await _queued(store)
-        lanes = _CostReads(_lanes_failing(inv, "read_job_end", _NobodyPlannedThis("x")))
-        serving = asyncio.create_task(_worker(world, store, child, open_lane=lanes, **_NO_TICK).serve())
-        try:
-            await _until(lambda: child.seen(inv), "the child")
-            os.kill(os.getpid(), signal.SIGTERM)
-            await asyncio.wait_for(serving, timeout=60)
-        finally:
-            release.touch()
-            _kill_whatever_remains(child.seen(inv))
-            await _stop_all(serving)
-    assert lanes.reads == 0, "premise: no live cost read happened"
-    _handed_back(dsn, inv, unknown_cost=True)  # a child ran but no live figure was read: unknown, not "at least 0" (r6 S2/S4)
-
-
-async def test_s2_an_outage_reading_a_finished_childs_records_hands_the_row_back_with_its_live_copy_marked(world):
-    """A child ran and its ending then cannot be read for an outage: the row is handed back with the cost so far it had copied, as a lower limit; the copy may be short. (S2)"""
-    release = world["tmp"] / "release"
-    child, marks = _spending(world, _SPEND, files=_committed(), wait_for=release)
-    dsn = world["dsn"]
-    async with job_store(dsn) as store:
-        inv = await _queued(store)
-        lanes = _lanes_failing(inv, "read_job_end", ConnectionError("the volume is gone"))
-        drained = asyncio.create_task(_worker(world, store, child, open_lane=lanes, **_FAST).drain())
-        try:
-            await _until(lambda: row(dsn, inv)["cost_usd"] == pytest.approx(SONNET_IN), "the live copy", timeout=10)
-        finally:
-            (marks / "go-0").touch()
-            release.touch()
-            await asyncio.wait_for(drained, timeout=60)
-    _handed_back(dsn, inv, cost=SONNET_IN, at_least=True)
-
-
-async def test_s4_an_outage_reading_a_finished_childs_records_before_any_live_figure_hands_the_row_back_unknown(world):
-    """A child ran, spent nothing the worker copied, and its ending cannot be read for an outage: the row is handed back with a NULL cost and no mark. (r6 S2/S4)"""
-    release = world["tmp"] / "release"
-    child = _child(world, files=_committed(), wait_for=release)
-    dsn = world["dsn"]
-    async with job_store(dsn) as store:
-        inv = await _queued(store)
-        lanes = _CostReads(_lanes_failing(inv, "read_job_end", ConnectionError("the volume is gone")))
-        drained = asyncio.create_task(_worker(world, store, child, open_lane=lanes, **_NO_TICK).drain())
-        try:
-            await _until(lambda: child.seen(inv), "the child")
-        finally:
-            release.touch()
-            await asyncio.wait_for(drained, timeout=60)
-    assert lanes.reads == 0, "premise: no live cost read happened"
-    _handed_back(dsn, inv, unknown_cost=True)
-
-
-@pytest.mark.parametrize(("child_ends", "expect"), [("killed", True), ("with its records", False)])
-async def test_s2_a_cancelled_running_row_stays_at_least_until_its_holder_writes_its_own_figure(world, child_ends, expect):
-    """The cancelled row reads "at least" at once (derived, not stored); the holder's final write then stores its own value: true after a killed child, false after a clean job-end. (S2, B1)"""
+@pytest.mark.parametrize("child_ends", ["killed", "with its records"])
+async def test_s2_a_cancelled_running_row_is_its_last_staged_progress_marked_a_lower_limit_and_the_holder_never_rewrites_it(
+        world, child_ends):
+    """CONFLICT-UPDATED (#1546 D15; was: the holder's final write stores its own figure after the cancel): the cancel ends the
+    row with the last staged `progress` as its cost, marked a lower limit, stored at once; the holder's end after its child
+    (killed, or leaving its records) writes nothing over it (the write fence has no exception). (S2, B1, D15)"""
     child, marks = _spending(world, _SPEND, files=_committed(), term="mark" if child_ends == "killed" else "finish",
                              term_mark=_term_mark(world))
     dsn = world["dsn"]
@@ -1679,44 +1459,23 @@ async def test_s2_a_cancelled_running_row_stays_at_least_until_its_holder_writes
         inv = await _queued(store)
         drained = asyncio.create_task(_worker(world, store, child, cost_interval=60.0).drain())
         try:
-            await _until(lambda: (marks / "wrote-0").exists(), "the child's spend")
+            await _until(lambda: (marks / "wrote-0").exists(), "the child's staged progress")
             got = await store.cancel_investigation(T1, inv, actor="u-1")
-            assert (got.cost_is_lower_limit, lower_limit(dsn, inv)) == (True, False), (
-                "cancel must read at least by derivation and store no mark (B1, B2)")
-            assert (await store.get_investigation(T1, inv)).cost_is_lower_limit is True
+            assert got.cost_is_lower_limit is True, "a cancelled row's cost is not a lower limit (D15)"
+            assert (row(dsn, inv)["stage"], row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (
+                "aborted", pytest.approx(SONNET_IN), True), "the cancel did not store the last progress, marked (D15)"
             await _until(lambda: _termed(world, inv), "the child to get SIGTERM", timeout=3.0)
         finally:
             (marks / "go-0").touch()
             await asyncio.wait_for(drained, timeout=60)
 
     assert (row(dsn, inv)["stage"], row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (
-        "aborted", pytest.approx(SONNET_IN), expect)
+        "aborted", pytest.approx(SONNET_IN), True), "the holder wrote over a cancelled row (D15: no exception to the fence)"
 
 
-@pytest.mark.parametrize("sealed", [True, False], ids=["killed after its seal", "killed before its seal"])
-async def test_t2_r7_3_a_child_killed_before_its_job_end_reads_exact_after_its_seal_and_at_least_before_it(world, sealed):
-    """A running child's ledger holds its response; it is cancelled (SIGTERM, no job-end left) either after the child sealed or while
-    it was still working: the holder's final figure is the ledger's sum, exact after the seal ("every request was recorded") and
-    "at least" before it. (r7.3 T2)"""
-    release = world["tmp"] / "release"
-    child, marks = _spending(world, _SPEND, released=sealed, term="mark", term_mark=_term_mark(world), wait_for=release)
-    dsn = world["dsn"]
-    async with job_store(dsn) as store:
-        inv = await _queued(store)
-        drained = asyncio.create_task(_worker(world, store, child, cost_interval=60.0).drain())
-        try:
-            await _until(lambda: (marks / ("sealed" if sealed else "wrote-0")).exists(), "the child's seal" if sealed else "the child's spend")
-            assert not list(marks.glob("seal-failed")), (marks / "seal-failed").read_text(encoding="utf-8")
-            await store.cancel_investigation(T1, inv, actor="u-1")
-            await _until(lambda: _termed(world, inv), "the child to get SIGTERM", timeout=3.0)
-        finally:
-            (marks / "go-0").touch()
-            release.touch()
-            await asyncio.wait_for(drained, timeout=60)
-
-    assert (row(dsn, inv)["stage"], row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (
-        "aborted", pytest.approx(SONNET_IN), not sealed)
-    assert (marks / "sealed").exists() is sealed, "premise: the child sealed exactly when it was meant to"
+# #1546 (A-O2, D15) retired `test_t2_r7_3_a_child_killed_before_its_job_end_reads_exact_after_its_seal_and_at_least_before_it[*]`:
+# its subject was the worker reading the ledger's seal after a cancel; a cancelled row's cost is now the last staged
+# `progress`, always a lower limit (the case above).
 
 
 class _CallFinishingAsItIsCancelled:

@@ -85,12 +85,13 @@ def facts(dsn: str, token: str) -> dict[str, Any]:
 
 def stage_upload(dsn: str, token: str, obj: str, data: bytes | None, *, status: str | None = None,
                  scrub: str | None = None) -> None:
-    """An upload row as the helper leaves it: `uploaded` with data, `refused` with none, unless `status` says."""
+    """An upload row as the helper leaves it: `uploaded` with data, `refused` with none (the PUT that failed), unless `status`
+    says. Every row carries the size, digest and wrapped key it was inserted with `pending`, before the PUT (design: uploads)."""
     status = status or ("refused" if data is None else "uploaded")
+    sent = data if data is not None else f"{token}/{obj}: the bytes whose PUT the store refused".encode()
     execute(dsn, "INSERT INTO jobs.uploads (token, object, size, sha256, wrapped_key, status, scrub, created_at) "
                  "VALUES (%s, %s, %s, %s, %s, %s, %s, now())",
-            (token, obj, None if data is None else len(data), None if data is None else sha(data),
-             None if data is None else f"wrapped:{obj}", status, scrub))
+            (token, obj, len(sent), sha(sent), f"wrapped:{obj}", status, scrub))
 
 
 def accepted(dsn: str, token: str) -> list[str]:
@@ -179,6 +180,20 @@ class Staging:
         assert self.token, "premise: the worker launched a child"
 
 
+def committed_end(world: dict, child: Callable[[Any], list[str]], *, disposition: str = "inconclusive",
+                  **staged: Any) -> Staging:
+    """`child` (an investigation's helper stand-in) behind a `Staging` that stages what a run the host committed and whose
+    tree walked clean leaves under #1546 (PR2): `started`, `knowledge`, an `outcome` whose close found `disposition` (the
+    `_committed()` files' closing record), no page, and an uploaded bundle; `staged` adds or replaces facts. The worker
+    then ends the row `completed` from rows alone; the child's files are decoys it never reads (A-O2)."""
+    from defender.tests.support.evidence._facts1546 import closing_found
+
+    facts = {"started": STARTED, "knowledge": KNOWLEDGE, "outcome": inv_outcome(closing=closing_found(disposition)),
+             "page": {"page": "none"}, **staged}
+    return Staging(world["dsn"], world["root"], "investigation", lambda launch: launch.investigation_id, child,
+                   staged=facts, objects={"bundle": b"bundle bytes (opaque to the worker)"})
+
+
 # --- the opened-paths audit, with SQLite --------------------------------------------------------------------------------
 
 _watching: list[list[tuple[str, bool]]] = []
@@ -242,3 +257,12 @@ def pack(files: dict[str, bytes]) -> bytes:
 def members(bundle: bytes) -> dict[str, bytes]:
     with tarfile.open(fileobj=io.BytesIO(bundle), mode="r:gz") as tar:
         return {m.name.removeprefix("./"): tar.extractfile(m).read() for m in tar.getmembers() if m.isfile()}  # type: ignore[union-attr]
+
+
+# --- appended for the #1546 stale sweep of the #1342/#1343 worker tests (slice `worker`) -----------------------------------
+
+def stage_progress(dsn: str, token: str, body: Any) -> None:
+    """The one replaced fact: the helper's latest `progress` for the claim (create, else replace in place)."""
+    execute(dsn, "INSERT INTO jobs.staged_facts (token, name, body, staged_at) VALUES (%s, 'progress', %s::jsonb, now()) "
+                 "ON CONFLICT (token, name) DO UPDATE SET body = EXCLUDED.body, staged_at = EXCLUDED.staged_at",
+            (token, json.dumps(body)))

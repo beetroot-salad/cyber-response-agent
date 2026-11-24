@@ -169,7 +169,7 @@ def test_a_symlink_planted_inside_the_run_dir_at_the_sidecars_basename_is_not_re
 
 
 def test_the_host_side_record_source_is_not_reachable_from_inside_a_box(tmp_path):
-    """The box's one writable bind is the run dir; the sidecar sits beside it, outside the bind."""
+    """The box binds the run dir read-only (#1546 D4) and has no writable bind; the sidecar sits beside it, outside the bind."""
     from defender.box._lifecycle import _create_argv, _run_lane_mounts
     from defender.box._spec import BoxSpec
 
@@ -180,16 +180,16 @@ def test_the_host_side_record_source_is_not_reachable_from_inside_a_box(tmp_path
     # An explicit rootfs: the tree is fake (no `box.Dockerfile`/`uv.lock`/`pyproject.toml`),
     # and with `rootfs` unset the builder would resolve the image from it and refuse (#1092).
     argv = _create_argv("defender-run-1047", run_dir, tmp_path / "srv" / "defender", BoxSpec(rootfs="python:3.11-slim"), (), lane=_run_lane_mounts(run_dir, tmp_path / "srv" / "defender", None)).argv
-    rw_specs = [spec for spec in argv if spec.startswith("type=bind,") and "readonly" not in spec]
+    binds = [spec for spec in argv if spec.startswith("type=bind,")]
+    rw_specs = [spec for spec in binds if "readonly" not in spec]
     writable = [spec.split("source=", 1)[1].split(",", 1)[0] for spec in rw_specs]
-    assert writable == [str(run_dir)], (
-        f"the box's writable binds are {writable}, not the run dir alone")
-    # The box sees that bind at `/runs/current`; containment is judged on the bind's host
-    # source, the run dir.
-    assert [spec.split("target=", 1)[1].split(",", 1)[0] for spec in rw_specs] == [
-        "/runs/current"], rw_specs
+    assert writable == [], f"the box's writable binds are {writable}, not none: the run dir is read-only (#1546 D4)"
+    # The box sees the run dir at `/runs/current`; containment is judged on the bind's host source, the run dir.
+    run_binds = [spec for spec in binds if spec.split("target=", 1)[1].split(",", 1)[0] == "/runs/current"]
+    assert [spec.split("source=", 1)[1].split(",", 1)[0] for spec in run_binds] == [str(run_dir)]
+    assert all("readonly" in spec.split(",") for spec in run_binds), run_binds
     assert not str(sidecar).startswith(str(run_dir) + "/"), (
-        f"{sidecar} is inside the box's own rw bind")
+        f"{sidecar} is inside the box's own bind")
     assert sidecar.parent == run_dir.parent
 
 

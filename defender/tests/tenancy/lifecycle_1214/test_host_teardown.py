@@ -474,19 +474,19 @@ def test_a_host_with_no_docker_has_no_box_to_remove():
 # --- H-13 --------------------------------------------------------------------------------------------
 
 def test_the_host_secret_file_is_private_to_the_host_user(world):
-    """Each AppRole secret id (delivery and sign) is written `0600` as `<secret id>\\n`, in a tenant directory that grants group
+    """Each AppRole secret id (delivery, sign and evidence) is written `0600` as `<secret id>\\n`, in a tenant directory that grants group
     and other nothing (DC-2, A24')."""
     tenant = world.active_tenant()
     gen = world.live(tenant)
-    assert gen.host_secret_file != gen.sign_secret_file
-    for path in (gen.host_secret_file, gen.sign_secret_file):
+    assert len({gen.host_secret_file, gen.sign_secret_file, gen.evidence_secret_file}) == 3
+    for path in (gen.host_secret_file, gen.sign_secret_file, gen.evidence_secret_file):
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
         assert stat.S_IMODE(path.parent.stat().st_mode) & 0o077 == 0
         assert path.read_text(encoding="utf-8").endswith("\n") and path.read_text(encoding="utf-8").count("\n") == 1
 
 
 def test_an_install_that_fails_after_writing_its_secret_file_removes_it(world):
-    """The AppRole login fails after both unwraps wrote their files: nothing records them, so install removes both
+    """The AppRole login fails after all three unwraps wrote their files: nothing records them, so install removes them all
     (DC-2, DC-4, A24')."""
     from defender.tests.tenancy.lifecycle_1214._job_cases import host_openbao_failing
 
@@ -531,13 +531,14 @@ def test_an_install_whose_commit_landed_but_whose_answer_was_lost_keeps_the_reco
     world.host_pass()
     world.tenants.lock = real
     assert landed, "control: install committed its generation"
-    [recorded] = [(g.host_secret_file, g.sign_secret_file) for g in world.generations(tenant) if g.host_secret_file]
+    [recorded] = [(g.host_secret_file, g.sign_secret_file, g.evidence_secret_file)
+                  for g in world.generations(tenant) if g.host_secret_file]
     assert all(p.is_file() for p in recorded), "a secret file the landed install recorded was removed"
     world.drive()
     item = world.item(tenant)
     assert (item["state"], item["failure"]) == ("active", None), item
     live = world.live(tenant)
-    assert (live.host_secret_file, live.sign_secret_file) == recorded and all(p.is_file() for p in recorded)
+    assert (live.host_secret_file, live.sign_secret_file, live.evidence_secret_file) == recorded and all(p.is_file() for p in recorded)
 
 
 class _Boxes:

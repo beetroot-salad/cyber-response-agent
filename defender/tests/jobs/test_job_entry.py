@@ -28,6 +28,7 @@ from defender.tenancy import case_ticket
 from defender.tests.jobs import test_job_helper as _H1471
 from defender.tests.support.jobs._container_entry1170 import enter
 from defender.tests.support.jobs._job_helper import ContainerStandIn, helper_scene
+from defender.tests.support.jobs._job_helper import process_state  # noqa: F401 — autouse: the helper runs here (its store seams)
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     ALERT_DIGEST,
@@ -55,7 +56,10 @@ OTHER_TENANT = str(uuid.UUID(int=0x1342))
 SETTLED = {"setup": "done", "box": "started", "report_committed": True, "scrub_verified": True, "cut_short": None}
 
 
-pytestmark = [pytest.mark.postgres, pytest.mark.skipif(
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — fixtures the helper's store seams take
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
+
+pytestmark = [pytest.mark.postgres, pytest.mark.garage, pytest.mark.openbao, pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="reads /proc/self/fd and uses prctl(PR_SET_PDEATHSIG), Linux only")]
 
 
@@ -110,8 +114,10 @@ class Scene:
         self.helper_args[run_id] = extra
 
     def job_end(self, run_id: str) -> dict[str, Any] | None:
-        path = self.runs / f"{run_id}.job-end.json"
-        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+        """The job's staged end facts (#1546 A-O2: the `outcome` fact under the claim, not a job-end file)."""
+        from defender.tests.support.jobs._job_helper import job_end_facts
+
+        return job_end_facts(self.dsn, self.helper.claim)
 
     def argv(self, run_id: str) -> list[str]:
         """The in-container entry's command line (A5, A6: no `--parent-pid`)."""

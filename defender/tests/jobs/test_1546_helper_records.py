@@ -51,8 +51,10 @@ from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 —
 from defender.tests.support.shared._postgres1339 import execute
 
 from defender.tests.support.jobs import _helper_evidence1546 as H  # noqa: E402
+from defender.tests.jobs import test_adoption_helper_1471 as ADOPT  # noqa: E402 — the adoption code-tree fixture
 
 evidence_store = H.evidence_store
+checkout = ADOPT.checkout
 process_state = J.process_state
 scene = H.fresh_scene
 
@@ -74,6 +76,12 @@ def _refused(staged: dict, name: str) -> dict:
 
 # --- PR2: valid records are staged as sent -----------------------------------------------------------------------------
 
+def _base_files_for(request, kind: str) -> None:
+    """An adoption's helper refuses at setup unless its system's adapter ships base files: plant them (as the folders tests do)."""
+    if kind == "adoption":
+        request.getfixturevalue("checkout")
+
+
 def _send_record(c, verb: str, record):
     """The job's send of one record on its verb (an `arm` after the roster naming it, as a job does)."""
     if verb == VERB_ARM:
@@ -83,10 +91,11 @@ def _send_record(c, verb: str, record):
 
 
 @pytest.mark.parametrize("case", sorted(VALID))
-def test_a_valid_record_of_each_kind_is_staged_as_the_closed_shape_it_was(scene, evidence_store, case):
+def test_a_valid_record_of_each_kind_is_staged_as_the_closed_shape_it_was(request, scene, evidence_store, case):
     """The control of every malformed-record case: a valid outcome/page/arms/arm/result/knowledge record of its kind, sent on
     its verb, is staged whole under its name, and no `refused/` fact exists. (PR2)"""
     kind, verb, record, name, want = VALID[case]
+    _base_files_for(request, kind)
     planted = plant(scene, kind)
     drive(scene, planted, lambda c: _send_record(c, verb, record) and 0, **evidence_store.seams)
     staged = facts(scene.dsn, scene.claim)
@@ -146,11 +155,12 @@ def _malformed_cases():
 
 @pytest.mark.parametrize(("case", "bad"), _malformed_cases())
 def test_a_malformed_record_of_any_kind_and_name_is_staged_refused_and_a_refused_outcome_or_result_reads_bad_record(
-        scene, evidence_store, case, bad):
+        request, scene, evidence_store, case, bad):
     """Whole class, every kind by every record name (outcome, page, arms, arm, result, readiness knowledge): a malformed
     record is staged `refused/<name>{reason}`, never `<name>`, and owes nothing; a refused `outcome` or `result` reads
     `bad_record` in the ending. (PR2, PR9, "Done when": every kind)"""
     kind, verb, _record, name, _staged = VALID[case]
+    _base_files_for(request, kind)
     planted = plant(scene, kind)
 
     def job(c) -> int:

@@ -791,23 +791,28 @@ class World:
                   "raw) VALUES (%s, %s, 'tickets', %s, %s, %s, %s, '{}') ON CONFLICT DO NOTHING",
                   (inv.alert_id, tenant, f"T-{inv.alert_id}", inv.created_at, inv.created_at, inv.created_at))
         lease = inv.created_at + DAY if inv.status == "running" else None
+        # #1546 A-O4: an ended row has an evidence state; one planted with no evidence reads `none`, its scrub `not_run`
+        ended = inv.status not in ("queued", "running")
         self._sql("INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
                   "started_at, finished_at, disposition, cost_usd, cost_is_lower_limit, failure_reason, "
-                  "lease_expires_at, update_ticket) "
-                  "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                  "lease_expires_at, update_ticket, evidence_state, scrub) "
+                  "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                   (inv.investigation_id, tenant, inv.alert_id, inv.request_key, inv.attempt, inv.status, inv.created_at,
                    inv.started_at, inv.finished_at, inv.disposition, inv.cost_usd, inv.cost_is_lower_limit,
-                   inv.failure_reason, lease, inv.update_ticket))  # C-3: every INSERT writes the flag
+                   inv.failure_reason, lease, inv.update_ticket,  # C-3: every INSERT writes the flag
+                   "none" if ended else None, "not_run" if ended else None))
         return inv
 
     def plant_learning_job(self, tenant: str, job: Any) -> Any:
         """Plant `job` (the wire model) as its row; its investigation must be planted. Returns it."""
         lease = job.created_at + DAY if job.status == "running" else None
+        ended = job.status not in ("queued", "running")  # #1546 A-O4: an ended row has an evidence state
         self._sql("INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, "
                   "trigger, status, created_at, finished_at, reason, lease_expires_at, sibling_cost_usd, "
-                  "publish_state) VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s, 0, 'none')",
+                  "publish_state, evidence_state) VALUES (%s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s, 0, 'none', %s)",
                   (job.learning_job_id, tenant, job.alert_id, job.investigation_id, f"k-{job.learning_job_id}",
-                   job.trigger, job.status, job.created_at, job.finished_at, job.reason, lease))
+                   job.trigger, job.status, job.created_at, job.finished_at, job.reason, lease,
+                   "none" if ended else None))
         return job
 
     def call(self, fn: Any, *args: Any, **kwargs: Any) -> Any:

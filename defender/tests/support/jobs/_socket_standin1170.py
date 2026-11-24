@@ -176,3 +176,32 @@ def handed_records(directory: Any, tenant: str) -> dict[str, Any]:
     from defender.tenancy import requested_tenant_id
 
     return directory.current_records(requested_tenant_id(tenant)).as_wire()
+
+
+def placed_inputs(tenant_id: str, inputs: Path, pin: str) -> Path:
+    """#1546: the inputs folder a learning job's helper fills before the launch (design "The job's folders": the pinned
+    export, written only by the helper, under `.job-inputs/<claim>/`): the tenant's export of `pin`, materialised from its
+    clone on the host as the helper's side does it, copied to where the container's `JobTenant` looks for it
+    (`export_folder(pin)` over `inputs`, the real class's answer). Returns that folder."""
+    from defender import tenancy
+    from defender.learning.author.version_control import materialise_export
+
+    root = tenancy.resolve_data_root()
+    export = materialise_export(tenancy.requested_tenant(root, tenant_id), pin)
+    target = Path(str(tenancy.JobTenant(id=tenant_id, data_root=Path(os.environ["DEFENDER_DATA_ROOT"]),
+                                        inputs=inputs).export_folder(pin)))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(Path(str(export.path)), target)
+    return target
+
+
+def pinned_materialise(pin: str, placed: Path) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """#1546 `export.materialise(commit=)` as the helper answers a learning job: the export it placed in the inputs for the pin,
+    any other commit refused (design: "`export.materialise` refuses any commit but the pin")."""
+
+    def answer(fields: dict[str, Any]) -> dict[str, Any]:
+        if fields.get("commit") != pin:
+            raise job_socket.Refused(f"only the pin {pin} is materialised for this job", "delivery")
+        return {"commit": pin, "path": str(placed)}
+
+    return answer

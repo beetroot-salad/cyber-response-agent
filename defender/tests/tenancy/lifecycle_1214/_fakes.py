@@ -314,25 +314,6 @@ class FakeForge(_Recorder):
                 return self._paged(call, [{"login": u} for u in sorted(self.team_members.get((org, team), set()))])
         return None
 
-    def _evidence(self, call: Call, op: str, key: str, body: dict[str, Any]) -> httpx.Response:
-        """`transit/datakey/plaintext/<key>` and `transit/decrypt/<key>` as the evidence policy allows them: a client token of an
-        AppRole made with `evidence_policy` whose entity's `tenant_id` names the key (`evidence-<tenant>`); the management
-        token, the delivery login and the sign login are refused (403). A datakey's ciphertext carries its plaintext."""
-        client = call.headers.get("x-vault-token")
-        role = self.tokens.get(client)
-        entity = self.token_entity.get(client)
-        tenant = (self.entities.get(entity or "", {}).get("metadata") or {}).get("tenant_id")
-        if role is None or self.evidence_policy not in self.approle_policies.get(role, []) or key != f"evidence-{tenant}":
-            return httpx.Response(403, json={"errors": ["permission denied"]})
-        if key not in self.transit_keys:
-            return httpx.Response(400, json={"errors": ["encryption key not found"]})
-        if op == "datakey":
-            self.datakeys.append((key, role))
-            plain = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
-            return httpx.Response(200, json={"data": {"plaintext": plain, "ciphertext": f"vault:v1:{plain}", "key_version": 1}})
-        self.decrypts.append((key, role))
-        return httpx.Response(200, json={"data": {"plaintext": str(body.get("ciphertext", "")).removeprefix("vault:v1:")}})
-
     def handle(self, request: httpx.Request) -> httpx.Response:  # noqa: C901, PLR0911, PLR0912 — one arm per endpoint
         call, injected = self._record(request)
         if injected is not None:
@@ -633,6 +614,25 @@ class FakeOpenBao(_Recorder):
             return httpx.Response(400, json={"errors": ["signing key not found"]})
         self.signs.append((key, role, str(body.get("input"))))
         return httpx.Response(200, json={"data": {"signature": f"vault:v1:{key}:{body.get('input')}", "key_version": 1}})
+
+    def _evidence(self, call: Call, op: str, key: str, body: dict[str, Any]) -> httpx.Response:
+        """`transit/datakey/plaintext/<key>` and `transit/decrypt/<key>` as the evidence policy allows them: a client token of an
+        AppRole made with `evidence_policy` whose entity's `tenant_id` names the key (`evidence-<tenant>`); the management
+        token, the delivery login and the sign login are refused (403). A datakey's ciphertext carries its plaintext."""
+        client = call.headers.get("x-vault-token")
+        role = self.tokens.get(client)
+        entity = self.token_entity.get(client)
+        tenant = (self.entities.get(entity or "", {}).get("metadata") or {}).get("tenant_id")
+        if role is None or self.evidence_policy not in self.approle_policies.get(role, []) or key != f"evidence-{tenant}":
+            return httpx.Response(403, json={"errors": ["permission denied"]})
+        if key not in self.transit_keys:
+            return httpx.Response(400, json={"errors": ["encryption key not found"]})
+        if op == "datakey":
+            self.datakeys.append((key, role))
+            plain = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+            return httpx.Response(200, json={"data": {"plaintext": plain, "ciphertext": f"vault:v1:{plain}", "key_version": 1}})
+        self.decrypts.append((key, role))
+        return httpx.Response(200, json={"data": {"plaintext": str(body.get("ciphertext", "")).removeprefix("vault:v1:")}})
 
     def handle(self, request: httpx.Request) -> httpx.Response:  # noqa: C901, PLR0911, PLR0912, PLR0915 — one arm per endpoint
         call, injected = self._record(request)

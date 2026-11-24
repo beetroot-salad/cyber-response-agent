@@ -201,3 +201,7 @@ VALID: dict[str, tuple[str, str, Any, str, Any]] = {
     "adoption-result": ("adoption", VERB_RESULT, ADOPTION_RESULT, "result", ADOPTION_RESULT),
     "drain-result": ("drain", VERB_RESULT, DRAIN_EXIT_STATUS, "result", DRAIN_EXIT_STATUS),
 }
+
+#: The launch fact naming the claim's inputs folder (`.job-inputs/<claim>/`, design "The job's folders"), from which a container
+#: builds its `JobTenant`'s `run_knowledge` and `export_folder(pin)`; adopted from the implementation's helper (both kinds).
+LAUNCH_INPUTS = "inputs_dir"

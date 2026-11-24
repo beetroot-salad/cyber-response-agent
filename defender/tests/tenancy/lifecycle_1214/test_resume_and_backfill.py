@@ -87,7 +87,8 @@ FAILURES = {
 
 def _names(world, tenant) -> tuple[str, ...]:
     [gen] = [g for g in world.generations(tenant)]
-    return (gen.bot_login, gen.oidc_role, gen.approle, gen.entity, gen.sign_approle, gen.sign_entity)
+    return (gen.bot_login, gen.oidc_role, gen.approle, gen.entity, gen.sign_approle, gen.sign_entity,
+            gen.evidence_approle, gen.evidence_entity)
 
 
 def _calls(world) -> int:
@@ -124,25 +125,31 @@ def test_a_failure_records_its_restart_point_is_not_retried_and_resume_only_clea
     world.drive()
     assert world.item(tenant)["state"] == "active"
     live = world.live(tenant)
-    assert (live.bot_login, live.oidc_role, live.approle, live.entity, live.sign_approle, live.sign_entity) == names
+    assert (live.bot_login, live.oidc_role, live.approle, live.entity, live.sign_approle, live.sign_entity,
+            live.evidence_approle, live.evidence_entity) == names
     assert (set(world.forge.users), set(world.openbao.oidc_roles), set(world.openbao.approles),
-            set(world.openbao.entities)) == ({names[0]}, {names[1]}, {names[2], names[4]}, {names[3], names[5]})
+            set(world.openbao.entities)) == ({names[0]}, {names[1]}, {names[2], names[4], names[6]},
+                                             {names[3], names[5], names[7]})
     assert list(world.forge.repos) == [f"{ORG}/{tenant}"]
     assert world.openbao.secret_accessors(live.approle) == {live.secret_accessor}
     assert world.openbao.secret_accessors(live.sign_approle) == {live.sign_secret_accessor}
-    assert len(world.openbao.aliases) == 2 and list(world.openbao.transit_keys) == [f"request-token-{tenant}"]
+    assert world.openbao.secret_accessors(live.evidence_approle) == {live.evidence_secret_accessor}
+    assert len(world.openbao.aliases) == 3
+    assert set(world.openbao.transit_keys) == {f"request-token-{tenant}", f"evidence-{tenant}"}
 
 
-@pytest.mark.parametrize("spent", ["delivery", "sign", "both"])
+@pytest.mark.parametrize("spent", ["delivery", "sign", "evidence", "all"])
 def test_a_spent_wrapper_found_when_install_is_taken_up_fails_loudly_and_restarts_at_wrap(world, spent):
-    """Either wrapper (or both) is spent before the host unwraps it: install fails loudly, leaves no secret file, restarts
-    at `wrap` (service); resume wraps both again and the job finishes with only the live secret ids (DC-4, A24')."""
+    """Any one of the three wrappers (or all) is spent before the host unwraps it: install fails loudly, leaves no secret
+    file, restarts at `wrap` (service); resume wraps all three again and the job finishes with only the live secret ids
+    (DC-4, A24', #1546 r9 evidence login)."""
     tenant = world.create()
     world.drive(stop=lambda: world.item(tenant)["step"] == "install")
     [gen] = world.generations(tenant)
-    assert len(world.openbao.wrapped) == 2, "control: a wrapped secret for each AppRole waits for the host"
+    assert len(world.openbao.wrapped) == 3, "control: a wrapped secret for each AppRole waits for the host"
+    which = {"delivery": gen.approle, "sign": gen.sign_approle, "evidence": gen.evidence_approle}
     for token, (approle, _secret, _accessor) in dict(world.openbao.wrapped).items():
-        if spent == "both" or (approle == gen.sign_approle) == (spent == "sign"):
+        if spent == "all" or approle == which[spent]:
             del world.openbao.wrapped[token]  # the unwrap happened and the host died before it committed
     world.drive()
     item = world.item(tenant)
@@ -154,10 +161,11 @@ def test_a_spent_wrapper_found_when_install_is_taken_up_fails_loudly_and_restart
     world.drive()
     assert world.item(tenant)["state"] == "active"
     wraps = [c for c in world.openbao.calls if c.path.endswith("/secret-id") and "x-vault-wrap-ttl" in c.headers]
-    assert len(wraps) == 4, "resume did not wrap a fresh secret for each AppRole"
+    assert len(wraps) == 6, "resume did not wrap a fresh secret for each of the three AppRoles"
     live = world.live(tenant)
     assert world.openbao.secret_accessors(live.approle) == {live.secret_accessor}
     assert world.openbao.secret_accessors(live.sign_approle) == {live.sign_secret_accessor}
+    assert world.openbao.secret_accessors(live.evidence_approle) == {live.evidence_secret_accessor}
 
 
 @pytest.mark.parametrize("line", ["stale 0123abc", "fresh", "error: remote refused", "fresh-ish 0123abc"])
@@ -278,7 +286,7 @@ def test_sweep_removes_unrecorded_secret_ids_and_secret_files_but_keeps_the_reco
     """At the sweep every secret id of both AppRoles but the installed ones and every file of the tenant's secrets
     directory no generation records are removed; another tenant's files are untouched (P1, RC-8, RC-9, DC-2, A24')."""
     other = world.active_tenant()
-    other_files = [world.live(other).host_secret_file, world.live(other).sign_secret_file]
+    other_files = [world.live(other).host_secret_file, world.live(other).sign_secret_file, world.live(other).evidence_secret_file]
     tenant = world.create()
     world.drive(stop=lambda: world.item(tenant)["step"] == "sweep")
     [gen] = world.generations(tenant)
@@ -286,14 +294,17 @@ def test_sweep_removes_unrecorded_secret_ids_and_secret_files_but_keeps_the_reco
     stray_file.write_text("left by a crash")
     world.openbao.approles[gen.approle]["accessor-stray"] = "secret-stray"
     world.openbao.approles[gen.sign_approle]["accessor-stray-sign"] = "secret-stray-sign"
-    assert gen.host_secret_file.is_file() and gen.sign_secret_file.is_file()  # control: the recorded files are there
+    world.openbao.approles[gen.evidence_approle]["accessor-stray-evidence"] = "secret-stray-evidence"
+    assert gen.host_secret_file.is_file() and gen.sign_secret_file.is_file() and gen.evidence_secret_file.is_file()  # control: the recorded files are there
     world.drive()
     assert world.item(tenant)["state"] == "active"
     live = world.live(tenant)
     assert not stray_file.exists()
-    assert live.host_secret_file.is_file() and live.sign_secret_file.is_file() and all(p.is_file() for p in other_files)
+    assert live.host_secret_file.is_file() and live.sign_secret_file.is_file() and live.evidence_secret_file.is_file()
+    assert all(p.is_file() for p in other_files)
     assert world.openbao.secret_accessors(live.approle) == {live.secret_accessor}
     assert world.openbao.secret_accessors(live.sign_approle) == {live.sign_secret_accessor}
+    assert world.openbao.secret_accessors(live.evidence_approle) == {live.evidence_secret_accessor}
 
 
 def test_an_offboard_that_fails_midway_is_resumed_from_its_restart_point_and_finishes(world):

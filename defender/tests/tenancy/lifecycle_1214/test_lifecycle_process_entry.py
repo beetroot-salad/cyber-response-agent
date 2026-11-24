@@ -14,6 +14,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from defender.tests.support.evidence._facts1546 import EVIDENCE_ENV_PREFIX  # noqa: E402
 from defender.tests.support.shared._postgres1339 import empty_database  # noqa: E402,F401 — fixture
 from defender.tests.support.tenancy._active1214 import DSN_ENV  # noqa: E402
 from defender.tests.support.tenancy._host1214 import LIFECYCLE_MARK  # noqa: E402
@@ -77,8 +78,10 @@ def test_serve_gives_the_host_the_credentialless_clients_and_the_service_the_cre
     expected = lifecycle_config(tmp_path, data_root)
     for name, value in (("forge-token", expected.forge_admin_token), ("bao-login", expected.openbao_login)):
         (tmp_path / name).write_text(value + "\n", encoding="utf-8")
-    for name in [k for k in os.environ if k.startswith(("DEFENDER_LIFECYCLE_", "LIFECYCLE_"))]:
+    for name in [k for k in os.environ if k.startswith(("DEFENDER_LIFECYCLE_", "LIFECYCLE_", EVIDENCE_ENV_PREFIX))]:
         monkeypatch.delenv(name)
+    for name in ("ENDPOINT", "BUCKET", "ACCESS_KEY", "SECRET_KEY"):  # #1546 A-O5: a lifecycle with no store is refused
+        monkeypatch.setenv(f"{EVIDENCE_ENV_PREFIX}{name}", "http://evidence.test:3900" if name == "ENDPOINT" else "x")
     for name, value in ((DSN_ENV, empty_database), (settings.FORGE_URL_ENV, expected.forge_url),
                         (settings.FORGE_TOKEN_FILE_ENV, str(tmp_path / "forge-token")),
                         (settings.OPENBAO_LOGIN_FILE_ENV, str(tmp_path / "bao-login")),

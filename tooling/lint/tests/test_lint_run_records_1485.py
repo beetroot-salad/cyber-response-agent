@@ -10,7 +10,7 @@ from _by_path import load_lint_gate
 
 _GATE = load_lint_gate("lint_run_records")
 _REPO = Path(__file__).resolve().parents[3]
-_RETIRED_FUNCTIONS = ("cut_over", "_read_learning", "learning_delivery")
+_RETIRED_FUNCTIONS = ("cut_over", "_read_learning", "learning_delivery")  # lint-stale-ref: ok — a deliberate list of retired names the gate must no longer permit
 
 
 def test_o5_the_gate_sweeps_the_lifted_store_and_still_the_rest():

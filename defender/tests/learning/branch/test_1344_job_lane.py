@@ -149,6 +149,7 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
             signer=extra.pop("signer", None), transport=extra.pop("issuer_transport", None))
     seams.update(extra)
     launch["records"] = handed_records(seams["directory"], tenant)
+    sent = _1546_helper_side(tmp_path, tenant, src, launch, answers)
     # In its job container (#1170 A6): no `--parent-pid`, and a job socket answering the helper's `launch` facts and the
     # export it materialises; the helper's own answers are `tests/jobs/test_job_helper_learning.py`'s.
     argv = ["--job", job, "--tenant", tenant, "--source", src.name]
@@ -163,10 +164,57 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
                 outcome = stop.code
     finally:
         signal.signal(signal.SIGTERM, previous)
-    return Ran(end=_read_json(runs / f"{job}.learning-end.json"),
-               progress=_read_json(runs / f"{job}.learning-progress.json"), questioner=asking, spawn=siblings,
+    # #1546 (A-O2, PR2): the end and the progress are typed records on the socket, not files in the job's folder.
+    return Ran(end=sent["outcome"][-1] if sent["outcome"] else None,
+               progress=sent["progress"][-1] if sent["progress"] else None, questioner=asking, spawn=siblings,
                judge=grading, ep=Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "episodes" / job, src=src,
                tenant=tenant, exit=outcome)
+
+
+def _1546_helper_side(tmp_path: Path, tenant: str, src: Path, launch: dict[str, Any],
+                      answers: dict[str, Any]) -> dict[str, list[Any]]:
+    """#1546: what the real helper gives a learning container besides #1170's facts (its own answers are pinned over the real
+    helper in `test_1546_job_tenant.py`): the claim's inputs folder holding the pinned export, the pin, the source as the
+    accepted bundle a pull returns (its host folder and session store then gone, A-O1), and the record verbs and pushes
+    taken and kept by name. Decides nothing the entry's tests are about."""
+    import shutil
+
+    from defender import job_socket
+    from defender.tests.support.evidence._facts1546 import LAUNCH_INPUTS
+    from defender.tests.support.jobs._evidence_flows1546 import pack, sha
+    from defender.tests.support.jobs._socket_standin1170 import pinned_materialise, placed_inputs
+
+    tenant_dir = src.parent.parent
+    pin = json.loads((src / "provenance.json").read_text(encoding="utf-8"))["knowledge"]["commit"]
+    inputs = tmp_path / ".job-inputs" / "c-1344"
+    inputs.mkdir(parents=True, exist_ok=True)
+    answers["export.materialise"] = pinned_materialise(pin, placed_inputs(tenant, inputs, pin))
+    launch.update({LAUNCH_INPUTS: str(inputs), "knowledge_commit": pin, "export_commit": pin})
+    bundle = pack(_1546_source_files(tenant_dir, src))
+    shutil.rmtree(src)
+    shutil.rmtree(tenant_dir / "sessions", ignore_errors=True)
+    sent: dict[str, list[Any]] = {name: [] for name in ("outcome", "progress", "arms", "arm", "put")}
+    parts: dict[str, list[bytes]] = {}
+
+    def pull(fields: dict[str, Any]) -> dict[str, Any]:
+        if (fields.get("owner"), fields.get("object")) != (src.name, "bundle"):
+            raise job_socket.Refused("not among the claim's inputs", "out_of_claim")
+        return {"data": bundle, "last": True}
+
+    def put(fields: dict[str, Any]) -> dict[str, Any]:
+        parts.setdefault(fields["object"], []).append(fields["data"])
+        if not fields["last"]:
+            return {}
+        data = b"".join(parts.pop(fields["object"]))
+        sent["put"].append((fields["object"], data))
+        return {"size": len(data), "sha256": sha(data)}
+
+    def keep(name: str) -> Any:
+        return lambda fields: sent[name].append(fields.get("record")) or {}
+
+    answers.update({"evidence.pull": pull, "evidence.put": put, **{name: keep(name) for name in ("outcome", "progress",
+                                                                                                   "arms", "arm")}})
+    return sent
 
 
 # --- O3: the fork pick --------------------------------------------------------------------------------
@@ -872,6 +920,8 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
     from defender.tests.learning.oracle.live_contracts import _spec1224 as S
     from defender.tests.support.jobs._socket_standin1170 import SocketStandIn, handed_records
     from defender.tests.support.jobs._socket_standin1170 import materialise as materialise_export
+    from defender.tests.support.jobs._socket_standin1170 import pinned_materialise, placed_inputs
+    from defender.tests.support.evidence._facts1546 import LAUNCH_INPUTS
     from defender.tests.support.learning.branch import _triplet_947 as T
     from defender.tests.support.learning.judge import _judge_921 as J
 
@@ -881,6 +931,7 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
     tenant_dir = src.parent.parent
     tenant = tenant_dir.name
     source_files = _1546_source_files(tenant_dir, src)
+    pin = json.loads((src / "provenance.json").read_text(encoding="utf-8"))["knowledge"]["commit"]
     assert any(name.startswith("sessions/") for name in source_files), "premise: the source has a session store"
     source_bundle = pack(source_files)
     shutil.rmtree(src)  # A-O1: the host keeps nothing of the finished run
@@ -935,7 +986,13 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
                  directory=est.launch_directory(tenant), spawn=spawned, candidates=L.choose(T.BRANCH_MESSAGE_ID))
     answers = {"export.materialise": materialise_export(tenant), "evidence.pull": pull, "evidence.put": put,
                "outcome": outcome, "arms": arms, "arm": arm}
-    launch = {"kind": "learning", "job": L.JOB, "records": handed_records(seams["directory"], tenant)}
+    # The launch facts the real helper hands a learning container (its own answers: `test_1546_job_tenant.py`): the claim's
+    # inputs folder, holding the pinned export the helper placed there, and the pin itself.
+    inputs = tmp_path / ".job-inputs" / "c-1546"
+    inputs.mkdir(parents=True)
+    answers["export.materialise"] = pinned_materialise(pin, placed_inputs(tenant, inputs, pin))
+    launch = {"kind": "learning", "job": L.JOB, "records": handed_records(seams["directory"], tenant),
+              LAUNCH_INPUTS: str(inputs), "knowledge_commit": pin, "export_commit": pin}
     previous = signal.signal(signal.SIGTERM, L._unexpected_sigterm)
     try:
         with SocketStandIn(tenant, launch=launch, answers=answers) as helper:
