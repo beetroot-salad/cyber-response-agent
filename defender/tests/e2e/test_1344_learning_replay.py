@@ -93,76 +93,6 @@ def _admitted_gathers(lane, run_id: str, dest: Path) -> tuple[list[int], list[in
     return gathers, admitted
 
 
-def _stored_bundle(lane, investigation: str) -> tuple[str, str, bytes]:
-    """The investigation's accepted bundle as stored: its claim token, its upload row's wrapped key and its bytes."""
-    from defender.tests.support.jobs._evidence_flows1546 import claim_of
-
-    token = claim_of(lane.dsn, "investigation", investigation)
-    [(wrapped,)] = execute(lane.dsn, "SELECT wrapped_key FROM jobs.uploads WHERE token = %s AND object = 'bundle' "
-                                     "AND status = 'uploaded'", (token,))
-    body = lane.bundle(investigation)
-    assert body is not None, "premise: the investigation stored its bundle"
-    return token, wrapped, body
-
-
-def _session_db_in(tenant_dir: Path, investigation: str) -> Path:
-    """The investigation's session database in an extracted bundle (`tenant_dir`: its tenant folder), by its case id."""
-    from defender.tests.support.jobs._jobs1342 import session_db
-
-    runs = tenant_dir / "runs"
-    case = json.loads((runs / f"{investigation}.session-pointer.json").read_text(encoding="utf-8"))["case_id"]
-    path = session_db(runs, case)
-    assert path.is_file(), f"premise: the run's session database is in its bundle, at {path}"
-    return path
-
-
-def _store_version(tenant_dir: Path, investigation: str) -> int:
-    """The `user_version` of the investigation's session database in an extracted bundle."""
-    import sqlite3
-
-    conn = sqlite3.connect(_session_db_in(tenant_dir, investigation))
-    try:
-        return int(conn.execute("PRAGMA user_version").fetchone()[0])
-    finally:
-        conn.close()
-
-
-def _a_source_of_another_store_version(lane, investigation: str, work: Path) -> int:
-    """L5's source: the investigation's stored bundle replaced by the same bundle whose session database is as a store of
-    another format version leaves it (`user_version` 99). The source exists only in the store (#1546 r10, A-O1), so the
-    damage is in the bytes the learning job's pull is served: re-put under the same key and data key, and its upload row's
-    size and digest moved to the new bytes, so the pull hands the job exactly these (it checks them). Returns the stored
-    database's version as read back from the store."""
-    import io
-    import sqlite3
-    import tarfile
-
-    from defender.tests.support.jobs._evidence_flows1546 import members, pack, sha
-
-    token, wrapped, body = _stored_bundle(lane, investigation)
-    tenant_dir = work / "tenant"
-    with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as packed:
-        packed.extractall(tenant_dir, filter="data")
-    conn = sqlite3.connect(_session_db_in(tenant_dir, investigation))
-    try:
-        conn.execute("PRAGMA user_version = 99")
-        conn.commit()
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # into the database file itself: the bundle holds that file
-    finally:
-        conn.close()
-    # The bundle's own members, each with its bytes now; a member sqlite folded into the database file on close (a
-    # write-ahead log) is gone, and the database file holds what it held.
-    damaged = pack({name: (tenant_dir / name).read_bytes() for name in members(body) if (tenant_dir / name).is_file()})
-    key = f"t/{lane.tenant}/investigation/{investigation}/{token}/bundle"
-    lane.garage.put(key, damaged, sse_key=lane.keys.unwrap(lane.tenant, wrapped))
-    execute(lane.dsn, "UPDATE jobs.uploads SET size = %s, sha256 = %s WHERE token = %s AND object = 'bundle'",
-            (len(damaged), sha(damaged), token))
-    back = work / "read-back"
-    with tarfile.open(fileobj=io.BytesIO(_stored_bundle(lane, investigation)[2]), mode="r:gz") as packed:
-        packed.extractall(back, filter="data")
-    return _store_version(back, investigation)
-
-
 async def _run_flow(migrated_database, tmp_path, monkeypatch, request, *, investigate_mode, damage=None):  # noqa: F811
     """The worker over one queued investigation, learning slot on: returns what the cases read back. #1546: the lane has
     the store every job needs (`test_worker_replay._lane`: Garage by the helper's environment names, the tenant's
@@ -182,6 +112,11 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, request, *, invest
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")  # the copy is read-only, as the worker's children see it
     entry = entry_in_a_code_copy(tmp_path / "code")
+    if damage is not None:
+        # L5: the learning job's helper child, before its helper starts, rewrites the source's stored bundle
+        # (`_flow_entry1344._a_source_of_another_store_version`): in its own process, never on this test's event loop,
+        # where the worker's transactions are parked.
+        monkeypatch.setenv("FLOW_DAMAGE", damage)
     golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
     marks = tmp_path / "marks"
     with B.run_tenant(tmp_path, root, tenant_id=fresh_tenant()) as t:
@@ -204,9 +139,6 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, request, *, invest
             flow["investigation"] = inv.investigation_id
 
             def learning(launch) -> list[str]:
-                if damage == "store-version":  # the source ended and is stored; its learning job's helper is not started yet
-                    flow["stored_version"] = _a_source_of_another_store_version(
-                        lane, str(inv.investigation_id), tmp_path / "damage")
                 return [sys.executable, str(entry), "family", t.commit, str(marks / "family"), str(t.remote), "--job", launch.job_id,
                         "--tenant", launch.tenant_id, "--source", inv.investigation_id, "--parent-pid", str(launch.parent_pid)]
 
@@ -219,6 +151,12 @@ async def _run_flow(migrated_database, tmp_path, monkeypatch, request, *, invest
             await worker.drain()
         if damage is None:  # a damaged store is one current code refuses to open, by design
             flow["gathers"] = _admitted_gathers(lane, str(inv.investigation_id), tmp_path / "stored")
+        else:  # the source as the learning job's pull was served it: the stored bundle, read back here
+            from defender.tests.support.jobs import _store_version1546 as V
+
+            body = lane.bundle(str(inv.investigation_id))
+            assert body is not None, "premise: the investigation stored its bundle"
+            flow["stored_version"] = V.store_version(body, str(inv.investigation_id), tmp_path / "read-back")
     return flow
 
 
@@ -276,12 +214,13 @@ async def test_o3_a_completed_investigation_with_no_gather_ends_its_job_skipped_
 async def test_l5_a_source_whose_session_store_is_of_another_version_ends_failed_launch_refused_not_in_a_crash(
         migrated_database, tmp_path, monkeypatch, request):  # noqa: F811
     """The source's database carries a format version current code refuses: `failed`/`launch_refused` with the `schema-version` kind's fixed wording, before any sibling, as every source whose closing record cannot be looked at (owner decision, #1534: no backwards compatibility; no longer `skipped`/`history_unreadable`); the intact flow above is the control. (O3, L5, Old history, V-LOOK)"""
+    from defender.tests.support.jobs import _store_version1546 as V
     from defender.tests.support.storage import _readers1534 as R
 
     flow = await _run_flow(migrated_database, tmp_path, monkeypatch, request, investigate_mode="investigate", damage="store-version")
 
     assert row(migrated_database, flow["investigation"])["stage"] == "completed"
-    assert flow.get("stored_version") == 99, "premise: the source's stored bundle holds a session store of another version"
+    assert flow.get("stored_version") == V.OTHER_VERSION, "premise: the source's stored bundle holds a session store of another version"
     assert (flow["marks"] / "family" / "runs").is_file(), "premise: the family step started (behind its real helper)"
     (job,) = _jobs(migrated_database, flow["investigation"])
     assert (job["status"], job["reason"]) == ("failed", "launch_refused"), job
