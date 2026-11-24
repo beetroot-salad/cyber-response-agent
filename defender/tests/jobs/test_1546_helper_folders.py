@@ -254,9 +254,11 @@ def test_copy_make_with_a_commit_answers_the_claims_pin_and_refuses_every_other_
     assert (pin in [c for _d, c in asked]), "control: the pin's copy was fetched by id"
 
 
-def _damaging_fetch(scene, nth: int) -> Any:
+def _damaging_fetch(scene, nth: int, damage: list[Path]) -> Any:
     """The real fetch seam, which for the `nth` fetch into the claim's inputs `run-knowledge/` (the `nth` sibling's copy)
-    also writes a link into the copy's `settings/` once the child has filled it: damage only the copy check can see."""
+    also replaces the copy's `settings/verb-grants.yaml` (a `REQUIRED_SETTINGS` file, so the copy check reads it) by a link
+    once the child has filled it, before the helper checks the copy: damage only that check can see. The damaged file is
+    appended to `damage`."""
     fetch, _asked = H.recording_fetch(scene)
     count = {"n": 0}
 
@@ -264,8 +266,11 @@ def _damaging_fetch(scene, nth: int) -> Any:
         line = fetch(tenant_id, dest, **kw)
         if Path(dest).is_relative_to(J.run_copies(scene)):
             count["n"] += 1
-            if count["n"] == nth and (Path(dest) / "settings").is_dir():
-                (Path(dest) / "settings" / "linked.yaml").symlink_to("/etc/passwd")
+            grants = Path(dest) / "settings" / "verb-grants.yaml"
+            if count["n"] == nth and grants.is_file():
+                grants.unlink()
+                grants.symlink_to("/etc/passwd")
+                damage.append(grants)
         return line
 
     damaging.calls = fetch.calls  # type: ignore[attr-defined]
@@ -276,8 +281,8 @@ def test_an_arms_run_copy_goes_through_the_same_settings_check_as_the_parents(sc
     """The job stages its `arms` roster (the staged fact names each arm's run, no roster file exists); each sibling's copy is
     a fetch of the claim's pin into the inputs. The first sibling's `copy.make` is answered under the staged roster's run id
     (control: its copy in `.job-inputs/<claim>/run-knowledge/<run>/`, its `run_dir` the episode's `runs/<run>` the container
-    will make); when the fetch stand-in writes a link into the second sibling's `settings/`, that sibling's `copy.make` is
-    refused and it gets no copy and no run folder. (design r9:289-290 "arm run copies go through the same settings check as
+    will make); when the second sibling's fetched copy has its `settings/verb-grants.yaml` replaced by a link (after the
+    fetch, before the helper's copy check), that sibling's `copy.make` is refused and it gets no copy and no run folder. (design r9:289-290 "arm run copies go through the same settings check as
     the parent's", discharged by `resolve_knowledge`'s copy check, r10 (a) "Who validates"; `arms` fact, PR2; D-2: the helper
     makes no `runs/<run>/`)"""
     planted = plant(scene, "learning")
@@ -292,8 +297,10 @@ def test_an_arms_run_copy_goes_through_the_same_settings_check_as_the_parents(sc
         seen["folders"] = sorted(p.name for p in (ep / "runs").iterdir()) if (ep / "runs").is_dir() else []
         return 0
 
-    drive(scene, planted, job, fetch=_damaging_fetch(scene, 2), **evidence_store.seams)
+    damage: list[Path] = []
+    drive(scene, planted, job, fetch=_damaging_fetch(scene, 2, damage), **evidence_store.seams)
     runs = seen["runs"]
+    assert len(damage) == 1, f"premise: the second sibling's fetched copy was damaged once: {damage}"
     assert seen["first"]["run"] == runs["b"], "the arm's run is the staged roster's"
     assert Path(seen["first"]["path"]) == J.run_copies(scene) / runs["b"], seen["first"]
     assert Path(seen["first"]["run_dir"]) == seen["ep"] / "runs" / runs["b"], seen["first"]

@@ -230,9 +230,10 @@ def _damaging_main_copy(scene, damage: dict) -> object:
 def test_the_learning_job_entrys_settings_read_comes_from_the_copy_the_helper_handed_it(scene, evidence_store, damaged,
                                                                                          reaches, tmp_path):
     """The learning container's tenant check reads `main`'s settings from the `copy.make()` copy the helper handed it, in the
-    claim's `shared/` folder: a link the fetch put in that copy's `settings/verb-grants.yaml` stops the entry after it built
-    its `JobTenant` and before it opens its launch source. The `none` arm (no damage) is the control that the scene reaches
-    the launch source at all, so the damaged arm's stop is the damage's. (owner D4 acknowledgement, r10 (c): "the container's
+    claim's `shared/` folder: a link the fetch put in that copy's `settings/verb-grants.yaml` stops the entry at that read (a
+    `launch_refused` naming the tenant's refusal), after it built its `JobTenant` and before the first step past the
+    settings read (the source's declared disposition, `cli._declared_or_refused`). The `none` arm (no damage) is the
+    control that the scene gets past the settings read at all, so the damaged arm's stop is the damage's. (owner D4 acknowledgement, r10 (c): "the container's
     settings read comes from the copy the helper handed it", never the host tenant folder, which holds no settings now; the
     `clone` arm went with the clone, r10 (f) bucket 2; was `..._gets_past_its_tenant_step_without_reading_the_clones_settings`)"""
     from defender.learning.branch import cli, job_entry
@@ -259,12 +260,15 @@ def test_the_learning_job_entrys_settings_read_comes_from_the_copy_the_helper_ha
 
     from defender.tenancy import JobTenant
 
-    with ThreadCalls({"source_opened": cli._open_launch_source, "tenant_step": JobTenant.__init__}) as calls:
+    with ThreadCalls({"past_settings": cli._declared_or_refused, "tenant_step": JobTenant.__init__}) as calls:
         H.drive(scene, planted, job, **seams)
     if damaged == "main-copy":
         assert damage.get("files"), "premise: the helper fetched no `copy.make()` copy into `shared/` to damage"
     # Both arms reach their tenant step (the container builds its `JobTenant`), so the damaged arm's stop comes after it, at
     # the settings read, not at an earlier step.
     assert calls.container("tenant_step") >= 1, (damaged, "the entry stopped before it built its job tenant")
-    assert (calls.container("source_opened") >= 1) is reaches, (damaged, damage.get("files"),
-                                                                 H.facts(scene.dsn, scene.claim).get("outcome"))
+    outcome = H.facts(scene.dsn, scene.claim).get("outcome")
+    assert (calls.container("past_settings") >= 1) is reaches, (damaged, damage.get("files"), outcome)
+    if not reaches:
+        assert (outcome or {}).get("reason") == "launch_refused", outcome
+        assert "tenant" in ((outcome or {}).get("message") or ""), f"the stop is not the tenant check's: {outcome}"

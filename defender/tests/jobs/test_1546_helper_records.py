@@ -209,7 +209,8 @@ def test_a_knowledge_request_is_an_unknown_verb_for_every_kind_and_the_staged_kn
     from defender import job_host
 
     assert isinstance(got["refusal"], job_host.Refused), f"a {kind} job's `knowledge` request was answered: {got['refusal']!r}"
-    assert got["refusal"].code == "unknown-request", got["refusal"].code
+    # The verb is gone (r10 U-3): an unregistered name (`unknown-request`), or one no kind of this job answers.
+    assert got["refusal"].code in ("unknown-request", "not-for-kind"), got["refusal"].code
     assert not isinstance(got["own"], job_host.Refused), f"control: the {kind} job's own verb was refused: {got['own']!r}"
     staged = facts(scene.dsn, scene.claim)
     assert "refused/knowledge" not in staged, staged.get("refused/knowledge")
