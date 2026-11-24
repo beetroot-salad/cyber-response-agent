@@ -37,12 +37,15 @@ def _columns(dsn: str, table: str) -> set[str]:
 
 
 def test_the_revision_is_on_one_line_of_history_after_the_host_requests_revision():
-    """One head; the revision is the head or an ancestor of it and follows `_host_requests`. (data model)"""
+    """One head; the revision is the head or an ancestor of it and follows `_host_requests`, and #1618's
+    `_drop_publish_status` (r10 (g): #1546's revisions are renumbered behind main's head, so their union has one head).
+    (data model)"""
     from defender.migrations import head, heads
 
     assert heads() == (head(),)
     assert _revision() == head() or _revision() in revisions.ancestors(head())
     assert revisions.by_suffix("_host_requests") in revisions.ancestors(_revision())
+    assert _prior() == revisions.by_suffix("_drop_publish_status"), f"the revision does not sit on #1618's drop: {_prior()}"
 
 
 @pytest.mark.postgres
