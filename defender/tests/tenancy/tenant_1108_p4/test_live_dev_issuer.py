@@ -334,7 +334,8 @@ def test_one_lesson_pr_is_delivered_end_to_end_through_the_dev_issuer_O12():
         pytest.skip("opens a PR on the lab repo: set DEFENDER_LIVE_ALLOW_LAB_PR=1")
     import httpx
 
-    from defender.learning.author.version_control import DeliveryStatus, TenantDelivery
+    from defender.learning.author.version_control import TenantDelivery
+    from defender.tests.tenancy.tenant_1108_delivery._support import DeliveryStatus, deliver
     from defender.learning.author.version_control.forgejo import ForgeAddress
 
     identity = _login(lab)
@@ -354,7 +355,7 @@ def test_one_lesson_pr_is_delivered_end_to_end_through_the_dev_issuer_O12():
         change_set = batch.change_set()
         assert [c.path for c in change_set] == [f"agent/lessons/{name}.md"]
         batch.commit(change_set, f"O12 live probe {batch_id}")
-        delivered = delivery.finish(batch)
+        delivered = deliver(delivery, batch)  # #1618: `finish` is deleted; the tick's push and PR
         assert delivered.status == DeliveryStatus.OPENED, delivered
         number = int(str(delivered.url).rstrip("/").rsplit("/", 1)[1])
         pr = httpx.get(f"{api}/pulls/{number}", headers=_bearer(identity), timeout=30).json()

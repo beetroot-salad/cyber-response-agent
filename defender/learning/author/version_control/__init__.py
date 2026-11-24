@@ -7,9 +7,7 @@ from .credential import TenantForgeCredential, forge_credential
 from .model import (
     AgentChange,
     ChangeSet,
-    Delivered,
     DeliveryRefused,
-    DeliveryStatus,
 )
 from .fetch import fetch_child_main, fetch_copy
 from .repository import NETWORK_TIMEOUT
@@ -18,9 +16,7 @@ __all__ = [
     "AgentChange",
     "Batch",
     "ChangeSet",
-    "Delivered",
     "DeliveryRefused",
-    "DeliveryStatus",
     "ForgejoAuthError",
     "ForgejoIdentity",
     "NETWORK_TIMEOUT",

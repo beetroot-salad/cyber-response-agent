@@ -20,6 +20,8 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
+from enum import StrEnum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -795,7 +797,6 @@ def push_and_open(batch, *, title="learning", body=""):
     the batch's tip pushed from its private repository (`GitRepository.push`, the tick's end push) and its PR opened
     (`store_delivery.open_pr_on`, as the tick opens it). Not the tick's policy (no reconcile, no existing-PR lookup): a
     case about `finish`'s own semantics is retired with it. Returns `Delivered(opened, url)`."""
-    from defender.learning.author.version_control.model import Delivered, DeliveryStatus
     from defender.learning.author.version_control.store_delivery import open_pr_on
 
     tip = batch.repository.branch_tip(batch.branch)
@@ -855,7 +856,6 @@ def deliver(d, batch):
     `merged` or `closed` as the forge lists it, never opened again), else opened (`store_delivery.open_pr_on`:
     `opened`). Composes production verbs only; the store's record of the batch is not involved (its cases are the
     tick's)."""
-    from defender.learning.author.version_control.model import Delivered, DeliveryStatus
     from defender.learning.author.version_control.store_delivery import open_pr_on
     from defender.learning.core.store_tick import find_pr
 
@@ -870,6 +870,24 @@ def deliver(d, batch):
     _number, url = open_pr_on(repository, branch=batch.branch, title=f"learning: tenant knowledge batch {batch.id}",
                               body=f"Tenant agent knowledge batch `{batch.branch}`.")
     return Delivered(DeliveryStatus.OPENED, url)
+
+
+class DeliveryStatus(StrEnum):
+    """Where a stand-in delivery (`deliver`, `push_and_open`) left a batch: test-only since #1618 deleted `finish`."""
+
+    OPENED = "opened"
+    OPEN = "open"
+    MERGED = "merged"
+    CLOSED = "closed"
+    NOTHING = "nothing to deliver"
+
+
+@dataclass(frozen=True)
+class Delivered:
+    """A stand-in delivery's answer: `status`, and the PR's `url` when there is one."""
+
+    status: DeliveryStatus
+    url: str | None = None
 
 
 def opened(result, number=7):

@@ -6,7 +6,6 @@ import contextlib
 import re
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from enum import StrEnum
 
 from defender import _git
 from defender.tenancy import DeliveryRefused
@@ -189,21 +188,3 @@ class ChangeSet:
         return len(self.changes)
 
 
-class DeliveryStatus(StrEnum):
-    """Where a batch (or a revert) stands with the forge."""
-
-    OPENED = "opened"
-    """A PR this call opened."""
-    OPEN = "open"
-    """An open PR this call found; nothing was pushed or opened."""
-    NOTHING = "nothing to deliver"
-    """No branch, or a branch holding nothing past its base."""
-
-
-@dataclass(frozen=True)
-class Delivered:
-    """`status`, and the PR's `url` for `opened` and `open` (also kept for `merged` and
-    `closed`)."""
-
-    status: DeliveryStatus
-    url: str | None = None
