@@ -213,18 +213,24 @@ async def test_control_a_helper_that_served_its_job_with_no_end_record_is_no_rep
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report"), stored
 
 
-class _RunsGoneAtTheRuntimeCheck(ContainerStandIn):
-    """A daemon without the box runtime (the helper's own start failure, before any container), whose answer comes
-    after the tenant's runs folder was swapped for a file: the start failure's end record cannot be written."""
+class _StoreGoneAtTheRuntimeCheck(ContainerStandIn):
+    """A daemon without the box runtime (the helper's own start failure, before any container), whose answer comes after
+    the job store lost the table the helper stages its facts in: the start failure's ending cannot be written. #1546 (A-O2,
+    PR2): a decided ending is the staged `outcome` under the claim, no end record beside the run, so the store, not the
+    tenant's runs folder, is where the write fails. The table is renamed, not dropped, so the test reads what landed."""
 
-    def __init__(self, runs) -> None:
+    GONE = "staged_facts_gone_1170"
+
+    def __init__(self, dsn: str) -> None:
         super().__init__(lambda c: 0, runtimes=("no-such-runtime",))
-        self._runs = runs
+        self._dsn, self.gone = dsn, False
 
     def __call__(self, argv, **kw):
-        if list(argv)[1:2] == ["info"] and self._runs.is_dir():
-            self._runs.rename(self._runs.with_name("runs-gone-1170"))
-            self._runs.write_text("not a folder\n", encoding="utf-8")
+        if list(argv)[1:2] == ["info"] and not self.gone:
+            from defender.tests.support.shared._postgres1339 import execute
+
+            execute(self._dsn, f"ALTER TABLE jobs.staged_facts RENAME TO {self.GONE}")
+            self.gone = True
         return super().__call__(argv, **kw)
 
 
@@ -233,13 +239,17 @@ class _RunsGoneAtTheRuntimeCheck(ContainerStandIn):
 def test_a_helper_that_cannot_write_the_ending_it_decided_does_not_exit_0(scene):
     """An ending the helper decided before the container, whose record cannot be written, is the helper's failure:
     not exit 0, which the worker would read as a served job that left no report."""
+    from defender.tests.support.shared._postgres1339 import execute
+
     inv = str(uuid.uuid4())
     scene.plant(inv)
-    docker = _RunsGoneAtTheRuntimeCheck(scene.runs)
+    docker = _StoreGoneAtTheRuntimeCheck(scene.dsn)
     ran = drive_helper(scene, scene.argv("investigation", inv), docker=docker, signer=make_signer())
 
+    assert docker.gone, "premise: the helper reached its runtime check (the store's table went then)"
     assert docker.boxes == [], "control: no container started"
-    assert not (scene.runs.with_name("runs-gone-1170") / f"{inv}.job-end.json").exists(), "control: no record"
+    landed = execute(scene.dsn, f"SELECT name FROM jobs.{docker.GONE} WHERE token = %s", (scene.claim,))  # noqa: S608
+    assert ("outcome",) not in landed, f"control: no record ({landed})"
     assert ran.rc != 0, (ran.rc, ran.raised)
 
 

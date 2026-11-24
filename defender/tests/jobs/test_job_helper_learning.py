@@ -501,9 +501,18 @@ def _as_the_container_makes(answer: dict[str, Any]) -> Path:
     """#1546 (r10 (a), owner decision D-2): the sibling's run folder at the answered `run_dir`, made as the container makes it
     (main's run setup: exclusively, in the container's own process); the helper makes only the episode's `runs/`. Tolerates a
     folder already there, so a scene that needs the folder runs against a helper that still makes it (the D-2 assertion that
-    it does not is `test_a6_a_sibling_gets_its_worlds_roster_id...`'s)."""
+    it does not is `test_a6_a_sibling_gets_its_worlds_roster_id...`'s). The run's input directory is made with it, the alert
+    and its record, as main's `run_common.materialize_run` writes them in the container (`_write_input`; r10 D-2: "with the
+    episode's copy of the source alert as input"), since the box start binds that directory and refuses a run without it."""
+    from defender.records import RunPaths
+    from defender.tests.support.jobs._job_helper import ALERT_BYTES
+    from defender.tests.support.storage._alert_plant import plant_alert
+
     run_dir = Path(answer["run_dir"])
     run_dir.mkdir(exist_ok=True)
+    inputs = RunPaths(run_dir).alert_input_dir
+    if not (inputs.is_dir() and any(inputs.iterdir())):
+        plant_alert(run_dir, ALERT_BYTES)
     return run_dir
 
 
