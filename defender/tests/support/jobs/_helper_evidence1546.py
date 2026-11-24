@@ -613,3 +613,35 @@ def store_for(request: pytest.FixtureRequest, scene: HelperScene) -> Store:
     store.seams = {"evidence": store.blob_store(),
                    "evidence_keys": evidence_module().EvidenceKeys(addr=openbao.addr, **login)}
     return store
+
+
+def stage_roster(scene: HelperScene, c: Any, planted: Planted) -> tuple[Path, dict[str, str], dict[str, str]]:
+    """What a learning job's pre-flight leaves, made from inside the container: the source's run folder and the episode in
+    the job's own root, and its roster sent as the `arms` record. Returns (episode, world id by label, run id by label)."""
+    from defender.tests.support.evidence._facts1546 import sent_arms
+    from defender.tests.support.jobs._job_helper import host_path
+    from defender.tests.support.learning.branch import _triplet_947 as T
+
+    owner, source = str(planted.owner), str(planted.source)  # repair-brief D1: plain `str` (YAML cannot dump an id subclass)
+    folder = host_path(c.mounts, str(job_root(scene) / scene.tenant))  # the job's own root, where its episode is made
+    (folder / "runs" / source).mkdir(parents=True, exist_ok=True)
+    doc = T.family_doc(episode_id=owner, source_run_dir=str(folder / "runs" / source), source_run_id=source)
+    ep = T.episode(scene.root, doc=doc, root=folder / "episodes", episode_id=owner)
+    worlds = {w: T.world_id(ep, w) for w in T.WORLDS}
+    runs = {w: str(uuid.uuid4()) for w in T.WORLDS}
+    send(c, "arms", record=sent_arms(*[(runs[w], worlds[w]) for w in T.WORLDS]))
+    return ep, worlds, runs
+
+
+def recording_fetch(scene: HelperScene) -> tuple[Any, list[tuple[str, str | None]]]:
+    """The real fetch seam over the scene's remote, each ask's `(dest, commit)` also recorded."""
+    from defender.tests.tenancy.knowledge_1618 import _support as K
+
+    seam, asked = K.fetch_seam(scene.t), []
+
+    def fetch(tenant_id, dest, **kw) -> str:
+        asked.append((str(dest), kw.get("commit")))
+        return seam(tenant_id, dest, **kw)
+
+    fetch.calls = seam.calls  # type: ignore[attr-defined]  # what `drive_helper` reads as `ran.fetch.calls`
+    return fetch, asked

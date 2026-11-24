@@ -108,24 +108,6 @@ def _walk(folder: Path) -> list[tuple[Path, os.stat_result]]:
     return [(p, p.lstat()) for p in sorted(folder.rglob("*"))]
 
 
-def _stage_roster(scene, c, planted) -> tuple[Path, dict[str, str], dict[str, str]]:
-    """What a learning job's pre-flight leaves, made from inside the container: the source's run folder and the episode in
-    the job's own root, and its roster sent as the `arms` record. Returns (episode, world id by label, run id by label)."""
-    from defender.tests.support.evidence._facts1546 import sent_arms
-    from defender.tests.support.jobs._helper_evidence1546 import send
-    from defender.tests.support.learning.branch import _triplet_947 as T
-
-    owner, source = str(planted.owner), str(planted.source)  # repair-brief D1: plain `str` (YAML cannot dump an id subclass)
-    folder = J.host_path(c.mounts, str(job_root(scene) / scene.tenant))  # the job's own root, where its episode is made
-    (folder / "runs" / source).mkdir(parents=True, exist_ok=True)
-    doc = T.family_doc(episode_id=owner, source_run_dir=str(folder / "runs" / source), source_run_id=source)
-    ep = T.episode(scene.root, doc=doc, root=folder / "episodes", episode_id=owner)
-    worlds = {w: T.world_id(ep, w) for w in T.WORLDS}
-    runs = {w: str(uuid.uuid4()) for w in T.WORLDS}
-    send(c, "arms", record=sent_arms(*[(runs[w], worlds[w]) for w in T.WORLDS]))
-    return ep, worlds, runs
-
-
 @pytest.mark.parametrize("kind", ["investigation", "learning", "readiness", "adoption"])
 def test_every_file_the_helper_places_in_a_root_or_inputs_has_link_count_one_and_no_link(request, scene, checkout, kind):
     """Every regular file under the job's root and inputs has `st_nlink == 1` and nothing is a symlink or special file, and
@@ -142,7 +124,7 @@ def test_every_file_the_helper_places_in_a_root_or_inputs_has_link_count_one_and
     def job(c) -> int:
         seen["entries"] = entries()
         if kind == "learning":
-            _ep, worlds, runs = _stage_roster(scene, c, planted)
+            _ep, worlds, runs = H.stage_roster(scene, c, planted)
             seen["copy"] = c.request("copy.make", world=worlds["b"])
             seen["entries"] += entries()
         return 0
@@ -226,20 +208,6 @@ def test_a_box_bind_under_the_root_or_the_inputs_replaced_by_a_link_is_refused_c
 
 # --- the pin: `copy.make(commit=)` answers the claim's pin only ---------------------------------------------------------------
 
-def _recording_fetch(scene) -> tuple[Any, list[tuple[str, str | None]]]:
-    """The real fetch seam over the scene's remote, each ask's `(dest, commit)` also recorded."""
-    from defender.tests.tenancy.knowledge_1618 import _support as K
-
-    seam, asked = K.fetch_seam(scene.t), []
-
-    def fetch(tenant_id, dest, **kw) -> str:
-        asked.append((str(dest), kw.get("commit")))
-        return seam(tenant_id, dest, **kw)
-
-    fetch.calls = seam.calls  # type: ignore[attr-defined]
-    return fetch, asked
-
-
 def _shared(scene) -> Path:
     return scene.root / H.SCRATCH / scene.claim / "shared"
 
@@ -258,7 +226,7 @@ def test_copy_make_with_a_commit_answers_the_claims_pin_and_refuses_every_other_
     later = t.merge({"agent/lessons/merged-after-the-pin.md": "merged on main after the pinned commit\n"})
     assert later != pin, "premise: main moved past the pin"
     planted = plant(scene, "learning", pin=pin)
-    fetch, asked = _recording_fetch(scene)
+    fetch, asked = H.recording_fetch(scene)
     seen: dict = {"refused": {}}
 
     def listing() -> list[str]:
@@ -289,7 +257,7 @@ def test_copy_make_with_a_commit_answers_the_claims_pin_and_refuses_every_other_
 def _damaging_fetch(scene, nth: int) -> Any:
     """The real fetch seam, which for the `nth` fetch into the claim's inputs `run-knowledge/` (the `nth` sibling's copy)
     also writes a link into the copy's `settings/` once the child has filled it: damage only the copy check can see."""
-    fetch, _asked = _recording_fetch(scene)
+    fetch, _asked = H.recording_fetch(scene)
     count = {"n": 0}
 
     def damaging(tenant_id, dest, **kw) -> str:
@@ -316,7 +284,7 @@ def test_an_arms_run_copy_goes_through_the_same_settings_check_as_the_parents(sc
     seen: dict = {}
 
     def job(c) -> int:
-        ep, worlds, runs = _stage_roster(scene, c, planted)
+        ep, worlds, runs = H.stage_roster(scene, c, planted)
         seen["runs"], seen["ep"] = runs, ep
         seen["first"] = c.request("copy.make", world=worlds["b"])
         seen["second"] = c.refused("copy.make", world=worlds["c"])
