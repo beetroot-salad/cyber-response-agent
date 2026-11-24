@@ -42,7 +42,7 @@ from defender.tests.support.jobs._evidence_flows1546 import (
     stage_upload,
 )
 from defender.tests.support.jobs._ending1546 import plant_claim, plant_complete_source, plant_uploads, queue_learning_job
-from defender.tests.support.jobs._jobs1342 import T1, T2, job_end, job_store, lapse_lease, row
+from defender.tests.support.jobs._jobs1342 import MALICIOUS_REPORT, T1, T2, job_end, job_store, lapse_lease, row
 from defender.tests.support.jobs._worker1342 import _child, _FAST, _queued, _until, _worker
 from defender.tests.support.jobs import _worker1342 as _shared
 from defender.tests.support.shared._postgres1339 import execute
@@ -53,10 +53,11 @@ _no_database_address_in_the_workers_environment = _shared._no_database_address_i
 
 BUNDLE = b"bundle bytes (opaque to the worker)"
 PAGE = b"<html>the renderer's page</html>"
-#: What a job leaves in the tenant's runs folder that contradicts its staged rows (the worker must read none of it). No
-#: `report.md` decoy: #1534 retired the file (nothing writes or reads it, `verdict_1534/test_report_file_gone.py` holds
-#: every product and test file to that), and the closing record it stood for is the staged `outcome`'s `closing` here.
+#: What a job leaves in the tenant's runs folder that contradicts its staged rows (the worker must read none of it). The
+#: retired report file (#1534) is one of them: a job could still leave one, and its line carries the census's exemption
+#: (`verdict_1534/test_report_file_gone.py`, "every other deliberate decoy ... carries EXEMPT").
 DECOYS = {"{id}.job-end.json": job_end(report_committed=False),
+          "{id}/report.md": MALICIOUS_REPORT.read_text(encoding="utf-8"),  # lint-report-file: ok — a decoy the worker must not read
           "{id}.knowledge-source.json": '{"kind": "stale", "commit": "' + "d" * 40 + '", "stale_kind": "operator", "reason": "x"}'}
 
 
