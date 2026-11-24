@@ -709,11 +709,17 @@ def _early_run(ns: argparse.Namespace, accepted: tenancy.Tenant, world: Any, epi
 
     try:
         if world is not None:
-            return episode_runs.create(episode_runs.arm_id(world.world_id))
+            return _arm_run(episode_runs, world)
         return accepted.runs_repository().create()
     except (RunRefused, TenantRefused) as refused:
         where = f"--episode {ns.episode}: " if world is not None else ""
         sys.exit(f"[run.py] {where}{refused}")
+
+
+def _arm_run(episode_runs: Any, world: Any) -> Run:
+    """A sibling's arm, from its episode's roster at its world's arm id (A3: the one place an arm is made); `RunRefused` or
+    `TenantRefused` for a roster or arm folder that does not hold it."""
+    return episode_runs.create(episode_runs.arm_id(world.world_id))
 
 
 def _judge_start(tenant: RunTenant, *, roster: RosterRead, defender_dir: Path,
@@ -1977,7 +1983,7 @@ def _sibling_made(  # noqa: PLR0913 — the request, the sibling's door and what
     if not isinstance(pin, str) or not run_knowledge.OID.fullmatch(pin):
         sys.exit(f"[run.py] --episode {ns.episode}: the launch facts pin no knowledge commit ({pin!r})")
     try:
-        early = episode_runs.create(episode_runs.arm_id(world.world_id))
+        early = _arm_run(episode_runs, world)
     except (RunRefused, TenantRefused) as refused:
         sys.exit(f"[run.py] --episode {ns.episode}: the sibling's run cannot be made: {refused}")
     copy = run_knowledge.RunCopy(accepted.run_knowledge / early.run_dir.name)

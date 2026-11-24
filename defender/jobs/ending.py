@@ -269,9 +269,9 @@ def lesser(decision: Decision) -> Decision:
     return dataclasses.replace(barest, evidence_state=state, promote=_promoted(state, barest.basis))
 
 
-#: A started run's knowledge when it cannot be stored as read: stale, operator kind, no commit (the API's shape of
-#: `records.job_lane.JobLane.unreadable_knowledge()`).
-UNREADABLE_KNOWLEDGE: Mapping[str, str | None] = {"status": "stale", "commit": None, "stale_kind": "operator"}
+#: A started run's knowledge when it cannot be stored as read: `unreadable`, no commit, no stale kind (#1618 K9: the API's
+#: shape of the unreadable knowledge status, `records._knowledge_status.api_knowledge(UNREADABLE)`).
+UNREADABLE_KNOWLEDGE: Mapping[str, str | None] = {"status": "unreadable", "commit": None, "stale_kind": None}
 
 
 # --- the evidence state (r8 rules 1-7) -------------------------------------------------------------------------------------
