@@ -445,7 +445,8 @@ def test_r13_1_4_launch_facts_saying_the_tenant_is_not_active_are_refused_at_the
 # Retired (#1546 D4/A-O9): `test_r13_1_4_launch_facts_saying_active_over_a_tenant_folder_the_container_refuses_are_refused_at_
 # container_tenant`. The container no longer reads the host's tenant folder: it builds a `JobTenant` over its job root and
 # inputs, and "`accept_tenant` stays the host's ... the knowledge-clone, `.tenant-id` and settings-vs-mount checks have no
-# job-side counterpart" (design, JobTenant). That no in-box entry reaches `accept_tenant` is pinned by
+# job-side counterpart" (design, JobTenant). That no container entry reaches `accept_tenant` (or its host wrappers) is
+# pinned by `tooling/test_no_container_accept_tenant_1546.py` (r10 (b) "New lint") and
 # `tenancy/lifecycle_1214/test_entry_boundaries.py` (`IN_BOX_ENTRIES`); the host's own refusals by this file's and
 # `test_1471_readiness_helper.py`'s tenant-step cases.
 
