@@ -836,7 +836,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
 
 
 def _materialize_run(  # noqa: PLR0913 — the builder's whole call
-    alert: Path, *, tenant: tenancy.Tenant, model: str | None, run: Run | None = None,
+    alert: Path, *, tenant: tenancy.Tenant | tenancy.JobTenant, model: str | None, run: Run | None = None,
     world: Any = None, mapping: AlertMapping | None = None,
     knowledge: run_knowledge.KnowledgeSource | None = None, started_at: datetime | None = None,
 ) -> Run:
@@ -1502,8 +1502,7 @@ class _JobFacts:
         # copies: the launch record and alert it wrote beside the run (the run's knowledge copy is in the inputs).
         tenant_root = run_dir.parent.parent
         paths = RunPaths(run_dir)
-        excludes = [f"runs/{paths.launch_record().name}", f"runs/{paths.launch_alert().name}", "run-knowledge",
-                    "exports"]
+        excludes = [f"runs/{paths.launch_record().name}", f"runs/{paths.launch_alert().name}"]
         try:
             bundle.push(self._request, tenant_root, tenant_root.parent / f".{run_dir.name}.bundle", exclude=excludes)
         except (bundle.BundleRefused, job_socket.Refused, OSError, ValueError) as e:
@@ -1862,15 +1861,8 @@ def readiness_main(argv: list[str], *, environ: Mapping[str, str] | None = None,
 
 
 def _send_readiness(request: Callable[..., dict[str, Any]], job: str, record: job_lane.ReadinessRecord) -> int:
-    """The check's knowledge (the launch facts' source, when the helper served one) and its result, sent to the helper as
-    the `knowledge` and `result` records (#1546 PR2): 0 once the result was taken."""
-    try:
-        launch = request("launch")
-        knowledge = launch.get("knowledge") if isinstance(launch, dict) else None
-        if isinstance(knowledge, dict):
-            request("knowledge", record=knowledge)
-    except (job_socket.Refused, OSError, ValueError) as e:
-        _logger.warning(f"readiness {job}: its knowledge was not sent: {e}")
+    """The check's result, sent to the helper as the `result` record (#1546 PR2): 0 once it was taken. The check's
+    knowledge is the helper's own to stage (r10, U-3): the container sends none."""
     try:
         request("result", record=json.loads(record.text()))
     except (job_socket.Refused, OSError, ValueError) as e:
@@ -1962,12 +1954,16 @@ def serve_job(  # noqa: PLR0913 — the entries' inputs plus their injection sea
 
 # -- a learning sibling in its job container (#1170 A6, #1449) ---------------------------------------
 
-def _sibling_made(request: Callable[..., dict[str, Any]], ns: argparse.Namespace, accepted: tenancy.Tenant | tenancy.JobTenant,
-                  episode_runs: Any, world: Any) -> tuple[Run, run_knowledge.RunCopy]:
-    """The sibling's run and knowledge copy, made by the job's host helper (`copy.make`, #1170 A6, C20):
-    its id the episode roster's for this world, its folder materialized there (input and stamp), its
-    copy owned by the helper. Opened here, never made: the id, the folder and the copy must be the ones
-    this sibling's own roster and tenant name."""
+def _sibling_made(  # noqa: PLR0913 — the request, the sibling's door and what its launch handed
+    request: Callable[..., dict[str, Any]], ns: argparse.Namespace, accepted: tenancy.JobTenant, episode_runs: Any,
+    world: Any, launch: Mapping[str, Any],
+) -> tuple[Run, run_knowledge.RunCopy]:
+    """The sibling's run and knowledge copy (#1170 A6, C20; #1546 r10, D-2): its copy made by the job's host helper
+    (`copy.make`, at the claim's pin, owned by the helper, in the inputs), its id the episode roster's for this world,
+    and its run made here, in the container, by run setup's shared half (`run_common.materialize_run`: the folder with
+    its input, the episode's copy of the source alert, and its stamp), with its knowledge record (the launch facts'
+    `knowledge_commit`) and its versions record (the launch facts' `records`). The id, the folder and the copy must be
+    the ones this sibling's own roster and tenant name."""
     from defender.records import RunRefused
 
     try:
@@ -1978,16 +1974,25 @@ def _sibling_made(request: Callable[..., dict[str, Any]], ns: argparse.Namespace
     except (OSError, ValueError) as lost:
         sys.exit(f"[run.py] --episode {ns.episode}: the job's host helper did not make the sibling's run: "
                  f"{type(lost).__name__}: {lost}")
+    pin = launch.get("knowledge_commit")
+    if not isinstance(pin, str) or not run_knowledge.OID.fullmatch(pin):
+        sys.exit(f"[run.py] --episode {ns.episode}: the launch facts pin no knowledge commit ({pin!r})")
     try:
-        arm = episode_runs.arm_id(world.world_id)
-    except RunRefused as refused:
-        sys.exit(f"[run.py] --episode {ns.episode}: the sibling's run cannot be opened: {refused}")
-    run = _open_run(episode_runs, arm, what=f"--episode {ns.episode}: the sibling's run")
-    copy = run_knowledge.RunCopy(accepted.run_knowledge / run.run_dir.name)
-    for what, ours, said in (("run id", run.run_dir.name, made.get("run")), ("run folder", run.run_dir, made.get("run_dir")),
+        early = episode_runs.create(episode_runs.arm_id(world.world_id))
+    except (RunRefused, TenantRefused) as refused:
+        sys.exit(f"[run.py] --episode {ns.episode}: the sibling's run cannot be made: {refused}")
+    copy = run_knowledge.RunCopy(accepted.run_knowledge / early.run_dir.name)
+    for what, ours, said in (("run id", early.run_dir.name, made.get("run")),
+                             ("run folder", early.run_dir, made.get("run_dir")),
                              ("knowledge copy", copy.root, made.get("path"))):
         if str(ours) != str(said):
             sys.exit(f"[run.py] --episode {ns.episode}: the helper's {what} {said!r} is not this sibling's {ours}")
+    knowledge = run_knowledge.KnowledgeSource(kind=run_knowledge.PINNED, commit=pin)
+    current = _run.handed_records(launch, label=f"--episode {ns.episode}")
+    run = _materialize_run(_screened_source_alert(episode_runs.episode), run=early, tenant=accepted,
+                           model=driver.resolve_main_model(ns.model), world=world, knowledge=knowledge)
+    _run.write_knowledge_record(run.run_dir, knowledge)
+    _run.write_versions_record(run.run_dir, current)
     return run, copy
 
 
@@ -1999,8 +2004,8 @@ def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the siblin
     """`run.py --tenant <T> --episode <id> --world <label>` inside its learning job's container (#1170
     A6, #1449): the sibling's run half, which `main` composes. Its tenant judged by the folder rules
     (the job's helper holds the lock and ran the admission), its episode door opened, its world
-    resumed, its run (id, folder with input and stamp) and copy made by the helper at the family's
-    knowledge, its systems judged, its preflight, the run its helper made announced, a read pass
+    resumed, its copy made by the helper at the claim's pin and its run (id, folder with input and stamp,
+    knowledge and versions records) made here (#1546 r10, D-2), its systems judged, its preflight, the run its helper made announced, a read pass
     from the helper — or the refusal (`SystemExit` naming it; `_PreflightRefused`). No database,
     host lock, publish or signer. Yields the started run, holding the episode door."""
     from defender.records.formats import family_identities
@@ -2020,7 +2025,7 @@ def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the siblin
         episode = episode_runs.episode
         world = _resume_target(ns, episode=episode, tenant=lambda: None, arm_ids=episode_runs.arm_ids)
         source = _open_world_source(accepted.runs_repository(), world)
-        run, copy = _sibling_made(request, ns, accepted, episode_runs, world)
+        run, copy = _sibling_made(request, ns, accepted, episode_runs, world, launch)
         _family_pin(ns, _knowledge_pin(ns), episode)  # a `--knowledge-commit` naming another export refuses
         current = _run.handed_records(launch, label=f"--episode {ns.episode}")
         tenant, systems = _container_systems(

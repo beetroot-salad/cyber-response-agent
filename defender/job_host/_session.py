@@ -172,6 +172,8 @@ class Session:
     #: The status the helper exits with once it served the job to its end: 0, or a post-step's answer whether work still
     #: waits (`job_host.NOTHING_WAITS`, `WORK_WAITS`), which its `exited` sets.
     served_status: int = 0
+    #: Why the job ended before its container (the helper's own words, as its log says them), once it did.
+    ending_why: str | None = None
     #: Every id this helper minted for the claim (the job's own, a sibling's run, a draft): `pass` and `box.start`
     #: name only these (A6).
     minted: set[str] = field(default_factory=set)

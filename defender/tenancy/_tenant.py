@@ -321,9 +321,10 @@ class _JobEpisodesRoot(EpisodesRoot):
 @dataclasses.dataclass(frozen=True)
 class JobTenant(RecordTenant):
     """The tenant a job container sees: its own root (`data_root`, laid out as `<root>/<T>/{runs,episodes,...}`) and its
-    read-only `inputs` folder (the run's knowledge copy), and no clone of the tenant's
-    knowledge, no lock and no scratch. `accept_tenant` opens `<T>/knowledge` and so refuses such a root: the container
-    entries build a `JobTenant` from the launch facts instead (`job_tenant_from_launch`). The helper that made the folders
+    read-only `inputs` folder (the run knowledge copies the helper made), and no scratch, drafts or worktrees. Its reason is
+    location (#1546 r10 (b)): the copies a container reads live in the read-only inputs, where `accept_tenant` over the
+    root would place them under `<root>/<T>/run-knowledge`, which the job can write. Every container entry builds one from
+    the launch facts (`job_tenant_from_launch`), never `accept_tenant`. The helper that made the folders
     already admitted the tenant for the claim; what a container can check for itself is the id grammar and where the two
     folders are, and that is what the constructor judges.
 

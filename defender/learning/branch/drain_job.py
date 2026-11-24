@@ -2,14 +2,17 @@
 started by the per-job host helper of kind `drain`.
 
 It runs the lead-author lane's tick once (`drains.lead_author_drain`) over the tenant's folder (bound read-write, as the
-post-step's), its store the job container's port, and resolves a curation request's run only from the runs its helper
-unpacked into the drain's own root (`launch.job_root`, `<root>/<T>/runs/<run id>`). Its result is the tick's exit status,
+post-step's), its store the job container's port, and resolves a curation request's run only from the drain's own root
+(`launch.job_root`, `<root>/<T>/runs/<run id>`), into which it first pulls and unpacks its claim's input set (the launch
+facts' `input_set`, each bundle through `evidence.pull`; #1546 r10, H3: the helper unpacks nothing). Its result is the tick's exit status,
 sent as the `result` record (an int); it writes no file the worker reads. Inside the container it takes no host lock,
 runs no admission and opens no database. With no job socket (a host shell) it does nothing and exits non-zero."""
 from __future__ import annotations
 
 import argparse
 import logging
+import os
+import shutil
 import signal
 import sys
 import threading
@@ -52,6 +55,51 @@ def _asked_unusable(ask: Callable[..., dict[str, Any]], tenant_id: str) -> Calla
     return unusable
 
 
+def _unpack_inputs(ask: Callable[..., dict[str, Any]], launch: Mapping[str, Any], root: Path, tenant_root: Path) -> None:
+    """The claim's input set (`input_set`, each `{owner, object}`) pulled and unpacked into the drain's root: each bundle
+    pulled (`job_socket.pull_object`) and unpacked into a staging folder of its own in the root (a bundle writes every
+    member exclusively, and each carries its own `scrub-findings.json`), then its files moved into `<root>/<T>/` at the
+    same relative path where none is there yet: on a clash the first placed is kept and this one's left out (logged). A
+    member whose pull or unpack fails is left out (logged): its work item waits."""
+    from defender.evidence import bundle
+
+    members = launch.get("input_set")
+    for n, member in enumerate(members if isinstance(members, list) else []):
+        owner = member.get("owner") if isinstance(member, dict) else None
+        obj = member.get("object") if isinstance(member, dict) else None
+        if not isinstance(owner, str) or obj != "bundle":
+            continue
+        packed, staging = root / f".pull-{n}.bundle", root / f".unpack-{n}"
+        try:
+            job_socket.pull_object(ask, owner, obj, packed)
+            bundle.unpack(packed, staging)
+            _merge_tree(staging, tenant_root, owner)
+        except (job_socket.Refused, bundle.BundleRefused, OSError, ValueError) as unusable:
+            _logger.warning("drain input %s of %s was not unpacked; its item waits: %s", obj, owner, unusable)
+        finally:
+            packed.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+
+
+def _merge_tree(staging: Path, target: Path, owner: str) -> None:
+    """`staging`'s files moved under `target` at the same relative path, but its root `scrub-findings.json` (the bundle's
+    own listing); a path already there is left as it is."""
+    for folder, _dirs, files in os.walk(staging):
+        here = Path(folder)
+        for name in files:
+            source = here / name
+            rel = source.relative_to(staging)
+            if rel == Path("scrub-findings.json"):
+                continue
+            dest = target / rel
+            if dest.exists() or dest.is_symlink():
+                _logger.warning("drain input of %s: %s is already placed by another bundle; this one's is left out",
+                                owner, rel)
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the drain's own root
+            os.rename(source, dest)
+
+
 def main(argv: list[str], *, tick: Callable[..., int] | None = None, environ: Mapping[str, str] | None = None,
          watch_stdin: bool = False) -> int:
     """Run the tick once and send its exit status as the drain's `result` (module doc); returns that status."""
@@ -74,11 +122,12 @@ def main(argv: list[str], *, tick: Callable[..., int] | None = None, environ: Ma
             job_root = launch.get("job_root")
             if not isinstance(job_root, str) or not job_root:
                 raise TenantRefused("the launch facts name no drain root (`job_root`)")
-            runs = tenancy.job_tenant_from_launch(tenancy.data_root_from_path(Path(job_root)), ns.tenant,
-                                                  launch).runs_repository()
+            drain_tenant = tenancy.job_tenant_from_launch(tenancy.data_root_from_path(Path(job_root)), ns.tenant, launch)
+            runs = drain_tenant.runs_repository()
             store = container.tick_store()
         except (TenantRefused, OSError, ValueError) as unusable:
             sys.exit(f"[drain] request {ns.job}: the tenant cannot be used: {unusable}")
+        _unpack_inputs(ask, launch, Path(job_root), Path(str(drain_tenant.tenant_root)))
         status = (tick or _lead_tick)(LoopPaths.for_tenant(tenant), store=store, runs=runs,
                                       unusable=_asked_unusable(ask, ns.tenant))
         try:

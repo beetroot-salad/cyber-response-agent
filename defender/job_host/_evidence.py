@@ -1,7 +1,7 @@
 """The helper's evidence half (#1546 PR2, PR7, PR8, A-O3, A-O6; flow steps 2-3): what a job stages and pushes, and what it
 pulls.
 
-**Facts.** Every record verb (`outcome`, `page`, `arms`, `arm`, `progress`, `result`, `knowledge`) is parsed on receipt
+**Facts.** Every record verb (`outcome`, `page`, `arms`, `arm`, `progress`, `result`) is parsed on receipt
 (`_records`) and staged as one closed fact under the job's claim through the job store (`_rows.Rows.stage`), which
 checks the claim is live in the same transaction (PR7). A malformed record is staged `refused/<name>{reason}` instead
 (a `progress` is dropped and logged: it is replaced, never decided on). `arm/<run id>` is staged only for a run the
@@ -45,10 +45,10 @@ from ._session import Registry, Session
 
 _logger = logging.getLogger(__name__)
 
-INVESTIGATION, LEARNING = "investigation", "learning"
+INVESTIGATION, LEARNING, DRAIN = "investigation", "learning", "drain"
 #: The job kinds that push and pull evidence (and need the store and the key login at setup).
 EVIDENCE_KINDS = (INVESTIGATION, LEARNING)
-HOST_REQUEST_KINDS = ("readiness", "adoption", "drain")
+HOST_REQUEST_KINDS = ("readiness", "adoption", DRAIN)
 
 _ARM_PAGE = re.compile(r"page/runs/([0-9a-f-]{36})/runtime\.html")
 #: The largest part a put carries, and the largest object of each class.
@@ -426,12 +426,10 @@ def register_evidence(registry: Registry) -> None:
     registry.add("arm", kinds=(LEARNING,), handler=_arm, required=("run_id",), optional=("record",), after_signal=True)
     registry.add("progress", kinds=EVIDENCE_KINDS, handler=_progress, optional=("record",), after_signal=True)
     registry.add("result", kinds=HOST_REQUEST_KINDS, handler=_result, optional=("record",), after_signal=True)
-    registry.add("knowledge", kinds=("readiness",),
-                 handler=_record_verb("knowledge", lambda _ev, r: _records.knowledge(r)), optional=("record",),
-                 after_signal=True)
     registry.add("evidence.put", kinds=EVIDENCE_KINDS, handler=lambda s, f: state(s).put(f),
                  required=("object", "part", "last", "data"), optional=("sha256",), after_signal=True)
-    registry.add("evidence.pull", kinds=EVIDENCE_KINDS, handler=lambda s, f: state(s).pull(f),
+    # A drain pulls its input set and unpacks it in its own container (#1546 r10, H3); it pushes nothing.
+    registry.add("evidence.pull", kinds=(*EVIDENCE_KINDS, DRAIN), handler=lambda s, f: state(s).pull(f),
                  required=("owner", "object", "part"))
 
 

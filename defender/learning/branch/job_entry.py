@@ -478,8 +478,8 @@ def _push_episode(ask: Callable[..., dict[str, Any]], data_root: Path, ns: argpa
     packed = data_root / f".{ns.job}.bundle"
     # The pulled source's run folder and listing are left out; the pulled session store is kept: the arms fork into it,
     # and every arm's session database rides in the bundle (D12).
-    excludes = sorted({f"runs/{ns.source}", f"runs/{ns.job}.launch.json", "run-knowledge", "exports",
-                       "scrub-findings.json", *(rel for rel in pulled if not rel.startswith("sessions/"))})
+    excludes = sorted({f"runs/{ns.source}", f"runs/{ns.job}.launch.json", "scrub-findings.json",
+                       *(rel for rel in pulled if not rel.startswith("sessions/"))})
     try:
         bundle.push(ask, tenant_root, packed, exclude=excludes)
     except (bundle.BundleRefused, job_socket.Refused, OSError, ValueError) as unsent:

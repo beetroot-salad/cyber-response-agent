@@ -30,18 +30,6 @@ def _give_entry(path: Path, owner: os.stat_result) -> None:
         os.chown(path, owner.st_uid, owner.st_gid, follow_symlinks=False)
 
 
-def give_tree(session: Session, top: Path) -> None:
-    """Everything under `top` (no link followed) given to the data root's owner, the container's uid (a helper run as
-    root makes it as root)."""
-    owner = os.stat(session.root_folder)
-    if os.geteuid() != 0:
-        return
-    _give_entry(top, owner)
-    for folder, dirs, files in os.walk(top):
-        for name in (*dirs, *files):
-            _give_entry(Path(folder) / name, owner)
-
-
 def make_claim_folders(session: Session) -> None:
     """The claim's root (with `<T>/runs` and `<T>/episodes`), inputs and spool; `StartFailed` when any cannot be made."""
     from defender.box import make_data_folder

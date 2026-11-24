@@ -7,8 +7,8 @@ handed the tenant, the system, the rendering and its digest, and the tenant's re
 answered `launch` and `forge.token` and nothing else (N-A1: no pass, no box, no signing), and its entry is
 `python3 -m defender.adoption --job <id> --tenant <T>`, which fetches, decides and delivers (`adoption/__main__.py`).
 
-Before the container, the helper makes the job's own clone of the tenant's repository in the job's root (`--no-hardlinks`,
-origin the forge). An ending the helper decides before the container is staged here as the one `{failed, reason}` result, in the
+The helper makes no repository (#1546 r10, #1618 flow 7): the container opens a private one in its own `/tmp` against the
+recorded forge origin and fetches, commits and pushes there with `forge.token`. An ending the helper decides before the container is staged here as the one `{failed, reason}` result, in the
 kind's own vocabulary (`job_lane.ADOPTION_HELPER_REASONS`): the record gone (`system_gone`), the release shipping none
 (`no_base_files`), a tenant that is not active at claim (`tenant_not_active`), any other refusal of a setup step, the lock, the
 credential or a tenant with no forge wiring (`setup_refused`), a container that cannot be started (`start_failed`), a crash
@@ -106,25 +106,6 @@ def _adoption_credential(session: Session, admitted: Any, cleanup: contextlib.Ex
         _refuse_adoption(session, "setup_refused", f"the tenant's forge credential cannot be made: {type(failed).__name__}: {failed}")
 
 
-def _clone_into_root(session: Session, tenant: Any, origin: str) -> None:
-    """The job's own clone of the tenant's repository at `<root>/<T>/knowledge` (#1546 A-O9, G11): made by the helper from
-    the tenant's knowledge clone with `--no-hardlinks` (a local clone shares its object files otherwise) and no
-    alternates, its `origin` the forge the tenant's clone names. The job's delivery fetches and pushes over it."""
-    from defender import _git
-
-    from ._folders import give_tree
-
-    if session.job_root is None:
-        raise SetupRefused("the claim's root was not made")
-    target = session.job_root / session.tenant_id / "knowledge"
-    try:
-        _git.git(["clone", "--quiet", "--no-hardlinks", str(tenant.knowledge), str(target)], cwd=session.job_root)
-        _git.git(["remote", "set-url", "origin", origin], cwd=target)
-        give_tree(session, target)
-    except Exception as failed:  # noqa: BLE001 — a clone that cannot be made is a refused setup
-        _refuse_adoption(session, "setup_refused", f"the job's clone could not be made: {type(failed).__name__}: {failed}")
-
-
 def prepare_adoption(session: Session, hold: contextlib.ExitStack) -> Prepared:
     admitted = _admit_adoption_tenant(session, hold)
     rendering, digest = _render_for_system(session, admitted)
@@ -134,11 +115,6 @@ def prepare_adoption(session: Session, hold: contextlib.ExitStack) -> Prepared:
     cleanup = contextlib.ExitStack()
     try:
         credential = _adoption_credential(session, admitted, cleanup)
-    except BaseException:
-        cleanup.close()
-        raise
-    try:
-        _clone_into_root(session, admitted.tenant, wiring.origin)
     except BaseException:
         cleanup.close()
         raise

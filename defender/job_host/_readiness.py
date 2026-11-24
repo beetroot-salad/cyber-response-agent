@@ -9,13 +9,14 @@ investigation's own (the launch check, the alert, the run folder, the versions r
 
 What it decided before the container it stages under the check's claim (#1546), create-once:
 
-- a step's refusal after the publish gave a source: the source's `knowledge` (served shape), before the result;
+- the source the publish settled, as `knowledge` (served shape: `current` or `pinned`), on every path on which the
+  publish settled one, before any result and before the container starts (#1546 r10, U-3: no job sends it);
 - a step's refusal: `{refused, step, sentence}`, our own sentence (P-2: a publish refusal names only its kind), and
   no container;
 - a container that cannot be started (or its socket opened): `{failed, start_failed}`; a crash, or a refusal before
   the container that is no step's: `{failed, worker_error}` (R13-1.2; the shared ending, `_host_request`);
-- otherwise nothing: the readiness container (`run.py --readiness <id>`, `run.readiness_main`) sends its `knowledge`
-  (the launch facts' source) and its `result`, answered `launch` and those verbs alone (C4).
+- otherwise its `result`: the readiness container (`run.py --readiness <id>`, `run.readiness_main`) is answered `launch`
+  and `result` alone (C4).
 
 The tenant's evidence key is the helper's own check (#1546 A-O7, amendment r9: produced host-side): once the tenant-level
 steps passed, the key login (the seam, else the one the live generation records) is proven by a datakey/unwrap probe of
@@ -67,8 +68,8 @@ def _readiness_sentence(refused: StepRefused) -> str:
 
 
 def _write_knowledge(session: Session, source: Any) -> None:
-    """The knowledge of the source the publish gave (R13-1.2), staged by the helper in the served shape when it ends the
-    check before its container; a source it cannot map is the helper's own failure."""
+    """The knowledge of the source the publish gave (R13-1.2), staged by the helper in the served shape on every path on
+    which the publish settled a source (#1546 r10: no job sends it); a source it cannot map is the helper's own failure."""
     from . import _evidence
     from ._records import served_knowledge
 
@@ -146,6 +147,9 @@ def _prepare_readiness(session: Session, hold: contextlib.ExitStack) -> Prepared
         _readiness_refused(session, facts, refused)
         raise
     try:
+        # The check's knowledge is the helper's own (#1546 r10, U-3): staged now from the source the publish step
+        # settled, so a container that never starts, or ends with no result, leaves it staged all the same.
+        _write_knowledge(session, facts.source)
         source, copy, current = facts.source, facts.copy, facts.current
         command = session.command or [
             "python3", str(session.defender_dir / "run.py"), "--readiness", rid, "--tenant", session.tenant_id]

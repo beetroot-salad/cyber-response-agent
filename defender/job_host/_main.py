@@ -344,6 +344,7 @@ def _run(session: Session, spec: KindSpec, signals: _Signals) -> int:
         signals.raising = False
         if ending is not None:
             _tell(session, ending[1])
+            session.ending_why = ending[1]
             spec.end(session, ending[0])
             return 0
         rc = _await_container(session, proc)

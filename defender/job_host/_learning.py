@@ -12,14 +12,15 @@ signed for the learning job's own id (pre-flight's pass names the row the worker
 is not checked here: the entry checks it in the container, over the tenant's own records (design correction).
 
 Its requests: `pass` for an id this helper minted (the job's own, or a sibling's run); `copy.make(world=)`, a sibling's
-run id, run copy and materialized run folder (input, stamp, knowledge record), all made here (A6, C20, C23): the world is looked up in the job's own episode only
-(`<root>/<T>/episodes/<job id>`, in the claim's root, never found by `--source`), its id is the one the job staged in
-its `arms` roster for it (#1546 D12), its folder is `<episode>/runs/<run>/`, made with no link followed out of the root
-(H10), and its copy, of the commit the claim pins the family to, fetched by the fetch child into the claim's inputs,
-passes the settings check. `copy.make(commit=)` (no world; no commit is main's tip), a copy of that commit's knowledge
-in the claim's scratch folder, fetched by the fetch child (the helper holds no credential): the judge's bodies, #1618
-F3. The container writes no copy of its own. The job's records (`outcome`, `arms`, `arm`, `progress`) and objects are
-`_evidence`'s.
+run id and run copy (A6, C20, C23): its id is the one the job staged in its `arms` roster for the world (#1546 D12, PR2),
+its copy is of the claim's pin (`knowledge_commit`), fetched by the fetch child into the claim's inputs and held to the
+settings check, and the helper makes the episode's `runs/` folder with no link followed out of the root (H10). It reads
+nothing from the episode (the job writes it): the container makes the run folder `<episode>/runs/<run>/` and its start
+records itself (#1546 r10, D-2). `copy.make(commit=)` answers the claim's pin only and `copy.make()` `main`'s tip, each a
+copy in the claim's `shared/` folder fetched by the fetch child (the helper holds no credential): the judge's bodies,
+#1618 F3. The container writes no copy of its own. The job's records (`outcome`, `arms`, `arm`, `progress`) and objects
+are `_evidence`'s. Its grant is read from `main`, fetched once into the claim's spool (`.job-spool/<claim>/grant/`, bound
+into nothing) and removed before the container starts.
 Boxes: `shell` (a sibling's run box over its run folder and copy) and `oracle` (the learning job's own: the
 oracle's box, its bind folders in a per-claim folder under the data root, never host `/tmp`, C21).
 
@@ -30,8 +31,9 @@ forge credential, for at most 150 s (C25: fail closed above it); and the tick's
 store, `store.*` (#1487 Flow 2, `_store_relay`). Box: `batch`, over a draft this helper made.
 
 **The drain request** (`--kind drain --job <request id> --tenant T`, #1546 D7): the post-step's host half and requests,
-its tick the lead-author lane's; the bundles of its claim's input set unpacked into its root (`<root>/<T>/runs/<run
-id>`), where its tick resolves a curation request's run. Its result is the tick's exit status (`result`, an int).
+plus `owner.unusable` and `evidence.pull`; its tick the lead-author lane's. The helper hands its claim's input set in the
+launch facts (`input_set`) and unpacks nothing: the container pulls and unpacks each bundle into its own root (r10, H3).
+Its result is the tick's exit status (`result`, an int).
 
 **Endings before the container** (A3, r4.1): a learning job's in the learning entry's own words, staged as its outcome
 (setup refused: `failed: launch_refused`; cannot be started confined or the helper crashed: `failed: entry_error`; a
@@ -51,7 +53,7 @@ import sys
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from defender import _io
 from defender.credential_proxy import PASS_LIFETIME_SEC
@@ -60,9 +62,6 @@ from defender.job_socket import SCRATCH_ROOT, Refused
 
 from ._common import answer_pass, first_pass, grant, settle_knowledge, start_run_box
 from ._session import DOCKER_DID_NOT_RUN, HandBack, KindSpec, Prepared, Registry, Session, SetupRefused, setup_step
-
-if TYPE_CHECKING:
-    from defender.records.formats import Episode
 
 _logger = logging.getLogger(__name__)
 
@@ -101,8 +100,6 @@ class _Learning:
     scratch: Path
     #: The tenant's current records, read once at the job's start (#1366 O6): every sibling's run reads these.
     records: Any = None
-    #: The job's own tenant over its root and inputs (`tenancy.JobTenant`): its episode and its siblings' runs are there.
-    job_tenant: Any = None
     #: The family's knowledge pin (the claim's launch facts): the commit every sibling's copy is fetched at.
     pin: str = ""
     #: Where `copy.make` makes its copies: the claim's `shared/` folder, the one folder of it the job container mounts (they go with the claim, F3).
@@ -198,6 +195,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
     from defender.tenancy import run_knowledge
 
     job = str(session.job_id)
+    pin = _claim_pin(session)  # before any fetch: a family that cannot be pinned is never served another commit
     _hold_within_wait(session, hold)
     admitted = _admit_tenant(session, hold)
     accepted, records = admitted.tenant, admitted.directory
@@ -213,11 +211,13 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
         # once and removed, so a Forgejo that cannot serve `main` refuses the job here, before any container (K4). The
         # proxy serves a system only by its declaration in `main`'s settings; a grant from an older pin could only add
         # systems the proxy refuses, and would miss none it serves.
-        grant_id = f"{job}-grant"
-        source = settle_knowledge(session, accepted, records, run_id=grant_id)
-        cleanup.callback(run_knowledge.RunCopy(accepted.run_knowledge / grant_id).remove)
+        # The copy is the helper's alone (#1546 r10, D-1): in the claim's spool, outside the tenant folder (which a
+        # post-step or a drain binds read-write) and bound into nothing, removed before the container starts.
+        grant_for = _grant_tenant(session, accepted)
+        cleanup.callback(shutil.rmtree, grant_for.run_knowledge, ignore_errors=True)
+        source = settle_knowledge(session, grant_for, records, run_id=job)
         try:
-            grant_copy = run_knowledge.adopt_copy(accepted, grant_id)
+            grant_copy = run_knowledge.adopt_copy(grant_for, job)
         except (run_knowledge.KnowledgeRefused, OSError) as refused:
             raise SetupRefused(f"this job's knowledge could not be copied: {refused}") from None
         try:
@@ -229,6 +229,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
         ready = setup_step(run_common.tenant_verdict, ready, roster, warn=False).tenant
         reads = grant(ready)
         grant_copy.remove()
+        shutil.rmtree(grant_for.run_knowledge, ignore_errors=True)
         passes = first_pass(session, accepted, records, reads)
         scratch = _scratch(session, cleanup)
         shared = _shared(scratch)
@@ -236,8 +237,7 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
         cleanup.close()
         raise
     session.minted.add(job)
-    pin, job_tenant = _claim_pin(session, source.commit)
-    state = _Learning(accepted, source.commit, scratch, records=current, job_tenant=job_tenant, pin=pin, copies=shared)
+    state = _Learning(accepted, source.commit, scratch, records=current, pin=pin, copies=shared)
     cleanup.callback(_remove_copies, state)
     command = session.command or ["python3", "-m", "defender.cli.learning.job", "--job", job,
                                   "--tenant", session.tenant_id, "--source", str(session.source)]
@@ -249,19 +249,33 @@ def _prepare_learning(session: Session, hold: contextlib.ExitStack) -> Prepared:
                     exited=_learning_exited, shared=shared)
 
 
-def _claim_pin(session: Session, settled: str) -> tuple[str, Any]:
-    """The family's pin (the claim's launch facts' `knowledge_commit`; the commit the grant read fetched when it names
-    none) and the job's own tenant."""
-    from defender import tenancy
-
+def _claim_pin(session: Session) -> str:
+    """The family's pin: the claim's launch fact `knowledge_commit`, the source run's commit the store wrote (#1546 r10).
+    A claim with none, or one that is no full commit id, is refused here: there is no fallback to `main` (#1618 r5.1-b),
+    nor to the commit the grant read fetched."""
     from . import _evidence
 
     pin = _evidence.state(session).claim.launch.get("knowledge_commit")
-    pin = pin if isinstance(pin, str) and _COMMIT.fullmatch(pin) else settled
-    if session.job_root is None or session.job_inputs is None:
-        raise SetupRefused("the claim's root and inputs were not made")
-    return pin, tenancy.JobTenant(id=session.tenant_id, data_root=tenancy.data_root_from_path(session.job_root),
-                                  inputs=session.job_inputs)
+    if not isinstance(pin, str) or not _COMMIT.fullmatch(pin):
+        raise SetupRefused(f"the source run's knowledge cannot be pinned: the claim's knowledge_commit {pin!r} is no "
+                           "full commit id")
+    return pin
+
+
+def _grant_tenant(session: Session, accepted: Any) -> Any:
+    """The grant read's copy tenant: the tenant's id, its one copy made under `<spool>/grant/` (a folder this helper
+    makes, mode 0700)."""
+    from ._folders import CopyTenant
+
+    if session.job_spool is None:
+        raise SetupRefused("the claim's spool was not made")
+    folder = session.job_spool / "grant"
+    try:
+        _io.guarded_mkdir(folder, base=session.job_spool)
+        folder.chmod(0o700)
+    except (OSError, ValueError) as e:
+        raise SetupRefused(f"the grant read's folder {folder} could not be made: {e}") from None
+    return CopyTenant(accepted.id, folder)
 
 
 def _remove_copies(state: _Learning) -> None:
@@ -291,77 +305,23 @@ def _prepare_post_step(session: Session, hold: contextlib.ExitStack) -> Prepared
 
 def _prepare_drain(session: Session, hold: contextlib.ExitStack) -> Prepared:
     """A drain request (#1546 D7): the post-step's host half (the tenant's admission, its store relay, its drafts and
-    forge tokens), and the bundles of its fixed input set unpacked into its own root (each a job's tenant folder, so its run
-    lands at `<root>/<T>/runs/<run id>`), the only place its tick resolves a curation request's run from. A member that
-    cannot be read now, or whose files clash with one unpacked before it, is left out: its item waits."""
+    forge tokens), and its claim's fixed input set handed in the launch facts (`input_set`, each `{owner, object}`). The
+    helper pulls and unpacks nothing (r10, H3): the container pulls each member through `evidence.pull` and unpacks it
+    into its own root."""
     from . import _host_request
 
     rid = _host_request.request_id(session)
+    from . import _evidence
+
     prepared = _prepare_post_step(session, hold)
-    try:
-        _unpack_inputs(session)
-    except BaseException:
-        prepared.cleanup.close()
-        raise
+    claim = _evidence.state(session).claim
     prepared.command = list(session.command or ["python3", "-m", "defender.learning.branch.drain_job", "--job", rid,
                                                 "--tenant", session.tenant_id])
     prepared.launch.update({"kind": DRAIN, "job": rid, "job_root": str(session.job_root),
-                            "inputs_dir": str(session.job_inputs)})
+                            "inputs_dir": str(session.job_inputs),
+                            "input_set": [{"owner": owner, "object": obj} for owner, obj in claim.inputs]})
     prepared.exited = None
     return prepared
-
-
-def _unpack_inputs(session: Session) -> None:
-    """Each in-set bundle unpacked into a staging folder of the root of its own (a bundle writes every member exclusively,
-    and every bundle carries its own `scrub-findings.json`), then its files moved into `<root>/<T>/` where none is there
-    yet; a file another bundle placed first is kept, this one's left out (logged). Given to the container's uid."""
-    import shutil
-
-    from defender.evidence import bundle
-
-    from . import _evidence
-    from ._folders import give_tree
-
-    ev = _evidence.state(session)
-    target = session.job_tenant_root
-    if session.job_root is None:
-        return
-    for n, (owner, obj) in enumerate(ev.claim.inputs):
-        if obj != _evidence.BUNDLE:
-            continue
-        staging = session.job_root / f".unpack-{n}"
-        try:
-            ev.pull({"owner": owner, "object": obj, "part": 0})
-            with ev.lock:
-                found = ev.pulled.get((owner, obj))
-            if found is None:
-                continue
-            bundle.unpack(found.path, staging)
-            _merge_tree(staging, target, owner)
-        except (Refused, bundle.BundleRefused, OSError) as unusable:
-            _logger.warning("drain input %s of %s was not unpacked; its item waits: %s", obj, owner, unusable)
-        finally:
-            shutil.rmtree(staging, ignore_errors=True)
-    give_tree(session, target)
-
-
-def _merge_tree(staging: Path, target: Path, owner: str) -> None:
-    """`staging`'s files moved under `target` at the same relative path, but its root `scrub-findings.json` (the bundle's
-    own listing); a path already there is left as it is."""
-    for folder, _dirs, files in os.walk(staging):
-        here = Path(folder)
-        for name in files:
-            source = here / name
-            rel = source.relative_to(staging)
-            if rel == Path("scrub-findings.json"):
-                continue
-            dest = target / rel
-            if dest.exists() or dest.is_symlink():
-                _logger.warning("drain input of %s: %s is already placed by another bundle; this one's is left out",
-                                owner, rel)
-                continue
-            dest.parent.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the helper's own root
-            os.rename(source, dest)
 
 
 def _drain_end(session: Session, cause: str) -> None:
@@ -397,8 +357,10 @@ def _learning_end(session: Session, cause: str) -> None:
         _write_learning_end(session, job_lane.LEARNING_STOPPED, None,
                             "the job was stopped before its container started; it is handed back")
     elif cause == "refused":
+        why = session.ending_why.removeprefix("setup refused: ") if session.ending_why else None
         _write_learning_end(session, job_lane.LEARNING_FAILED, job_lane.LAUNCH_REFUSED,
-                            "the job's setup was refused before its container started")
+                            "the job's setup was refused before its container started"
+                            + (f": {why}"[:2000] if why else ""))
     elif cause == "start-failed":
         _write_learning_end(session, job_lane.LEARNING_FAILED, job_lane.ENTRY_ERROR,
                             "the job could not be started confined; it ran nowhere")
@@ -459,18 +421,22 @@ def _roster_id(session: Session, world: str) -> str:
     entries = roster.get("roster") if isinstance(roster, dict) else None
     if not isinstance(entries, list):
         raise Refused("no arms roster is staged: a sibling's run is made only for a run the roster names", "unknown-id")
+    from defender.records import RunId, RunRefused
+
     for entry in entries:
-        if entry.get("world_id") == world:
-            return str(entry["run_id"])
+        if isinstance(entry, dict) and entry.get("world_id") == world:
+            try:
+                return str(RunId.parse(entry.get("run_id")))  # parsed on receipt; a path segment only as an id
+            except RunRefused:
+                raise Refused(f"the staged roster's run id for {world!r} is not canonical", "unknown-id") from None
     raise Refused(f"the staged roster holds no world {world!r}", "unknown-id")
 
 
 def _copy_make(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
-    """`copy.make(world=)`: a sibling's run id (the roster's), its run copy and its run folder `<episode>/runs/<run>/`,
-    made and owned here: the run materialized (its input, the episode's copy of the source alert, and its stamp) as an
-    investigation's is, and its host-held knowledge record beside it (A6, C20). The sibling's run half opens it.
-    `copy.make(commit=)` (or neither): a copy of that commit's (else `main`'s) knowledge in the claim's scratch folder
-    (F3). A sibling's pin is the family's, chosen here and never named by the container."""
+    """`copy.make(world=)`: a sibling's run id (the staged roster's), its run copy of the claim's pin, owned here, and
+    the episode's `runs/` folder; the container makes the run folder `<episode>/runs/<run>/` at the answered `run_dir`
+    (A6, C20; #1546 r10, D-2). `copy.make(commit=)`, the claim's pin only, or `copy.make()`, `main`'s tip: a copy in the
+    claim's `shared/` folder (F3; r10 H1). A sibling's pin is the family's, chosen here and never named by the container."""
     state = _state(session, _Learning)
     world, commit = fields.get("world"), fields.get("commit")
     if world is None:
@@ -482,13 +448,15 @@ def _copy_make(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
 
 def _scratch_copy(session: Session, state: _Learning, commit: Any) -> dict[str, Any]:
     """The fetch child's copy of `commit` (`main` when none) in a folder of the claim's scratch this helper owns, which
-    goes with the claim (F3). The helper holds no credential: the child mints its own."""
+    goes with the claim (F3). The helper holds no credential: the child mints its own. A `commit` other than the claim's
+    pin is refused before any folder or fetch (#1546 r10, H1: least privilege; the forge is never asked what it is)."""
     from defender import run_common
     from defender.tenancy import run_knowledge
     from defender.tenancy import owned_temporary
 
-    if commit is not None and (not isinstance(commit, str) or not _COMMIT.fullmatch(commit)):
-        raise Refused("copy.make takes a full commit id", "bad-fields")
+    if commit is not None and commit != state.pin:
+        raise Refused(f"copy.make(commit=) answers only the claim's pinned commit {state.pin}, not {commit!r}",
+                      "not-for-kind")
     assert state.copies is not None
     dest = state.copies / owned_temporary("copy")
     try:
@@ -518,17 +486,16 @@ def _sibling_copy(session: Session, state: _Learning, world: object) -> dict[str
     runs = episode / "runs"
     run_dir = runs / run
     session.inside(run_dir, must_exist=False)
+    try:
+        # The episode's arm folder, no link followed out of the episode; the run folder is the container's to make
+        # (run setup makes it exclusively: a run folder is never resumed).
+        _io.guarded_mkdir(runs, base=episode)
+    except (OSError, ValueError) as unmade:
+        raise Refused(f"the episode's runs folder could not be made: {unmade}", "confinement") from None
+    session.inside(runs)
     source = run_knowledge.KnowledgeSource(kind=run_knowledge.PINNED, commit=state.pin)
     copy = _sibling_run_copy(session, state, source, run)
-    try:
-        _io.guarded_mkdir(runs, base=episode)
-        session.inside(runs)
-        made_dir = _materialize_sibling(session, state, world, run, source)
-        session.inside(made_dir)
-    except BaseException:
-        copy.remove()
-        raise
-    sibling = _Sibling(run, world, made_dir, copy)
+    sibling = _Sibling(run, world, run_dir, copy)
     with session.lock:
         state.siblings[run] = sibling
         state.by_world[world] = run
@@ -556,56 +523,6 @@ def _sibling_run_copy(session: Session, state: _Learning, source: Any, run: str)
         raise Refused(f"the sibling's run copy could not be made: {why}", "settings") from None
     except (run_knowledge.KnowledgeRefused, OSError) as refused:
         raise Refused(f"the sibling's run copy could not be made: {refused}", "settings") from None
-def _source_alert(episode: Episode) -> Path:
-    """The episode's copy of the source alert (the sibling's input), by the episode handle."""
-    return Path(episode.source_alert.path)
-
-
-def _materialize_sibling(session: Session, state: _Learning, world: str, run: str, source: Any) -> Path:
-    """The sibling's run, made by run setup's shared half (`run_common.materialize_run`) at the roster's arm id."""
-    from defender import run_common
-    from defender.investigation.driver import resolve_main_model
-    from defender.records import RunAbsent, RunRefused, artifact_file, formats
-    from defender.records.formats import TenantRefused
-
-    try:
-        with state.job_tenant.runs_repository().episode(str(session.job_id)) as view:
-            arms = _staged_arm_ids(session)
-            filed = view.arm_ids()
-            if filed is not None and filed != arms:
-                raise Refused("the episode's arm roster is not the staged one", "unknown-id")
-            family = formats.load_family(view.episode.view(), expected_episode_id=str(session.job_id))
-            label = family.world_by_id(world).label
-            resumed = formats.resume_world_from(family, label, view.episode.dir, arm_ids=arms)
-            alert = _source_alert(view.episode)
-            if not artifact_file(alert):
-                raise Refused("the episode's copy of the source alert is not a plain file", "confinement")
-            arm = view.create_listed(arms[world], arms)
-            if str(arm.run_dir.name) != run:
-                raise Refused("the roster moved while the sibling's run was made", "internal")
-            made = run_common.materialize_run(alert, run=arm, tenant=state.job_tenant, model=resolve_main_model(None),
-                                              world=resumed, knowledge=source)
-    except (FileNotFoundError, RunAbsent, RunRefused, TenantRefused, KeyError, ValueError, OSError) as refused:
-        raise Refused(f"the sibling's run could not be made: {type(refused).__name__}: {refused}",
-                      "internal") from None
-    except SystemExit as refused:
-        raise Refused(f"the sibling's run could not be made: {refused.code}", "internal") from None
-    try:
-        run_common.write_knowledge_record(Path(made.run_dir), source)
-        run_common.write_versions_record(Path(made.run_dir), state.records)
-    except SystemExit as e:
-        raise Refused(f"could not write the sibling's start records: {e.code}", "internal") from None
-    return Path(made.run_dir)
-
-
-def _staged_arm_ids(session: Session) -> dict[str, Any]:
-    """The staged roster as `{world id: RunId}`."""
-    from defender.records import RunId
-
-    from . import _evidence
-
-    roster = _evidence.state(session).fact("arms")
-    return {e["world_id"]: RunId.parse(e["run_id"]) for e in (roster or {}).get("roster", [])}
 
 
 def _copy_answer(sibling: _Sibling) -> dict[str, Any]:

@@ -52,7 +52,7 @@ def _alert_label(alert: Path) -> str:
 
 
 def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the knowledge it reads
-    alert: Path, *, tenant: tenancy.Tenant, run: Run | None = None, model: str | None = None,
+    alert: Path, *, tenant: tenancy.Tenant | tenancy.JobTenant, run: Run | None = None, model: str | None = None,
     world: ResumeWorld | None = None,
     mapping: AlertMapping | None = None, knowledge: KnowledgeSource | None = None,
     launch: Launched | None = None, alert_digest: str | None = None,

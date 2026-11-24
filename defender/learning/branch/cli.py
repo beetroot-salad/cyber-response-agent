@@ -405,6 +405,17 @@ def _copy_of(tenant_id: TenantId, commit: str | None, *, container: JobContainer
     yield Path(str(answer.get("path")))
 
 
+def _launch_pin(container: JobContainer) -> str:
+    """A job's family pin: the launch facts' `knowledge_commit`, the claim's pin its host helper handed over (#1546 r10
+    (a)). The pulled source's knowledge record is ignored here: it neither moves the pin nor refuses the job. A launch
+    that names no full commit id refuses, before anything is fetched or spent."""
+    commit = container.launch.get("knowledge_commit")
+    if not isinstance(commit, str) or not formats.OID.fullmatch(commit):
+        raise ending(f"[branch] the job's launch facts pin no knowledge commit ({commit!r}): the family cannot be "
+                     "launched", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
+    return commit
+
+
 def _source_pin(source: Run) -> str:
     """The knowledge commit every sibling is pinned to and the questioner's corpus is read from (flow 7, O-PIN): the one the
     source run's HOST-HELD knowledge record names (U12, beside the run folder, where no box writes) — never its provenance
@@ -820,8 +831,9 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         runs = admitted.tenant.runs_repository()
         source = _open_launch_source(runs, ns.source_run_id)
         _source_stamp_agrees(source, admitted.tenant.id)
-        # What the family is pinned to is decided from the source alone, before anything is fetched or spent.
-        commit = _source_pin(source)
+        # What the family is pinned to is decided before anything is fetched or spent: an operator's launch from the source
+        # alone, a job's from its launch facts alone (#1546 r10: the claim's pin; a pulled source's record moves nothing).
+        commit = _source_pin(source) if container is None else _launch_pin(container)
         try:
             # The tenant's grants and settings are `main`'s at this moment (K8: the tenant has no knowledge folder), read from
             # a copy fetched for the check.

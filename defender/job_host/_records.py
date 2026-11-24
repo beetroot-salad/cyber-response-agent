@@ -2,10 +2,10 @@
 shape (exact keys, typed values, bounded text) and answered as the body the helper stages, or `Malformed` with the reason
 the helper stages under `refused/<name>`. Pure: no store, no session, no file.
 
-The shapes are the design's (`outcome`, `page`, `arms`, `arm/<run id>`, `progress`, `result`, `knowledge`). A learning
+The shapes are the design's (`outcome`, `page`, `arms`, `arm/<run id>`, `progress`, `result`). A learning
 outcome's findings are screened here (#1487's channel rules, `learning.judge.enqueue.screen_findings`, under the 8 MiB
 text cap): what passes is staged as rows by channel, anything else as `refused{reason}` inside the outcome, never the job's
-text. A readiness job's knowledge record is staged in the served shape, mapped once (`api_knowledge`)."""
+text. The `knowledge` fact is the helper's own (`served_knowledge`, mapped once by `api_knowledge`): no job sends one."""
 from __future__ import annotations
 
 import json
@@ -235,30 +235,22 @@ def drain_result(record: Any) -> int:
     return record
 
 
-_KNOWLEDGE_RECORD = ("kind", "commit")
-_KNOWLEDGE_OPTIONAL = ("stale_kind", "reason")
-
-
-def knowledge(record: Any) -> dict[str, Any]:
-    """A knowledge record (`{kind, commit, stale_kind, reason}`) as the served shape `{status, commit, stale_kind}`."""
+def served_knowledge(host_record: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The served shape `{status, commit, stale_kind}` of the knowledge record the helper itself holds (its own source's,
+    main's `{kind, commit, reason}`, #1618), or None when it is not one: `current` or `pinned` only, since the helper maps
+    its own source and never a stale one (#1546 r10, U-3; a job sends no knowledge record)."""
     from defender.records.formats import api_knowledge, knowledge_status
 
-    r = _object(record, _KNOWLEDGE_RECORD, "knowledge", optional=_KNOWLEDGE_OPTIONAL)
-    status = knowledge_status(json.dumps(r), stamp_names_source=True)
-    # A record that does not parse reads as the unreadable status (no commit), which a record that parses never is.
-    unreadable = knowledge_status(None, stamp_names_source=True)
-    served = api_knowledge(status) if status is not None and status != unreadable else None
-    if served is None:
-        raise Malformed("the knowledge record is not one of its shapes")
-    return dict(served)
-
-
-def served_knowledge(host_record: Mapping[str, Any]) -> dict[str, Any] | None:
-    """The served shape of a knowledge record the helper itself holds (its own source's), or None."""
     try:
-        return knowledge(dict(host_record))
-    except Malformed:
+        text = json.dumps(dict(host_record))
+    except (TypeError, ValueError):
         return None
+    status = knowledge_status(text, stamp_names_source=True)
+    served = api_knowledge(status) if status is not None and status != knowledge_status(None, stamp_names_source=True) \
+        else None
+    if served is None or served.get("status") not in ("current", "pinned"):
+        return None
+    return dict(served)
 
 
 #: Each result verb's parser, by job kind.

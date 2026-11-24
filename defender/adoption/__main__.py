@@ -92,8 +92,8 @@ def _deliver(container: JobContainer, ns: argparse.Namespace, root: Any, client:
     assert rendering is not None  # `_is_this_requests` held
     with contextlib.ExitStack() as owned:
         try:
-            # The job's tenant from the launch facts (#1546): its root holds the clone the helper made for this job at
-            # `<root>/<T>/knowledge`; the host's admission was the helper's, so nothing here accepts the tenant's folder.
+            # The job's tenant from the launch facts (#1546 r10 (b): every container entry builds one); the host's admission
+            # was the helper's, so nothing here accepts the tenant's folder. Its repository is private, against the forge.
             tenant = tenancy.job_tenant_from_launch(root, ns.tenant, facts)
             if client is None:
                 import httpx
