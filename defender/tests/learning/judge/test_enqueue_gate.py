@@ -131,6 +131,11 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
     retry.mkdir()
     ep_retry = T.tenant_episodes(retry / "data-root") / ep.name
     shutil.copytree(ep, ep_retry, symlinks=True)
+    # #1546 (design-r9 "Session pointer": recorded relative to the run): the retry's copy keeps each arm's database at the
+    # same place relative to its arm, as the episode moved whole with its tenant's sessions would.
+    from defender.tests.support.storage._carry_sessions1546 import carry_episode_sessions
+
+    carry_episode_sessions(ep, ep_retry)
     (ep_retry / "judge.yaml").unlink()
     shutil.rmtree(ep_retry / "worlds" / T.world_id(ep_retry, "b") / "judge")
     shutil.rmtree(ep_retry / "worlds" / T.world_id(ep_retry, "c") / "judge")

@@ -151,9 +151,10 @@ def _socket(tenant: str, *, signing: dict | None = None, answers: dict | None = 
     return SocketStandIn(tenant, launch=launch, answers=answers)
 
 
-def _family_seams(tenant: str) -> dict:
+def _family_seams(tenant: str, *, live_tree=None) -> dict:
     """The family step's seams over this process's data root (`DEFENDER_DATA_ROOT`): scripted questioner, oracle,
-    verifier and judge, and the siblings as `run.main` in this process."""
+    verifier and judge, and the siblings as `run.main` in this process. `live_tree`: the launch checks' capture of the tree
+    the family runs on (default `_triplet_947.source_capture()`)."""
     from defender import box as box_mod
     from defender.tests.e2e import _1255_twin as TWIN
     from defender.tests.integrations.credential_proxy_1163 import _stream1412 as W
@@ -206,7 +207,8 @@ def _family_seams(tenant: str) -> dict:
     # token: the tenant's records hold a live generation with a sign login, as the siblings' and the investigation's
     # do (`directory_for_argv`), the signature is a stand-in's, and the proxy's address is one nothing answers at
     # (`PROXY_URL`). Every call the source made is in its capture, so pre-flight reads nothing live through it.
-    return dict(questioner=S.questioner_for(), preflight=S.no_preflight, live_tree=T.source_capture(),
+    return dict(questioner=S.questioner_for(), preflight=S.no_preflight,
+                live_tree=T.source_capture() if live_tree is None else live_tree,
                 judge=judge, oracle=S.oracle(then=S.submit()).model,
                 verifier=S.passing_verifier().model, directory=directory_for_argv(argv), spawn=sibling,
                 signer=FakeSigner("flow1344"), proxy_url=PROXY_URL)
@@ -216,8 +218,14 @@ def family() -> int:
     """The learning job entry in its job container, behind the real learning helper (`helper_in_front`)."""
     from defender.learning.branch import job_entry
 
+    from defender.tests.support.learning.branch import _triplet_947 as T
+
     tenant = argv[argv.index("--tenant") + 1]
-    seams = _family_seams(tenant)
+    # The launch checks hold the family's tree to the source on knowledge alone (`preflight._family_faults`), and the
+    # job's family reads the claim's pin (r10 (a); the real capture's knowledge is replaced by the pin, `cli._launch`).
+    # The source here is a real investigation, stamped with the commit its helper served, which the store writes as the
+    # claim's pin: the published commit this script is handed (`<commit>`). So the injected capture reads that commit.
+    seams = _family_seams(tenant, live_tree=T.source_capture(knowledge={"commit": commit}))
     # The container's own data root (#1546 A-O9: the claim's root, never the host's tenant folder).
     runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
     (marks / "runs").write_text(str(runs), encoding="utf-8")  # the family step started, in its container's own root

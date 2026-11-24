@@ -1144,6 +1144,7 @@ def test_1534_a_record_that_cannot_be_looked_up_fails_the_render_and_saves_no_pa
     """`CouldNotLook`: the post-run step's save raises `VisualizeFailed`, the chain carries the kind's wording and no path, and
     no page is saved. (V-PAGE, V-READERS)"""
     from defender.presentation.visualize_run import VisualizeFailed, save_page
+    from defender.records import session_store as ss
     from defender.tests.support.storage import _readers1534 as R
 
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
@@ -1151,7 +1152,8 @@ def test_1534_a_record_that_cannot_be_looked_up_fails_the_render_and_saves_no_pa
     control = _run_handle_1165(run)
     assert _closing_headline(_page(run)), "positive control: the same run renders while its record reads"
     pointer = json.loads(control.observability.session_pointer.read_result().text)
-    R.break_database(Path(pointer["store_path"]), run.name, fault,
+    # #1546 (design r9 "Session pointer"): recorded relative to the run's folder, named through the one resolver.
+    R.break_database(ss.run_store_path(run, pointer["store_path"]), run.name, fault,
                      pointer=Path(control.observability.session_pointer.path))
 
     with pytest.raises(VisualizeFailed) as failed:

@@ -350,10 +350,13 @@ def test_named_path_unreadable_lesson_is_still_an_error(tmp_path, capsys):
     assert "cannot read undecodable.md" in cap.err
 
 
-def test_1534_a_data_root_moved_after_a_run_fails_its_page_rerender_and_shows_a_fault_row_in_the_trace(
+def test_1546_a_run_moved_without_its_sessions_fails_its_page_rerender_and_shows_a_fault_row_and_one_moved_with_them_reads(
         tmp_path, capsys, caplog):
-    """The pointer's stored path is stale after the move: the CLI re-render exits 1 naming `database-missing`, and the trace has a
-    fault row for that run beside the readable one. (V-LOOK residual, V-PAGE, trace CLI)"""
+    """#1546 (design-r9 "Session pointer": the database is recorded relative to the run): a run moved into another data root
+    WITH its tenant's sessions folder, at the same place beside its runs, still reads (its re-render exits 0, its trace row
+    is its disposition); one moved WITHOUT its sessions folder has a pointer naming a database that is not there: the CLI
+    re-render exits 1 naming `database-missing`, and the trace has a fault row for that run beside the readable ones.
+    (V-LOOK residual, V-PAGE, trace CLI; was the moved-root case of the absolute pointer)"""
     import shutil
 
     from defender.presentation import visualize_run
@@ -364,22 +367,30 @@ def test_1534_a_data_root_moved_after_a_run_fails_its_page_rerender_and_shows_a_
     tl = _load()
     _mk_lesson(tmp_path / "lessons", "L", body_frontmatter="name: L\ndescription: d\ncreated_at: 2026-06-04")
     load = [{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}]
-    old = tmp_path / "old-root" / TID
-    _mk_run(old / "runs", "case-a", disposition="benign", loads=load)
+    carried, stranded = tmp_path / "old-root-carried" / TID, tmp_path / "old-root-stranded" / TID
+    _mk_run(carried / "runs", "case-a", disposition="benign", loads=load)
+    _mk_run(stranded / "runs", "case-c", disposition="benign", loads=load)
+    assert (stranded / "sessions").is_dir(), "premise: the stranded run's database is in its old root's sessions folder"
     runs = _tenant_runs_dir(tmp_path)
-    for entry in (old / "runs").iterdir():
-        shutil.move(str(entry), runs / entry.name)
-    shutil.copytree(old / "sessions", tmp_path / "data" / TID / "sessions", dirs_exist_ok=True)
-    shutil.rmtree(tmp_path / "old-root")
+    for old in (carried, stranded):
+        for entry in (old / "runs").iterdir():
+            shutil.move(str(entry), runs / entry.name)
+    shutil.copytree(carried / "sessions", tmp_path / "data" / TID / "sessions", dirs_exist_ok=True)  # case-a's only
+    shutil.rmtree(tmp_path / "old-root-carried")
+    shutil.rmtree(tmp_path / "old-root-stranded")
     _mk_run(runs, "case-b", disposition="malicious", loads=load)
 
+    directory = active_directory(current_data_root(), TID)
     caplog.set_level("ERROR")
-    rc = visualize_run.main(["visualize_run.py", "--tenant", TID, C("case-a")],
-                            directory=active_directory(current_data_root(), TID))
+    rc = visualize_run.main(["visualize_run.py", "--tenant", TID, C("case-c")], directory=directory)
     assert rc == 1
     assert R.names(R.KINDS_BY_FAULT[0], caplog.text), caplog.text
+    caplog.clear()
+    assert visualize_run.main(["visualize_run.py", "--tenant", TID, C("case-a")], directory=directory) == 0, (
+        "a run moved with its sessions folder no longer renders", caplog.text)
 
     assert trace_main(tl, ["L", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID]) == 0
     rows = _rows(capsys.readouterr().out)
-    assert R.names_only("database-missing", rows[C("case-a")]), rows[C("case-a")]
+    assert R.names_only("database-missing", rows[C("case-c")]), rows[C("case-c")]
+    assert f"{C('case-a')}\tbenign" in "\n".join(rows.values()), "the run moved with its sessions folder lost its record"
     assert f"{C('case-b')}\tmalicious" in "\n".join(rows.values()), "positive control: a run whose database is where its pointer says"
