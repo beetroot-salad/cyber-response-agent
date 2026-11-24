@@ -117,8 +117,6 @@ def _launch_copies(session: Session) -> Any:
     """The launch record and the alert, written by the helper in the job's root from the claim's launch facts and the
     stored alert's exact bytes (#1546: nothing is read beside the tenant's runs), then checked as a launch is
     (`JobLane.check_launch`). The alert is admitted later against the digest the worker handed this helper."""
-    import secrets as _secrets
-
     from defender import tenancy
     from defender.records import job_lane
 
@@ -130,11 +128,12 @@ def _launch_copies(session: Session) -> Any:
     stored = session.rows.alert(session.tenant_id, str(alert_id)) if isinstance(alert_id, str) else None
     if stored is None:
         raise SetupRefused("the launch check refused the job: the claim names no alert the store holds")
-    box_token = launch.get("box_token")
+    digest, box_token = launch.get("digest"), launch.get("box_token")
+    if not isinstance(digest, str) or not isinstance(box_token, str):
+        raise SetupRefused("the launch check refused the job: the claim's launch facts name no digest or box token")
     record = job_lane.LaunchRecord(
         investigation_id=str(session.job_id), tenant_id=str(session.tenant_id), alert_id=str(alert_id),
-        digest=str(launch.get("digest") or session.alert_digest), label=str(launch.get("label") or stored.title or ""),
-        box_token=box_token if isinstance(box_token, str) else _secrets.token_hex(16))
+        digest=digest, label=str(launch.get("label") or stored.title or ""), box_token=box_token)
     if session.job_root is None:
         raise SetupRefused("the claim's root was not made")
     try:

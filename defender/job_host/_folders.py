@@ -12,8 +12,8 @@ Each is made exclusively, mode 0700 and owned by the data root's owner (the cont
 the worker removes whatever a dead helper left (`job_socket.CLAIM_ROOTS`)."""
 from __future__ import annotations
 
+import logging
 import os
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,8 @@ from typing import Any
 from defender.job_socket import INPUTS_ROOT, ROOTS_ROOT, SPOOL_ROOT
 
 from ._session import Session, StartFailed
+
+_logger = logging.getLogger(__name__)
 
 RUN_KNOWLEDGE = "run-knowledge"
 
@@ -48,10 +50,17 @@ def make_claim_folders(session: Session) -> None:
 
 
 def remove_claim_folders(session: Session) -> None:
-    """Root, inputs and spool removed, nothing below them followed (a link the job left is removed as the link)."""
+    """Root, inputs and spool removed, nothing below them followed (a link the job left is removed as the link), a
+    read-only run input folder included (`box.remove_data_folder`); what cannot be removed is logged and left for the
+    worker's start-up sweep."""
+    from defender.box import remove_data_folder
+
     for folder in (session.job_root, session.job_inputs, session.job_spool):
         if folder is not None:
-            shutil.rmtree(folder, ignore_errors=True)
+            try:
+                remove_data_folder(folder)
+            except OSError as e:
+                _logger.error("the claim folder %s could not be removed; the worker's next start removes it: %s", folder, e)
 
 
 def make_input_folder(session: Session, *parts: str) -> Path:

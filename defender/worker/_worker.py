@@ -70,7 +70,6 @@ import contextlib
 import datetime as _dt
 import logging
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -342,11 +341,10 @@ def _end_late_child(spawn: asyncio.Future[asyncio.subprocess.Process]) -> None:
 def _remove_claim_entry(entry: Path) -> None:
     """Remove one entry under a claim root by plain removal (a folder's links are removed, never followed); one
     already gone counts as removed. Any other failure is an error naming it, left for the next start (#1557 O6)."""
+    from defender.box import remove_data_folder
+
     try:
-        if entry.is_dir() and not entry.is_symlink():
-            shutil.rmtree(entry)
-        else:
-            entry.unlink()
+        remove_data_folder(entry)
     except FileNotFoundError:
         pass
     except Exception:  # noqa: BLE001 — what a job left may defeat removal (a deep tree: RecursionError); logged

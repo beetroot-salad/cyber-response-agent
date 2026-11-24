@@ -72,7 +72,6 @@ from defender.tenancy.models import AlertMappingRow, CaseVersionRow, TenantRecor
 from defender.tenancy.models import offboard as _tenancy_offboard
 from defender.tenancy.models import share_tenant
 
-from .learning_models import OPEN_WORK, WorkItemRow
 from .models import (
     ADOPTION,
     ALERT_LISTING_COLUMNS,
@@ -816,6 +815,9 @@ class JobStore:
             return None
         token = await _claim_token(s, ClaimRow.investigation_id, owner_id)
         decided = await _decision_under_lock(s, token, decision)
+        if token is None and isinstance(decided, ending.End) and decided.cost_usd is None:
+            # A row ended before any claim (a queued row cancelled or offboarded): nothing ran, so exactly 0 (S2).
+            decided = dataclasses.replace(decided, cost_usd=0.0, cost_is_lower_limit=False)
         where = (InvestigationRow.id == owner_id,)
         if isinstance(decided, ending.HandBack):
             done = (await s.execute(
@@ -1471,9 +1473,9 @@ async def _drain_inputs(s: AsyncSession, tenant_id: TenantId) -> list[dict[str, 
     """A drain's input set, fixed in its claim's transaction (#1546 D7, amendment r9 "Drain"): the bundle of each run the
     tenant's open curation requests name (the lead lane's only run-naming kind) whose investigation is `clean` and not
     `expired`. A request whose run is outside the set waits for the next drain; one whose run is unusable is dead."""
-    named = (select(WorkItemRow.source_run).where(
-        WorkItemRow.tenant_id == tenant_id, WorkItemRow.kind == "curation_request",  # lint-half-table: ok — the curation request is the lead lane's one kind that names a run, as the tick's own rule
-        WorkItemRow.status.in_(OPEN_WORK), WorkItemRow.source_run.is_not(None)))
+    from .learning_models import curation_request_runs  # the learning store's tables load only for a drain's claim
+
+    named = curation_request_runs(str(tenant_id))
     owners = (await s.execute(
         select(InvestigationRow.id).where(
             InvestigationRow.tenant_id == tenant_id, sql_cast(InvestigationRow.id, Text).in_(named), _usable_run())

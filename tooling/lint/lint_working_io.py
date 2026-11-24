@@ -239,6 +239,9 @@ RESIDUE = {
     # The one rule for the product's folders under the data root (the box check's and the job sockets'); never a run record.
     ("box._data_folder", "make_data_folder", ".mkdir"): (2, "probe", ('above', 'folder')),
     ("box._data_folder", "make_data_folder", "os.rmdir"): (1, "probe", ('folder',)),
+    # #1546: a claim's folders (root, inputs, spool) removed whole once the job ends, a run's read-only input folder included.
+    ("box._data_folder", "remove_data_folder", ".unlink"): (1, "probe", ('folder',)),
+    ("box._data_folder", "remove_data_folder", "shutil.rmtree"): (1, "probe", ('folder',)),
     ("box._check", "_Listener.__init__", "os.open"): (1, "probe", ('folder',)),
     ("box._check", "_Listener.close", "os.unlink"): (1, "probe", ('SOCKET_NAME',)),
     ("box._check", "_clear_check_folder", "os.rmdir"): (1, "probe", ('folder',)),

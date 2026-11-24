@@ -1444,9 +1444,8 @@ class _JobFacts:
     def _scrub(self) -> str:
         if self.held.box != job_facts.BOX_STARTED or self.run_dir is None:
             return "not_run"
-        verdict = box_mod.verdict_state(self.run_dir)
-        if verdict in ("clean", "tainted"):
-            return str(verdict)
+        # `clean` only when the teardown and scrub returned on a clean verdict (`held.scrub_verified`): a verdict file that
+        # reads `clean` under a scrub or teardown that then raised is not a verified tree (C2, O8).
         return "clean" if self.held.scrub_verified else "tainted"
 
     def _closing(self) -> dict[str, Any] | None:

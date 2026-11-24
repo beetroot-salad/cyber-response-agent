@@ -9,11 +9,14 @@ text. The `knowledge` fact is the helper's own (`served_knowledge`, mapped once 
 from __future__ import annotations
 
 import json
+import logging
 import math
 from collections.abc import Callable, Mapping
 from typing import Any
 
 from defender.records import job_facts, job_lane
+
+_logger = logging.getLogger(__name__)
 
 #: The most a record (its JSON) may hold; a learning outcome's findings text is capped on its own (8 MiB) below it.
 RECORD_CAP_BYTES = 12 * 1024 * 1024
@@ -133,11 +136,14 @@ def _screened(findings: Any, job_id: str) -> dict[str, Any] | None:
         raise Malformed("findings is not a findings field (an object with a state)")
     channels, why = job_lane.findings_of(findings)
     if channels is None:
+        # #1487 r5.1 item 3: each refusal is logged with the job id and the refusal's kind (D11: the screen is the helper's).
+        _logger.warning("learning job %s: its findings were refused (shape): %s", job_id, why)
         return {"state": "refused", "reason": str(why)}
     for channel in job_lane.FINDINGS_CHANNELS:
         try:
             screen_findings(channel, channels[channel], job_id)
         except JudgeRefused as refused:
+            _logger.warning("learning job %s: its %s findings were refused (row rule): %s", job_id, channel, refused)
             return {"state": "refused", "reason": f"the {channel} rows were refused by the screen: {refused}"[:1000]}
     return {"state": "screened", "rows": {c: list(channels[c]) for c in job_lane.FINDINGS_CHANNELS}}
 

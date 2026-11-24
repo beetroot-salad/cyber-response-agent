@@ -446,7 +446,7 @@ def job_tenant_folder(tenant: Tenant | JobTenant) -> Path:
     """`<data root>/<T>/` of an accepted tenant, as a plain folder: the explicit owner mount export
     for the per-job host helper (#1170), which binds it whole into its job's container at its own
     path (O1) and judges every path it derives below it with no link followed (H10); of a `JobTenant`,
-    its own folder in the job's root (the adoption entry's clone lives there, #1546). A join:
+    its own folder in the job's root (#1546). A join:
     nothing is read or made."""
     return unwrap_tenant_root(tenant.tenant_root)
 

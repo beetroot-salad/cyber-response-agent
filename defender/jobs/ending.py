@@ -338,7 +338,8 @@ def _investigation_cost(facts: Mapping[str, Any], outcome: dict[str, Any] | None
                         ended_by: EndedBy) -> tuple[float | None, bool]:
     """D15: after a cut (cancel, offboard, take-over), the last staged progress, a lower limit; after an exit or a stop,
     the outcome's figure with its own mark, else the last progress as a lower limit. With no progress: unknown (null,
-    unmarked) once the container started, exactly 0 when nothing started (a queued row cancelled, a launch refused)."""
+    unmarked) once the container started or after a cut (r9 "D15 mark"), exactly 0 when the row's own holder ended it
+    before anything started (a launch refused, a worker fault). A queued row nobody claimed is the store's to price."""
     if isinstance(ended_by, NotLaunched):
         return 0.0, False
     if outcome is not None and not isinstance(ended_by, _CUT):
@@ -349,7 +350,7 @@ def _investigation_cost(facts: Mapping[str, Any], outcome: dict[str, Any] | None
     figure = progress.get("cost_usd") if isinstance(progress, dict) else None
     if isinstance(figure, int | float) and not isinstance(figure, bool):
         return float(figure), True
-    return (None, False) if "started" in facts else (0.0, False)
+    return (None, False) if "started" in facts or isinstance(ended_by, _CUT) else (0.0, False)
 
 
 def _investigation_stage(facts: Mapping[str, Any], outcome: dict[str, Any] | None, decided: bool,

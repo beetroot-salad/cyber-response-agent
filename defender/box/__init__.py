@@ -144,7 +144,7 @@ from ._docker import (
     resolve_rootfs,
 )
 from ._check import BoxCheckFailed, require_box_check
-from ._data_folder import make_data_folder
+from ._data_folder import make_data_folder, remove_data_folder
 from ._host_env import provider_scrubbed_environ, run_env
 from ._relay import RELAY_LOST, relay_exec, relay_halt, relay_stop, relay_window
 from ._clock import clock_dir
@@ -311,6 +311,7 @@ __all__ = [
     "relay_window",
     "require_box_check",
     "make_data_folder",
+    "remove_data_folder",
     "require_image",
     "require_runtime",
     "resolve_rootfs",

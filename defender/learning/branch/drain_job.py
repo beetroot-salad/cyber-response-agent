@@ -127,7 +127,7 @@ def main(argv: list[str], *, tick: Callable[..., int] | None = None, environ: Ma
             store = container.tick_store()
         except (TenantRefused, OSError, ValueError) as unusable:
             sys.exit(f"[drain] request {ns.job}: the tenant cannot be used: {unusable}")
-        _unpack_inputs(ask, launch, Path(job_root), Path(str(drain_tenant.tenant_root)))
+        _unpack_inputs(ask, launch, Path(job_root), tenancy.job_tenant_folder(drain_tenant))
         status = (tick or _lead_tick)(LoopPaths.for_tenant(tenant), store=store, runs=runs,
                                       unusable=_asked_unusable(ask, ns.tenant))
         try:
