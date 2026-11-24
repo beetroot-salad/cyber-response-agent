@@ -23,6 +23,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import uuid
 from pathlib import Path
 
 import pytest
@@ -121,7 +122,9 @@ async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_moun
 
         ensure_job_network(run_docker)
 
-        with B.run_tenant(tmp_path, root) as t:
+        # A tenant id of this test alone: the store's objects live under `t/<tenant>/`, which the `garage` fixture empties at
+        # every test's end, and the published fixture's id is shared by every helper suite running beside this one.
+        with B.run_tenant(tmp_path, root, tenant_id=str(uuid.uuid4())) as t:
             register_tenant(migrated_database, t.tenant_id, data_root=root, records=no_proxy_records())
             (root / t.tenant_id / "runs").mkdir(exist_ok=True)
             evidence_keys.make(t.tenant_id)
@@ -140,16 +143,23 @@ async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_moun
             async with job_store(migrated_database) as store:
                 alert = await an_alert(store, t.tenant_id, raw=(GOLDEN / "alert.json").read_bytes())
                 inv, _ = await store.create_investigation(t.tenant_id, alert.alert_id, "k1", actor="u-1")
-                inv_id = inv.investigation_id
+                inv_id = str(inv.investigation_id)  # an `InvestigationId` (a str subclass) cannot be a glob pattern
                 worker = make_worker(store, root, child, containers=StandInContainers(tmp_path / "containers"))
                 await worker.drain()
 
             dsn = migrated_database
             assert owner(dsn, "investigations", inv_id, "stage", "disposition", "scrub", "evidence_state") == (
-                "completed", "benign", "clean", "complete")
+                "completed", golden_disposition(GOLDEN), "clean", "complete")  # the replay closes with the golden's own
             token = claim_of(dsn, "investigation", inv_id)
             assert token
             assert accepted(dsn, token) == ["bundle", "page/runtime.html"]
+
+            # nothing of the job is left on the host (asserted here, keyed by the claim's token)
+            for base in (ROOTS, INPUTS, SPOOL, ".job-sockets", ".job-scratch"):
+                assert not (root / base / token).exists(), f"{base}/<claim> outlived the job"
+            left = subprocess.run(["docker", "ps", "-aq", "--filter", f"label={CLAIM_LABEL}={token}"], capture_output=True,
+                                  text=True, check=True).stdout.split()
+            assert left == [], f"a container of the claim outlived the job: {left}"
 
             # the store: encrypted by the row's wrapped key, bytes matching the row's digest, the page the renderer's
             prefix = f"t/{t.tenant_id}/investigation/{inv_id}/{token}/"
@@ -163,8 +173,13 @@ async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_moun
                 body = garage.get(prefix + name, sse_key=key).content
                 assert sha(body) == digest
                 fetched[name] = body
-            # the page is the renderer's output over the run the job's own bundle holds, computed here (not the job's call)
-            unpacked = tmp_path / "unpacked"
+            # the page is the renderer's output over the run the job's own bundle holds, computed here (not the job's call).
+            # The bundle is the job's tenant folder from its root (members tenant-relative), and its run names its session store
+            # and its own folder by their paths there (the session pointer's `store_path`; the page's byline its `run_dir`).
+            # So it is unpacked where the job's root was, once that root is shown gone (above): the render here then reads the
+            # paths the job's render read.
+            unpacked = root / ROOTS / token / t.tenant_id
+            unpacked.mkdir(parents=True)
             with tarfile.open(fileobj=io.BytesIO(fetched["bundle"]), mode="r:gz") as bundle_tar:
                 bundle_tar.extractall(unpacked, filter="data")
             [held] = [p for p in unpacked.rglob(inv_id) if p.is_dir() and p.parent.name == "runs"]
@@ -189,12 +204,5 @@ async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_moun
                 assert not Path(m["source"]).is_relative_to(tenant_folder), f"a bind names the tenant folder: {m}"
                 rel = Path(m["source"]).relative_to(root) if Path(m["source"]).is_relative_to(root) else None
                 assert rel is None or not rel.parts[0].startswith(".job-") or token in rel.parts, f"another claim: {m}"
-
-            # nothing of the job is left on the host (asserted here, keyed by the claim's token)
-            for base in (ROOTS, INPUTS, SPOOL, ".job-sockets", ".job-scratch"):
-                assert not (root / base / token).exists(), f"{base}/<claim> outlived the job"
-            left = subprocess.run(["docker", "ps", "-aq", "--filter", f"label={CLAIM_LABEL}={token}"], capture_output=True,
-                                  text=True, check=True).stdout.split()
-            assert left == [], f"a container of the claim outlived the job: {left}"
     finally:
         shutil.rmtree(root, ignore_errors=True)

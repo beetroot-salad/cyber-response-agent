@@ -30,5 +30,9 @@ command = ["python3", "-c", program, tenant, job]
 login = json.loads(os.environ.pop("DEFENDER_TEST_EVIDENCE_LOGIN", "null"))
 keys = None if login is None else evidence.EvidenceKeys(addr=login["addr"], role_id=login["role_id"],
                                                         secret_id=login["secret_id"], mount=login["mount"])
-sys.exit(job_host.main(argv, docker=run_docker, signer=A.MarkedSigner(), forge=ForgeCredentialRecorder(),
+#: The real docker, carrying the program's observation through its container's own root when that root is not the data
+#: root (`R.ObservingDocker`: a learning container binds no tenant folder, #1546 A-O9).
+docker = R.ObservingDocker(run_docker, host_root=Path(os.environ["DEFENDER_DATA_ROOT"]), tenant=tenant,
+                           name={"learning": "learning", "post-step": "post-step"}[kind])
+sys.exit(job_host.main(argv, docker=docker, signer=A.MarkedSigner(), forge=ForgeCredentialRecorder(),
                        fetch=in_process_fetch(remote), command=command, evidence_keys=keys))
