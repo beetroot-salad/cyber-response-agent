@@ -225,8 +225,9 @@ def _open_claim(session: Session) -> None:
         raise _common.HelperFault(f"the job store cannot be read: {type(down).__name__}: {down}") from None
     if claim is None or claim.tenant_id != str(session.tenant_id) or claim.kind != session.kind:
         raise _common.HelperFault(f"no {session.kind} claim {session.claim} of this tenant is in the job store")
-    if session.kind != "post-step" and session.job_id is not None and claim.reference != str(session.job_id):
-        # The claim's reference column names the row it was minted for (#1546 PR7): a token for another job serves none.
+    if session.kind == "investigation" and session.job_id is not None and claim.reference != str(session.job_id):
+        # The claim's reference column names the investigation it was minted for (#1546 Claim, "the lease reference
+        # (owner row)"; the `launch-names-another-id` arm it replaced was the investigation's alone).
         raise _common.HelperFault(f"the claim {session.claim} is not job {session.job_id}'s")
     session.evidence_state = _evidence.Evidence(
         rows=session.rows, claim=claim, kind=session.kind, job_id=session.job_id, spool=None,
