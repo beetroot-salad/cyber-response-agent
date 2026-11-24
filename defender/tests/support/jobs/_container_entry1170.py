@@ -14,6 +14,7 @@ import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from defender.tests.support.jobs._job_helper import (
@@ -38,13 +39,38 @@ class Entered:
     err: str = ""
     ran: bool = False  # the entry was reached at all
     extra: dict[str, Any] = field(default_factory=dict)
+    #: #1546 (design "The job's folders": the run lives in the job's root, which the helper removes once the job ends,
+    #: A-O1): a copy of the job root's `<T>/` as the job left it when its container exited, when `enter(keep=)` asks.
+    kept: Path | None = None
+
+
+def keep_runs(container: Any, tenant: str, keep: Path) -> Path:
+    """Copy the job root's `<T>/` (under the container's `DEFENDER_DATA_ROOT`) to `keep` as it stands: directories and
+    regular files only (a link, socket or other entry is left out). An observation for the test to read after the helper
+    removed the root; it changes nothing the job or the helper sees. Returns `keep`."""
+    import os
+    import shutil
+
+    runs = Path(str(container.env["DEFENDER_DATA_ROOT"])) / tenant
+    keep.mkdir(parents=True, exist_ok=True)
+    for top, dirs, files in os.walk(runs):
+        here = keep / Path(top).relative_to(runs)
+        here.mkdir(exist_ok=True)
+        for name in files:
+            source = Path(top) / name
+            if source.is_file() and not source.is_symlink():
+                shutil.copy2(source, here / name)
+        dirs[:] = [d for d in dirs if not (Path(top) / d).is_symlink()]
+    return keep
 
 
 def enter(scene: HelperScene, inv: str, *, signer: Any = None, entry: Callable[..., int] | None = None,
-          kind: str = "investigation", docker: ContainerStandIn | None = None, **seams: Any) -> Entered:
+          kind: str = "investigation", docker: ContainerStandIn | None = None, keep: Path | None = None,
+          **seams: Any) -> Entered:
     """Run the helper for `inv` over a container whose process is `run.job_main` with `seams` (`entry(container)` instead:
     a custom container process). `docker` is a prebuilt stand-in (a `RelayDocker`, say) to run the job on. Stdout and stderr
-    are captured across the whole run."""
+    are captured across the whole run. `keep`: where the job root's `<T>/` is copied as the container leaves it
+    (`Entered.kept`, `keep_runs`)."""
     from defender import run as run_py
     from defender.tests.integrations.credential_proxy_1163 import _adapter1163 as A
 
@@ -52,7 +78,11 @@ def enter(scene: HelperScene, inv: str, *, signer: Any = None, entry: Callable[.
 
     def job(container: Any) -> int:
         done.ran = True
-        done.job_rc = run(container)
+        try:
+            done.job_rc = run(container)
+        finally:
+            if keep is not None:
+                done.kept = keep_runs(container, scene.tenant, keep)
         return done.job_rc
 
     def run(container: Any) -> int:
@@ -140,3 +170,27 @@ def lifecycle(**kw):
 sys.exit(run_py.serve_job(sys.argv[2:], lifecycle=lifecycle, preflight=lambda *a, **k: 0,
                           visualize=lambda *a, **k: None))
 '''
+
+
+@contextlib.contextmanager
+def in_container_environment(env: dict[str, Any]) -> Any:
+    """The process environment as the job container's (`container.env`) for an entry run on this thread: inside the box the
+    two are one, so a read of `os.environ` (the data root above all) sees the container's job root, not the test's host data
+    root (#1546 design "The job's folders": the root is the container's `DEFENDER_DATA_ROOT`). Restored afterwards. Use it
+    only around an entry whose helper does not read the same names meanwhile."""
+    import os
+
+    saved = {k: os.environ.get(k) for k in env}
+    try:
+        for key, value in env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value

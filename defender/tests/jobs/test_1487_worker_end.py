@@ -377,10 +377,12 @@ def _blocked_on_items(dsn: str) -> bool:
                              "AND query ILIKE '%INSERT INTO learning.work_items%' AND pid <> pg_backend_pid()"))
 
 
-async def test_p4_o3_a_worker_cut_off_at_the_insert_never_commits_a_refusal_and_the_job_reruns(world):  # noqa: F811
+async def test_p4_o3_a_worker_cut_off_at_the_insert_never_commits_a_refusal_and_its_decided_verdict_survives_the_take_over(world):  # noqa: F811
     """The insert is held on a table lock and the worker is cancelled there (real cancellation, a `BaseException`): the
-    row stays `running` with nothing stored and no publish state; its lease then lapses and a take-over reruns the job
-    as attempt 2, the first run's findings not stored. (P4: never caught; O3)"""
+    row stays `running` with nothing stored and no publish state (no refusal committed); its lease then lapses and the
+    take-over keeps the verdict the helper staged instead of rerunning (#1546 PR9, D8, D10, amending #1487 O3): the job
+    `completed`, its screened findings stored `waiting`, `publish_state = done`, evidence `complete`, still one attempt.
+    (P4: never caught; O3, D10)"""
     import psycopg
 
     from defender.tests.jobs.test_1344_learning_jobs import _lapse
@@ -421,9 +423,13 @@ async def test_p4_o3_a_worker_cut_off_at_the_insert_never_commits_a_refusal_and_
         assert _stored(dsn, job) == []
         _lapse(dsn, job)
         await store.take_over()
-    old, new = jobs_of(dsn, inv)
-    assert (old["status"], old["reason"], new["attempt"], new["status"]) == ("failed", "lease_lapsed", 2, "queued")
-    assert _stored(dsn, job) == []
+    # a take-over of a DECIDED job keeps its verdict (a rerun would be attempt 2, a refusal would read `refused`)
+    [only] = jobs_of(dsn, inv)
+    assert only["id"] == job, "the take-over made a new attempt"
+    assert (only["attempt"], only["status"], only["reason"], only["publish_state"]) == (1, "completed", None, "done"), only
+    assert _stored(dsn, job) == [(T1, "finding", f"{job}/w-b/0/0", "waiting"), (T1, "finding", f"{job}/w-b/0/1", "waiting"),
+                                 (T1, "questioner_finding", f"{job}/w-c/0/0", "waiting")]
+    assert execute(dsn, "SELECT evidence_state FROM jobs.learning_jobs WHERE id = %s", (job,)) == [("complete",)]
 
 
 # #1546 D11 retired `test_o2_p4_an_exception_in_the_screen_refuses_the_findings_and_the_ending_stands`: the worker runs no
@@ -539,7 +545,7 @@ async def test_o2_the_end_write_takes_the_tenant_lock_first_waiting_out_an_offbo
                 try:
                     await asyncio.to_thread(
                         holder.execute, "UPDATE jobs.learning_jobs SET status = 'skipped', reason = 'tenant_offboarded', "
-                        "message = 'offboarded', finished_at = now(), lease_expires_at = NULL WHERE id = %s "
+                        "message = 'offboarded', finished_at = now(), lease_expires_at = NULL, evidence_state = 'none' WHERE id = %s "
                         "AND status = 'running'", (job,))
                 except psycopg.errors.DeadlockDetected:
                     pytest.fail("the offboard ending the job row deadlocked with the end write: it holds the row")

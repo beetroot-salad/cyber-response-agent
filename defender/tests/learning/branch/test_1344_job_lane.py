@@ -16,6 +16,7 @@ import textwrap
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -43,12 +44,13 @@ def _roots(tmp_path, monkeypatch):
 
 
 class Watch(T.FakeAgent):
-    """The questioner double, which also reads the job's progress record each time it is paid for."""
+    """The questioner double, which also reads the job's progress record each time it is paid for (#1546 A-O2: the last
+    `progress` record the job sent on its socket so far, `record` the reader `run_entry` hands it)."""
 
     def __init__(self, *replies: Any, fail: BaseException | None = None) -> None:
         super().__init__(*replies)
         self.fail = fail
-        self.record: Path | None = None
+        self.record: Callable[[], dict | None] | None = None
         self.progress_seen: list[dict | None] = []
 
     def __call__(self, prompt: str, **kw: Any) -> Any:
@@ -58,10 +60,13 @@ class Watch(T.FakeAgent):
         return super().__call__(prompt, **kw)
 
 
-def _read_json(path: Path | None) -> dict | None:
-    if path is None or not path.is_file():
+def _read_json(record: Callable[[], dict | None] | None) -> dict | None:
+    """The progress record as the double sees it when called: #1546 (A-O2, PR2) the last `progress` record the job sent on
+    its socket so far (a copy), or None before any; no progress file is written to a folder."""
+    if record is None:
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    seen = record()
+    return None if seen is None else json.loads(json.dumps(seen))
 
 
 @dataclass
@@ -80,7 +85,7 @@ def choose(*ids: int):
 class WatchJudge(J.FakeJudge):
     """The judge double, which also reads the job's progress record each time it is called."""
 
-    record: Path | None = None
+    record: Callable[[], dict | None] | None = None
     progress_seen: list = field(default_factory=list)
 
     def __call__(self, *a: Any, **kw: Any) -> str:
@@ -125,13 +130,9 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     tenant = src.parent.parent.name
     authored = S.questioner_for()
     asking = questioner if questioner is not None else Watch(*authored.replies)
-    runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
-    asking.record = runs / f"{job}.learning-progress.json"
     siblings = spawn if spawn is not None else J.FakeSibling()
     grading = judge if judge is not None else WatchJudge(
         default=J.as_reply_text(J.reply_doc(bucket="none", systems=[])))
-    if isinstance(grading, WatchJudge):
-        grading.record = asking.record
     seams = dict(
         questioner=asking, preflight=preflight or S.no_preflight, live_tree=live_tree or T.source_capture(),
         roster=est.roster(), judge=grading,
@@ -150,6 +151,13 @@ def run_entry(  # noqa: PLR0913 — one keyword per seam a scenario may replace
     seams.update(extra)
     launch["records"] = handed_records(seams["directory"], tenant)
     sent = _1546_helper_side(tmp_path, tenant, src, launch, answers)
+
+    def progress_so_far() -> dict | None:
+        return sent["progress"][-1] if sent["progress"] else None
+
+    asking.record = progress_so_far
+    if isinstance(grading, WatchJudge):
+        grading.record = progress_so_far
     # In its job container (#1170 A6): no `--parent-pid`, and a job socket answering the helper's `launch` facts and the
     # export it materialises; the helper's own answers are `tests/jobs/test_job_helper_learning.py`'s.
     argv = ["--job", job, "--tenant", tenant, "--source", src.name]

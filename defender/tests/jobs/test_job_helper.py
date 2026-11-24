@@ -23,6 +23,7 @@ import pytest
 from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — #1546: fixtures of `evidence_store`
 from defender.tests.support.jobs import _helper_evidence1546 as _h1546
 from defender.tests.support.jobs._helper_evidence1546 import drive, plant
+from defender.tests.support.evidence._facts1546 import sent_inv_outcome, staged_inv_outcome
 from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — #1546: fixture of `evidence_store`
 from defender.tests.support.jobs._job_helper import (
     ASK_LAUNCH,
@@ -89,7 +90,8 @@ def _go(scene, job=None, *, docker=None, signer=None, **seams):
 
 def test_claim_flow_the_helper_starts_one_labelled_container_serves_it_and_cleans_up_once_it_exits(scene):
     """Lock, publish, one container labelled with tenant, claim and job, served until it exits; then removed by label,
-    the lock free, and the job's own end record left as the job wrote it. (Flow: claim, H3, A3, A5, Design 1-8)"""
+    the lock free, and the job's own ending staged as the job sent it (#1546 A-O2: its `outcome` record, no end file).
+    (Flow: claim, H3, A3, A5, Design 1-8)"""
     from defender import job_host
     from defender.box import CLAIM_LABEL, TENANT_LABEL
     from defender.tenancy import host_lock
@@ -100,7 +102,8 @@ def test_claim_flow_the_helper_starts_one_labelled_container_serves_it_and_clean
     def job(c) -> int:
         seen["holders"] = [h.pid for h in host_lock.holders(scene.root, scene.tenant)]
         seen["launch"] = c.request("launch")
-        (scene.runs / f"{inv}.job-end.json").write_text('{"written": "by the job"}', encoding="utf-8")
+        # #1546 (A-O2, PR2): the job's own ending is the `outcome` record it sends; no job-end file is written.
+        c.request("outcome", record=sent_inv_outcome(cost_usd=0.17))
         return 0
 
     docker = ContainerStandIn(job)
@@ -116,7 +119,8 @@ def test_claim_flow_the_helper_starts_one_labelled_container_serves_it_and_clean
     assert seen["holders"] == [os.getpid()], "the helper did not hold the tenant's lock as a recorded holder"
     assert seen["launch"]["export_commit"] == scene.t.commit
     assert docker.left(CLAIM_LABEL, scene.claim) == [], "the job's containers outlived the helper"
-    assert (scene.runs / f"{inv}.job-end.json").read_text(encoding="utf-8") == '{"written": "by the job"}'
+    assert _h1546.facts(scene.dsn, scene.claim)["outcome"] == staged_inv_outcome(cost_usd=0.17), (
+        "the job's own ending was not staged as it sent it")
     assert [h.pid for h in host_lock.holders(scene.root, scene.tenant)] == []
     fd = host_lock.acquire(scene.root, scene.tenant, exclusive=True, timeout=0)
     assert fd is not None, "the helper kept the tenant's lock after it exited"
@@ -243,10 +247,13 @@ def test_s2_the_job_container_runs_under_the_job_runtime_derived_from_the_box_ru
 def test_a7_the_code_mounted_is_read_only_at_the_same_path_and_holds_no_env_file(scene):
     """The one code bind is read-only, its source and target the same path, and the tree holds no `.env`. (A7; that it is
     the worker's code copy is the worker-lane composition's, `e2e/test_job_box_boundary_e2e.py`)"""
-    own = str(scene.root / scene.tenant)
     _inv, docker, _ran, _s = _go(scene, lambda c: 0)
 
-    (code,) = [m for m in docker.box.mounts if m["source"] and m["source"] != own and m["readonly"]]
+    # #1546 (A-O9): the read-only binds are the claim's inputs folder and the one code tree.
+    inputs = str(_h1546.job_inputs(scene))
+    read_only = [m for m in docker.box.mounts if m["source"] and m["readonly"]]
+    assert inputs in [m["source"] for m in read_only], read_only
+    (code,) = [m for m in read_only if m["source"] != inputs]
     assert code["source"] == code["target"], code
     assert not list(Path(code["source"]).glob(".env")), "the mounted code tree holds an env file"
 
@@ -771,17 +778,19 @@ def _tree(root: Path) -> dict[str, str]:
 
 
 def test_a6_h9_a_helper_run_leaves_on_the_data_root_only_its_run_folder_its_records_and_the_empty_socket_parent(scene):
-    """The data root after a helper's run, against before it: what was added is the run folder `<T>/runs/<inv>/` and what
-    the job wrote in it, the run's records beside it (`<T>/runs/<inv>.*`) and the shared socket parent `.job-sockets/`,
-    empty (the claim's socket folder is gone, so no later claim finds one), and the shared owner-record parent
-    `.job-owners/`, empty likewise (#1557 O5), beside the tenant lock's own files (no holder left) and the empty run-copy
-    parent; nothing was removed. (A6, H9)"""
+    """The data root after a helper's run, against before it: what was added is the shared per-claim parents, each empty
+    (`.job-sockets/`, so no later claim finds a socket folder; `.job-owners/`, #1557 O5; #1546's `.job-roots/`,
+    `.job-inputs/` and `.job-spool/`), beside the tenant lock's own files (no holder left); the run folder the job wrote in
+    lived in the claim's root and is gone with it, and nothing of the job is under the tenant folder; nothing was removed.
+    (A6, H9; #1546 A-O1: after a job ends its root, inputs and spool are gone, design "The job's folders")"""
     inv, argv = _investigation(scene)
-    tenant_runs = (scene.runs).relative_to(scene.root)
     before = _tree(scene.root)
+    seen: dict = {}
 
     def job(c) -> int:
-        (scene.runs / inv / "report.md").write_text("the report", encoding="utf-8")
+        run = J.job_runs(scene) / inv
+        seen["run"] = run.is_dir()
+        (run / "report.md").write_text("the report", encoding="utf-8")
         return 0
 
     docker = ContainerStandIn(job)
@@ -794,19 +803,17 @@ def test_a6_h9_a_helper_run_leaves_on_the_data_root_only_its_run_folder_its_reco
     added = {p: kind for p, kind in after.items() if p not in before}
     assert added.get(".job-sockets") == "dir", f"control: the shared socket parent was made: {sorted(added)}"
     assert added.get(".job-owners") == "dir", f"control: the shared owner-record parent was made: {sorted(added)}"
-    assert listing(scene.root / ".job-sockets") == [], "a claim's socket folder outlived the helper"
-    assert listing(scene.root / ".job-owners") == [], "a claim's owner record outlived the helper"
-    run = str(tenant_runs / inv)
-    # #1214's own: the tenant's lock file and its holder folder, left with no holder recorded; the run copies' parent,
-    # left empty (the copy itself is gone).
+    assert seen["run"], "control: the job's run folder was made in its root"
+    parents = (".job-sockets", ".job-owners", ".job-roots", ".job-inputs", ".job-spool")
+    for parent in parents:
+        assert listing(scene.root / parent) == [], f"a claim's folder under {parent} outlived the helper"
+    # #1214's own: the tenant's lock file and its holder folder, left with no holder recorded.
     locks = f".host-locks/{scene.tenant}"
-    owned = {".host-locks", locks, f"{locks}/lock", f"{locks}/processes", f"{scene.tenant}/run-knowledge"}
+    owned = {".host-locks", locks, f"{locks}/lock", f"{locks}/processes"}
     assert listing(scene.root / locks / "processes") == [], "a holder record outlived the helper"
-    assert listing(scene.root / scene.tenant / "run-knowledge") == [], "a run copy outlived the helper"
-    stray = sorted(p for p in added if p not in (".job-sockets", ".job-owners") and p not in owned and p != run
-                   and not p.startswith(run + "/") and not (p.startswith(run + ".") and "/" not in p[len(run):]))
-    assert stray == [], f"the helper left behind more than the run folder, its records and the shared parents: {stray}"
-    assert added[run] == "dir"
+    stray = sorted(p for p in added if p not in parents and p not in owned)
+    assert stray == [], f"the helper left behind more than the shared parents and the lock's files: {stray}"
+    assert not [p for p in added if p.startswith(f"{scene.tenant}/")], "the job left something under the tenant folder"
     assert all(kind != "link" for kind in added.values()), added
 
 
@@ -828,7 +835,7 @@ def test_1557_o5_the_helper_records_itself_for_its_claim_outside_every_bind_whil
             claim = got["claims"][0]
             got["pid"] = owner_record(owners / claim)["pid"]
             got["socket"] = (scene.root / ".job-sockets" / claim).is_dir()
-        (scene.runs / inv / "report.md").write_text("the report", encoding="utf-8")
+        (J.job_runs(scene) / inv / "report.md").write_text("the report", encoding="utf-8")  # #1546: the run is in its root
         return 0
 
     docker = ContainerStandIn(job)
@@ -846,12 +853,14 @@ def test_1557_o5_the_helper_records_itself_for_its_claim_outside_every_bind_whil
 
 
 def test_a6_the_helper_makes_the_run_folder_and_the_run_copy_owned_by_itself_and_removes_the_copy_at_the_end(scene):
-    """Before the container runs: `<T>/runs/<inv>/` exists and `<T>/run-knowledge/<inv>/` is a copy whose owner is the helper's
-    process. After: the copy is gone and what the job wrote in the run folder stays. (A6, C20)"""
+    """Before the container runs: the run folder `<root>/<T>/runs/<inv>/` exists in the claim's root and
+    `.job-inputs/<claim>/run-knowledge/<inv>/` is a copy whose owner is the helper's process. After: the copy and the run
+    folder are gone with the claim's root and inputs, and the tenant folder holds neither. (A6, C20; #1546 design "The job's
+    folders": root and inputs; A-O1: nothing of the job remains on the host, its output leaves as evidence objects)"""
     from defender.tests.tenancy.tenant_1108_p4._drain_support import owner_record
 
     inv, argv = _investigation(scene)
-    copy, run = scene.root / scene.tenant / "run-knowledge" / inv, scene.runs / inv
+    copy, run = J.run_copies(scene) / inv, J.job_runs(scene) / inv
     got: dict = {}
 
     def job(c) -> int:
@@ -866,8 +875,10 @@ def test_a6_the_helper_makes_the_run_folder_and_the_run_copy_owned_by_itself_and
     assert docker.job_error is None, docker.job_error
     assert got == {"run_folder": True, "owner": os.getpid()}
     assert not copy.exists(), "the helper left the run copy it made"
-    assert listing(copy.parent) == [], "the helper left a temporary in the run-knowledge folder"
-    assert (run / "report.md").read_text(encoding="utf-8") == "the report", "the run's output did not survive the helper"  # lint-report-file: ok — an arbitrary file the stand-in job wrote
+    assert not _h1546.job_inputs(scene).exists(), "the helper left the claim's inputs folder (a temporary in it)"
+    assert not run.exists(), "the run folder outlived the job's root (A-O1)"
+    assert not (scene.runs / inv).exists(), "the run folder was made under the tenant folder"
+    assert not (scene.root / scene.tenant / "run-knowledge" / inv).exists(), "the run copy was made under the tenant folder"
 
 
 # --- H10: links in helper-made folders ------------------------------------------------------------------------------
@@ -889,7 +900,7 @@ def test_h10_a_run_folder_replaced_by_a_link_into_another_tenant_gets_no_box_and
     def job(c) -> int:
         first = c.request("box.start", kind="shell", id=inv)
         c.request("box.stop", handle=first["handle"])
-        target = _swap_for_a_link_into_the_other_tenant(scene, scene.runs / inv)
+        target = _swap_for_a_link_into_the_other_tenant(scene, J.job_runs(scene) / inv)  # #1546: the run is in its root
         got["before"], got["listing"] = len(docker.creates()), listing(target)
         got["refusal"] = c.refused("box.start", kind="shell", id=inv)
         got["after"], got["listing_after"] = len(docker.creates()), listing(target)
@@ -914,7 +925,7 @@ def test_h10_the_helpers_removal_of_its_run_copy_does_not_follow_a_link_into_ano
     (other_runs / "keep.txt").write_text(CANARY, encoding="utf-8")
 
     def job(c) -> int:
-        _swap_for_a_link_into_the_other_tenant(scene, scene.root / scene.tenant / "run-knowledge" / inv)
+        _swap_for_a_link_into_the_other_tenant(scene, J.run_copies(scene) / inv)  # #1546: the copy is in the claim's inputs
         return 0
 
     docker = ContainerStandIn(job)
@@ -932,7 +943,8 @@ def test_h10_every_folder_from_the_tenant_down_to_each_bind_source_is_judged_and
     link into a folder of the other tenant that holds what lay below it, gets `box.start` refused as `confinement`, no
     further box, and the other tenant's folder unchanged; an id the helper did not mint is refused as `unknown-id`.
     Control: the untouched folders start the box, whose sources include the run folder and the run copy. (H10, A6, O9;
-    the learning kinds' twin is `test_job_helper_learning`)"""
+    the learning kinds' twin is `test_job_helper_learning`; #1546: the run folder lies in the claim's root and the copy in its
+    inputs, and the sweep starts below each, design "The job's folders", helper-side bind judging)"""
     from defender.tests.support.jobs._job_helper import swap_every_component
 
     inv, argv = _investigation(scene)
@@ -950,11 +962,11 @@ def test_h10_every_folder_from_the_tenant_down_to_each_bind_source_is_judged_and
 
     assert ran.raised is None, ran.raised
     assert docker.job_error is None, docker.job_error
-    tenant = scene.root / scene.tenant
-    assert scene.runs / inv in got["sources"], f"control: the run box binds its run folder: {got['sources']}"
-    assert any(s.is_relative_to(tenant / "run-knowledge" / inv) for s in got["sources"]), got["sources"]
+    runs, copies = J.job_runs(scene), J.run_copies(scene)
+    assert runs / inv in got["sources"], f"control: the run box binds its run folder: {got['sources']}"
+    assert any(s.is_relative_to(copies / inv) for s in got["sources"]), got["sources"]
     swapped = {a.component for a in got["arms"]}
-    assert {tenant / "runs", scene.runs / inv, tenant / "run-knowledge"} <= swapped, swapped
+    assert {runs.parent, runs, runs / inv, copies, copies / inv} <= swapped, swapped
     for arm in got["arms"]:
         assert arm.code == "confinement", f"{arm.component} swapped for a link: {arm.code}"
         assert arm.creates[1] == arm.creates[0], f"a box was created over the link at {arm.component}"
@@ -967,9 +979,10 @@ def test_h10_every_folder_from_the_tenant_down_to_each_bind_source_is_judged_and
 # --- O9, O10: the helper decides every box's shape and bounds every command ----------------------------------------------
 
 def test_o9_a_box_request_naming_another_tenants_folder_is_refused_and_a_plain_one_is_shaped_by_the_helper(scene):
-    """`box.start(kind=shell, id=<inv>)` is started with the tenant's label and the launch record's box token (the worker
-    reaps a leftover by it, #1342 r5 C1) and binds inside `<root>/<T>` or the code tree; a request carrying a host path or
-    another tenant's folder is refused and creates nothing. (O9)"""
+    """`box.start(kind=shell, id=<inv>)` is started with the tenant's label and the launch facts' box token (the worker
+    reaps a leftover by it, #1342 r5 C1) and binds inside the claim's root or inputs or the code tree; a request carrying a
+    host path or another tenant's folder is refused and creates nothing. (O9; #1546: the launch facts are the claim row's,
+    the run lives in the claim's root and its copy in its inputs, design "The job's folders")"""
     from defender.box import START_TOKEN_LABEL, TENANT_LABEL
 
     inv, argv = _investigation(scene)
@@ -990,13 +1003,17 @@ def test_o9_a_box_request_naming_another_tenants_folder_is_refused_and_a_plain_o
     assert docker.job_error is None, docker.job_error
     (create,) = docker.creates()
     assert parse_labels(create)[TENANT_LABEL] == scene.tenant
-    token = json.loads((scene.runs / f"{inv}.launch.json").read_text(encoding="utf-8"))["box_token"]
+    from defender.tests.support.shared._postgres1339 import execute
+
+    ((launch,),) = execute(scene.dsn, "SELECT launch FROM jobs.claims WHERE token = %s", (scene.claim,))
+    token = launch["box_token"]
     assert parse_labels(create).get(START_TOKEN_LABEL) == token, "the run box does not carry the worker's box token"
     code = Path(__file__).resolve().parents[3]
-    (job_code,) = [m for m in docker.box.mounts if m["source"] and m["readonly"]]
+    inputs = _h1546.job_inputs(scene)
+    (job_code,) = [m for m in docker.box.mounts if m["source"] and m["readonly"] and m["source"] != str(inputs)]
     for m in (m for m in parse_mounts(create) if m["source"]):
         src = Path(m["source"])
-        assert any(src.is_relative_to(ok) for ok in (scene.root / scene.tenant, code, Path(job_code["source"]))), m
+        assert any(src.is_relative_to(ok) for ok in (_h1546.job_root(scene), inputs, code, Path(job_code["source"]))), m
     assert got["after"] == got["state"] == 1
 
 
@@ -1090,7 +1107,8 @@ def test_o7_a_stop_from_the_worker_stops_the_container_gracefully_lets_the_job_w
         fd = host_lock.acquire(scene.root, scene.tenant, exclusive=True, timeout=0)
         got["exclusive"] = fd is not None
         host_lock.release_lock(fd)
-        (scene.runs / f"{inv}.job-end.json").write_text('{"written": "while unwinding"}', encoding="utf-8")
+        # #1546 (A-O2): the job's end, written while it unwinds, is the `outcome` record it sends within the stop grace.
+        c.request("outcome", record=sent_inv_outcome(cost_usd=0.23))
         return 143
 
     docker = ContainerStandIn(job)
@@ -1103,7 +1121,8 @@ def test_o7_a_stop_from_the_worker_stops_the_container_gracefully_lets_the_job_w
     touching = [c for c in docker.log if len(c) > 1 and docker.box.name in c and c[1] in ("stop", "kill", "rm")]
     assert [c[1] for c in touching][:1] == ["stop"], f"the container was not stopped gracefully first: {touching}"
     assert docker.left(CLAIM_LABEL, scene.claim) == []
-    assert (scene.runs / f"{inv}.job-end.json").read_text(encoding="utf-8") == '{"written": "while unwinding"}'
+    assert _h1546.facts(scene.dsn, scene.claim)["outcome"] == staged_inv_outcome(cost_usd=0.23), (
+        "the end the job sent while it unwound was not staged")
     (grace,) = flag_values(touching[0], "--time", "-t", "--timeout")
     worker_grace = inspect.signature(Worker.__init__).parameters["stop_grace"].default
     assert cli._STOP_GRACE_SECONDS < float(grace) < worker_grace, "the grace budgets do not nest (A2)"
@@ -1192,10 +1211,13 @@ def _tamper_the_alert(scene, inv):
     (scene.runs / f"{inv}.alert.json").write_bytes(b'{"not": "the alert the record digests"}')
 
 
-def _offboarding(scene, _inv):
-    from defender.tests.support.jobs._jobs1342 import restate_tenant
+def _offboarding(scene, inv):
+    """#1546 (design: Claim): the worker's claim precedes the offboard (an offboarding tenant takes no new job, so a claim
+    is planted while it is active), then the tenant's record moves to offboarding in place."""
+    from defender.tests.support.jobs._jobs1342 import move_tenant
 
-    restate_tenant(scene.dsn, scene.tenant, state="offboarding", data_root=scene.root)
+    J.claim_for(scene, scene.argv("investigation", inv))
+    move_tenant(scene.dsn, scene.tenant, state="offboarding")
 
 
 def _refusing_premise(scene, inv, cause):
@@ -1207,6 +1229,7 @@ def _refusing_premise(scene, inv, cause):
     elif cause == "admission":
         _offboarding(scene, inv)
     elif cause == "alert-mapping":
+        J.claim_for(scene, scene.argv("investigation", inv))  # #1546: claimed while mapped, as the worker's claim precedes
         scene.unmap()
     else:
         return A.RaisingSigner(RuntimeError("openbao is sealed"))
@@ -1282,6 +1305,8 @@ def test_o7_a_helper_whose_parent_is_not_the_pid_it_was_handed_does_nothing_and_
     assert signer.payloads == [], "the helper signed a pass for a worker that is gone"
     assert scene.end(inv) is None
     assert not (scene.root / scene.tenant / "run-knowledge" / inv).exists()
+    assert not _h1546.job_root(scene).exists(), "the helper made the claim's root for a worker that is gone"
+    assert not _h1546.job_inputs(scene).exists(), "the helper made the claim's inputs for a worker that is gone"
 
 
 @pytest.mark.parametrize("rc", [1, 2, 137, 143])
@@ -1411,6 +1436,9 @@ def test_d4_a_job_container_that_exits_nonzero_without_the_server_ever_accepting
     # Every record a job's ending can be lives in the job lane, written only through its `write_*` methods; counting
     # them all (by code, whatever route reaches them) proves "writes no ending" for every kind without naming where
     # each kind's ending lives.
+    # #1546 (design "The job's folders": the root holds the helper's copies of the launch facts and alert, never read back;
+    # census: the worker's launch record became the claim row and "the helper writes the job's copies"): `write_launch`
+    # writes those copies, no ending; that the helper stages no `outcome` of its own is asserted below.
     writers = {name: fn for name, fn in vars(JobLane).items() if name.startswith("write_") and callable(fn)}
     assert writers, "the job lane names no writers: the count below would prove nothing"
     with caplog.at_level(logging.DEBUG), counting_calls(**writers) as calls:
@@ -1426,8 +1454,11 @@ def test_d4_a_job_container_that_exits_nonzero_without_the_server_ever_accepting
 
     assert ran.rc == (NOTHING_WAITS if kind == "post-step" else 0), f"the helper's exit followed the container's status: {ran.rc}"
     assert "its container exited with status 7" in err, err
-    written = {name: n for name, n in calls.counts.items() if n}
+    written = {name: n for name, n in calls.counts.items() if n and name != "write_launch"}
     assert not written, f"the helper wrote a job-lane record of its own: {written}"
+    staged = _h1546.facts(scene.dsn, scene.claim)
+    assert "outcome" not in staged, f"the helper staged an ending of its own: {sorted(staged)}"
+    assert "result" not in staged, f"the helper staged an ending of its own: {sorted(staged)}"
 
 
 def test_d4_nothing_is_logged_when_the_job_connected_even_if_it_then_failed(scene, capsys):
@@ -1938,6 +1969,7 @@ def test_1471_p5_an_alert_swapped_for_another_tickets_with_a_matching_record_dig
         _ask_both(s, control, control_argv)
         assert s.end(control) is None, "control: the unswapped job runs"
 
+        s = J.next_claim(s, monkeypatch)  # #1546: the second job is claimed on its own (a row is claimed at most once)
         inv, argv, _link = _flagged_investigation(
             s, flagged=True, alert=OTHER_KEYED_ALERT_1471,
             digest=hashlib.sha256(KEYED_ALERT_1471).hexdigest())  # argv: the worker's digest of the original alert
@@ -1963,6 +1995,7 @@ def test_1471_p5_an_investigation_helper_started_without_the_alert_digest_is_ref
         _ask_both(s, control, control_argv)
         assert s.end(control) is None, "control: with the digest the job runs"
 
+        s = J.next_claim(s, monkeypatch)  # #1546: the second job is claimed on its own (a row is claimed at most once)
         inv, argv, _link = _flagged_investigation(s, flagged=True, send_digest=False)
         assert not any(a.startswith("--alert-digest") for a in argv), f"premise: the argv holds no digest: {argv}"
         docker, signer = ContainerStandIn(lambda c: 0), make_signer()
@@ -1998,6 +2031,11 @@ def test_1471_p5_the_ticket_is_derived_from_the_bytes_the_digest_admitted_in_one
     assert _signed_writes(signer) == [["ticket", "rw", TICKET_1471]], _signed_grants(signer)
 
 
+def _rewrite_every_ticket_folder(folders: tuple[Path, ...]) -> list[Path]:
+    """`_rewrite_every_ticket_file` over each of `folders` that exists."""
+    return [p for folder in folders if folder.is_dir() for p in _rewrite_every_ticket_file(folder)]
+
+
 def _rewrite_every_ticket_file(folder: Path) -> list[Path]:
     """What any file the job container can write may say: every regular file under `folder` (the tenant's folder, the
     container's read-write bind) whose bytes hold `TICKET_1471` is rewritten, making it writable first, to name
@@ -2023,8 +2061,10 @@ def _rewrite_every_ticket_file(folder: Path) -> list[Path]:
 @pytest.mark.parametrize("gap", ["after-the-run-folder-is-written", "before-the-write-pass-ask"])
 def test_1471_p5_whatever_a_file_the_job_can_write_says_after_admission_the_write_pass_names_the_admitted_ticket(
         tmp_path, monkeypatch, migrated_database, gap):
-    """Every file under the tenant folder that names the ticket is rewritten to name another, once the run folder is
-    written or just before the job asks: the signed write is `[case system, rw, <the admitted ticket>]` each time. (P-5)"""
+    """Every file under the tenant folder and the claim's root (#1546: the job's read-write folder, where the run folder and
+    the helper's copies of the launch facts and alert now lie) that names the ticket is rewritten to name another, once the
+    run folder is written or just before the job asks: the signed write is `[case system, rw, <the admitted ticket>]` each
+    time. (P-5)"""
     from defender import run_common
     from defender.records import RunPaths
 
@@ -2033,15 +2073,15 @@ def test_1471_p5_whatever_a_file_the_job_can_write_says_after_admission_the_writ
     def then_real(run_dir, *args, **kwargs):
         seen["run_dir"] = Path(run_dir)
         if gap == "after-the-run-folder-is-written":
-            seen["rewritten"] = _rewrite_every_ticket_file(tenant_folder)
+            seen["rewritten"] = _rewrite_every_ticket_folder(writable)
         return real(run_dir, *args, **kwargs)
 
     with _ticket_scene(tmp_path, monkeypatch, migrated_database) as s:
-        tenant_folder = s.root / s.tenant
+        writable = (s.root / s.tenant, _h1546.job_root(s))
         inv, argv, _link = _flagged_investigation(s, flagged=True)
         monkeypatch.setattr(run_common, "write_versions_record", then_real)  # lint-monkeypatch: ok — the gap between the run folder's writes and the job's start has no seam
         got, signer = _ask_both(s, inv, argv, before_write=None if gap == "after-the-run-folder-is-written" else
-                                lambda: seen.update(rewritten=_rewrite_every_ticket_file(tenant_folder)))
+                                lambda: seen.update(rewritten=_rewrite_every_ticket_folder(writable)))
 
     assert seen["run_dir"] is not None, "premise: the helper wrote the run's versions record"
     assert seen["rewritten"], f"nothing was rewritten at the gap {gap}"

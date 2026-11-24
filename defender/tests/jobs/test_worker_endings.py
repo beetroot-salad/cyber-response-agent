@@ -16,6 +16,8 @@ import pytest
 
 from defender.records import job_lane, run_end
 from defender import _vocab
+from defender.tests.support.evidence._facts1546 import LAUNCH_ALERT, LAUNCH_BOX_TOKEN, LAUNCH_DIGEST, LAUNCH_LABEL
+from defender.tests.support.jobs._jobs1342 import launch_facts
 from defender.tests.support.jobs._jobs1342 import (
     CLOSING_KEY,
     NOW,
@@ -212,7 +214,8 @@ ORIGIN_1471 = "https://app.defender.test"
 KEYED_1471 = (b'{"rule": {"id": "r-1342",  "description": "sketch"},\n'
               b' "alert_id": "SEC-1471", "alert_timestamp": "2026-10-29T00:00:00Z"}\n')
 DIGEST_1471 = hashlib.sha256(KEYED_1471).hexdigest()
-LAUNCH_FIELDS = {"investigation_id", "tenant_id", "alert_id", "digest", "label", "box_token"}
+#: The launch facts every investigation claim carries (#1546: the launch record's names, now on the claim row; design: Claim).
+LAUNCH_FIELDS = {LAUNCH_ALERT, LAUNCH_DIGEST, LAUNCH_LABEL, LAUNCH_BOX_TOKEN}
 
 
 def _worker_1471(world, store, child, **kw):
@@ -274,10 +277,20 @@ async def test_1471_p5_each_helper_is_started_with_its_own_flag_digest_and_link(
         assert _values(argv, "--job") == [inv]
 
 
-async def test_1471_p5_a_flagged_rows_tenant_folder_changes_exactly_as_an_unflagged_rows_does(world):
-    """Two tenant folders that differ only in their row's flag change alike under the worker, entry for entry (added,
-    altered or removed; by kind, mode and decoded text) once each folder's own ids are masked: nothing a job can see depends
-    on the flag. (P-5; the stand-in job writes nothing)"""
+def _masked_facts(facts: dict, tenant: str, inv: str) -> str:
+    """A claim's launch facts as sorted JSON, its own row, alert, box token and tenant masked."""
+    text = json.dumps(facts, sort_keys=True)
+    for n, value in enumerate([inv, facts[LAUNCH_ALERT], facts[LAUNCH_BOX_TOKEN], tenant]):
+        text = text.replace(value, f"<v{n}>")
+    return text
+
+
+async def test_1471_p5_a_flagged_rows_tenant_folder_and_launch_facts_change_exactly_as_an_unflagged_rows_do(world):
+    """UPDATED (#1546 census: the launch record beside the run -> the claim row, whose launch facts the helper copies for
+    the job; design: Claim): two tenant folders that differ only in their row's flag change alike under the worker, entry
+    for entry (added, altered or removed; by kind, mode and decoded text) once each folder's own ids are masked, and the
+    two claims' launch facts carry the same names, each its own row's digest, and no word of the flag: nothing a job can
+    see depends on the flag, which travels on the helper's argv alone. (P-5; the stand-in job writes nothing)"""
     rows = [(T1, True, "k1"), (T2, False, "k1")]
     folders = {tenant: world["root"] / tenant for tenant, _flag, _key in rows}
 
@@ -299,13 +312,11 @@ async def test_1471_p5_a_flagged_rows_tenant_folder_changes_exactly_as_an_unflag
     assert _values(door.argvs[flagged_id], "--ticket-link") == [f"{ORIGIN_1471}/t/{T1}/investigations/{flagged_id}"], \
         "premise: the flag reached the worker"
     assert "--post-ticket" not in door.argvs[plain_id], "premise: the unflagged row carries no flag"
-
-    def launch_of(tenant, inv):
-        return json.loads((folders[tenant] / "runs" / f"{inv}.launch.json").read_text(encoding="utf-8"))
+    launch = {T1: launch_facts(world["dsn"], flagged_id), T2: launch_facts(world["dsn"], plain_id)}
+    assert all(isinstance(facts, dict) for facts in launch.values()), f"premise: both claims carry launch facts: {launch}"
 
     def masked(tenant, inv):
-        launch = launch_of(tenant, inv)
-        values = [inv, launch["alert_id"], launch["box_token"], tenant]
+        values = [inv, launch[tenant][LAUNCH_ALERT], launch[tenant][LAUNCH_BOX_TOKEN], tenant]
 
         def mask(text):
             for n, value in enumerate(values):
@@ -315,15 +326,20 @@ async def test_1471_p5_a_flagged_rows_tenant_folder_changes_exactly_as_an_unflag
         return {mask(str(path)): tuple(None if e is None else mask(e.decode("utf-8", "replace")) for e in pair)
                 for path, pair in changed[tenant].items()}
 
-    assert [is_box_token(launch_of(t, inv)["box_token"]) for t, inv in ((T1, flagged_id), (T2, plain_id))] == [True, True], \
+    assert [is_box_token(launch[t][LAUNCH_BOX_TOKEN]) for t in (T1, T2)] == [True, True], \
         "a box token is not of the decided form, which the mask would hide"
     flagged, plain = masked(T1, flagged_id), masked(T2, plain_id)
-    assert len(plain) >= 2, "premise: the worker changed the unflagged row's folder"
     assert sorted(flagged) == sorted(plain), "the flagged folder changed at other paths than the unflagged one"
     assert {n: c for n, c in flagged.items() if c != plain[n]} == {}, "an entry of the flagged folder changed otherwise"
-    for tenant, inv in ((T1, flagged_id), (T2, plain_id)):
-        assert set(launch_of(tenant, inv)) == LAUNCH_FIELDS, launch_of(tenant, inv)
-        assert launch_of(tenant, inv)["digest"] == DIGEST_1471, "premise: the record is this row's"
+    assert set(launch[T1]) == set(launch[T2]), "the flagged claim's launch facts carry other names than the unflagged one's"
+    assert _masked_facts(launch[T1], T1, flagged_id) == _masked_facts(launch[T2], T2, plain_id), \
+        "a launch fact differs with the flag"
+    assert set(launch[T1]) >= LAUNCH_FIELDS, launch[T1]
+    for tenant in (T1, T2):
+        assert launch[tenant][LAUNCH_DIGEST] == DIGEST_1471, "premise: the facts are this row's"
+        text = json.dumps(launch[tenant]).encode()
+        assert not any(w in text for w in (b"app.defender.test", b"update_ticket", b"ticket_link", b"post_ticket")), \
+            launch[tenant]
     for tenant in (T1, T2):
         for path, (_old, data) in changed[tenant].items():
             assert not any(w in (data or b"") for w in (b"app.defender.test", b"update_ticket", b"ticket_link", b"post_ticket")), path

@@ -58,7 +58,7 @@ END = "{id}.learning-end.json"
 COLUMNS = ("id", "request_key", "attempt", "trigger", "status", "stage", "fork_message_id", "created_at",
            "reason", "message", "sibling_cost_usd", "publish_state")
 RUN_TEXT = "RUN-TEXT-1344"
-OVER_AGE = NOW - dt.timedelta(hours=25)
+OVER_AGE = dt.timedelta(hours=48)  # well past the default 24 h limit (an age against the database clock)
 SKIPPED_BY_THE_ENTRY = ("no_fork_point", "history_unreadable", "family_unusable")
 FAILED_BY_THE_ENTRY = ("control_failed", "launch_refused", "verify_refused", "source_unavailable", "judge_failed",
                        "entry_error")
@@ -102,10 +102,15 @@ def investigation_of(dsn: str, job_id: str) -> str:
     return execute(dsn, "SELECT investigation_id FROM jobs.learning_jobs WHERE id = %s", (job_id,))[0][0]
 
 
-def set_created(dsn: str, table: str, row_id: str, when: dt.datetime) -> None:
-    """Age one row: `fixed_clock` gives every row the same `created_at`."""
+def set_created(dsn: str, table: str, row_id: str, age: dt.timedelta) -> None:
+    """Age one row by `age`. A learning job is aged against the DATABASE clock (D10: queue expiry reads the database's `now()`
+    and the store stamps a learning job's `created_at` with it); an investigation keeps the injected clock `NOW` (its
+    `created_at` is the fixed clock's, so only its order among the other investigations matters)."""
     assert table in {"learning_jobs", "investigations"}
-    execute(dsn, f"UPDATE jobs.{table} SET created_at = %s WHERE id = %s", (when, row_id))  # noqa: S608
+    if table == "learning_jobs":
+        execute(dsn, "UPDATE jobs.learning_jobs SET created_at = now() - %s WHERE id = %s", (age, row_id))
+    else:
+        execute(dsn, "UPDATE jobs.investigations SET created_at = %s WHERE id = %s", (NOW - age, row_id))
 
 
 class JobChild(ScriptedChild):
@@ -652,7 +657,7 @@ async def test_a_job_whose_child_cannot_be_spawned_is_a_worker_error_and_the_wor
     async with job_store(world["dsn"]) as store:
         bad = await queued_job(world, store, ticket="T-1")
         fine = await queued_job(world, store, ticket="T-2")
-        set_created(world["dsn"], "learning_jobs", bad, NOW - dt.timedelta(hours=1))
+        set_created(world["dsn"], "learning_jobs", bad, dt.timedelta(hours=1))
 
         def argv(launch):
             return [str(world["tmp"] / "no-such-program")] if launch.job_id == bad else good(launch)
@@ -684,7 +689,7 @@ async def test_o2_o6_o7_a_stopped_family_is_handed_back_and_retried_on_the_new_w
         inv = await completed_investigation(store, ticket="T-1")
         other = await completed_investigation(store, ticket="T-2", key="k2")
         first, second = jobs_of(dsn, inv)[0], jobs_of(dsn, other)[0]
-        set_created(dsn, "learning_jobs", first["id"], NOW - dt.timedelta(hours=1))
+        set_created(dsn, "learning_jobs", first["id"], dt.timedelta(hours=1))
         serving = asyncio.create_task(learning_worker(world, store, job=stopped, post=post, **_FAST).serve())
         try:
             await _until(lambda: stopped.seen(first["id"]), "the job's child")
@@ -696,6 +701,7 @@ async def test_o2_o6_o7_a_stopped_family_is_handed_back_and_retried_on_the_new_w
         assert job_row(dsn, first["id"])["status"] == "running", "a hand-back is not an ending of its own"
 
         set_created(dsn, "learning_jobs", first["id"], OVER_AGE)
+        aged = job_row(dsn, first["id"])["created_at"]
         retried = ended_child(world, name="retried", files={END: learning_end("completed")})
         serving = asyncio.create_task(learning_worker(world, store, job=retried, post=post, **_FAST).serve())
         try:
@@ -711,7 +717,8 @@ async def test_o2_o6_o7_a_stopped_family_is_handed_back_and_retried_on_the_new_w
     assert old["message"]
     assert new["id"] != old["id"]
     assert (new["request_key"], new["attempt"], new["trigger"]) == (old["request_key"], 2, "auto")
-    assert new["created_at"] == OVER_AGE, "a retry keeps its original's age"
+    assert new["created_at"] == aged, "a retry keeps its original's age"
+    assert execute(dsn, "SELECT %s < now() - interval '24 hours'", (aged,)) == [(True,)], "premise: the original is past the limit"
     assert set(retried.seen_all()) == {new["id"], second["id"]}, "the new code did not run both, or the retry expired"
     assert list(stopped.seen_all()) == [first["id"]]
 
@@ -837,6 +844,7 @@ async def test_o6_only_a_lapsed_lease_retries_and_the_third_lapse_ends_retry_cap
         assert [(j["attempt"], j["status"]) for j in jobs_of(dsn, inv)] == [(1, "running")], "a live lease was taken over"
 
         set_created(dsn, "learning_jobs", claim.record.learning_job_id, OVER_AGE)
+        aged = job_row(dsn, claim.record.learning_job_id)["created_at"]
         for attempt in (1, 2, 3):
             execute(dsn, "UPDATE jobs.learning_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = %s",
                     (claim.record.learning_job_id,))
@@ -849,7 +857,7 @@ async def test_o6_only_a_lapsed_lease_retries_and_the_third_lapse_ends_retry_cap
     rows = jobs_of(dsn, inv)
     assert [(j["attempt"], j["status"], j["reason"]) for j in rows] == [
         (1, "failed", "lease_lapsed"), (2, "failed", "lease_lapsed"), (3, "failed", "retry_cap")]
-    assert {j["created_at"] for j in rows} == {OVER_AGE}
+    assert {j["created_at"] for j in rows} == {aged}
     assert all(j["message"] for j in rows)
 
 
@@ -909,7 +917,7 @@ async def test_o5_a_freed_learning_slot_goes_to_the_next_job_before_an_older_inv
         wanted = [await queued_job(world, store, ticket=f"J-{n}") for n in (1, 2)]
         queued = [await _queued(store, ticket=f"I-{n}", key=f"i{n}") for n in (1, 2)]
         for n, inv in enumerate(queued):
-            set_created(dsn, "investigations", inv, NOW - dt.timedelta(hours=2, minutes=-n))
+            set_created(dsn, "investigations", inv, dt.timedelta(hours=2, minutes=-n))
         draining = asyncio.create_task(learning_worker(
             world, store, job=jobs, post=post_child(world), inv=invs, slots=2).drain())
         try:
@@ -953,7 +961,7 @@ async def test_o5_a_job_queued_while_every_slot_is_busy_takes_the_first_freed_sl
         assert (await store.claim()).record.investigation_id == source, "premise: the test holds the source running"
         first, second, older = [await _queued(store, ticket=f"I-{n}", key=f"i{n}") for n in (1, 2, 3)]
         for inv, hours in ((first, 4), (second, 3), (older, 2)):
-            set_created(dsn, "investigations", inv, NOW - dt.timedelta(hours=hours))
+            set_created(dsn, "investigations", inv, dt.timedelta(hours=hours))
         runs = {first: ScriptedChild(world["tmp"] / "a", world["runs"], wait_for=releases["a"]),
                 second: ScriptedChild(world["tmp"] / "b", world["runs"], wait_for=releases["b"]),
                 older: ScriptedChild(world["tmp"] / "c", world["runs"])}
@@ -1010,7 +1018,7 @@ async def test_o5_jobs_are_claimed_oldest_first(world):
     async with job_store(dsn) as store:
         made = [await queued_job(world, store, ticket=f"J-{n}") for n in range(3)]
         for job, hours in zip(made, (1, 3, 2), strict=True):
-            set_created(dsn, "learning_jobs", job, NOW - dt.timedelta(hours=hours))
+            set_created(dsn, "learning_jobs", job, dt.timedelta(hours=hours))
         claimed = [(await store.claim_learning_job()).record.learning_job_id for _ in made]
     assert claimed == [made[1], made[2], made[0]]
 
@@ -1082,7 +1090,7 @@ async def test_d4_a_first_attempt_past_the_age_limit_is_skipped_when_claimed(wor
             assert created, "premise: the request queued a job of its own"
             job = record.learning_job_id
             assert job_row(world["dsn"], job)["trigger"] == trigger, job_row(world["dsn"], job)
-        set_created(world["dsn"], "learning_jobs", job, NOW - dt.timedelta(hours=hours))
+        set_created(world["dsn"], "learning_jobs", job, dt.timedelta(hours=hours))
         claim = await store.claim_learning_job()
 
     stored = job_row(world["dsn"], job)
@@ -1093,6 +1101,31 @@ async def test_d4_a_first_attempt_past_the_age_limit_is_skipped_when_claimed(wor
         assert claim is None
         assert (stored["status"], stored["reason"]) == ("skipped", "expired")
         assert stored["message"]
+
+
+@pytest.mark.parametrize("instant", [dt.datetime(2001, 2, 3, 4, 5, 6, tzinfo=dt.UTC), dt.datetime(2100, 2, 3, 4, 5, 6, tzinfo=dt.UTC)],
+                         ids=["clock-in-the-past", "clock-in-the-future"])
+async def test_d10_a_learning_jobs_age_is_the_database_clocks_whatever_the_injected_clock_says(world, instant):
+    """Queue expiry reads the DATABASE's `now()` and the store stamps a learning job's `created_at` with it (owner D10): with
+    the injected clock decades away, a job the store just created is claimed and runs (it was claimed, `running`, its
+    `created_at` the database's now), while one aged 48 h against the database clock is skipped `expired`; the age is
+    never the injected clock's. (D4, D10)"""
+    from defender.jobs import JobStore
+
+    dsn = world["dsn"]
+    store = JobStore(dsn, clock=lambda: instant)
+    try:
+        fresh = await queued_job(world, store, ticket="J-fresh")
+        old = await queued_job(world, store, ticket="J-old")
+        assert execute(dsn, "SELECT abs(EXTRACT(EPOCH FROM now() - created_at)) < 120 FROM jobs.learning_jobs WHERE id = %s",
+                       (fresh,)) == [(True,)], "the store did not stamp the job with the database's now()"
+        set_created(dsn, "learning_jobs", old, OVER_AGE)
+        claim = await store.claim_learning_job()
+    finally:
+        await store.close()
+    assert claim is not None, "a job the store just created was expired by a clock that is not the database's"
+    assert (claim.record.learning_job_id, job_row(dsn, fresh)["status"]) == (fresh, "running")
+    assert (job_row(dsn, old)["status"], job_row(dsn, old)["reason"]) == ("skipped", "expired")
 
 
 async def test_d4_an_expired_job_starts_nothing_and_the_next_job_runs_in_its_slot(world):
@@ -1138,7 +1171,7 @@ async def test_d4_expiry_waits_for_a_pick_to_reach_the_queue(world):
     async with job_store(world["dsn"]) as store:
         running = await queued_job(world, store, ticket="J-1")
         old = await queued_job(world, store, ticket="J-2")
-        set_created(world["dsn"], "learning_jobs", running, NOW - dt.timedelta(hours=1))
+        set_created(world["dsn"], "learning_jobs", running, dt.timedelta(hours=1))
         draining = asyncio.create_task(learning_worker(world, store, job=jobs, post=post_child(world), **_FAST).drain())
         try:
             await _until(lambda: jobs.seen(running), "the first family")
@@ -1284,7 +1317,7 @@ async def test_o8_a_post_step_that_cannot_be_spawned_leaves_its_row_alone_and_th
     async with job_store(dsn) as store:
         a = await queued_job(world, store, ticket="J-1")
         b = await queued_job(world, store, ticket="J-2")
-        set_created(dsn, "learning_jobs", b, NOW - dt.timedelta(hours=1))  # b and its post-step first; a's is the last
+        set_created(dsn, "learning_jobs", b, dt.timedelta(hours=1))  # b and its post-step first; a's is the last
 
         def post(launch):
             return [str(world["tmp"] / "no-such-program")] if launch.job_id == a else good(launch)
@@ -1345,8 +1378,8 @@ async def test_o10_delete_removes_the_investigations_queued_attempts_and_leaves_
         inv = await completed_investigation(store, ticket="T-1")
         other = await completed_investigation(store, ticket="T-2", key="k2")
         explicit, _ = await store.create_learning_job(T1, inv, "client-1", actor="u-1")
-        set_created(dsn, "learning_jobs", jobs_of(dsn, inv)[0]["id"], NOW - dt.timedelta(hours=2))
-        set_created(dsn, "learning_jobs", explicit.learning_job_id, NOW - dt.timedelta(hours=1))
+        set_created(dsn, "learning_jobs", jobs_of(dsn, inv)[0]["id"], dt.timedelta(hours=2))
+        set_created(dsn, "learning_jobs", explicit.learning_job_id, dt.timedelta(hours=1))
         claim = await store.claim_learning_job()
         execute(dsn, "UPDATE jobs.learning_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = %s",
                 (claim.record.learning_job_id,))

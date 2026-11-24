@@ -25,6 +25,7 @@ from defender.tests.support.jobs._readiness1471 import (
     investigate,
     listed_runs,
     norm,
+    plant_premise,
     readiness,
     requests_other_than,
     readiness_scene,
@@ -36,7 +37,6 @@ process_state = J.process_state
 
 from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: E402, F401 — fixtures the helper's store seams take
 from defender.tests.support.shared._openbao1163 import openbao  # noqa: E402, F401 — fixture
-from defender.tests.support.shared._postgres1339 import execute  # noqa: E402
 
 pytestmark = [pytest.mark.postgres, pytest.mark.garage, pytest.mark.openbao, pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="reads /proc and uses prctl(PR_SET_PDEATHSIG), Linux only")]
@@ -56,9 +56,10 @@ class Fault:
 
 def _offboarding(state: str) -> Callable[[Any, Any], None]:
     def go(scene: Any, _mp: Any, _tmp: Path) -> None:
-        from defender.tests.support.jobs._jobs1342 import restate_tenant
+        from defender.tests.support.jobs._jobs1342 import move_tenant
 
-        restate_tenant(scene.dsn, scene.tenant, state=state, data_root=scene.root)
+        # In place, as the lifecycle moves a tenant (#1546: the premise's claimed row names the tenant, so it is not replaced).
+        move_tenant(scene.dsn, scene.tenant, state=state)
     return go
 
 
@@ -148,10 +149,11 @@ def _scene(faults: list[Fault], tmp_path: Path, monkeypatch: Any, dsn: str, **kw
     return readiness_scene(tmp_path, monkeypatch, dsn, files=files, records=records if editors else None, **kw)
 
 
-def _premise_refused(scene: Any, faults: list[Fault], *, publish: Any = None) -> None:
-    """A real investigation of the same tenant is refused in setup, its stderr naming the first fault's cause."""
+def _premise_refused(scene: Any, faults: list[Fault], *, publish: Any = None, inv: str | None = None) -> None:
+    """A real investigation of the same tenant (`inv`: the one `plant_premise` claimed before the faults) is refused in setup,
+    its stderr naming the first fault's cause."""
     seams = {} if publish is None else {"publish": publish}
-    inv = investigate(scene, signer=_signer(any(f.sealed for f in faults)), **seams)
+    inv = investigate(scene, signer=_signer(any(f.sealed for f in faults)), inv=inv, **seams)
     assert inv.refused, f"premise: the investigation was not refused: {inv.end!r}\n{inv.err[-800:]}"
     assert norm(faults[0].needle) in norm(inv.err), f"premise: the refusal does not name {faults[0].needle!r}:\n{inv.err[-800:]}"
 
@@ -165,9 +167,10 @@ def test_p1_each_tenant_level_step_refuses_a_readiness_with_the_sentence_an_inve
     cause, no container started, the knowledge record present exactly when the step is after `publish`. (P-1, R3, R13-1.2)"""
     fault = FAULTS[name]
     with _scene([fault], tmp_path, monkeypatch, migrated_database) as scene:
+        premise = plant_premise(scene)  # #1546: the worker's claim precedes the fault (an offboarding tenant is not claimable)
         if fault.prepare is not None:
             fault.prepare(scene, monkeypatch, tmp_path)
-        _premise_refused(scene, [fault])
+        _premise_refused(scene, [fault], inv=premise)
         ran = readiness(scene, signer=_signer(fault.sealed), container=lambda c: 0)
 
         sentence = assert_refused_shape(ran.result(), fault.step)
@@ -195,10 +198,11 @@ def test_p1_the_first_refusing_step_in_the_launch_order_is_the_result_and_nothin
     alone (the controls) reads at its own step, and a real investigation stops at the same first one. (P-1, N5)"""
     a, b = FAULTS[first], FAULTS[later]
     with _scene([a, b], tmp_path, monkeypatch, migrated_database) as scene:
+        premise = plant_premise(scene)  # #1546: the worker's claim precedes the faults
         for f in (a, b):
             if f.prepare is not None:
                 f.prepare(scene, monkeypatch, tmp_path)
-        _premise_refused(scene, [a, b])
+        _premise_refused(scene, [a, b], inv=premise)
         ran = readiness(scene, signer=_signer(True), container=lambda c: 0)
 
         sentence = assert_refused_shape(ran.result(), a.step)
@@ -240,14 +244,22 @@ def test_p1_r13_1_a_tenant_that_leaves_active_after_admission_reads_refused_at_t
 
 def test_p3_a_database_outage_at_admission_reads_refused_at_the_tenant_step_never_failed(
         tmp_path, monkeypatch, migrated_database):
-    """The records' database cannot be reached: an outage reads as a refusal whose sentence says so, like an investigation's,
-    and the helper writes no `failed` record. (P-3, D8)"""
+    """The tenant records' database cannot be reached at admission: an outage reads as a refusal whose sentence says so, like
+    an investigation's, and the helper writes no `failed` record. (P-3, D8)
+    #1546 (A-O2, D5, PR7): the helper stages its result in the job store, so the outage is the records' directory only (a real
+    Postgres directory over a closed port, handed in), the store still reachable; an outage of the one database both live in
+    leaves the helper nowhere to stage any record (not this case)."""
+    from defender.tenancy._directory import TenantDirectory
+    from defender.tenancy.postgres import PostgresTenantRepository
+
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
-        monkeypatch.setenv("DEFENDER_DATABASE_DSN", J.closed_port_dsn(migrated_database))
-        inv = investigate(scene)
-        assert inv.refused
+        def outage() -> Any:  # what `tenancy.host_directory` builds from the environment, over a port nothing listens on
+            return TenantDirectory(lambda: PostgresTenantRepository(J.closed_port_dsn(migrated_database)))
+
+        inv = investigate(scene, directory=outage())
+        assert inv.refused, f"premise: {inv.end!r}\n{inv.err[-600:]}"
         assert "could not be reached" in inv.err, f"premise: {inv.end!r}\n{inv.err[-600:]}"
-        ran = readiness(scene, container=lambda c: 0)
+        ran = readiness(scene, container=lambda c: 0, directory=outage())
 
         sentence = assert_refused_shape(ran.result(), "tenant")
         assert "reach" in norm(sentence), f"the sentence does not say the database could not be reached: {sentence!r}"
@@ -291,18 +303,19 @@ def test_p2_r5_a_refused_publish_is_refused_at_the_publish_step_naming_its_kind_
 def test_r3_a_stale_publish_over_a_published_copy_is_no_refusal_and_its_knowledge_record_says_stale(
         tmp_path, monkeypatch, migrated_database):
     """Control for the refusals above: with a published copy a stale publish settles on it, and the helper starts its
-    container with the knowledge record saying `stale` and its kind. (R3, R13-1.2)"""
+    container (the real readiness entry), the check ending `ready` with its knowledge saying `stale` and its kind. (R3,
+    R13-1.2; #1546 PR2: the knowledge travels on the job's `knowledge` verb and is staged in the served shape)"""
     from defender.tenancy import run_knowledge
 
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
-        ran = readiness(scene, publish=_publish_says("stale:transient"), container=lambda c: 0)
+        ran = readiness(scene, publish=_publish_says("stale:transient"))
 
         assert ran.docker.job_ran, f"a stale publish over a published copy refused the check: {ran.said()}"
+        assert ran.result()["outcome"] == "ready", f"a stale publish over a published copy is no refusal: {ran.said()}"
         known = ran.knowledge
         assert isinstance(known, dict), ran.said()
         assert (known["status"], known["commit"], known["stale_kind"]) == (  # staged served shape (#1546)
             "stale", scene.t.commit, run_knowledge.TRANSIENT), known
-        assert ran.record is None, "the helper writes no result record when it serves the job to its container"
 
 
 # --- the publish trigger: the seam is told who asked, and the child's argv carries it ------------------------------------
@@ -354,47 +367,41 @@ def test_p2_the_publish_child_is_handed_the_trigger_it_was_launched_with(tmp_pat
 
 # --- R13-1.2: the knowledge record --------------------------------------------------------------------------------------
 
-def test_r13_1_2_the_helper_writes_the_knowledge_record_for_the_source_it_settled_before_its_container_starts(
+def test_r13_1_2_the_knowledge_a_check_ends_with_is_the_source_the_helper_settled_staged_once_in_the_served_shape(
         tmp_path, monkeypatch, migrated_database):
-    """When the publish gave a source, its knowledge is staged under the check's claim (as the served shape `{status, commit,
-    stale_kind}`, mapped once from the source's `{kind, commit, stale_kind, reason}`) by the time the container runs, and
-    no record file is written. (R13-1.2; #1546 PR2, D5)"""
+    """When the publish gave a source, the check's knowledge (carried by the job on its `knowledge` verb, the real readiness
+    entry here) is staged under the check's claim as the served shape `{status, commit, stale_kind}`, mapped once from the
+    source's `{kind, commit, stale_kind, reason}`, at the commit the helper settled; no record file is written. (R13-1.2;
+    #1546 PR2, D5, A-O2. Was `..._the_helper_writes_the_knowledge_record_..._before_its_container_starts`: the record is no
+    file the helper writes ahead of its container now, so the ordering it pinned is gone.)"""
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
-        seen: dict[str, Any] = {}
-
-        def container(c: Any) -> int:
-            seen["at_start"] = execute(scene.dsn, "SELECT body FROM jobs.staged_facts WHERE token = %s AND name = 'knowledge'",
-                                       (scene.claim,))
-            return 0
-
         rid = str(uuid.uuid4())
-        seen["rid"] = rid
-        ran = readiness(scene, rid=rid, container=container)
+        ran = readiness(scene, rid=rid)
 
-        assert seen.get("at_start"), f"no knowledge staged when the container started: {ran.said()}"
+        assert ran.docker.job_ran, ran.said()
         known = ran.knowledge
-        assert seen["at_start"] == [(known,)], "the knowledge staged at the container's start is not the one the check ends with"
-        assert (known["status"], known["commit"]) == ("current", scene.t.commit), known
-        assert set(known) == {"status", "commit", "stale_kind"}, known
-        assert not (scene.runs / f"{seen['rid']}.knowledge-source.json").exists(), "a knowledge record file was written (A-O2)"
+        assert isinstance(known, dict), f"no knowledge was staged: {ran.said()}"
+        assert set(known) == {"status", "commit", "stale_kind"}, f"not the served shape: {known!r}"
+        assert (known["status"], known["commit"], known["stale_kind"]) == ("current", scene.t.commit, None), known
+        assert not (scene.runs / f"{rid}.knowledge-source.json").exists(), "a knowledge record file was written (A-O2)"
 
 
-def test_r13_1_2_a_knowledge_record_that_cannot_be_written_is_a_crash_with_no_record_and_no_container(
+def test_r13_1_2_a_knowledge_fact_already_staged_under_the_claim_is_kept_as_it_was(
         tmp_path, monkeypatch, migrated_database):
-    """A `knowledge` fact already staged under the claim is kept as it was (a staged fact is create-once); the refused write
-    propagates as a crash: the helper exits non-zero, stages no readiness result and starts no container. (R13-1.2,
-    surface §5; #1546 PR7)"""
+    """A `knowledge` fact already staged under the claim is kept as it was: the job's own `knowledge` (the real readiness
+    entry, which sends one) never replaces it, a staged fact being create-once. Control: with none in the way the same check
+    stages the settled source's. (#1546 PR2 create-once; was `..._a_knowledge_record_that_cannot_be_written_is_a_crash_with_no_
+    record_and_no_container`: the record is a staged fact now, and a knowledge fact the helper could not stage owes nothing,
+    r9, so the crash it pinned is gone; guard `test_1471_host_request_worker.py::test_r13_1_5_a_missing_or_refused_knowledge_
+    record_owes_nothing_and_none_of_its_text_reaches_the_row`)"""
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
-        control = readiness(scene, container=lambda c: 0)
-        assert control.docker.job_ran, f"control: with no record in the way the container starts: {control.said()}"
-        assert control.ran.rc == 0, control.said()
-        rid = str(uuid.uuid4())
-        ran = readiness(scene, rid=rid, container=lambda c: 0, staged={"knowledge": WEDGED_KNOWLEDGE})
+        control = readiness(scene)
+        assert control.docker.job_ran, f"control: with no fact in the way the container starts: {control.said()}"
+        assert (control.knowledge or {}).get("commit") == scene.t.commit, f"control: the settled source is staged: {control.said()}"
+        ran = readiness(scene, rid=str(uuid.uuid4()), staged={"knowledge": WEDGED_KNOWLEDGE})
 
-        assert ran.knowledge == WEDGED_KNOWLEDGE, f"the helper replaced a staged knowledge fact: {ran.said()}"
-        assert ran.docker.boxes == [], "a container was started over a knowledge record that could not be written"
-        assert ran.record is None, f"a crash writes no readiness record: {ran.said()}"
-        assert ran.ran.raised is not None or ran.ran.rc not in (0, None), f"a clean exit reads as no_record: {ran.said()}"
+        assert ran.docker.job_ran, f"premise: the job ran, so its own knowledge was sent: {ran.said()}"
+        assert ran.knowledge == WEDGED_KNOWLEDGE, f"the staged knowledge fact was replaced: {ran.said()}"
 
 
 #: The faults refused at a step after the publish (the knowledge record is written before the refusal's own record).
@@ -402,11 +409,14 @@ AFTER_PUBLISH_FAULTS = [name for name, fault in FAULTS.items() if fault.step in 
 
 
 @pytest.mark.parametrize("name", AFTER_PUBLISH_FAULTS)
-def test_r13_1_2_a_knowledge_record_that_cannot_be_written_at_a_refusal_after_the_publish_is_a_crash_with_no_record(
+def test_r13_1_2_at_a_refusal_after_the_publish_a_knowledge_fact_already_staged_is_kept_as_it_was(
         tmp_path, monkeypatch, migrated_database, name):
-    """At every refusing step after the publish, a knowledge record that cannot be written (one already there) is the
-    helper's crash: no refusal record is written before it, no container, a non-zero exit (the worker's `worker_error`).
-    The same fault with the way clear reads `refused` at its step (the P-1 case). (R13-1.2; repair 5)"""
+    """At every refusing step after the publish (where the helper stages the knowledge of the source it settled, the P-1
+    case), a `knowledge` fact already under the claim is kept as it was (create-once), and no container starts. (#1546 PR2;
+    was `..._a_knowledge_record_that_cannot_be_written_at_a_refusal_after_the_publish_is_a_crash_with_no_record`: a knowledge
+    fact the helper could not stage owes nothing beside a staged result, r9, so the crash it pinned is gone; guard
+    `test_1471_host_request_worker.py::test_r13_1_5_a_missing_or_refused_knowledge_record_owes_nothing_and_none_of_its_text_
+    reaches_the_row`)"""
     fault = FAULTS[name]
     with _scene([fault], tmp_path, monkeypatch, migrated_database) as scene:
         if fault.prepare is not None:
@@ -415,10 +425,8 @@ def test_r13_1_2_a_knowledge_record_that_cannot_be_written_at_a_refusal_after_th
         ran = readiness(scene, rid=rid, signer=_signer(fault.sealed), container=lambda c: 0,
                         staged={"knowledge": WEDGED_KNOWLEDGE})
 
-        assert ran.knowledge == WEDGED_KNOWLEDGE, ran.said()
-        assert ran.record is None, f"a record was written though the knowledge record could not be: {ran.said()}"
-        assert ran.docker.boxes == []
-        assert ran.ran.raised is not None or ran.ran.rc not in (0, None), f"a clean exit reads as no_record: {ran.said()}"
+        assert ran.knowledge == WEDGED_KNOWLEDGE, f"the staged knowledge fact was replaced: {ran.said()}"
+        assert ran.docker.boxes == [], f"a container was started for a tenant the helper refused: {ran.said()}"
 
 
 def _left_behind(scene: Any, rid: str) -> list[str]:
@@ -432,14 +440,15 @@ def _left_behind(scene: Any, rid: str) -> list[str]:
 WEDGED_KNOWLEDGE = {"status": "current", "commit": "0" * 40, "stale_kind": None}
 
 
-#: Every ending after the run copy was made: (faults, docker, container, rid planter).
-COPY_MADE_ENDINGS: dict[str, tuple[list[str], Any, Any, Any]] = {
-    **{f"refused-{name}": ([name], None, None, None) for name in AFTER_PUBLISH_FAULTS},
-    "start-failed": ([], lambda: ContainerStandIn(run_fault=(125, "docker: refused\n")), None, None),
-    "crash-writing-the-knowledge-record": ([], None, None, True),
-    "crash-starting-the-container": ([], ExplodingDocker, None, None),
-    "container-ended-with-no-record": ([], None, lambda c: 3, None),
-    "ready": ([], None, "entry", None),
+#: Every ending after the run copy was made: (faults, docker, container). #1546 (PR2, r9) retired
+#: `crash-writing-the-knowledge-record`: the knowledge is a staged fact a refused write of which owes nothing, so no crash
+#: follows it; the crash after the shared steps stays as `crash-starting-the-container`.
+COPY_MADE_ENDINGS: dict[str, tuple[list[str], Any, Any]] = {
+    **{f"refused-{name}": ([name], None, None) for name in AFTER_PUBLISH_FAULTS},
+    "start-failed": ([], lambda: ContainerStandIn(run_fault=(125, "docker: refused\n")), None),
+    "crash-starting-the-container": ([], ExplodingDocker, None),
+    "container-ended-with-no-record": ([], None, lambda c: 3),
+    "ready": ([], None, "entry"),
 }
 
 
@@ -450,7 +459,7 @@ def test_r13_1_the_run_copy_is_gone_once_the_helper_has_ended_whatever_the_endin
     steps, a container ending of its own, `ready`), nothing named for the check is left under `<T>` but its records:
     the run copy is removed (the shared steps' cleanup; §8 run-less sidecars). Control: the copy existed while the
     container ran. (R13-1; repair 5)"""
-    names, docker, container, plant = COPY_MADE_ENDINGS[ending]
+    names, docker, container = COPY_MADE_ENDINGS[ending]
     faults = [FAULTS[n] for n in names]
     with _scene(faults, tmp_path, monkeypatch, migrated_database) as scene:
         for f in faults:
@@ -467,8 +476,7 @@ def test_r13_1_the_run_copy_is_gone_once_the_helper_has_ended_whatever_the_endin
 
         ran = readiness(scene, rid=rid, signer=_signer(any(f.sealed for f in faults)),
                         docker=None if docker is None else docker(),
-                        container=None if container == "entry" else watching,
-                        staged={"knowledge": WEDGED_KNOWLEDGE} if plant else None)
+                        container=None if container == "entry" else watching)
 
         assert _left_behind(scene, rid) == [], f"the check's run copy was left behind: {ran.said()}"
         if container == "entry":
@@ -631,16 +639,16 @@ def test_c4_a_readiness_container_is_started_for_readiness_is_answered_launch_al
     "Unable to find image 'defender-job:latest' locally\n",
     "docker: Error response from daemon: unknown or invalid runtime name: runsc\n",
 ])
-def test_r13_1_2_a_container_that_cannot_start_ends_the_check_failed_start_failed_after_the_knowledge_record(
+def test_r13_1_2_a_container_that_cannot_start_ends_the_check_failed_start_failed(
         tmp_path, monkeypatch, migrated_database, stderr):
-    """`docker run` refuses (rc 125): the helper records `{outcome: failed, reason: start_failed}`, never a refusal, with
-    the knowledge record already there. (R13-1.2, P-3)"""
+    """`docker run` refuses (rc 125): the helper records `{outcome: failed, reason: start_failed}`, never a refusal. (R13-1.2,
+    P-3. #1546 PR2: was `..._after_the_knowledge_record`; the knowledge travels on the job's `knowledge` verb now, and a
+    `failed` result reads no knowledge, base `worker/_worker._readiness_ending` and r9 "owes nothing", so whether one is staged
+    here is not decided)"""
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
         ran = readiness(scene, docker=ContainerStandIn(run_fault=(125, stderr)), container=lambda c: 0)
 
         assert ran.result() == {"outcome": "failed", "reason": "start_failed"}, ran.said()
-        assert isinstance(ran.knowledge, dict)
-        assert ran.knowledge["commit"] == scene.t.commit
         assert ran.ran.rc == 0, "the helper served the check to its end"
 
 
@@ -696,19 +704,18 @@ def test_r13_1_2_a_job_socket_that_cannot_be_opened_ends_the_check_failed_start_
         assert ran.docker.boxes == []
 
 
-def test_r13_1_1_a_missing_runs_folder_is_damage_the_helper_does_not_make_and_it_exits_non_zero_with_no_record(
-        tmp_path, monkeypatch, migrated_database):
-    """`<T>/runs` removed after the worker's pre-open (a race): the helper makes nothing, starts no container, and does not
-    report a refusal (`runs_folder` is no step), so the worker reads its exit. (R13-1.1, P-3)"""
+def test_r13_1_1_a_missing_runs_folder_is_damage_the_helper_does_not_make(tmp_path, monkeypatch, migrated_database):
+    """`<T>/runs` removed after the worker's pre-open (a race): the helper does not make it, and does not report a refusal
+    for it (`runs_folder` is no step). (R13-1.1, P-3. #1546 A-O2, D5: was `..._and_it_exits_non_zero_with_no_record`; a check's
+    records are staged facts, so the runs folder holds nothing of it and whether the check runs without one is not decided)"""
     with readiness_scene(tmp_path, monkeypatch, migrated_database) as scene:
         control = readiness(scene, container=lambda c: 0)
         assert control.docker.job_ran, f"control: with its runs folder the helper starts its container: {control.said()}"
-        shutil.rmtree(scene.runs)  # it holds the control's records (its knowledge record, its result)
+        shutil.rmtree(scene.runs)
         ran = readiness(scene, container=lambda c: 0)
 
-        assert not scene.runs.exists(), "the helper made the tenant's runs folder"
-        assert ran.docker.boxes == []
-        assert ran.ran.raised is not None or ran.ran.rc not in (0, None), f"a clean exit hides the damage: {ran.said()}"
+        assert not scene.runs.exists(), f"the helper made the tenant's runs folder: {ran.said()}"
+        assert not (isinstance(ran.record, dict) and ran.record.get("step") == "runs_folder"), ran.said()
 
 
 # --- P-1: the same steps, none of the investigation's own ------------------------------------------------------------------

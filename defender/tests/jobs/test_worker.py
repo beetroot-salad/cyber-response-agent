@@ -52,20 +52,17 @@ from defender.tests.support.jobs._jobs1342 import (
     lower_limit,
     move_tenant,
     plant_queued_investigation,
-    plant_sessions,
     restate_tenant,
     row,
     seed_alert_mapping,
-    session_pointer,
     tree,
 )
+from defender.tests.support.evidence._facts1546 import LAUNCH_ALERT, LAUNCH_BOX_TOKEN, LAUNCH_DIGEST, LAUNCH_LABEL
+from defender.tests.support.jobs._jobs1342 import launch_facts
 from defender.tests.support.shared._postgres1339 import execute
 from defender.tests.support.tenancy._mapping1345 import mapping_value
-from defender.tests.support.jobs._jobs1342 import (  # noqa: E402
-    accounting_written,
-)
 from defender.tests.support.jobs._worker1342 import (
-    CASE,
+    _delete_out_of_band,
     COMMIT,
     EXIT,
     MARKER,
@@ -144,8 +141,11 @@ async def test_o4_two_workers_never_run_one_row_twice(world):
 # --- O5: the fence ---------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("moved", ["failed", "cancelled", "completed"])
-async def test_o5_a_row_moved_while_its_child_runs_keeps_its_stage_and_gains_the_holders_final_accounting(world, caplog, moved):
-    """CONFLICT-UPDATED (#1343 B-P2, B3, B4): a row moved to a terminal stage under its child keeps every stage field; its child is ended and the holder adds final cost, knowledge and the mark; no finish is audited. The `queued` variant is retired: nothing re-queues a row (r4 item 2)."""
+async def test_o5_a_row_moved_while_its_child_runs_keeps_every_column_and_the_holder_writes_nothing(world, caplog, moved):
+    """CONFLICT-UPDATED (#1343 B-P2, B3, B4): a row moved to a terminal stage under its child keeps every stage field; its
+    child is ended; no finish is audited. UPDATED (#1546 D15, "no exception to the write fence"; was: the holder adds final
+    cost, knowledge and the mark): the holder writes nothing to the moved row, which keeps every column as moved, while
+    its unmoved sibling ends with its own cost and knowledge. The `queued` variant is retired: nothing re-queues a row (r4 item 2)."""
     caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
     audit = JobsAudit(caplog)
     release = world["tmp"] / "release"
@@ -154,6 +154,7 @@ async def test_o5_a_row_moved_while_its_child_runs_keeps_its_stage_and_gains_the
     sql = {"failed": "stage = 'failed', failure_reason = 'worker_error', failure_message = 'moved by test', finished_at = %s",
            "cancelled": "stage = 'aborted', failure_reason = 'cancelled', finished_at = %s",
            "completed": "stage = 'completed', disposition = 'benign', finished_at = %s"}[moved]
+    sql += ", evidence_state = 'none', scrub = 'not_run'"  # #1546 A-O4: every terminal row has an evidence state
     async with job_store(world["dsn"]) as store:
         fenced = await _queued(store, ticket="T-1", key="k1")
         other = await _queued(store, ticket="T-2", key="k2")
@@ -163,17 +164,14 @@ async def test_o5_a_row_moved_while_its_child_runs_keeps_its_stage_and_gains_the
             execute(world["dsn"], f"UPDATE jobs.investigations SET {sql} WHERE id = %s", (NOW, fenced))  # noqa: S608
             snapshot = row(world["dsn"], fenced)
             await _until(lambda: Path(str(mark).replace("{id}", fenced)).exists(), "the moved row's child to be ended", timeout=5)
-            await _until(lambda: accounting_written(world["dsn"], fenced) is not None, "the holder's final accounting", timeout=10)
+            await asyncio.sleep(1.0)  # its child is gone: time for a write the fence forbids
         finally:
             release.touch()
             await asyncio.wait_for(drained, timeout=60)
 
     final, sibling = row(world["dsn"], fenced), row(world["dsn"], other)
-    stage_fields = lambda r: {k: v for k, v in r.items() if k not in ("cost_usd", "knowledge")}  # noqa: E731
-    assert stage_fields(final) == stage_fields(snapshot), "the holder's write changed the moved row's stage"
-    assert final["cost_usd"] == 0
-    assert final["knowledge"] is not None
-    assert final["knowledge"] == sibling["knowledge"]
+    assert final == snapshot, "the holder wrote to the moved row (D15: no exception to the write fence)"
+    assert sibling["knowledge"] is not None, "premise: the unmoved row's end carries its knowledge"
     assert not Path(str(mark).replace("{id}", other)).exists(), "an unmoved row's child was ended"
     assert not _warned(caplog, other), "a clean finish was logged as a fault"
     assert sibling["stage"] == "completed", "the worker stopped working on every row"
@@ -183,9 +181,12 @@ async def test_o5_a_row_moved_while_its_child_runs_keeps_its_stage_and_gains_the
 
 # --- O6: the job lane ------------------------------------------------------------------------------
 
-async def test_o6_the_launch_record_and_alert_file_exist_before_the_child_and_nowhere_else(
+async def test_o6_the_launch_facts_are_on_the_claim_before_the_child_and_nothing_is_written_beside_the_run(
         world, monkeypatch):
-    """Both files are written beside the run folder before the child starts; argv, data root and session as ratified; the record has a worker-minted box token; nothing else is made. (O6, r5 C1)"""
+    """UPDATED (#1546 census: "Worker writes alert and launch record beside the run -> claim row"; design: Claim): the
+    launch facts are on the row's claim before the child starts (its alert reference, digest, label and a box token);
+    argv, data root and session as ratified; the worker writes nothing under the data root, beside the run or anywhere
+    else. (O6, r5 C1; the claim row's facts in full: test_1546_claim_launch_facts.py)"""
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(world["tmp"] / "somewhere-else"))
     before = tree(world["root"])
     other_before = tree(world["other_runs"])
@@ -196,18 +197,16 @@ async def test_o6_the_launch_record_and_alert_file_exist_before_the_child_and_no
     assert seen is not None, "the child never ran"
     assert seen["argv"] == ["--job", inv, "--tenant", T1, "--parent-pid", str(os.getpid())]
     assert seen["data_root"] == str(world["root"]), "the child must be given DEFENDER_DATA_ROOT"
-    assert (seen["launch_at_start"], seen["alert_at_start"]) == (True, True)
+    assert (seen["launch_at_start"], seen["alert_at_start"]) == (False, False), "the worker wrote a launch file"
     assert seen["sid"] == seen["pid"] != os.getsid(0), "the child must lead its own session"
-    assert (world["runs"] / f"{inv}.alert.json").read_bytes() == ALERT_BYTES
-    launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
-    alert_id = launch["alert_id"]
-    assert is_box_token(launch.get("box_token")), launch
-    assert launch == {"investigation_id": inv, "tenant_id": T1, "alert_id": alert_id,
-                      "digest": ALERT_DIGEST, "label": TITLE, "box_token": launch["box_token"]}
-    assert alert_id
-    created = {k for k in tree(world["root"]) if k not in before}
-    assert created == {f"{T1}/runs/{inv}.launch.json", f"{T1}/runs/{inv}.alert.json"}
-    assert {k: v for k, v in tree(world["root"]).items() if k in before} == before
+    at_start = seen["claim_launch_at_start"]
+    assert isinstance(at_start, dict), f"no launch facts on the claim when the child started: {at_start!r}"
+    alert_id = execute(world["dsn"], "SELECT alert_id FROM jobs.investigations WHERE id = %s", (inv,))[0][0]
+    assert (at_start.get(LAUNCH_ALERT), at_start.get(LAUNCH_DIGEST), at_start.get(LAUNCH_LABEL)) == (
+        alert_id, ALERT_DIGEST, TITLE), at_start
+    assert is_box_token(at_start.get(LAUNCH_BOX_TOKEN)), at_start
+    assert launch_facts(world["dsn"], inv) == at_start, "the claim's launch facts changed after the child started"
+    assert tree(world["root"]) == before, "the worker wrote under the data root"
     assert tree(world["other_runs"]) == other_before
 
 
@@ -221,12 +220,12 @@ async def test_o6_the_launch_record_and_alert_file_exist_before_the_child_and_no
 ], ids=["mapped", "other-path", "unmapped", "absent", "float", "empty-mapping"])
 async def test_1345_o2_the_launch_label_is_the_alerts_title_or_its_vendor_ticket_id_when_the_title_is_null(
         world, mapping, label):
-    """The launch record's label is the alert's stored title, else the vendor's ticket id (`T-1`). (#1345 O2, worker)"""
+    """UPDATED (#1546 design: Claim, the launch facts): the claim's launch label is the alert's stored title, else the
+    vendor's ticket id (`T-1`). (#1345 O2, worker)"""
     seed_alert_mapping(world["dsn"], T1, mapping)
     inv, _ = await _run_one(world, _child(world))
 
-    launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
-    assert launch["label"] == label
+    assert launch_facts(world["dsn"], inv)[LAUNCH_LABEL] == label
 
 
 async def test_1420_the_label_is_the_title_stored_with_the_alert_not_one_from_a_later_mapping(world):
@@ -237,16 +236,17 @@ async def test_1420_the_label_is_the_title_stored_with_the_alert_not_one_from_a_
         await store.put_alert_mapping(T1, mapping_value({"title": "a"}), actor="u-1")
         await _worker(world, store, _child(world)).drain()
 
-    launch = json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))
-    assert launch["label"] == TITLE
+    assert launch_facts(world["dsn"], inv)[LAUNCH_LABEL] == TITLE  # #1546: the claim's launch facts (design: Claim)
 
 
 @pytest.mark.parametrize("raw", [AWKWARD_ALERT_BYTES, PADDED_ALERT_BYTES, DECOMPOSED_ALERT_BYTES, ZWNBSP_ALERT_BYTES,
                                  FEFF_RICH_ALERT_BYTES],
                          ids=["crlf tab multibyte", "leading whitespace and trailing spaces", "decomposed unicode",
                               "zero-width no-break space in a string", "feff_rich"])
-async def test_o6_the_alert_file_is_the_stored_raw_bytes_whatever_they_contain(world, raw):
-    """An alert that CRLF, tabs, multibyte text, padding whitespace or a decomposed sequence would change reaches `<id>.alert.json` byte for byte, and the launch digest is of those bytes. (O6, M5)"""
+async def test_o6_the_claims_alert_is_the_stored_raw_bytes_whatever_they_contain(world, raw):
+    """UPDATED (#1546 census: the alert file -> the claim's alert reference and the alert row; design: Claim): an alert that
+    CRLF, tabs, multibyte text, padding whitespace or a decomposed sequence would change is the alert the claim names, byte
+    for byte, and the claim's launch digest is of those bytes; no alert file is written beside the run. (O6, M5)"""
     import unicodedata
 
     from defender.records.formats import admit
@@ -271,16 +271,23 @@ async def test_o6_the_alert_file_is_the_stored_raw_bytes_whatever_they_contain(w
         alert = await an_alert(store, T1, raw=raw)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
         await _worker(world, store, child).drain()
+        launch = launch_facts(world["dsn"], inv.investigation_id)
+        assert launch[LAUNCH_ALERT] == str(alert.alert_id), "the claim names another alert"
+        handed = await store.get_alert(T1, alert.alert_id)
 
-    written = (world["runs"] / f"{inv.investigation_id}.alert.json").read_bytes()
-    assert written == raw
-    launch = json.loads((world["runs"] / f"{inv.investigation_id}.launch.json").read_text(encoding="utf-8"))
-    assert launch["digest"] == hashlib.sha256(raw).hexdigest()
+    assert child.seen(inv.investigation_id) is not None, "premise: the row's child ran"
+    assert handed.raw == raw
+    assert launch[LAUNCH_DIGEST] == hashlib.sha256(raw).hexdigest()
+    assert not (world["runs"] / f"{inv.investigation_id}.alert.json").exists(), "an alert file was written beside the run"
 
 
 @pytest.mark.parametrize("present", [".launch.json"])
-async def test_o6_launch_files_are_create_only_and_a_failed_write_is_a_worker_error(world, present):
-    """A launch record that already exists is not overwritten; no child; `failed`/`worker_error`, cost exactly 0 and unmarked. (O6, D-af: a leftover alert file is not a launch marker; #1377 S2)"""
+async def test_o6_a_file_left_at_the_launch_records_name_is_never_written_and_the_row_runs(world, present):
+    """UPDATED (#1546 census: the launch record -> the claim row; the worker writes nothing beside the run): a file left
+    at the old launch record's name is not overwritten, read or taken as a launch marker; the row runs to the end its
+    staged facts decide. (Was: create-only, `failed`/`worker_error` cost 0 unmarked; a pre-launch worker fault's cost 0
+    unmarked is guarded by test_o6_a_worker_error_ending_whose_write_fails_as_an_outage_is_retried_unchanged_until_it_lands
+    [worker-fault] and test_r7_1_a_tenant_that_is_not_active_fails_the_row_as_a_worker_error_before_any_file_or_child.)"""
     import uuid
 
     inv = str(uuid.uuid4())
@@ -292,12 +299,10 @@ async def test_o6_launch_files_are_create_only_and_a_failed_write_is_a_worker_er
         await _worker(world, store, child).drain()
 
     stored = row(world["dsn"], inv)
-    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
-    assert stored["failure_message"]
-    assert stored["cost_usd"] == 0, "a worker fault before the run is cost 0, not unknown"
-    assert lower_limit(world["dsn"], inv) is False, "nothing was launched: the 0 is exact (#1377 S2)"
+    assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("completed", "inconclusive", None)
     assert (world["runs"] / f"{inv}{present}").read_text(encoding="utf-8") == "planted"
-    assert child.seen() is None, "a child started although its launch files could not be written"
+    assert child.seen(inv) is not None, "a leftover file at the old record's name kept the row from launching"
+    assert isinstance(launch_facts(world["dsn"], inv), dict), "the launch facts are not on the claim"
 
 
 @pytest.mark.parametrize("shape", ["tenant folder without runs", "no tenant folder on this host"])
@@ -443,8 +448,8 @@ async def test_o8_a_failed_run_that_started_still_shows_the_knowledge_it_read(wo
 # --- O7: the containers a child leaves, in-process (#1446 review: the claim sweep is the one remover) ----
 
 def _claim_token(world: dict, inv: str) -> str:
-    """The `box_token` the worker wrote into this row's launch record."""
-    return json.loads((world["runs"] / f"{inv}.launch.json").read_text(encoding="utf-8"))["box_token"]
+    """The box token of this row's claim (#1546: a launch fact of the claim row, design: Claim; was the launch record's)."""
+    return launch_facts(world["dsn"], inv)[LAUNCH_BOX_TOKEN]
 
 
 async def test_o7_after_the_child_exits_its_own_box_is_swept_and_a_missing_box_is_normal(world, tmp_path, caplog):
@@ -453,7 +458,7 @@ async def test_o7_after_the_child_exits_its_own_box_is_swept_and_a_missing_box_i
     caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
     containers = StandInContainers(tmp_path / "containers")
     owning = _child(world, files=_committed(), box_dir=containers.where)  # its start made and stamped the box
-    bare = ScriptedChild(world["tmp"] / "child-bare", world["runs"], files=_committed())
+    bare = ScriptedChild(world["tmp"] / "child-bare", world["runs"], files=_committed(), dsn=world["dsn"])
     async with job_store(world["dsn"]) as store:
         left = await _queued(store, ticket="T-1", key="k1")
         await _worker(world, store, owning, containers=containers).drain()
@@ -868,8 +873,8 @@ async def test_o7_a_worker_given_no_containers_uses_docker_and_removes_only_its_
     daemon.hold("defender-run-someone-else", "running", OTHER_TOKEN)
     own = _child(world, files=_committed(), box_dir=held, box_state=state)
     foreign = ScriptedChild(world["tmp"] / "child-foreign", world["runs"], files=_committed(), box_dir=held,
-                            box_state=state, box_token="other")
-    bare = ScriptedChild(world["tmp"] / "child-bare", world["runs"], files=_committed())
+                            box_state=state, box_token="other", dsn=world["dsn"])
+    bare = ScriptedChild(world["tmp"] / "child-bare", world["runs"], files=_committed(), dsn=world["dsn"])
     async with job_store(world["dsn"]) as store:
         ids = {}
         for n, (kind, child) in enumerate((("own", own), ("foreign", foreign), ("clean", bare))):
@@ -1075,26 +1080,51 @@ async def test_o6_a_decided_ending_refused_with_and_without_its_knowledge_ends_w
 
 
 @pytest.mark.parametrize("kind", ["runtime", "unplanned", "programming"])
-async def test_o6_a_decided_ending_whose_write_fails_with_neither_an_outage_nor_a_refusal_is_dropped_and_the_row_lapses_into_a_retry(
+async def test_o6_a_decided_ending_whose_write_fails_with_neither_an_outage_nor_a_refusal_is_dropped_and_a_take_over_keeps_its_verdict(
         world, caplog, kind):
-    """A bug or an unplanned fault says nothing about the job: tried once, never stepped down to a lesser ending, logged loudly; the row's lease lapses, a take-over fails it `lease_lapsed` and its retry runs. (B5, r5 item 7, #1343 review)"""
-    child = _child(world, files=_committed())
+    """UPDATED (#1546 PR9, D8, D15; was: the take-over fails it `lease_lapsed` and a retry runs): a bug or an unplanned
+    fault says nothing about the job: tried once, never stepped down to a lesser ending, logged loudly; the row's lease
+    lapses and the take-over decides from the staged facts, which are decided: the verdict stands (`completed`,
+    `inconclusive`, evidence `complete`), the cost is the last staged progress marked a lower limit, and nothing reruns.
+    (B5, r5 item 7, #1343 review)"""
+    bad, used, _stored = await _dropped_then_taken_over(world, _data_fault(kind))
+    assert [t[0] for t in used.tries(bad)] == ["completed"], "a bug was retried or stepped down"
+    assert any(r.levelno >= logging.ERROR and bad in r.getMessage() for r in caplog.records
+               if r.name.startswith(WORKER_LOGGER)), "the dropped ending was not logged loudly"
+
+
+_PROGRESS_SPENT = 2.5
+
+
+async def _dropped_then_taken_over(world, fault):
+    """A committed run whose every end write by its worker raises `fault`, served under a 1 s lease until the take-over
+    has ended the row; asserts the D8 verdict the take-over keeps and that no retry exists. `(row id, store, row)`."""
+    from defender.tests.support.evidence._facts1546 import inv_progress
+    child = _child(world, files=_committed(), staged={"progress": inv_progress(_PROGRESS_SPENT)})
     dsn = world["dsn"]
     async with job_store(dsn, lease=1.0) as store:
         bad = await _queued(store, ticket="T-1", key="k1")
-        used = _StoreWhoseFinishFails(store, bad, _data_fault(kind), fails=99)
+        used = _StoreWhoseFinishFails(store, bad, fault, fails=99)
         serving = asyncio.create_task(_worker(world, used, child, **_FAST).serve())
         try:
             await _until(lambda: used.tries(bad), "the first end write")
-            await _until(lambda: row(dsn, bad)["failure_reason"] == "lease_lapsed", "the dropped row's lease to lapse", timeout=15)
+            await _until(lambda: row(dsn, bad)["stage"] != "running", "the dropped row to be taken over", timeout=20)
+            await asyncio.sleep(1.5)  # time enough for a retry the take-over should not have queued to be claimed
         finally:
             if not serving.done():
                 os.kill(os.getpid(), signal.SIGTERM)
             await asyncio.wait_for(serving, timeout=60)
 
-    assert [t[0] for t in used.tries(bad)] == ["completed"], "a bug was retried or stepped down"
-    assert any(r.levelno >= logging.ERROR and bad in r.getMessage() for r in caplog.records
-               if r.name.startswith(WORKER_LOGGER)), "the dropped ending was not logged loudly"
+    stored = {**row(dsn, bad), "cost_is_lower_limit": lower_limit(dsn, bad),
+              "evidence_state": execute(dsn, "SELECT evidence_state FROM jobs.investigations WHERE id = %s", (bad,))[0][0]}
+    assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("completed", "inconclusive", None), \
+        f"the take-over did not keep the decided verdict: {stored}"
+    assert stored["evidence_state"] == "complete", stored
+    assert (stored["cost_usd"], stored["cost_is_lower_limit"]) == (pytest.approx(_PROGRESS_SPENT), True), \
+        "after a take-over the cost is the last staged progress, a lower limit (D15)"
+    assert execute(dsn, "SELECT count(*) FROM jobs.investigations WHERE request_key = 'k1'") == [(1,)], \
+        "a decided run was rerun after its take-over"
+    return bad, used, stored
 
 
 async def test_o6_a_standbys_read_only_refusal_is_an_outage_waited_out_with_the_ending_unchanged(world):
@@ -1109,24 +1139,13 @@ async def test_o6_a_standbys_read_only_refusal_is_an_outage_waited_out_with_the_
 
 
 @pytest.mark.parametrize("kind", _REFUSALS)
-async def test_o6_an_ending_whose_every_lesser_write_is_refused_is_logged_dropped_and_the_row_lapses_into_a_retry(
+async def test_o6_an_ending_whose_every_lesser_write_is_refused_is_logged_dropped_and_a_take_over_keeps_its_verdict(
         world, caplog, kind):
-    """CONFLICT-UPDATED (#1343 review; was: one try): every write refused, down to the barest end: each is tried once, the drop is logged loudly, the row's lease lapses, a take-over fails it `lease_lapsed` and its retry runs. (B5, r5 item 7)"""
-    child = _child(world, files=_committed())
-    dsn = world["dsn"]
-    async with job_store(dsn, lease=1.0) as store:
-        bad = await _queued(store, ticket="T-1", key="k1")
-        used = _StoreWhoseFinishFails(store, bad, _data_fault(kind), fails=99)
-        serving = asyncio.create_task(_worker(world, used, child, **_FAST).serve())
-        try:
-            await _until(lambda: used.tries(bad), "the first end write")
-            await _until(lambda: row(dsn, bad)["failure_reason"] == "lease_lapsed", "the dropped row's lease to lapse", timeout=15)
-            await _until(lambda: execute(dsn, "SELECT stage FROM jobs.investigations WHERE request_key = 'k1' "
-                                               "AND attempt = 2") == [("completed",)], "the retry to run", timeout=20)
-        finally:
-            if not serving.done():
-                os.kill(os.getpid(), signal.SIGTERM)
-            await asyncio.wait_for(serving, timeout=60)
+    """UPDATED (#1546 PR9, D8, D15; was: the take-over fails it `lease_lapsed` and a retry runs): every write refused, down
+    to the barest end: each is tried once, the drop is logged loudly, the row's lease lapses and the take-over decides from
+    the staged facts, which are decided: the verdict stands, the cost is the last progress marked, nothing reruns. (B5,
+    r5 item 7)"""
+    bad, used, _stored = await _dropped_then_taken_over(world, _data_fault(kind))
 
     assert [t[0] for t in used.tries(bad)] == ["completed", "completed", "failed"], "a refused write was retried as is"
     assert any(r.levelno >= logging.ERROR and bad in r.getMessage() and "dropped" in r.getMessage()
@@ -1156,8 +1175,9 @@ async def test_o6_a_worker_error_ending_whose_write_fails_as_an_outage_is_retrie
                                           bad, ConnectionError("dropped"), fails=4)
         await _worker(world, used, child).drain()
 
-    expect_cost = 0.0 if path == "worker-fault" else None
-    assert used.tries(bad) == [("failed", "worker_error", expect_cost)] * 5
+    # UPDATED (#1546 PR9: `ended_by` is a closed type, and a fault before any helper ran is `not_launched`): both seams fault
+    # before the launch, so nothing was spent and the cost is exactly 0, unmarked (was: the catch-all's unknown, None).
+    assert used.tries(bad) == [("failed", "worker_error", 0.0)] * 5
     assert [kw["cost_is_lower_limit"] for i, kw in used.finishes if i == bad] == [False] * 5, "a worker error carried a mark"
     stored = row(world["dsn"], bad)
     assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
@@ -1165,48 +1185,8 @@ async def test_o6_a_worker_error_ending_whose_write_fails_as_an_outage_is_retrie
 
 
 # --- M1: what the worker reads, and where ------------------------------------------------------------
-
-OVER_THE_LIMIT = 70 * 1024 * 1024
-
-
-def _tampered(world: dict, which: str, shape: str) -> tuple[dict[str, str], dict]:
-    """Host records with `which` replaced by a symlink to a valid copy, or by a valid copy padded past
-    any size limit; returns the child's files and its extra spec."""
-    name = {"job-end": "{id}.job-end.json", "knowledge": "{id}.knowledge-source.json",
-            "pointer": "{id}.session-pointer.json"}[which]
-    text = {"job-end": job_end(), "knowledge": knowledge_record(COMMIT), "pointer": session_pointer(CASE)}[which]
-    files = _committed(**{name: None})
-    if shape == "symlinked":
-        target = world["tmp"] / "elsewhere" / "record.json"
-        target.parent.mkdir()
-        target.write_text(text, encoding="utf-8")
-        return files, {"links": {name: str(target)}}
-    return files, {"padded": {name: (text, OVER_THE_LIMIT)}}
-
-
-@pytest.mark.parametrize("shape", ["symlinked", "oversize"])
-@pytest.mark.parametrize("which", ["job-end", "knowledge", "pointer"])
-async def test_m1_a_symlinked_or_oversize_host_record_is_unreadable_not_followed_or_swallowed(
-        world, caplog, which, shape):
-    """The job-end record, knowledge record and session pointer are read no-follow and size-limited: tampered, each counts as unreadable. (M1, D-f, R3, O8)"""
-    caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
-    plant_sessions(world["runs"], CASE, [("main", "claude-sonnet-4-6", {"input_tokens": 1_000_000})])
-    files, extra = _tampered(world, which, shape)
-    child = _child(world, files=files, exit=0, **extra)  # the helper served it (#1170)
-    inv, stored = await _run_one(world, child)
-
-    if which == "job-end":  # unreadable = absent: rule 1
-        assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
-    elif which == "pointer":  # CONFLICT-UPDATED (#1534): pointer-unreadable costs the disposition too
-        assert (stored["stage"], stored["disposition"]) == ("unparseable", None)
-    else:
-        assert (stored["stage"], stored["disposition"]) == ("completed", "inconclusive")
-    if which == "knowledge":
-        assert stored["knowledge"] == STALE_OPERATOR
-    if which == "pointer":
-        assert stored["cost_usd"] is None
-        assert _warned(caplog, inv)
-
+# #1546 RETIRED (A-O2: the worker parses no job-written file): test_m1_a_symlinked_or_oversize_host_record_is_unreadable_not_followed_or_swallowed;
+# guard test_1546_worker_end.py::test_the_worker_opens_no_file_under_a_job_root_or_a_tenant_folder_and_no_sqlite_database.
 
 @pytest.mark.parametrize("linked", ["tenant folder", "runs container"])
 async def test_m1_a_symlinked_tenant_folder_or_runs_container_is_refused_and_nothing_is_written(world, linked):
@@ -1230,8 +1210,10 @@ async def test_m1_a_symlinked_tenant_folder_or_runs_container_is_refused_and_not
 
 
 @pytest.mark.parametrize("present", [".launch.json"])
-async def test_m1_a_symlink_where_the_launch_record_goes_is_not_written_through(world, present):
-    """A symlink planted at the launch record's name is refused: its target is never created; `failed`/`worker_error`, no child. (M1, O6)"""
+async def test_m1_a_symlink_where_the_launch_record_went_is_never_written_through(world, present):
+    """UPDATED (#1546 census: the launch record -> the claim row): a symlink planted at the old launch record's name is
+    never written through: its target is never created, the link is left as it was, and the row runs to the end its staged
+    facts decide (the worker writes nothing beside the run). (M1, O6)"""
     inv = str(uuid.uuid4())
     target = world["tmp"] / "elsewhere" / "target"
     target.parent.mkdir()
@@ -1243,14 +1225,17 @@ async def test_m1_a_symlink_where_the_launch_record_goes_is_not_written_through(
         await _worker(world, store, child).drain()
 
     stored = row(world["dsn"], inv)
-    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
+    assert (stored["stage"], stored["failure_reason"]) == ("completed", None)
     assert not target.exists(), "the worker wrote through a planted symlink"
-    assert child.seen() is None
+    assert (world["runs"] / f"{inv}{present}").readlink() == target, "the link was changed"
+    assert child.seen(inv) is not None
 
 
 @pytest.mark.parametrize("target_exists", [False, True], ids=["target-absent", "target-present"])
-async def test_m1_a_symlink_where_the_alert_file_goes_is_refused_not_written_through(world, target_exists):
-    """A symlink at `<id>.alert.json` is a non-plain entry and is refused (D-af, M1): the row ends `failed`/`worker_error`, no child starts, the link is still a link, and its target is neither created nor changed. (M1, O6, D-af)"""
+async def test_m1_a_symlink_where_the_alert_file_went_is_never_written_through(world, target_exists):
+    """UPDATED (#1546 census: the alert file -> the claim's alert reference): a symlink at the old `<id>.alert.json` name is
+    never written through: the link is still a link, its target is neither created nor changed, and the row runs to the end
+    its staged facts decide. (M1, O6)"""
     inv = str(uuid.uuid4())
     target = world["tmp"] / "elsewhere" / "target"
     target.parent.mkdir()
@@ -1265,8 +1250,8 @@ async def test_m1_a_symlink_where_the_alert_file_goes_is_refused_not_written_thr
         await _worker(world, store, child).drain()
 
     stored = row(world["dsn"], inv)
-    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
-    assert child.seen() is None, "a child started although the alert file could not be written"
+    assert (stored["stage"], stored["failure_reason"]) == ("completed", None)
+    assert child.seen(inv) is not None, "a link at the old alert file's name kept the row from launching"
     assert link.is_symlink(), "the link was replaced"
     assert link.readlink() == target, "the link was changed"
     if target_exists:
@@ -1328,7 +1313,8 @@ async def test_o7_the_same_id_claimed_twice_by_one_worker_gets_two_different_tok
     tokens: list[str] = []
     async with job_store(world["dsn"]) as store:
         alert = await an_alert(store, T1)
-        worker = _worker(world, store, ScriptedChild(world["tmp"] / "child", world["runs"], files=_committed()))
+        worker = _worker(world, store, ScriptedChild(world["tmp"] / "child", world["runs"], files=_committed(),
+                                                     dsn=world["dsn"]))
         for _ in range(3):
             plant_queued_investigation(world["dsn"], tenant=T1, alert_id=alert.alert_id, investigation_id=inv)
             await worker.drain()
@@ -1336,7 +1322,7 @@ async def test_o7_the_same_id_claimed_twice_by_one_worker_gets_two_different_tok
             tokens.append(_claim_token(world, inv))
             # A completed investigation queued its learning job (#1344 O1), which refers to it: rows cleared child first.
             execute(world["dsn"], "DELETE FROM jobs.learning_jobs WHERE investigation_id = %s", (inv,))
-            execute(world["dsn"], "DELETE FROM jobs.investigations WHERE id = %s", (inv,))
+            _delete_out_of_band(world["dsn"], inv)  # #1546: its claim, facts and uploads with it (Claims lifecycle)
             for path in world["runs"].glob(f"{inv}*"):
                 shutil.rmtree(path) if path.is_dir() else path.unlink()
 
@@ -1793,29 +1779,8 @@ async def test_r6_4_the_worker_holds_no_tenant_lock_and_is_no_holder_during_a_cl
     assert row(world["dsn"], inv)["stage"] == "completed"
 
 
-async def test_r6_4_no_tenant_lock_is_held_or_a_holder_while_the_launch_files_are_written(world, monkeypatch):
-    """Inside the launch-file write itself, an exclusive try-once on the tenant's host lock succeeds and the worker's pid is no holder; a lock folder that already exists is no excuse. The spied name `JobLane.write_launch` is a pinned seam (D-ab). (R6-4)"""
-    from defender.records import job_lane
-
-    lock_folder = world["root"] / ".host-locks" / T1
-    lock_folder.mkdir(parents=True)  # exists before the claim, so only a probe inside the write can see a taken lock
-    probes: list[SimpleNamespace] = []
-    real_write = job_lane.JobLane.write_launch
-
-    def probing_write(self, *args, **kwargs):
-        probes.append(probe_host_lock(world["root"], T1))
-        return real_write(self, *args, **kwargs)
-    monkeypatch.setattr(job_lane.JobLane, "write_launch", probing_write)  # lint-monkeypatch: ok — the lane is built inside the Worker and no seam injects a lane stand-in; this observes the lock state at the write and runs the real write
-
-    child = _child(world, files=_committed())
-    inv, stored = await _run_one(world, child)
-
-    assert probes, "premise: the worker wrote the launch files through the job lane"
-    for probe in probes:
-        assert probe.free, "the worker held the tenant's host lock while it wrote the launch files"
-        assert os.getpid() not in probe.holders, "the worker is on the tenant's holder list during the write"
-    assert stored["stage"] == "completed"
-
+# #1546 RETIRED (census: the worker writes no launch files): test_r6_4_no_tenant_lock_is_held_or_a_holder_while_the_launch_files_are_written;
+# guard test_r6_4_the_worker_holds_no_tenant_lock_and_is_no_holder_during_a_claim_or_a_run (the claim now carries the facts).
 
 # --- r7: the launch record is the only "launched" marker (D-af) ------------------------------------------
 
@@ -1853,7 +1818,9 @@ def test_d_af_control_a_present_launch_record_still_raises_file_exists(world):
 
 
 async def test_d_af_a_worker_launches_a_row_whose_alert_file_was_left_behind(world):
-    """A row whose `<id>.alert.json` is a leftover (no launch record) is launched: its child runs and the alert file is the stored bytes. (D-af)"""
+    """UPDATED (#1546 census: the alert file -> the claim's alert reference): a row whose `<id>.alert.json` is a leftover is
+    launched: its child runs, the leftover is left as it was (the worker writes no alert file), and the claim names the
+    row's stored alert. (D-af)"""
     inv = str(uuid.uuid4())
     child = _child(world, files=_committed())
     async with job_store(world["dsn"]) as store:
@@ -1864,7 +1831,8 @@ async def test_d_af_a_worker_launches_a_row_whose_alert_file_was_left_behind(wor
 
     assert row(world["dsn"], inv)["stage"] == "completed"
     assert child.seen(inv) is not None
-    assert (world["runs"] / f"{inv}.alert.json").read_bytes() == ALERT_BYTES
+    assert (world["runs"] / f"{inv}.alert.json").read_bytes() == b"leftover", "the worker wrote an alert file"
+    assert launch_facts(world["dsn"], inv)[LAUNCH_ALERT] == str(alert.alert_id)
 
 
 # --- r7: one cleanup follows each row's child (D-ac) -----------------------------------------------------
@@ -2137,8 +2105,10 @@ def test_d_af_the_launch_record_write_is_create_only_even_when_the_record_appear
     assert record.read_text(encoding="utf-8") == "planted by a racer", "the launch record was replaced"
 
 
-async def test_d_af_an_alert_file_that_cannot_be_written_leaves_no_launch_record_and_the_id_stays_launchable(world):
-    """The alert file's write is refused (a symlink sits at its name): the row ends `failed`/`worker_error`, no launch record is left behind, and once the obstacle is gone the same id can be launched. (D-af: the alert is written first, the record is the only mark of a launch)"""
+async def test_d_af_a_link_at_the_alert_files_name_blocks_no_launch_and_leaves_no_launch_record(world):
+    """UPDATED (#1546 census: launch record and alert file -> the claim row): a symlink at the old alert file's name blocks
+    nothing: the row runs, the link is left as it was and no launch record is written; the lane's own write over that id
+    still works once the obstacle is gone. (D-af)"""
     inv = str(uuid.uuid4())
     link = world["runs"] / f"{inv}.alert.json"
     link.symlink_to(world["tmp"] / "elsewhere")
@@ -2149,9 +2119,11 @@ async def test_d_af_an_alert_file_that_cannot_be_written_leaves_no_launch_record
         await _worker(world, store, child).drain()
 
     stored = row(world["dsn"], inv)
-    assert (stored["stage"], stored["failure_reason"]) == ("failed", "worker_error")
-    assert child.seen() is None
-    assert not (world["runs"] / f"{inv}.launch.json").exists(), "a launch record was left behind a failed alert write"
+    assert (stored["stage"], stored["failure_reason"]) == ("completed", None)
+    assert child.seen(inv) is not None
+    assert link.readlink() == world["tmp"] / "elsewhere", "the link was changed"
+    assert not (world["tmp"] / "elsewhere").exists(), "the worker wrote through the link"
+    assert not (world["runs"] / f"{inv}.launch.json").exists(), "the worker wrote a launch record"
     link.unlink()
     _lane_write(world, inv, ALERT_BYTES)  # relaunchable: no record blocks it
     assert (world["runs"] / f"{inv}.launch.json").is_file()

@@ -90,9 +90,17 @@ class Garage:
     region: str = "garage"
     tag: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     prefixes: list[str] = field(default_factory=list)
+    held: list[str] = field(default_factory=list)  # tenant prefixes this test holds by count (`tenant_prefix`)
 
     def tenant_prefix(self, tenant_id: str) -> str:
+        """The store's layout root for `tenant_id`, tracked for cleanup. Many scenes share the published fixture's tenant id
+        across tests and xdist workers, so the prefix is held by count across processes (as `EvidenceKeys` holds keys): its
+        objects are deleted when the last test holding it ends, never under another test still reading them."""
         prefix = f"t/{tenant_id}/"
+        if prefix not in self.held:
+            with _key_hold(f"garage-{self.bucket}-t-{tenant_id}") as held:
+                held(+1)
+            self.held.append(prefix)
         self.track(prefix)
         return prefix
 
@@ -198,7 +206,13 @@ def garage() -> Iterator[Garage]:
         yield store
     finally:
         for prefix in store.prefixes:
-            store.delete_prefix(prefix)
+            if prefix in store.held:
+                tenant_id = prefix.removeprefix("t/").rstrip("/")
+                with _key_hold(f"garage-{store.bucket}-t-{tenant_id}") as held:
+                    if held(-1) == 0:
+                        store.delete_prefix(prefix)
+            else:
+                store.delete_prefix(prefix)
 
 
 @dataclass(frozen=True)

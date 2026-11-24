@@ -205,3 +205,8 @@ VALID: dict[str, tuple[str, str, Any, str, Any]] = {
 #: The launch fact naming the claim's inputs folder (`.job-inputs/<claim>/`, design "The job's folders"), from which a container
 #: builds its `JobTenant`'s `run_knowledge` and `export_folder(pin)`; adopted from the implementation's helper (both kinds).
 LAUNCH_INPUTS = "inputs_dir"
+
+#: An investigation claim's launch facts (`jobs.claims.launch`, design "Claim": admission facts, knowledge pin, alert reference;
+#: census "Worker writes alert and launch record beside the run -> claim row"), by the names the launch record used: the alert
+#: reference, the digest of its stored bytes, its label (#1345 O2) and the claim's box token (r5 C1, separate from the token).
+LAUNCH_ALERT, LAUNCH_DIGEST, LAUNCH_LABEL, LAUNCH_BOX_TOKEN = "alert_id", "digest", "label", "box_token"

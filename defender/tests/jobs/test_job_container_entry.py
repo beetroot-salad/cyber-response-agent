@@ -391,8 +391,8 @@ def test_o11_a_box_start_the_helper_refuses_is_a_start_fault_in_the_job_and_no_b
     docker = R.RelayDocker()
 
     def start_box(*a: Any, **kw: Any) -> Any:
-        if refused:
-            folder = scene.runs / inv
+        if refused:  # #1546: the run folder is the one the lifecycle starts the box over, in the job's root (not `<T>/runs/`)
+            folder = Path(a[0])
             folder.rename(folder.with_name(folder.name + ".moved"))
             folder.symlink_to(other, target_is_directory=True)
         return box_mod.start_box(*a, **kw)

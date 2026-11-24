@@ -4,7 +4,10 @@ census's set; the entries (investigation, readiness, learning job) run over a jo
 Pinned: `defender.tenancy.JobTenant(id=, data_root=, inputs=)`."""
 from __future__ import annotations
 
+import contextlib
+import os
 import random
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -180,12 +183,34 @@ def test_the_helper_hands_a_learning_job_its_inputs_folder_and_its_pin_in_the_la
 @pytest.mark.postgres
 @pytest.mark.openbao
 @pytest.mark.garage
-@pytest.mark.parametrize(("damaged", "reaches"), [("clone", True), ("export", False)])
+@contextlib.contextmanager
+def _in_container_environment(env: dict) -> Iterator[None]:
+    """The process environment as the job container's (`c.env`) for an entry run on this thread: inside the box the two are
+    one, so a read of `os.environ` (the data root) must see the container's job root, not the test's host data root."""
+    saved = {k: os.environ.get(k) for k in env}
+    try:
+        for key, value in env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+@pytest.mark.parametrize(("damaged", "reaches"), [("clone", True), ("export", False), ("none", True)])
 def test_the_learning_job_entry_gets_past_its_tenant_step_without_reading_the_clones_settings(scene, evidence_store, damaged,
                                                                                               reaches, tmp_path):
     """A link planted, once the helper admitted the job, in the host clone's settings leaves the learning entry reaching its
-    launch steps; the same link in the pinned export's settings under its inputs stops it there: it reads the export's.
-    (design: the learning job passes the export roots; admission of a faulted clone stays the helper's refusal, owner D4)"""
+    launch steps; the same link in the pinned export's settings under its inputs stops it there: it reads the export's. The
+    `none` arm (no damage) is the control that the scene reaches the launch steps at all, so the export arm's stop is the
+    damage's. (design: the learning job passes the export roots; admission of a faulted clone stays the helper's refusal,
+    owner D4)"""
     from defender.learning.branch import cli, job_entry
     from defender.tests.support.jobs._container_entry1170 import ThreadCalls
 
@@ -194,19 +219,27 @@ def test_the_learning_job_entry_gets_past_its_tenant_step_without_reading_the_cl
     evidence_store.plant_source_bundle(scene, planted.source, tmp_path)
     damage: dict = {}
 
+    def entry(c) -> int:
+        try:
+            with _in_container_environment(c.env):
+                return int(job_entry.main(["--job", planted.owner, "--tenant", scene.tenant, "--source", planted.source],
+                                          environ=c.env, preflight=lambda *a, **k: 0))
+        except SystemExit:
+            return 1
+
     def job(c) -> int:
+        if damaged == "none":
+            return entry(c)
         base = scene.t.clone if damaged == "clone" else H.job_inputs(scene)
+        # The settings table the tenant step must read (`tenancy._tenants.REQUIRED_SETTINGS`), so damage there is met by a read.
         files = sorted(p for d in base.rglob("settings") if d.is_dir() and not d.is_symlink()
-                       for p in d.rglob("*") if p.is_file() and not p.is_symlink())
-        assert files, f"premise: {damaged} holds settings to damage"
+                       for p in d.glob("verb-grants.yaml") if p.is_file() and not p.is_symlink())
+        assert files, f"premise: {damaged} holds the verb-grants table to damage"
         damage["file"], damage["kept"] = files[0], files[0].read_bytes()
         files[0].unlink()  # after admission: only a read inside the container can meet the damage
         files[0].symlink_to("/etc/passwd")
         try:
-            return int(job_entry.main(["--job", planted.owner, "--tenant", scene.tenant, "--source", planted.source],
-                                      environ=c.env, preflight=lambda *a, **k: 0))
-        except SystemExit:
-            return 1
+            return entry(c)
         finally:
             damage["file"].unlink()
             damage["file"].write_bytes(damage["kept"])
