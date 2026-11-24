@@ -102,8 +102,10 @@ def test_o5_with_no_such_row_the_upgrade_restores_the_0013_constraints_and_refus
     upgrade_marking_tenants(empty_database)  # #1470's mark drop sits above: the planted tenants get their marks
     assert _version(empty_database) == [(head(),)]
     assert _constraints(empty_database) == at_0013
-    execute(empty_database, "UPDATE tenancy.tenants SET pending_action = 'rotate', step = 'names', step_actor = 'service' WHERE id = %s",
-            (TENANTS[1],))
+    # #1592 (OD-5): the helper finished TENANTS[0]'s rotate before 0027, which refuses pending work; so both tenants
+    # are set to `rotate` here, which still shows head's constraint takes it.
+    execute(empty_database, "UPDATE tenancy.tenants SET pending_action = 'rotate', step = 'names', step_actor = 'service' "
+                            "WHERE id IN (%s, %s)", (TENANTS[0], TENANTS[1]))
     assert [r[2] for r in _rows(empty_database)] == ["rotate", "rotate"]
     for refused in (ACTION, "not_an_action"):  # the second is the control that a bad value is refused this way
         with pytest.raises(Exception, match=r"ck_tenants_pending_action"):  # noqa: PT011 — a CHECK violation, whichever driver class carries it

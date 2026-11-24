@@ -40,7 +40,9 @@ KINDS = ("key", "oauth_client")
 AUTOMATION_ROUTES = [r for r in TENANT_ROUTES if PERMISSION_OF[r] in AUTOMATION]
 #: #1496: the sweeps run on the real ports, which do not back lessons (refused, #1082): a lessons call answers 501 before
 #: any store.
-STORE_ROUTES = [r for r in AUTOMATION_ROUTES if not r[1].endswith("/lessons")]
+#: The home redesign's repository read reads the tenant record, not the job or learning store `_break_the_store` breaks,
+#: so it is left out with the lessons read.
+STORE_ROUTES = [r for r in AUTOMATION_ROUTES if not r[1].endswith(("/lessons", "/repository"))]
 #: The routes that announce: every write the automation role is granted. The one read that audits, the artifact read,
 #: finds nothing on the real store (no blob store holds an artifact, #1083 N4), so it is left out; its program and
 #: credential are checked over scripted ports below (`test_the_artifact_read_audits_the_program_and_the_credential_it_used`).

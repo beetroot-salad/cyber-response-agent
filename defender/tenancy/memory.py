@@ -5,7 +5,13 @@ tenant, rows that belong to a tenant) so both answer one contract suite (`reposi
 Safe across threads: every operation applies whole under one mutex and never awaits partway, so
 the API's loop and a `TenantDirectory` call in another thread see each other's writes at once. The
 tenant lock is a per-tenant flag, taken without waiting. Needs SQLAlchemy (the records are the
-models) but no driver."""
+models) but no driver.
+
+The people requests (#1592 OD-10) live here too, for both twins: the store records them where it writes the three
+columns the database's triggers watch, mirroring them. Storing a tenant row that is new or whose state changed records
+(none, T), whoever stores it (the port's writes, `HeldTenant.commit`, test support's seeders and offboard); the identity
+twin over this store records its memberships and sign-outs through `record_people_request`. Each request is stamped
+with the process clock (the twin has no database clock)."""
 
 from __future__ import annotations
 
@@ -13,12 +19,13 @@ import contextlib
 import dataclasses
 import datetime as _dt
 import threading
-from collections.abc import AsyncIterator, Collection, Mapping
+from collections.abc import AsyncIterator, Callable, Collection, Mapping
 from typing import Any, Literal, TypeVar, cast, overload
 
-from defender.records.formats import AlertMapping, TenantId
+from defender.records.formats import AlertMapping, PeopleRequestId, TenantId, UserId
 from defender.tenancy.models import (ALLOWED_ACTIONS, RETENTION_LEAST, RETENTION_MOST, AlertMappingRow, EvidenceRetention,
-                                     ForgeWiring, Generation, MergeEligibility, PublishStatus, TenantRecord, TenantRecords)
+                                     ForgeWiring, Generation, PeopleRequest, PublishStatus, TenantRecord, TenantRecords,
+                                     knowledge_repo)
 from defender.tenancy.record_refusals import refuse_unless_active
 from defender.tenancy.repository import (
     KEEP,
@@ -33,7 +40,7 @@ from defender.tenancy.repository import (
 #: The job a seeded row in a state that requires one gets when the seeder names none.
 _SEED_JOB = {"creating": ("create", "names", SERVICE), "offboarding": ("offboard", "offboard", SERVICE)}
 
-_Row = TypeVar("_Row", TenantRecord, Generation, ForgeWiring, PublishStatus)
+_Row = TypeVar("_Row", TenantRecord, Generation, ForgeWiring, PublishStatus, PeopleRequest)
 
 
 @overload
@@ -50,16 +57,37 @@ def _check_pair(state: str, pending_action: str | None) -> None:
         raise ValueError(f"a tenant {state!r} cannot have {pending_action!r} pending")
 
 
+def _check_wiring(tenant_id: str, repo: str) -> None:
+    """The wiring CHECK's mirror: a tenant is wired only to its own `knowledge_repo`."""
+    if repo != knowledge_repo(tenant_id):
+        raise ValueError(f"tenant {tenant_id} can be wired only to {knowledge_repo(tenant_id)!r}, not {repo!r}")
+
+
+class _TenantRows(dict[str, TenantRecord]):
+    """The stored tenant rows, mirroring the tenants trigger: storing a row that is new, or whose state differs from
+    the stored one, records (none, T). Rows are replaced whole, never changed in place."""
+
+    def __init__(self, record: Callable[[UserId | None, TenantId | None], None]) -> None:
+        super().__init__()
+        self._record = record
+
+    def __setitem__(self, tenant_id: str, row: TenantRecord) -> None:
+        before = self.get(tenant_id)
+        super().__setitem__(tenant_id, row)
+        if before is None or before.state != row.state:
+            self._record(None, cast(TenantId, tenant_id))
+
+
 class InMemoryTenantRepository:
     def __init__(self) -> None:
         self._mutex = threading.RLock()
-        self._tenants: dict[str, TenantRecord] = {}
+        self._people_requests: dict[str, PeopleRequest] = {}
+        self._tenants: dict[str, TenantRecord] = _TenantRows(self.record_people_request)
         self._generations: dict[tuple[str, str], Generation] = {}
         self._wiring: dict[str, ForgeWiring] = {}
         self._publish: dict[str, PublishStatus] = {}
         self._mappings: dict[str, AlertMappingRow] = {}
         self._records: dict[str, TenantRecords] = {}
-        self._eligibility: dict[str, MergeEligibility] = {}
         self._retention: dict[str, EvidenceRetention] = {}
         self._locked: set[str] = set()
 
@@ -94,6 +122,16 @@ class InMemoryTenantRepository:
         live = [g for (t, _), g in self._generations.items() if t == tenant_id and g.status == "live"]
         if len(live) > 1:
             raise ValueError(f"tenant {tenant_id} would have two live generations")
+
+    def record_people_request(self, user_id: UserId | None, tenant_id: TenantId | None) -> None:
+        """The twins' mirror of the recording triggers (not part of the port): one request, a fresh id, the process
+        clock. The ids are stored as given, unchecked, as the seeders store them."""
+        if user_id is None and tenant_id is None:
+            raise ValueError("a people request names a user, a tenant or both")
+        row = PeopleRequest(id=PeopleRequestId.mint(), user_id=user_id, tenant_id=tenant_id,
+                            requested_at=_dt.datetime.now(_dt.UTC))
+        with self._mutex:
+            self._people_requests[row.id] = row
 
     def state_of(self, tenant_id: TenantId) -> str | None:
         """The tenant's state now, or None: synchronous, for the identity twin that shares this store."""
@@ -139,10 +177,6 @@ class InMemoryTenantRepository:
             refuse_unless_active(tenant_id, None if row is None else row.state)
             return self._records.get(tenant_id, TenantRecords())
 
-    async def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
-        with self._mutex:
-            return self._eligibility.get(tenant_id)
-
     # --- requests (the API) ----------------------------------------------------------------------
     async def request_create(self, *, now: _dt.datetime, investigation_days: int, learning_days: int) -> TenantRecord:
         retention = _checked_retention(EvidenceRetention(investigation_days, learning_days))
@@ -169,9 +203,9 @@ class InMemoryTenantRepository:
         row = self._tenants[tenant_id]
         if not allowed:
             raise Conflict(refusal)
-        for name, value in changes.items():
-            setattr(row, name, value)
-        return _detached(row)
+        after = dataclasses.replace(row, **changes)
+        self._tenants[tenant_id] = after
+        return _detached(after)
 
     def _row(self, tenant_id: TenantId) -> TenantRecord:
         row = self._tenants.get(tenant_id)
@@ -194,12 +228,6 @@ class InMemoryTenantRepository:
                 pending_action="rotate", step="names", step_actor=SERVICE)
 
     # --- host processes --------------------------------------------------------------------------
-    async def record_merge_eligibility(self, tenant_id: TenantId, *, logins: frozenset[str], read_at: _dt.datetime) -> None:
-        with self._mutex:
-            if tenant_id not in self._tenants:
-                raise ValueError(f"no tenant {tenant_id}")
-            self._eligibility[tenant_id] = MergeEligibility(logins=frozenset(logins), read_at=read_at.astimezone(_dt.UTC))
-
     async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
         published, refused, kind = publish_outcome(line)
         with self._mutex:
@@ -231,6 +259,29 @@ class InMemoryTenantRepository:
             held.spent = True
             with self._mutex:
                 self._locked.discard(tenant_id)
+
+    # --- people requests (#1592) -------------------------------------------------------------------
+    async def open_people_requests(self) -> list[PeopleRequest]:
+        with self._mutex:
+            return [_detached(r) for r in sorted(self._people_requests.values(), key=lambda r: r.requested_at)]
+
+    async def edit_people_requests(
+        self, *, delete: Collection[PeopleRequestId] = (),
+        add: Collection[tuple[UserId | None, TenantId | None]] = (), requested_at: _dt.datetime | None = None,
+    ) -> None:
+        if any(user is None and tenant is None for user, tenant in add):
+            raise ValueError("a people request names a user, a tenant or both")
+        at = _dt.datetime.now(_dt.UTC) if requested_at is None else requested_at
+        with self._mutex:
+            for request_id in delete:
+                self._people_requests.pop(request_id, None)
+            for user, tenant in add:
+                row = PeopleRequest(id=PeopleRequestId.mint(), user_id=user, tenant_id=tenant, requested_at=at)
+                self._people_requests[row.id] = row
+
+    async def people_lock(self) -> bool:
+        """One store is one process: the twin always holds the lock."""
+        return True
 
 
 def _checked_retention(retention: EvidenceRetention) -> EvidenceRetention:
@@ -304,6 +355,8 @@ class _Held:
             row = self._fenced()
             after = dataclasses.replace(row, step=step, step_actor=actor, failure=None, **columns)
             _check_pair(after.state, after.pending_action)
+            if wiring is not None:
+                _check_wiring(self.tenant_id, wiring.repo)
             generations = self._changed_generations(add_generation, update_generations, go_live, destroy)
             store._tenants[self.tenant_id] = after
             store._generations.update(generations)

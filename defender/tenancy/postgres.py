@@ -16,7 +16,12 @@ all. The fence (RC-1): the pending action, step and actor as read at the step's 
 expected failure (none), and this session still holding the lock (`pg_locks`). A miss or a failure
 of that connection spends the hold: the connection is closed, never reused or reconnected. A write
 the database refuses for its content (bad data, a broken constraint) is rolled back and raised as
-`ValueError`; the session and its lock stay, so the worker records the step's failure."""
+`ValueError`; the session and its lock stay, so the worker records the step's failure.
+
+The request worker's lock (#1592 OD-12) is `pg_try_advisory_lock(PEOPLE_LOCK_NAMESPACE, 0)` on one more connection of
+the lock engine (the same keepalives), opened at the first `people_lock()` and kept until `close()`; nothing unlocks
+it, so its hold ends only with that connection. The people requests are written by the database's triggers; this
+repository only reads them and makes the request worker's edits."""
 
 from __future__ import annotations
 
@@ -33,15 +38,17 @@ from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from defender.database import async_engine, url
-from defender.records.formats import AlertMapping, TenantId
+from defender.records.formats import AlertMapping, PeopleRequestId, TenantId, UserId
 from defender.tenancy.models import (SCHEMA, AlertMappingRow, CaseRecord, CaseVersionRow, EvidenceRetention,
-                                     EvidenceRetentionRow, ForgeWiring, Generation, MergeEligibility, MergeEligibilityRow, PublishStatus, SystemVersionRow,
-                                     TenantRecord, TenantRecords)
+                                     EvidenceRetentionRow, ForgeWiring, Generation, PeopleRequest, PublishStatus,
+                                     SystemVersionRow, TenantRecord, TenantRecords)
+from defender.tenancy._directory import why_unreachable
 from defender.tenancy.record_refusals import refuse_unless_active
 from defender.tenancy.repository import (
     ALL,
     KEEP,
     LOCK_NAMESPACE,
+    PEOPLE_LOCK_NAMESPACE,
     SERVICE,
     Conflict,
     FenceMissed,
@@ -58,8 +65,8 @@ _P: Table = PublishStatus.__table__  # type: ignore[assignment]
 _M: Table = AlertMappingRow.__table__  # type: ignore[assignment]
 _SV: Table = SystemVersionRow.__table__  # type: ignore[assignment]
 _CV: Table = CaseVersionRow.__table__  # type: ignore[assignment]
-_R: Table = EvidenceRetentionRow.__table__  # type: ignore[assignment]
-_E: Table = MergeEligibilityRow.__table__  # type: ignore[assignment]
+_RET: Table = EvidenceRetentionRow.__table__  # type: ignore[assignment]
+_R: Table = PeopleRequest.__table__  # type: ignore[assignment]
 
 #: The lock connection's keepalive bound, in seconds, when the caller states none.
 LOCK_KEEPALIVE = 30
@@ -89,12 +96,16 @@ class PostgresTenantRepository:
         self._engine = async_engine(dsn, max_connections=max_connections)
         self._lock_engine = create_async_engine(
             url(dsn), connect_args={"options": lock_options(lock_keepalive)}, poolclass=NullPool)
+        self._people: AsyncConnection | None = None
 
     async def close(self) -> None:
         try:
             await self._engine.dispose()
         finally:
-            await self._lock_engine.dispose()
+            try:
+                await self._drop_people_connection()
+            finally:
+                await self._lock_engine.dispose()
 
     # --- reads ---------------------------------------------------------------------------------
     async def _rows(self, statement: Any) -> list[Any]:
@@ -157,10 +168,6 @@ class PostgresTenantRepository:
             case = CaseRecord(version=c.version, system_id=c.system_id)
         return TenantRecords(systems=systems, case=case)
 
-    async def merge_eligibility(self, tenant_id: TenantId) -> MergeEligibility | None:
-        rows = await self._rows(select(_E).where(_E.c.tenant_id == tenant_id))
-        return MergeEligibilityRow(**rows[0]._mapping).as_record() if rows else None
-
     # --- requests (the API) ----------------------------------------------------------------------
     async def request_create(self, *, now: _dt.datetime, investigation_days: int, learning_days: int) -> TenantRecord:
         """The tenant row and its retention row in one transaction. A value the table's check refuses is raised as the
@@ -170,8 +177,8 @@ class PostgresTenantRepository:
         try:
             async with self._engine.begin() as conn:
                 made = _record((await conn.execute(insert(_T).values(**values).returning(*_T.c))).one())
-                await conn.execute(insert(_R).values(tenant_id=made.id, investigation_days=investigation_days,
-                                                     learning_days=learning_days))
+                await conn.execute(insert(_RET).values(tenant_id=made.id, investigation_days=investigation_days,
+                                                       learning_days=learning_days))
                 return made
         except IntegrityError as refused:
             if refused.orig is None:
@@ -179,15 +186,15 @@ class PostgresTenantRepository:
             raise refused.orig from None
 
     async def evidence_retention(self, tenant_id: TenantId) -> EvidenceRetention | None:
-        rows = await self._rows(select(_R).where(_R.c.tenant_id == tenant_id))
+        rows = await self._rows(select(_RET).where(_RET.c.tenant_id == tenant_id))
         return EvidenceRetentionRow(**rows[0]._mapping).as_record() if rows else None
 
     async def set_evidence_retention(self, tenant_id: TenantId, retention: EvidenceRetention) -> EvidenceRetention:
         values = dict(investigation_days=retention.investigation_days, learning_days=retention.learning_days)
         try:
             async with self._engine.begin() as conn:
-                await conn.execute(insert(_R).values(tenant_id=tenant_id, **values)
-                                   .on_conflict_do_update(index_elements=[_R.c.tenant_id], set_=values))
+                await conn.execute(insert(_RET).values(tenant_id=tenant_id, **values)
+                                   .on_conflict_do_update(index_elements=[_RET.c.tenant_id], set_=values))
         except IntegrityError as refused:
             if getattr(refused.orig, "sqlstate", None) == "23503":  # foreign_key_violation: no such tenant
                 raise NotFound(f"no tenant {tenant_id}") from refused
@@ -218,15 +225,6 @@ class PostgresTenantRepository:
             pending_action="rotate", step="names", step_actor=SERVICE)
 
     # --- host processes --------------------------------------------------------------------------
-    async def record_merge_eligibility(self, tenant_id: TenantId, *, logins: frozenset[str], read_at: _dt.datetime) -> None:
-        values = dict(logins=sorted(logins), read_at=read_at)
-        try:
-            async with self._engine.begin() as conn:
-                await conn.execute(insert(_E).values(tenant_id=tenant_id, **values)
-                                   .on_conflict_do_update(index_elements=[_E.c.tenant_id], set_=values))
-        except IntegrityError as e:
-            raise ValueError(f"no tenant {tenant_id}") from e
-
     async def record_publish_status(self, tenant_id: TenantId, line: str, *, by: str) -> None:
         published, refused, kind = publish_outcome(line)
         values = dict(recorded_by=by, published=published, refused=refused, kind=kind)
@@ -269,6 +267,54 @@ class PostgresTenantRepository:
         finally:
             if held is not None:
                 held.spent = True
+            with contextlib.suppress(Exception):  # closing a broken connection may fail; it is gone either way
+                await conn.close()
+
+
+    # --- people requests (#1592) -------------------------------------------------------------------
+    async def open_people_requests(self) -> list[PeopleRequest]:
+        return [PeopleRequest(**r._mapping) for r in await self._rows(select(_R).order_by(_R.c.requested_at))]
+
+    async def edit_people_requests(
+        self, *, delete: Collection[PeopleRequestId] = (),
+        add: Collection[tuple[UserId | None, TenantId | None]] = (), requested_at: _dt.datetime | None = None,
+    ) -> None:
+        at: Any = func.now() if requested_at is None else requested_at
+        rows = [dict(user_id=user, tenant_id=tenant) for user, tenant in add]
+        try:
+            async with self._engine.begin() as conn:
+                if delete:
+                    await conn.execute(_R.delete().where(_R.c.id.in_(list(delete))))
+                if rows:
+                    await conn.execute(insert(_R).values(id=func.gen_random_uuid(), requested_at=at), rows)
+        except IntegrityError as e:
+            raise ValueError(f"a people request names a user, a tenant or both ({str(e.orig).splitlines()[0]})") from e
+
+    async def people_lock(self) -> bool:
+        """The lock's connection runs only this statement, so any failure of it ends the connection, and its hold: a
+        held one answers False (the next call takes a new one), a new one raises."""
+        held = self._people is not None
+        conn = self._people or await self._lock_engine.connect()
+        self._people = conn
+        try:
+            return await self._take_people_lock(conn)
+        except Exception as e:
+            await self._drop_people_connection()
+            if not held:
+                raise
+            _logger.warning("the people lock's connection failed (%s); its hold, if any, is gone", why_unreachable(e))
+            return False
+
+    @staticmethod
+    async def _take_people_lock(conn: AsyncConnection) -> bool:
+        got = await conn.scalar(text("SELECT pg_try_advisory_lock(CAST(:ns AS integer), 0)"),
+                                {"ns": PEOPLE_LOCK_NAMESPACE})
+        await conn.commit()
+        return bool(got)
+
+    async def _drop_people_connection(self) -> None:
+        conn, self._people = self._people, None
+        if conn is not None:
             with contextlib.suppress(Exception):  # closing a broken connection may fail; it is gone either way
                 await conn.close()
 

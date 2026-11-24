@@ -19,7 +19,7 @@ pytest.importorskip("httpx")
 from defender.tests.support.shared._postgres1339 import empty_database  # noqa: E402,F401 — fixture
 from defender.tests.support.tenancy._active1214 import DSN_ENV  # noqa: E402
 from defender.tests.support.tenancy._host1214 import LIFECYCLE_MARK  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config, people_settings  # noqa: E402
 
 
 
@@ -55,7 +55,10 @@ def test_the_lifecycle_builds_its_identity_service_with_a_programs_port_that_ref
                         (settings.OPENBAO_LOGIN_FILE_ENV, str(tmp_path / "bao-login")),
                         (settings.INTEGRATION_ENV, expected.integration_command),
                         (settings.SECRETS_DIR_ENV, str(expected.secrets_dir)), (settings.DATA_ROOT_ENV, str(data_root)),
-                        (settings.POLL_ENV, "0.05")):
+                        (settings.POLL_ENV, "0.05"),
+                        # #1592 r15 Settings: required, so the real `_serve` refuses without them; the sessions DSN is
+                        # unreachable (the worker logs it, and the case stops at SIGTERM)
+                        *people_settings(settings)):
         monkeypatch.setenv(name, value)
 
     constructors = {HostActor.__init__.__code__: "host", ManagementService.__init__.__code__: "service",

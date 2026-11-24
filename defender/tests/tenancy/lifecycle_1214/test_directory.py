@@ -213,7 +213,7 @@ def test_a_directory_over_the_in_memory_twin_survives_its_calls():
     from defender.tenancy import InMemoryTenantRepository, TenantDirectory
 
     twin: Any = InMemoryTenantRepository()
-    asyncio.run(seed_tenant(twin, T1, created_at=NOW, state="active", repo="tenants/t1", origin=ORIGIN))
+    asyncio.run(seed_tenant(twin, T1, created_at=NOW, state="active", repo=f"t-{T1}/knowledge", origin=ORIGIN))
     directory = TenantDirectory(lambda: twin)
     assert [directory.state(T1), directory.state(T1)] == ["active", "active"]
     assert directory.state(T2) is None  # control: an unseeded tenant is unknown
@@ -231,7 +231,7 @@ def _insert(dsn: str, tenant: str, state: str, *, wiring: bool = False) -> None:
                     VALUES (%s, %s, %s, %s, %s, %s)""", (tenant, NOW, state, action, step, actor))
     if wiring:
         execute(dsn, "INSERT INTO tenancy.forge_wiring (tenant_id, repo, origin) VALUES (%s, %s, %s)",
-                (tenant, f"tenants/{tenant}", ORIGIN))
+                (tenant, f"t-{tenant}/knowledge", ORIGIN))
 
 
 def _postgres_directory(dsn: str) -> Any:
@@ -251,7 +251,7 @@ def test_the_directory_over_postgres_reads_each_state_and_the_wiring_and_leaves_
     assert {state: directory.state(tenant) for state, tenant in ids.items()} == {s: s for s in JOB}
     assert directory.state(fixture_uuid("tenant:1214-dir-absent")) is None
     got = directory.forge_wiring(ids["active"])
-    assert (got.repo, got.origin) == (f"tenants/{ids['active']}", ORIGIN)
+    assert (got.repo, got.origin) == (f"t-{ids['active']}/knowledge", ORIGIN)
 
     async def open_connections() -> int:
         return await connections(migrated_database)

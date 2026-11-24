@@ -157,9 +157,12 @@ if TYPE_CHECKING:
         LearningJobId as LearningJobId,
         HostRequestId as HostRequestId,
         MembershipId as MembershipId,
+        PeopleRequestId as PeopleRequestId,
         ProgramId as ProgramId,
         UserId as UserId,
         UuidId as UuidId,
+        login_of as login_of,
+        user_of as user_of,
     )
     from defender.records._alert_mapping_file import (
         parse_mapping as parse_mapping,
@@ -187,8 +190,8 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("BranchError", "holds_content", "inherited_artifact_names", "lead_dirs", "refuse_seeded_run_dir",), "_seeded"),
     **dict.fromkeys(("parse_mapping",), "_alert_mapping_file"),
     **dict.fromkeys(("TenantId", "TenantRefused",), "_tenant_id"),
-    **dict.fromkeys(("UUID_PATTERN", "AlertId", "BatchId", "CommitId", "CredentialId", "IdRefused", "HostRequestId", "InvestigationId", "LearningJobId", "MembershipId", "ProgramId", "UserId", "WorkItemId",
-                     "UuidId",), "_record_ids"),
+    **dict.fromkeys(("UUID_PATTERN", "AlertId", "BatchId", "CommitId", "CredentialId", "IdRefused", "HostRequestId", "InvestigationId", "LearningJobId", "MembershipId", "PeopleRequestId", "ProgramId", "UserId", "WorkItemId",
+                     "UuidId", "login_of", "user_of",), "_record_ids"),
     **dict.fromkeys(("wire_digest",), "_wire"),
 }
 

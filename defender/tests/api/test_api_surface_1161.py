@@ -18,6 +18,7 @@ pytest.importorskip("fastapi")
 from defender.tests.support.api._identity1306 import ANN, T1, World  # noqa: E402
 from defender.tests.support.frontend._ingress1161 import (  # noqa: E402
     ARTIFACT_DOMAIN,
+    FORGE_UPSTREAM_ENV,
     REPO,
     launcher_env,
     run_launcher,
@@ -177,6 +178,8 @@ INPUTS = {
     "DEFENDER_INGRESS_LISTEN": ["localhost", "localhost:abc", "localhost:99999", ":8000", "http://localhost:8000"],
     "DEFENDER_ARTIFACT_DOMAIN": ["https://artifacts.defender.test", "*.defender.test", "Artifacts.Test", "a.test:8443"],
     "DEFENDER_INGRESS_API_UPSTREAM": ["localhost", "localhost:abc", "localhost:99999", ":8001", "http://localhost:8001"],
+    "DEFENDER_FORGE_DOMAIN": ["https://forge.defender.test", "*.defender.test", "Forge.Test", "f.test:8443", "f.test/x"],
+    FORGE_UPSTREAM_ENV: ["localhost", "localhost:abc", "localhost:99999", ":3000", "http://localhost:3000"],
     "DEFENDER_INGRESS_FRONTEND_DIR": ["{tmp}/no-such-dir", "{tmp}/a-file", "{tmp}/my dist", "{tmp}/a}}b", "{tmp}/a{{b",
                                       "{tmp}/a\nb", "{tmp}/a#b", '{tmp}/a"b', "{tmp}/a\tb"],
 }
@@ -240,6 +243,16 @@ def test_the_launcher_refuses_a_misshapen_input_naming_it_before_caddy(name: str
     assert done.returncode > 0, (done.returncode, done.stderr)
     assert name in done.stdout + done.stderr
     assert not (tmp_path / "caddy-ran").exists()
+
+
+def test_1592_the_ingress_parses_the_forge_domain_with_the_apis_one_hostname_parser() -> None:
+    """S3-9 (#1592, Amends #1471): `DEFENDER_FORGE_DOMAIN` is parsed by the same function as `artifact_domain` (one
+    shared hostname parser), so the ingress and the API judge every value alike; the five bad values above are samples."""
+    from defender.api_server import ingress
+    from defender.api_server._settings import artifact_domain
+
+    assert ingress.INPUTS["DEFENDER_FORGE_DOMAIN"] is artifact_domain
+    assert ingress.INPUTS["DEFENDER_ARTIFACT_DOMAIN"] is artifact_domain, "control: the parser named is the shared one"
 
 
 def test_the_redirect_uri_the_provider_is_sent_names_the_callback_route() -> None:

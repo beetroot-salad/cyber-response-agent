@@ -2,16 +2,16 @@
 an accepted object of an investigation and of a learning job is kept, each 30 to 730. There is no default (#1082): the
 tenant's create request carries both values, and the API changes them (`config.write`, audited).
 
-Revision ID: 0028_evidence_retention
-Revises: 0027_run_evidence
+Revision ID: 0029_evidence_retention
+Revises: 0028_run_evidence
 
 Creates a table and changes no other. There is no downgrade.
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0028_evidence_retention"
-down_revision = "0027_run_evidence"
+revision = "0029_evidence_retention"
+down_revision = "0028_run_evidence"
 
 SCHEMA = "tenancy"
 #: The bounds, frozen here as they stand at this revision.

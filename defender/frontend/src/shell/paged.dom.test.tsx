@@ -65,7 +65,12 @@ function server() {
     pathname: "/",
     shape: null,
     query: { get: () => null, getAll: () => [] },
-    actions: { retry: () => undefined, signOut: () => undefined, acceptInvitation: () => Promise.reject(new Error()) },
+    actions: {
+      retry: () => undefined,
+      signOut: () => undefined,
+      acceptInvitation: () => Promise.reject(new Error()),
+      outbound: () => null,
+    },
   };
   return { sent, shell };
 }

@@ -196,7 +196,7 @@ def test_a_lifecycle_with_no_evidence_store_configured_is_refused_at_its_setting
     from defender.lifecycle import ConfigRefused
     from defender.lifecycle import config as settings
     from defender.tests.support.evidence._facts1546 import EVIDENCE_ENV_PREFIX
-    from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config
+    from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config, people_settings
 
     expected = lifecycle_config(tmp_path, data_root)
     for name, value in (("forge-token", expected.forge_admin_token), ("bao-login", expected.openbao_login)):
@@ -206,7 +206,8 @@ def test_a_lifecycle_with_no_evidence_store_configured_is_refused_at_its_setting
     for name, value in ((settings.FORGE_URL_ENV, expected.forge_url), (settings.FORGE_TOKEN_FILE_ENV, str(tmp_path / "forge-token")),
                         (settings.OPENBAO_LOGIN_FILE_ENV, str(tmp_path / "bao-login")),
                         (settings.INTEGRATION_ENV, expected.integration_command),
-                        (settings.SECRETS_DIR_ENV, str(expected.secrets_dir)), (settings.DATA_ROOT_ENV, str(data_root))):
+                        (settings.SECRETS_DIR_ENV, str(expected.secrets_dir)), (settings.DATA_ROOT_ENV, str(data_root)),
+                        *people_settings(settings)):  # #1592: the people worker's required settings
         monkeypatch.setenv(name, value)
     for name in STORE_ENV:
         if name != missing:

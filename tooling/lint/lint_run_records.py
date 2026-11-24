@@ -250,9 +250,8 @@ CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
     ("scratch_root", "learning/call_folders.py"): frozenset({"call_folder"}),
     # #1170: the per-job helper makes the oracle's folder in the tenant's scratch location.
     ("scratch_root", "job_host/_learning.py"): frozenset({"_oracle_box"}),
-    # #1278: the learning store's `commit_record` verb (its commit-maker rows), read where a tick or a
-    # revert reads what the commit-maker made — the store's record, not the tenant's file record.
-    ("commit_record", "learning/author/version_control/store_delivery.py"): frozenset({"revert_lesson"}),
+    # #1278: the learning store's `commit_record` verb (its commit-maker rows), read where a tick
+    # reads what the commit-maker made — the store's record, not the tenant's file record.
     ("commit_record", "learning/core/store_tick.py"): frozenset({"Tick._opened", "Tick._author"}),
     # #1487: the same verb behind the tick's store interface, the adapter's binding and the helper's relay of it.
     ("commit_record", "learning_store/tick.py"): frozenset({"StoreAdapter.commit_record"}),

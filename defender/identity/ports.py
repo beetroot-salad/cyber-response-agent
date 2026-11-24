@@ -65,7 +65,11 @@ class IdentityRepository(Protocol):
       row. The one write that does not take it, `revoke_stale_pending`, decides nothing: it revokes only a
       `pending` row past its deadline, and going live refuses that same row, so the two cannot both apply.
 
-    Time is an explicit aware-UTC argument; the repository holds no clock. Every method is a
+    - every write of a membership's `status` (an insert included) or of a user's `signed_out_at` records a people
+      request in its own transaction (#1592 OD-10): the database's triggers, mirrored by the twin over its tenant store.
+
+    Time is an explicit aware-UTC argument; the repository holds no clock, but for `sign_out`'s stamp, which is the
+    database's `now()` (the twin's process clock). Every method is a
     coroutine. A returned model is a detached copy with every field set: changing it changes
     nothing stored. A refused write raises `DataRuleViolation`."""
 
@@ -122,6 +126,13 @@ class IdentityRepository(Protocol):
         """The tenant's rows in `status`, each with its user, in one read."""
         ...
     async def active_membership(self, user_id: UserId, tenant_id: TenantId) -> Membership | None: ...
+    async def wanted_tenants(self, user_id: UserId) -> set[TenantId]:
+        """The tenants the user is wanted in (#1592): those of an `active` membership whose tenant is `active`. The
+        user's status and admin flag are not inputs; a user the product does not know is wanted nowhere."""
+        ...
+    async def wanted_users(self, tenant_id: TenantId) -> set[UserId]:
+        """The users wanted in the tenant, by `wanted_tenants`' one rule: none unless the tenant is `active`."""
+        ...
 
     # --- programs and their credentials (#1307, #1454)
     async def program(self, program_id: ProgramId) -> Program | None:
@@ -253,7 +264,11 @@ class IdentityRepository(Protocol):
         used_otp: bool = False,
     ) -> Session: ...
     async def session_by_value(self, value: str) -> Session | None: ...
-    async def delete_session(self, value: str) -> bool: ...
+    async def sign_out(self, user_id: UserId, value: str) -> None:
+        """A product sign-out (#1592): delete the user's session with this value, if there is one (another user's
+        session with it stays), and set the user's `signed_out_at` to now either way, in one transaction, which records
+        the person's (U, none) request. The expiry purge is not a sign-out."""
+        ...
     async def touch_session(self, value: str, *, now: _dt.datetime) -> bool:
         """Move `last_seen_at` to `now` only when it is more than five minutes old."""
         ...

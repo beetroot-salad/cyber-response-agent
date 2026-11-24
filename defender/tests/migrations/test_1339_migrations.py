@@ -476,6 +476,22 @@ def test_neither_jobs_table_has_a_trigger(migrated_database):
 
 
 @pytest.mark.postgres
+def test_exactly_three_tables_carry_a_trigger_the_people_requests_ones_with_their_event_and_column(migrated_database):
+    """S1-7 (#1592 OD-10): `memberships` (insert, update of status), `tenants` (insert, update of state) and `users`
+    (update of signed_out_at) each carry one non-internal AFTER trigger; no other identity, tenancy or jobs table has
+    one. Names are not asserted."""
+    rows = execute(migrated_database, """
+        SELECT n.nspname || '.' || t.relname, (g.tgtype & 4) <> 0, (g.tgtype & 16) <> 0, (g.tgtype & 2) <> 0,
+               array(SELECT a.attname::text FROM pg_attribute a WHERE a.attrelid = g.tgrelid AND a.attnum = ANY (g.tgattr))
+        FROM pg_trigger g JOIN pg_class t ON t.oid = g.tgrelid JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE NOT g.tgisinternal AND n.nspname IN ('identity', 'tenancy', 'jobs') ORDER BY 1""")
+    #: table, fires on insert, fires on update, is a BEFORE trigger, the columns of `UPDATE OF`
+    assert rows == [("identity.memberships", True, True, False, ["status"]),
+                    ("identity.users", False, True, False, ["signed_out_at"]),
+                    ("tenancy.tenants", True, True, False, ["state"])]
+
+
+@pytest.mark.postgres
 def test_the_jobs_indexes_are_the_constraints_plus_one_partial_unique_and_the_list_index_and_nothing_else(migrated_database):
     """Four indexes on alerts and on investigations: key-backed ones, #1083's newest-first list index, and on investigations one partial unique over the live stages only (#1342 M10; #1083 Am-5, CONFLICT: the list indexes join the set)."""
     alerts = _jobs_indexes(migrated_database, "alerts")

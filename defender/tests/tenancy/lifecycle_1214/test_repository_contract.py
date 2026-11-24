@@ -60,6 +60,11 @@ T2 = fixture_uuid("tenant:1214-repo-2")
 ABSENT = fixture_uuid("tenant:1214-repo-absent")
 
 
+def knowledge(tenant: str) -> str:
+    """#1592 OD-5: a tenant's repository is `t-<T>/knowledge`, the only value the wiring CHECK admits."""
+    return f"t-{tenant}/knowledge"
+
+
 T3 = fixture_uuid("tenant:1214-repo-3")
 
 
@@ -516,10 +521,10 @@ async def test_requests_chain_through_the_lifecycle(store):
 
 async def test_forge_wiring_is_the_recorded_repo_and_origin(store):
     """`forge_wiring` returns the recorded repo and origin (not derived), None for a tenant without wiring (Flow 4, DC-4)."""
-    await store.seed(T1, ACTIVE, repo="tenants/playground", origin=ORIGIN)
+    await store.seed(T1, ACTIVE, repo=knowledge(T1), origin=ORIGIN)
     await store.seed(T2, ACTIVE)
     wiring = await store.repo.forge_wiring(T1)
-    assert (wiring.repo, wiring.origin) == ("tenants/playground", ORIGIN)
+    assert (wiring.repo, wiring.origin) == (knowledge(T1), ORIGIN)
     assert await store.repo.forge_wiring(T2) is None  # GAP-A-3: absent answers None
 
 
@@ -565,7 +570,7 @@ def _records(result: object) -> list[object]:
 @pytest.mark.parametrize("read", sorted(READS))
 async def test_every_returned_record_is_readable_and_editing_it_changes_nothing_stored(store, read):
     """Detached copies: every field of what a method returns is readable, and mutating it stores nothing (P4, #1339)."""
-    await store.seed(T1, ACTIVE, repo="tenants/t1", origin=ORIGIN)
+    await store.seed(T1, ACTIVE, repo=knowledge(T1), origin=ORIGIN)
     returned = _records(await READS[read](store.repo))
     assert returned
     before = [_values(r) for r in returned]
@@ -762,14 +767,14 @@ async def test_admission_is_the_state_and_the_recorded_wiring_or_none(store, nam
     """For a tenant in each state `admission` returns its state with the recorded repo and origin when wiring was
     recorded, and with `None` when none was: wiring is never invented (r10 A1 step 4, Finding 9)."""
     await store.seed(T1, ALL_ROWS[name])
-    await store.seed(T2, ALL_ROWS[name], repo="tenants/playground", origin=ORIGIN)
+    await store.seed(T2, ALL_ROWS[name], repo=knowledge(T2), origin=ORIGIN)
     state, wiring = await store.repo.admission(T1)
     assert (state, wiring) == (ALL_ROWS[name][0], None)
     state, wiring = await store.repo.admission(T2)
     assert state == ALL_ROWS[name][0]
     recorded = await store.repo.forge_wiring(T2)
     assert wiring is not None
-    assert (wiring.repo, wiring.origin) == ("tenants/playground", ORIGIN)
+    assert (wiring.repo, wiring.origin) == (knowledge(T2), ORIGIN)
     assert (wiring.repo, wiring.origin) == (recorded.repo, recorded.origin)
 
 
@@ -824,17 +829,17 @@ async def test_a_commit_for_a_tenant_that_has_a_wiring_leaves_the_recorded_one_o
     """`names` keeps an already recorded repo and origin (the lab's own); a tenant without one gets the committed one (RC-9)."""
     from defender.tenancy import ForgeWiring
 
-    await store.seed(T1, CREATING, repo="tenants/playground", origin=ORIGIN)
+    await store.seed(T1, CREATING, repo=knowledge(T1), origin=ORIGIN)
     await store.seed(T2, CREATING)
     for tenant in (T1, T2):
         async with store.repo.lock(tenant) as held:
             assert held is not None
             await held.commit(step="repo", actor="service",
-                              wiring=ForgeWiring(tenant_id=tenant, repo=f"tenants/{tenant}", origin="http://forge.test/new.git"))
+                              wiring=ForgeWiring(tenant_id=tenant, repo=knowledge(tenant), origin="http://forge.test/new.git"))
     kept = await store.repo.forge_wiring(T1)
-    assert (kept.repo, kept.origin) == ("tenants/playground", ORIGIN)
+    assert (kept.repo, kept.origin) == (knowledge(T1), ORIGIN)
     fresh = await store.repo.forge_wiring(T2)
-    assert (fresh.repo, fresh.origin) == (f"tenants/{T2}", "http://forge.test/new.git")
+    assert (fresh.repo, fresh.origin) == (knowledge(T2), "http://forge.test/new.git")
 
 
 # --- a write the store refuses as data ---------------------------------------------------------------
@@ -1150,3 +1155,28 @@ async def test_1366_o10_a_commit_that_drops_records_removes_that_tenants_version
         assert store.twin._records[T3] == theirs
         if not fenced:
             assert store.twin._records[T1] == mine, "nothing of this tenant's is dropped"
+
+
+# --- the people requests read (#1592 S1-17) --------------------------------------------------------
+
+
+async def test_open_people_requests_returns_every_row_with_its_fields_and_a_copy(store, request):
+    """S1-17 (r15.1): `open_people_requests()` returns each recorded row's id, user_id, tenant_id and requested_at; the
+    twin stamps the process clock; an edit of what it returned changes nothing stored."""
+    before = dt.datetime.now(dt.UTC)
+    await store.seed(T1, ACTIVE)
+    await store.seed(T2, CREATING)
+    rows = await store.repo.open_people_requests()
+    assert sorted((str(r.tenant_id), r.user_id) for r in rows) == sorted([(T1, None), (T2, None)])
+    assert len({str(r.id) for r in rows}) == 2
+    after = dt.datetime.now(dt.UTC)
+    assert all(before - dt.timedelta(minutes=1) <= r.requested_at <= after + dt.timedelta(minutes=1) for r in rows), \
+        "requested_at is neither the database's nor the twin's process clock"
+    from defender.records.formats import PeopleRequestId
+
+    assert all(PeopleRequestId(str(r.id)) == r.id for r in rows)
+    for r in rows:
+        with contextlib.suppress(AttributeError, TypeError, dataclasses.FrozenInstanceError):
+            r.tenant_id = None  # a detached copy, or frozen: either way not the store's row
+    again = await store.repo.open_people_requests()
+    assert sorted(str(r.tenant_id) for r in again) == sorted([T1, T2])

@@ -15,7 +15,7 @@ import pytest
 
 from defender.tests.support.api._server1083 import A
 from defender.tests.tenancy.tenant_1108_p4.test_dev_compose import theme_looks
-from defender.tests.support.frontend._ingress1161 import ARTIFACT_DOMAIN, REPO, ingress, launcher_env
+from defender.tests.support.frontend._ingress1161 import ARTIFACT_DOMAIN, FORGE_DOMAIN, REPO, ingress, launcher_env
 
 UUID = "3400a0c8-beda-4fe6-86fb-3c6da1ea4a11"
 CSP = {"default-src": ["'self'"], "base-uri": ["'none'"], "frame-ancestors": ["'none'"],
@@ -216,11 +216,15 @@ def test_1161_b9_the_caddyfile_turns_off_the_admin_endpoint(browser_tools, tmp_p
 
 
 def test_1161_b9_the_ingress_serves_plain_http_on_its_listen_address_for_any_host(browser_tools, tmp_path: Path):
-    """One plain-HTTP server on the listen port, bound to its host, with automatic HTTPS off and no host matcher: what
+    """One plain-HTTP server on the listen port, bound to its host, with automatic HTTPS off and no host matcher on the app (#1592: the Forgejo site alone has one): what
     a TLS terminator in front forwards (any `Host`) is served, and Caddy never binds 443 or asks for a certificate.
     (B9, amended: TLS ends in front of the ingress)"""
     [server] = _adapted("127.0.0.1:8080", tmp_path)["apps"]["http"]["servers"].values()
     assert server["listen"] == ["127.0.0.1:8080"], server["listen"]
     assert server.get("automatic_https", {}).get("disable") is True, server.get("automatic_https")
-    assert all("host" not in matcher for route in server["routes"] for matcher in route.get("match", [])), server["routes"]
+    # #1592: the one host-matched site is the Forgejo one; every route that names a host names that domain alone.
+    hosts = [matcher["host"] for route in server["routes"] for matcher in route.get("match", []) if "host" in matcher]
+    assert all(h == [FORGE_DOMAIN] for h in hosts), server["routes"]
+    assert any("host" not in matcher for route in server["routes"] for matcher in route.get("match", [{}])), \
+        "the app's routes must stay with no host matcher"
     assert "tls" not in _adapted("127.0.0.1:8080", tmp_path)["apps"]

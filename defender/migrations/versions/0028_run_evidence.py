@@ -14,8 +14,8 @@ uploads it makes, and each owner row's evidence state.
 
 No foreign key carries an ON DELETE action: deleting an investigation removes its claims, facts and uploads itself.
 
-Revision ID: 0027_run_evidence
-Revises: 0026_host_requests
+Revision ID: 0028_run_evidence
+Revises: 0027_people_requests
 
 There is no downgrade.
 """
@@ -23,8 +23,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0027_run_evidence"
-down_revision = "0026_host_requests"
+revision = "0028_run_evidence"
+down_revision = "0027_people_requests"
 
 SCHEMA = "jobs"
 

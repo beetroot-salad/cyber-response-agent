@@ -16,6 +16,7 @@ import socket
 import threading
 from typing import Any
 import json
+from fnmatch import fnmatchcase
 
 import pytest
 
@@ -25,7 +26,7 @@ import httpx
 pytest.importorskip('httpx')
 
 from defender.tests.support.shared._postgres1339 import execute, migrated_database  # noqa: E402,F401 — fixture
-from defender.tests.tenancy.lifecycle_1214._fakes import Fakes  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import Fakes, repo_of  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import ADMIN_TOKEN, FORGE_URL  # noqa: E402
 from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
@@ -40,7 +41,7 @@ NOW = _dt.datetime(2026, 10, 28, 12, 0, tzinfo=_dt.UTC)
 USERS = "/api/v1/admin/users"
 
 
-REPOS = "/api/v1/orgs/tenants/repos"
+REPOS = "/api/v1/orgs/t-*/repos"  #: one pattern for every tenant's organisation (`_fakes._Recorder._popped`)
 
 
 WAIT = 10.0
@@ -432,7 +433,7 @@ def test_a_worker_whose_lock_connection_is_terminated_writes_nothing_and_the_nex
     assert (status, set(fakes.forge.users), set(fakes.openbao.oidc_roles), set(fakes.openbao.approles),
             set(fakes.openbao.entities)) == ("pending", {bot}, {role}, {approle, sign_approle, evidence_approle},
                                              {entity, sign_entity, evidence_entity}), "unknown or duplicate things"
-    assert list(fakes.forge.repos) == [f"tenants/{t}"] and len(fakes.forge.made("POST", REPOS)) == 1
+    assert list(fakes.forge.repos) == [repo_of(t)] and len(fakes.forge.made("POST", REPOS)) == 1
     assert len(fakes.forge.made("POST", USERS)) == 1
     args = fakes.integration.calls
     assert all(a == args[0] for a in args) and args[0][args[0].index("--username") + 1] == bot
@@ -538,7 +539,7 @@ def test_an_offboard_mid_step_leaves_a_created_bot_to_be_destroyed_by_its_record
     _pass(dsn, "service", fakes, config, identity=identity)
     assert (fakes.forge.users, fakes.forge.integrations) == (set(), {})
     assert not (fakes.openbao.oidc_roles or fakes.openbao.approles or fakes.openbao.entities)
-    assert set(fakes.forge.repos) <= {f"tenants/{t}"} and all(r["archived"] for r in fakes.forge.repos.values())
+    assert set(fakes.forge.repos) <= {repo_of(t)} and all(r["archived"] for r in fakes.forge.repos.values())
 
 
 def test_the_host_actor_holds_the_same_lock_and_an_offboard_mid_prepare_makes_its_commit_miss(
@@ -597,7 +598,7 @@ def test_a_failure_text_the_database_cannot_store_is_still_recorded_and_the_pass
     asked: list[int] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
-        if hostile != "integration-stderr-nul" and request.method == "POST" and request.url.path == REPOS and not asked:
+        if hostile != "integration-stderr-nul" and request.method == "POST" and fnmatchcase(request.url.path, REPOS) and not asked:
             asked.append(1)
             return httpx.Response(500, content=json.dumps({"message": hostile}).encode())
         return fakes.forge.handle(request)

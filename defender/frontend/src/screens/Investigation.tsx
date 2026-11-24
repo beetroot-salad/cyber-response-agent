@@ -10,7 +10,7 @@ export function Investigation() {
   const result = useRead(READ, { path: { tenant_id, investigation_id } });
   return (
     <>
-      <TopBar />
+      <TopBar tenant={tenant_id} />
       <main data-screen="investigation" data-state={stateOf(result)}>
         <h1>Investigation</h1>
         {content(result)}

@@ -26,15 +26,20 @@ from defender.credential_proxy import transit_key_for
 from defender.evidence import key_name as evidence_key_name
 from defender.identity import audit
 from defender.lifecycle._bot import Minted, log_in, mint
-from defender.lifecycle._eligibility import eligible_to_merge, listed_logins
+from defender.lifecycle._eligibility import _team_id, listed, listed_logins, teams_named
 from defender.lifecycle._job import SERVICE, Actor, Step, StepFailed, answered, field_of, next_step, only
+from defender.lifecycle._people_run import MEMBERS
 from defender.lifecycle.config import LifecycleConfig
-from defender.tenancy import ALL, ForgeWiring, Generation, HeldTenant, TenantId, TenantRepository, tenant_id_file_text
+from defender.tenancy import (ALL, ForgeWiring, Generation, HeldTenant, TenantId, TenantRepository, knowledge_repo,
+                              tenant_id_file_text)
 
-#: The forge organisation every tenant's repository is made in.
-ORG = "tenants"
-#: The team of the repository's owning organisation that alone may merge `main` (#1163 A23).
+#: The team of a tenant's organisation that holds only the lifecycle's admin (#1592: its people are in `members`).
 OWNERS = "Owners"
+#: What team `members` is (#1592 "Forgejo organisation and team"): write on code, pull requests and issues, no other
+#: repository than T's and no repository creation. `permission` travels in every body that sets
+#: `includes_all_repositories` (P33: without it that flag is ignored); `units_map` is never sent (P20).
+MEMBERS_SHAPE: dict[str, Any] = {"permission": "write", "units": ["repo.code", "repo.pulls", "repo.issues"],
+                                 "includes_all_repositories": False, "can_create_org_repo": False}
 #: How long the archived repo is kept after offboarding (Q5).
 REPO_WINDOW = _dt.timedelta(days=30)
 #: The OIDC role's claim template: the minting entity's tenant (G10, F-6).
@@ -44,9 +49,6 @@ TOKEN_TTL = "10m"
 WRAP_TTL = "600"
 #: The integration's grant: the repository, and issues, labels and comments (#1414 D13). One value, the way the forge takes it.
 INTEGRATION_SCOPES = "write:repository,write:issue"
-#: How old a tenant's merge-eligibility record may be before a pass reads it again: a third of the feedback tick's
-#: default 60 s staleness bound, so a record never goes stale between passes, and the forge is not read every pass.
-ELIGIBILITY_REFRESH = _dt.timedelta(seconds=20)
 MAIN_WAIT_TRIES = 40
 MAIN_WAIT_SECONDS = 0.25
 
@@ -77,39 +79,6 @@ class ManagementService(Actor):
                 "sweep": self._sweep, "activate": self._activate, "retire": self._retire,
                 "offboard": self._offboard, "finish": self._finish, "delete_repo": self._delete_repo}
 
-    async def work(self) -> int:
-        """The job's steps (`Actor.work`), then the merge eligibility of every active tenant whose record is older than
-        `ELIGIBILITY_REFRESH` read afresh (#1414 D13), whether or not a step ran. The count is the steps run."""
-        ran = await super().work()
-        await self._record_eligibility()
-        return ran
-
-    async def _record_eligibility(self) -> None:
-        """For each active tenant: `main`'s merge whitelist (users and team members) less every generation's bot,
-        recorded with the time read. A read that fails, for any reason, is logged and leaves the tenant's earlier record
-        as it was; the other tenants are still read."""
-        try:
-            tenants = [t for t in await self._tenants.tenants() if t.state == "active"]
-        except Exception:  # noqa: BLE001 — a failed listing never fails the pass: the next one retries
-            _logger.exception("merge eligibility: the tenants could not be listed")
-            return
-        for tenant in tenants:
-            try:
-                await self._record_eligibility_of(tenant.id)
-            except Exception as failed:  # noqa: BLE001 — one tenant's failed read keeps its record and never stops the others
-                _logger.warning("tenant %s: merge eligibility not read, the earlier record stays: %s", tenant.id, failed)
-
-    async def _record_eligibility_of(self, tenant: TenantId) -> None:
-        recorded = await self._tenants.merge_eligibility(tenant)
-        if recorded is not None and _dt.timedelta(0) <= self._clock() - recorded.read_at < ELIGIBILITY_REFRESH:
-            return
-        wiring = await self._tenants.forge_wiring(tenant)
-        if wiring is None:
-            raise StepFailed("the tenant has no forge wiring")
-        bots = {g.bot_login for g in await self._tenants.generations(tenant)}
-        logins = await eligible_to_merge(self._forge, wiring.repo, bots=bots)
-        await self._tenants.record_merge_eligibility(tenant, logins=logins, read_at=self._clock())
-
     async def _commit_next(self, held: HeldTenant, **records: Any) -> None:
         step, actor = next_step(held)
         await held.commit(step=step, actor=actor, **records)
@@ -122,7 +91,7 @@ class ManagementService(Actor):
         tenant = held.tenant_id
         wiring = await held.forge_wiring()
         if wiring is None:
-            repo = f"{ORG}/{tenant}"
+            repo = knowledge_repo(tenant)
             wiring = ForgeWiring(tenant_id=tenant, repo=repo, origin=f"{self._config.forge_url.rstrip('/')}/{repo}.git")
         salt = secrets.token_hex(4)
         bot = f"bot-{tenant[:8]}-{salt}"
@@ -136,7 +105,7 @@ class ManagementService(Actor):
             integration_args=["--username", bot, "--name", f"defender-{salt}", "--issuer", self._config.issuer_url,
                               "--claim-eq", f"tenant_id={tenant}", "--scope", INTEGRATION_SCOPES,
                               "--repo", wiring.repo])
-        repo_url = held.record.repo_url or f"{self._config.forge_url.rstrip('/')}/{wiring.repo}"
+        repo_url = held.record.repo_url or f"{self._config.forge_page_base}/{wiring.repo}"
         await self._commit_next(held, add_generation=generation, wiring=wiring, repo_url=repo_url)
 
     async def _building(self, held: HeldTenant) -> Generation:
@@ -253,11 +222,14 @@ class ManagementService(Actor):
         answered(await self._bao.post(f"/v1/identity/oidc/role/{gen.oidc_role}", json=body))
 
     async def _repo(self, held: HeldTenant) -> None:
-        """The tenant's private repository, made empty if absent (Flow 1.4)."""
+        """The tenant's private repository, made empty if absent, in its private organisation `t-<T>`, made first if
+        absent (Flow 1.4, #1592 OD-5). Nothing else: the team and the rule are `_protect_main`'s."""
         wiring = await self._wiring(held)
         found = answered(await self._forge.get(f"/api/v1/repos/{wiring.repo}"), 404)
         if found.status_code == 404:
             org, name = wiring.repo.split("/", 1)
+            if answered(await self._forge.get(f"/api/v1/orgs/{org}"), 404).status_code == 404:
+                answered(await self._forge.post("/api/v1/orgs", json={"username": org, "visibility": "private"}))
             answered(await self._forge.post(f"/api/v1/orgs/{org}/repos", json={
                 "name": name, "private": True, "auto_init": False, "default_branch": "main"}))
         elif found.json().get("private") is not True:
@@ -324,28 +296,74 @@ class ManagementService(Actor):
         await self._commit_next(held)
 
     async def _protect_main(self, held: HeldTenant, wiring: ForgeWiring) -> None:
-        """`main`'s rule holds the invariant, as stored (A23, r8.2): push disabled, the merge whitelist
-        enabled with the owning organisation's `Owners` team on it, and no bot login of any of the
-        tenant's generations; other users and teams on it are kept. An absent rule is made, one that
-        breaks the invariant is changed with both whitelists sent whole (the forge keeps a list a
-        change omits). The rule is then read back as stored: the forge drops a user without access to
-        the repository and every team of a user-owned one, so only the stored rule shows the invariant."""
+        """The organisation's shape, the one owner of it (#1592 "Forgejo organisation and team", A23 amended), each part
+        ensured and read back: team `members` as `MEMBERS_SHAPE` with exactly T's repository, `Owners` holding only the
+        lifecycle's admin, and `main`'s rule (`_protect_rule`)."""
+        org = wiring.repo.split("/", 1)[0]
+        team = await self._members_team(org)
+        await self._team_repositories(team, wiring.repo)
+        await self._owners_only_the_admin(org)
+        await self._protect_rule(held, wiring)
+
+    async def _members_team(self, org: str) -> int:
+        """Team `members` of `org`, made or PATCHed to `MEMBERS_SHAPE` when it differs, then read back; its id."""
+        named = await teams_named(self._forge, org, MEMBERS)
+        if not named:
+            made = answered(await self._forge.post(f"/api/v1/orgs/{org}/teams", json={"name": MEMBERS, **MEMBERS_SHAPE}))
+            team = field_of(made, "id")
+        else:
+            team = named[0].get("id")
+            if _team_differs(named[0]):
+                answered(await self._forge.patch(f"/api/v1/teams/{team}", json={"name": MEMBERS, **MEMBERS_SHAPE}))
+        if not isinstance(team, int) or isinstance(team, bool):
+            raise StepFailed(f"the team {MEMBERS} of {org} has no numeric id")
+        if _team_differs(answered(await self._forge.get(f"/api/v1/teams/{team}")).json()):
+            raise StepFailed(f"the team {MEMBERS} of {org} reads back in another shape than {MEMBERS_SHAPE}")
+        return team
+
+    async def _team_repositories(self, team: int, repo: str) -> None:
+        """Exactly `repo` attached to the team: any other detached (turning `includes_all_repositories` off detaches
+        nothing, P33), `repo` attached; then read back."""
+        path = f"/api/v1/teams/{team}/repos"
+        attached = set(await listed(self._forge, path, f"the repositories of team {team}", key="full_name"))
+        for other in sorted(attached - {repo}):
+            answered(await self._forge.delete(f"{path}/{other}"), 404)
+        if repo not in attached:
+            answered(await self._forge.put(f"{path}/{repo}"))
+        now = set(await listed(self._forge, path, f"the repositories of team {team}", key="full_name"))
+        if now != {repo}:
+            raise StepFailed(f"team {team} reads back with the repositories {sorted(now)}, not exactly {repo}")
+
+    async def _owners_only_the_admin(self, org: str) -> None:
+        """`Owners` holds only the lifecycle's admin, whose login the admin token's own account names."""
+        admin = str(field_of(answered(await self._forge.get("/api/v1/user")), "login"))
+        team = await _team_id(self._forge, org, OWNERS)
+        path = f"/api/v1/teams/{team}/members"
+        members = set(await listed_logins(self._forge, path, f"the members of {OWNERS} of {org}"))
+        if admin not in members:
+            answered(await self._forge.put(f"{path}/{admin}"))
+        for other in sorted(members - {admin}):
+            answered(await self._forge.delete(f"{path}/{other}"), 404)
+        now = set(await listed_logins(self._forge, path, f"the members of {OWNERS} of {org}"))
+        if now != {admin}:
+            raise StepFailed(f"{OWNERS} of {org} reads back holding {sorted(now)}, not only the admin {admin}")
+
+    async def _protect_rule(self, held: HeldTenant, wiring: ForgeWiring) -> None:
+        """`main`'s rule holds the invariant, as stored (A23 amended by #1592): push disabled, the merge whitelist
+        enabled with exactly team `members` on it, no user and no bot. An absent rule is made; one that breaks the
+        invariant is PATCHed with both whitelists sent whole (the forge keeps a list a change omits), so anything else
+        is stripped. The rule is then read back as stored."""
         bots = {g.bot_login for g in await held.generations()}
         rules = f"/api/v1/repos/{wiring.repo}/branch_protections"
+        whitelist = {"enable_push": False, "enable_merge_whitelist": True, "merge_whitelist_usernames": [],
+                     "merge_whitelist_teams": [MEMBERS]}
         found = answered(await self._forge.get(f"{rules}/main"), 404)
         if found.status_code == 404:
             answered(await self._forge.post(rules, json={
-                "rule_name": "main", "branch_name": "main", "enable_push": False, "enable_push_whitelist": False,
-                "enable_force_push": False, "enable_merge_whitelist": True, "merge_whitelist_usernames": [],
-                "merge_whitelist_teams": [OWNERS]}))
-        else:
-            rule = _rule(found, wiring.repo)
-            if _breaks_invariant(rule, bots) is not None:
-                users = [u for u in _names_in(rule, "merge_whitelist_usernames") if u not in bots]
-                teams = _names_in(rule, "merge_whitelist_teams")
-                answered(await self._forge.patch(f"{rules}/main", json={
-                    "enable_push": False, "enable_merge_whitelist": True, "merge_whitelist_usernames": users,
-                    "merge_whitelist_teams": teams if OWNERS in teams else [*teams, OWNERS]}))
+                "rule_name": "main", "branch_name": "main", "enable_push_whitelist": False, "enable_force_push": False,
+                **whitelist}))
+        elif _breaks_invariant(_rule(found, wiring.repo), bots) is not None:
+            answered(await self._forge.patch(f"{rules}/main", json=whitelist))
         broken = _breaks_invariant(_rule(answered(await self._forge.get(f"{rules}/main")), wiring.repo), bots)
         if broken is not None:
             raise StepFailed(f"the protection of main on {wiring.repo} reads back with {broken}")
@@ -527,11 +545,14 @@ class ManagementService(Actor):
 
     async def _delete_repo(self, held: HeldTenant) -> None:
         """Due once `repo_delete_after` passed (the listing waits for it): the by-name sweep again
-        (RC-8), the repo deleted, `repo_url` and the wiring cleared; audited after the commit."""
+        (RC-8), the repo deleted, then its organisation `t-<T>` (#1592 OD-5), `repo_url` and the wiring
+        cleared; audited after the commit."""
         repo = await self._repo_of(held)
         await self._destroy(await held.generations(), repo=repo)
         if repo is not None and answered(await self._forge.get(f"/api/v1/repos/{repo}"), 404).status_code != 404:
             answered(await self._forge.delete(f"/api/v1/repos/{repo}"), 404)
+        if repo is not None:
+            answered(await self._forge.delete(f"/api/v1/orgs/{repo.split('/', 1)[0]}"), 404)
         await held.commit(step=None, actor=None, pending_action=None, repo_url=None, drop_wiring=True)
         audit.emit("tenant.repo.delete", actor=audit.SYSTEM, tenant_id=held.tenant_id, target=held.tenant_id)
 
@@ -561,13 +582,26 @@ def _names_in(rule: Mapping[str, Any], key: str) -> list[str]:
 
 
 def _breaks_invariant(rule: Mapping[str, Any], bots: set[str]) -> str | None:
-    """What of A23's invariant `rule` breaks (for the failure text), or None when it holds."""
+    """What of A23's invariant, as #1592 amends it, `rule` breaks (for the failure text), or None when it holds: push
+    off, the merge whitelist on, exactly team `members` on it, no user and so no bot."""
     if rule.get("enable_push") is not False:
         return f"enable_push={rule.get('enable_push')!r}"
     if rule.get("enable_merge_whitelist") is not True:
         return f"enable_merge_whitelist={rule.get('enable_merge_whitelist')!r}"
-    if OWNERS not in _names_in(rule, "merge_whitelist_teams"):
-        return f"merge_whitelist_teams={_names_in(rule, 'merge_whitelist_teams')!r}, without {OWNERS}"
-    if on := sorted(bots & set(_names_in(rule, "merge_whitelist_usernames"))):
+    if _names_in(rule, "merge_whitelist_teams") != [MEMBERS]:
+        return f"merge_whitelist_teams={_names_in(rule, 'merge_whitelist_teams')!r}, not exactly [{MEMBERS!r}]"
+    users = _names_in(rule, "merge_whitelist_usernames")
+    if on := sorted(bots & set(users)):
         return f"the bot logins {on} on the merge whitelist"
+    if users:
+        return f"the users {sorted(users)} on the merge whitelist"
     return None
+
+
+def _team_differs(team: Any) -> bool:
+    """Whether a team as the forge answers it differs from `MEMBERS_SHAPE`."""
+    if not isinstance(team, dict):
+        return True
+    return (team.get("permission") != MEMBERS_SHAPE["permission"]
+            or sorted(team.get("units") or []) != sorted(MEMBERS_SHAPE["units"])
+            or team.get("includes_all_repositories") is not False or team.get("can_create_org_repo") is not False)

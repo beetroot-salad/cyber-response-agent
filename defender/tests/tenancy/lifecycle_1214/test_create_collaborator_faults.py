@@ -10,7 +10,7 @@ pytest.importorskip("httpx")
 
 from defender.tests.support.api._mount1161 import API  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._atk1 import page_collaborators, seconds  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._fakes import ORG  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fakes import repo_of  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._job_cases import USERS  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noqa: E402
 
@@ -34,7 +34,7 @@ def test_create_removes_every_foreign_collaborator_not_just_the_first_page(world
     """The repo has 120 foreign collaborators when the bot step runs: the forge pages its list (50 at most), and when the
     job is done the new bot is the only collaborator (O1, DC-3)."""
     tenant = world.create()
-    repo = f"{ORG}/{tenant}"
+    repo = repo_of(tenant)
     world.forge.during[("POST", USERS)] = lambda: _crowd(world, repo)
     world.drive()
     assert world.item(tenant)["state"] == "active"
@@ -45,7 +45,7 @@ def test_rotation_removes_every_foreign_collaborator_and_keeps_the_live_bot_unti
     """Rotation with 120 foreign collaborators: after the `bot` step only the live and the new bot remain, and when the
     rotation ends the new bot alone (O1, DC-3)."""
     tenant = world.active_tenant()
-    repo = f"{ORG}/{tenant}"
+    repo = repo_of(tenant)
     old = world.live(tenant).bot_login
     _crowd(world, repo)
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/rotate-forge-credential").status_code == 202
@@ -86,7 +86,7 @@ def test_create_removes_every_foreign_collaborator_when_the_forge_pages_by_fewer
         page_collaborators(w.forge, max_limit=10)
         w.service_actor = w.new_service(w.tenants, identity=w.service)
         tenant = w.create()
-        repo = f"{ORG}/{tenant}"
+        repo = repo_of(tenant)
         w.forge.during[("POST", USERS)] = lambda: w.forge.repos[repo]["collaborators"].update(
             {f"outsider-{i:03d}": "write" for i in range(25)})
         w.drive()

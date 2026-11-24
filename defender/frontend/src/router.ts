@@ -6,6 +6,7 @@ import { Alerts } from "./screens/alerts/Alerts";
 import { Home } from "./screens/Home";
 import { Investigation } from "./screens/Investigation";
 import { NotFound } from "./screens/NotFound";
+import { Repo } from "./screens/Repo";
 import { Root } from "./screens/Root";
 import { SignInFailed } from "./screens/SignInFailed";
 
@@ -14,6 +15,7 @@ const SCREENS: Record<ShapeName, ComponentType> = {
   home: Home,
   investigation: Investigation,
   alerts: Alerts,
+  repo: Repo,
   "sign-in-failed": SignInFailed,
 };
 

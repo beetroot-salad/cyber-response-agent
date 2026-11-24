@@ -74,6 +74,7 @@ import os
 import subprocess
 import threading
 import uuid
+from fnmatch import fnmatchcase
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -83,7 +84,20 @@ import httpx
 
 FORGE_URL = "http://forge.test"
 OPENBAO_URL = "https://openbao.test"
-ORG = "tenants"
+#: The lifecycle's Forgejo administrator: the one account `Owners` holds in an organisation it created (probe P33's
+#: observation: an organisation made with the admin token has Owners = [admin]).
+ADMIN_LOGIN = "forge-admin"
+
+
+def org_of(tenant: Any) -> str:
+    """T's Forgejo organisation, spelled out here as an independent oracle of the name (#1592 OD-5)."""
+    return f"t-{tenant}"
+
+
+def repo_of(tenant: Any) -> str:
+    """T's repository, `t-<T>/knowledge`, spelled out here as an independent oracle of the name (#1592 OD-5)."""
+    return f"{org_of(tenant)}/knowledge"
+
 #: The issuer URL the fakes serve (OpenBao's OIDC issuer) and `lifecycle_config` names; the integration command
 #: refuses any other (Forgejo fetches `<issuer>/.well-known/openid-configuration`, G6).
 ISSUER_URL = "https://openbao.test:8200/v1/identity/oidc"
@@ -126,16 +140,28 @@ class _Recorder:
         call = Call(request.method, url.path, parse_qs(url.query), _json(request), dict(request.headers))
         with self.lock:
             self.calls.append(call)
-            status = self.fail_next.pop((call.method, call.path), None)
-            hook = self.during.pop((call.method, call.path), None)
+            status = self._popped(self.fail_next, call)
+            hook = self._popped(self.during, call)
         if hook is not None:
             hook()
         if status is not None:
             return call, httpx.Response(status, json={"message": f"injected {status}"})
         return call, None
 
+    @staticmethod
+    def _popped(table: dict[tuple[str, str], Any], call: Call) -> Any:
+        """The entry for `call`: its exact (method, path), else the first whose path is a `*` pattern that matches it
+        (a path the test cannot spell before the tenant exists, e.g. `/api/v1/orgs/t-*/repos`)."""
+        if (call.method, call.path) in table:
+            return table.pop((call.method, call.path))
+        for key in table:
+            if key[0] == call.method and "*" in key[1] and fnmatchcase(call.path, key[1]):
+                return table.pop(key)
+        return None
+
     def made(self, method: str, path: str) -> list[Call]:
-        return [c for c in self.calls if (c.method, c.path) == (method, path)]
+        """Calls of `method` to `path` (a `*` in `path` matches any run of characters)."""
+        return [c for c in self.calls if c.method == method and fnmatchcase(c.path, path)]
 
 
 class FakeForge(_Recorder):
@@ -159,7 +185,13 @@ class FakeForge(_Recorder):
         #: audience -> {"user", "issuer", "claims_eq", "scopes", "repos"} as the integration command recorded it.
         self.integration_rules: dict[str, dict[str, Any]] = {}
         #: organisation -> its team names (P-a: a repository whose owner is not here is user-owned).
-        self.orgs: dict[str, set[str]] = {ORG: {"Owners", "Reviewers"}}
+        self.orgs: dict[str, set[str]] = {}
+        #: organisation -> "private" or "public", as POST /orgs recorded it (#1592).
+        self.org_visibility: dict[str, str] = {}
+        #: (organisation, team) -> the fields Forgejo keeps of a team (#1592, probe P33).
+        self.team_fields: dict[tuple[str, str], dict[str, Any]] = {}
+        #: (organisation, team) -> full names of the repositories attached to the team (#1592, probe P33).
+        self.team_repos: dict[tuple[str, str], set[str]] = {}
         #: (organisation, team) -> member logins.
         self.team_members: dict[tuple[str, str], set[str]] = {}
         #: repository full name -> status answered to every GET of its branch protections (#1414: a forge that fails a read).
@@ -282,6 +314,118 @@ class FakeForge(_Recorder):
             repo["collaborators"].pop(user, None)
         return httpx.Response(204)
 
+    def make_org(self, org: str, *teams: str, private: bool = True) -> None:
+        """An organisation as `POST /orgs` makes it (its `Owners` team holds the admin only), with extra empty `teams`."""
+        self.orgs[org] = {"Owners"}
+        self.org_visibility[org] = "private" if private else "public"
+        self.team_fields[org, "Owners"] = {"permission": "owner", "units": [], "includes_all_repositories": True,
+                                           "can_create_org_repo": True}
+        self.team_members[org, "Owners"] = {ADMIN_LOGIN}
+        for team in teams:
+            self.make_team(org, team)
+
+    def make_team(self, org: str, team: str, *, members: Sequence[str] = (), **fields: Any) -> None:
+        """A team as `POST /orgs/{org}/teams` makes it (probe P33: includes_all_repositories and can_create_org_repo
+        default off; `units_map` is all write for a write team made with `units`), with its `members`."""
+        self.orgs[org].add(team)
+        stored = {"permission": "write", "units": [], "includes_all_repositories": False, "can_create_org_repo": False,
+                  **fields}
+        stored["units_map"] = {u: "write" for u in stored["units"]} if fields.get("units_map") is None else stored["units_map"]
+        self.team_fields[org, team] = stored
+        self.team_members.setdefault((org, team), set()).update(members)
+        self.team_repos.setdefault((org, team), set())
+        if stored["includes_all_repositories"]:
+            self.team_repos[org, team] |= {f for f in self.repos if f.split("/", 1)[0] == org}
+
+    def _fields(self, org: str, team: str) -> dict[str, Any]:
+        """The stored fields of `team`; a team an older seeder put in `orgs` has Forgejo's defaults."""
+        return self.team_fields.setdefault((org, team), {"permission": "write", "units": [], "units_map": {},
+                                                          "includes_all_repositories": False, "can_create_org_repo": False})
+
+    def team(self, org: str, team: str) -> dict[str, Any]:
+        """The fields Forgejo keeps of `team` now."""
+        return dict(self._fields(org, team))
+
+    def attached(self, org: str, team: str) -> set[str]:
+        """The full names of the repositories attached to `team` now."""
+        return set(self.team_repos.get((org, team), set()))
+
+    def _team_named(self, team_id: str) -> tuple[str, str] | None:
+        return next((k for k, v in self._team_ids.items() if str(v) == team_id), None)
+
+    def _team_body(self, org: str, team: str) -> dict[str, Any]:
+        fields = self._fields(org, team)
+        return {"id": self._team_id(org, team), "name": team, "organization": {"username": org},
+                "permission": fields.get("permission", "write"), "units": list(fields.get("units", [])),
+                "units_map": dict(fields.get("units_map") or {}),
+                "includes_all_repositories": fields.get("includes_all_repositories", False),
+                "can_create_org_repo": fields.get("can_create_org_repo", False)}
+
+    def _team_write(self, call: Call, parts: list[str]) -> httpx.Response | None:  # noqa: C901, PLR0911, PLR0912 — one arm per endpoint
+        """#1592: organisation, team and team-repository writes (the routes Forgejo has), or None for any other call."""
+        body = call.body or {}
+        match (call.method, parts):
+            case ("POST", ["orgs"]):
+                if body["username"] in self.orgs or body["username"] in self.users:
+                    return httpx.Response(422, json={"message": "organization already exists"})
+                self.make_org(body["username"], private=body.get("visibility", "public") == "private")
+                return httpx.Response(201, json={"username": body["username"], "visibility": self.org_visibility[body["username"]]})
+            case ("DELETE", ["orgs", org]):
+                if org not in self.orgs:
+                    return httpx.Response(404)
+                if any(f.split("/", 1)[0] == org for f in self.repos):
+                    return httpx.Response(422, json={"message": "the organization still owns repositories"})
+                for team in self.orgs.pop(org):
+                    for table in (self.team_fields, self.team_members, self.team_repos):
+                        table.pop((org, team), None)
+                self.org_visibility.pop(org, None)
+                return httpx.Response(204)
+            case ("POST", ["orgs", org, "teams"]) if org in self.orgs:
+                if body["name"] in self.orgs[org]:
+                    return httpx.Response(422, json={"message": "team already exists"})
+                fields = {k: body[k] for k in ("permission", "units", "includes_all_repositories", "can_create_org_repo",
+                                              "units_map") if k in body}
+                self.make_team(org, body["name"], **fields)
+                return httpx.Response(201, json=self._team_body(org, body["name"]))
+            case ("PATCH", ["teams", team_id]):
+                if (named := self._team_named(team_id)) is None:
+                    return httpx.Response(404, json={"message": "team does not exist"})
+                org, team = named
+                fields = self._fields(org, team)
+                for key in ("permission", "units", "can_create_org_repo"):
+                    if key in body:
+                        fields[key] = body[key]
+                # P33: includes_all_repositories is ignored unless `permission` is in the body; turning it off keeps
+                # the repositories it attached, turning it on attaches every repository of the organisation.
+                if "includes_all_repositories" in body and "permission" in body:
+                    fields["includes_all_repositories"] = bool(body["includes_all_repositories"])
+                    if fields["includes_all_repositories"]:
+                        self.team_repos.setdefault((org, team), set()).update({f for f in self.repos if f.split("/", 1)[0] == org})
+                return httpx.Response(200, json=self._team_body(org, team))
+            case ("PUT", ["teams", team_id, "members", user]):
+                if (named := self._team_named(team_id)) is None or user not in self.users | {ADMIN_LOGIN}:
+                    return httpx.Response(404)
+                self.team_members.setdefault(named, set()).add(user)
+                return httpx.Response(204)
+            case ("DELETE", ["teams", team_id, "members", user]):
+                if (named := self._team_named(team_id)) is None:
+                    return httpx.Response(404)
+                if user not in self.team_members.setdefault(named, set()):
+                    return httpx.Response(404, json={"message": "not a member"})
+                self.team_members[named].discard(user)
+                return httpx.Response(204)
+            case ("PUT", ["teams", team_id, "repos", owner, name]):
+                if (named := self._team_named(team_id)) is None or f"{owner}/{name}" not in self.repos:
+                    return httpx.Response(404)
+                self.team_repos.setdefault(named, set()).add(f"{owner}/{name}")
+                return httpx.Response(204)
+            case ("DELETE", ["teams", team_id, "repos", owner, name]):
+                if (named := self._team_named(team_id)) is None:
+                    return httpx.Response(404)
+                self.team_repos.setdefault(named, set()).discard(f"{owner}/{name}")
+                return httpx.Response(204)
+        return None
+
     def _team_id(self, org: str, team: str) -> int:
         return self._team_ids.setdefault((org, team), 101 + len(self._team_ids))
 
@@ -293,19 +437,30 @@ class FakeForge(_Recorder):
         return httpx.Response(200, json=items[(page - 1) * limit:page * limit], headers={"X-Total-Count": str(len(items))})
 
     def _teams_of(self, org: str) -> list[dict[str, Any]]:
-        return [{"id": self._team_id(org, t), "name": t, "organization": {"username": org}} for t in sorted(self.orgs.get(org, ()))]
+        return [self._team_body(org, t) for t in sorted(self.orgs.get(org, ()))]
 
     def _team_read(self, call: Call, parts: list[str]) -> httpx.Response | None:
         """#1414: the admin reads of an organisation's teams and their members (the routes Forgejo has), or None for any other call."""
         match (call.method, parts):
+            case ("GET", ["orgs", org]):
+                return httpx.Response(200, json={"username": org}) if org in self.orgs \
+                    else httpx.Response(404, json={"message": "organization does not exist"})
             case ("GET", ["orgs", org, "teams"]) if org in self.orgs:
                 return self._paged(call, self._teams_of(org))
             case ("GET", ["orgs", org, "teams", "search"]) if org in self.orgs:
                 q = (call.query.get("q") or [""])[0].lower()
                 found = [t for t in self._teams_of(org) if q in t["name"].lower()]
                 return httpx.Response(200, json={"ok": True, "data": found})
+            case ("GET", ["teams", team_id]):
+                named = self._team_named(team_id)
+                return httpx.Response(200, json=self._team_body(*named)) if named else httpx.Response(404)
+            case ("GET", ["teams", team_id, "repos"]):
+                named = self._team_named(team_id)
+                if named is None:
+                    return httpx.Response(404, json={"message": "team does not exist"})
+                return self._paged(call, [self._repo(f) for f in sorted(self.team_repos.get(named, set())) if f in self.repos])
             case ("GET", ["teams", team_id, "members"]):
-                named = next((k for k, v in self._team_ids.items() if str(v) == team_id), None)
+                named = self._team_named(team_id)
                 if named is None:
                     return httpx.Response(404, json={"message": "team does not exist"})
                 org, team = named
@@ -314,7 +469,7 @@ class FakeForge(_Recorder):
                 return self._paged(call, [{"login": u} for u in sorted(self.team_members.get((org, team), set()))])
         return None
 
-    def handle(self, request: httpx.Request) -> httpx.Response:  # noqa: C901, PLR0911, PLR0912 — one arm per endpoint
+    def handle(self, request: httpx.Request) -> httpx.Response:  # noqa: C901, PLR0911, PLR0912, PLR0915 — one arm per endpoint
         call, injected = self._record(request)
         if injected is not None:
             return injected
@@ -329,7 +484,11 @@ class FakeForge(_Recorder):
         if call.headers.get("authorization", "").startswith("Bearer "):
             response = self._integration(call, parts)
             return response
+        if (written := self._team_write(call, parts)) is not None:
+            return written
         match (call.method, parts):
+            case ("GET", ["user"]):
+                return httpx.Response(200, json={"login": ADMIN_LOGIN, "is_admin": True})
             case ("POST", ["admin", "users"]):
                 if body["username"] in self.users:
                     return httpx.Response(422, json={"message": "user already exists"})
@@ -349,6 +508,8 @@ class FakeForge(_Recorder):
             case ("DELETE", ["admin", "users", user]):
                 return self._delete_user(user, purge=call.query.get("purge") == ["true"])
             case ("POST", ["orgs", org, "repos"]):
+                if org not in self.orgs:
+                    return httpx.Response(404, json={"message": "organization does not exist"})
                 full = f"{org}/{body['name']}"
                 if full in self.repos:
                     return httpx.Response(409, json={"message": "repository already exists"})
@@ -356,6 +517,9 @@ class FakeForge(_Recorder):
                 _git("init", "--bare", "-q", "-b", "main", str(self.bare(full)))
                 self.repos[full] = {"private": bool(body.get("private")), "archived": False,
                                     "collaborators": {}, "protections": {}}
+                for team, fields in self.team_fields.items():  # a team that includes all repositories gets the new one
+                    if team[0] == org and fields["includes_all_repositories"]:
+                        self.team_repos.setdefault(team, set()).add(full)
                 return httpx.Response(201, json=self._repo(full))
             case ("GET", [_, _, _]) if parts[0] == "repos":
                 full = f"{parts[1]}/{parts[2]}"
@@ -368,6 +532,8 @@ class FakeForge(_Recorder):
             case ("DELETE", ["repos", owner, name]):
                 if self.repos.pop(f"{owner}/{name}", None) is None:
                     return httpx.Response(404)
+                for attached in self.team_repos.values():
+                    attached.discard(f"{owner}/{name}")
                 return httpx.Response(204)
             case ("GET", ["repos", owner, name, "collaborators"]):
                 return httpx.Response(200, json=[{"login": u} for u in self.repos[f"{owner}/{name}"]["collaborators"]])

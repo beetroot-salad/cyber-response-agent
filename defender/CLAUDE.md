@@ -41,13 +41,23 @@ they start, the learning drains, the lifecycle service) refuses a database whose
 migration may lock the tables it changes until it commits. So: stop the API, the workers, the learning drains and the
 lifecycle service; run migrations; start the new code. The notes below say only what an upgrade needs beyond that.
 
+## Restoring a backup
+
+After restoring the product database or Forgejo from a backup, run `python -m defender.lifecycle resync-people` once,
+with `DEFENDER_DATABASE_DSN`, `DEFENDER_LIFECYCLE_FORGE_URL`, `DEFENDER_LIFECYCLE_FORGE_ADMIN_TOKEN_FILE` and
+`DEFENDER_LIFECYCLE_KEYCLOAK_SOURCE_ID` set (#1592). It records a people request for every tenant with a forge wiring
+and for every `p-<id>` account on the sign-in provider's login source, known to the product or not; the lifecycle's request worker
+then brings Forgejo's teams, suspensions and sessions in line with the restored memberships within a few polls. It
+lists, and leaves unchanged, every account on that source whose login is not `p-<user id>` and every `p-` account whose
+`login_name` is not its user's sub: fix or delete those by hand. It writes nothing to Forgejo itself.
+
 ## Upgrade from before #1546
 
 Evidence leaves the host: a job's bundle is kept in an S3-compatible store (Garage in development), each object
 encrypted under a data key wrapped by the tenant's OpenBao transit key `evidence-<T>`. After the shared steps in
 "Upgrading", once:
 
-1. Run migrations (revisions `0027` to `0030`). The upgrade to `0029_retention_required` stops, changing nothing,
+1. Run migrations (revisions `0028` to `0031`). The upgrade to `0030_retention_required` stops, changing nothing,
    while any tenant that is not offboarded (`creating` included) has no row in `tenancy.evidence_retention`, naming
    each; the table is new, so recreate the development database, or offboard those tenants first. There is no backfill:
    no tenant survives the upgrade without being created again.
@@ -70,6 +80,66 @@ encrypted under a data key wrapped by the tenant's OpenBao transit key `evidence
    `DEFENDER_DATABASE_DSN` set it queues a `drain` host request (printing `drain_request=<id>`; one queued or running per
    tenant), which a worker runs in a job container over the runs its helper pulls. A worker reads a job's end only from
    the rows its helper staged: it writes no launch files and reads no job-end, progress, readiness or adoption file.
+
+## Upgrade from before #1592
+
+Tenant people use Forgejo's own web interface, signed in with their product account. Each tenant's repository is
+exactly `t-<T>/knowledge` (organisation `t-<T>`, repository `knowledge`), and migration `0027` refuses any other
+wiring. By hand, on development deployments only:
+
+1. Let every pending action finish: create, rotate, offboard and delete_repo, and every queued or running host request
+   (an adoption pushes to the repository being moved; a readiness check publishes). For an offboarded tenant, bring
+   `repo_delete_after` forward and let `delete_repo` run.
+2. For each remaining tenant, the lab included: stop the lifecycle; create the private organisation `t-<T>` with the
+   forge admin token; transfer the repository into it and rename it `knowledge`; update the tenant's
+   `tenancy.forge_wiring` row (`repo` `t-<T>/knowledge`, `origin` its clone URL) and `repo_url` (`<the Forgejo site's
+   address>/t-<T>/knowledge`, as in step 4); then run `git -C <data root>/<T>/knowledge remote set-url origin <the new
+   origin>` on the host clone.
+3. In the sign-in realm (the dev realm file is imported on first start only), add what the realm file now holds, in
+   this order. First the flow `forgejo browser`: the username and password form, required, then the second factor
+   a person has set up, conditional, as in the realm's own browser flow, and no Cookie step. Then the client
+   `forgejo`: confidential, standard flow only, the realm file's secret (dev) or one of the deployment's own,
+   redirect URI `<the Forgejo site's address>/user/oauth2/product/callback`, and its browser flow overridden to
+   `forgejo browser` (Advanced > Authentication flow overrides). Without the override the client signs a person in
+   on any open sign-in session, without the password. Check it: signed in to the product, open the Forgejo site and
+   sign in there: it must ask for the password.
+4. Build Forgejo's sessions database and its two logins: on the dev stack, start compose (its `forgejo-sessions`
+   service runs `.devcontainer/postgres/forgejo-sessions.sql` and the dev logins before Forgejo starts) and run
+   `.devcontainer/forgejo/setup.sh`, which adds Forgejo's `product` login source. Elsewhere, run that SQL as a
+   superuser and make one login in `fs_forgejo` (Forgejo's `[session] PROVIDER_CONFIG`) and one in `fs_lifecycle`.
+   Then set the lifecycle's three new required settings: `DEFENDER_LIFECYCLE_KEYCLOAK_SOURCE_ID` (the `product`
+   source's id, `forgejo admin auth list`), `DEFENDER_LIFECYCLE_FORGE_SESSIONS_DSN` (the `fs_lifecycle` login), and
+   `DEFENDER_LIFECYCLE_FORGE_PUBLIC_URL`, the Forgejo site's address (dev `http://forge.localhost:8000`, Forgejo's
+   `ROOT_URL`). An unset one refuses the lifecycle's start, naming it.
+5. Start the ingress with its two new required inputs: `DEFENDER_FORGE_DOMAIN`, the Forgejo site's host (dev
+   `forge.localhost`, Forgejo's `DOMAIN`), and `DEFENDER_INGRESS_FORGE_UPSTREAM`, Forgejo's private `host:port` (dev
+   `forgejo:3000`). Unset, it refuses to start, naming it. The API reads neither: an adoption's pull-request link is
+   the tenant's recorded repository page plus `/pulls/<n>`.
+6. Run migrations (revision `0027_people_requests`). It refuses, changing nothing, while any tenant has a pending
+   action or a wiring other than `t-<T>/knowledge`, naming each one. It then adds that constraint,
+   `identity.users.signed_out_at`, the people requests table and its three triggers, and drops the old #1414 table
+   of who may merge, whose readers are gone.
+7. Start the lifecycle service.
+8. Rotate each tenant (`POST /api/admin/tenants/<T>/rotate-forge-credential`): its integration is bound to the
+   repository's path, and rotation also builds team `members` and `main`'s rule on it.
+9. Run `python -m defender.lifecycle resync-people`: the request worker then adds every member to the tenant's team.
+10. Delete the hand-made person accounts: the members of the old `tenants` organisation that are neither `p-` logins nor
+    bots. Deleting them also removes any direct collaborator rights they kept through the transfer.
+
+Removed (F9): `cli/learning/revert_lesson.py`. A member reverts a lesson in Forgejo's editor, as a pull request.
+
+## Upgrade: the home page's Knowledge repo link
+
+Home and the top bar link each tenant's knowledge repository through the app's `/t/<tenant>/repo`, which sends the
+browser to the page the lifecycle recorded on the tenant (`tenancy.tenants.repo_url`). That page was built from
+`DEFENDER_LIFECYCLE_FORGE_URL`, the forge address the lifecycle calls, which may be an internal service name a browser
+cannot reach (the lab's `http://forgejo:3000`). Once:
+
+1. Set `DEFENDER_LIFECYCLE_FORGE_PUBLIC_URL` to the forge's address as a browser reaches it (http or https, no
+   credentials, query or fragment; a path is allowed), and restart the lifecycle service. Since #1592 it is required.
+2. Rewrite the page already recorded on each tenant, which a resume or rotation keeps:
+   `UPDATE tenancy.tenants t SET repo_url = '<public url>/' || w.repo FROM tenancy.forge_wiring w WHERE w.tenant_id =
+   t.id AND t.repo_url IS NOT NULL`. Until then the link opens the old address.
 
 ## Upgrade: the sign-in screens' name and wording
 
@@ -230,7 +300,8 @@ Removed (#1471): `tenant.py check <tenant-id>`, `tenant.py update` and `tenant.p
 (`POST /api/tenants/<tenant-id>/readiness`, then its GET) judges a tenant's repo and stored records; the adoption request
 (`POST /api/tenants/<tenant-id>/systems/<system-id>/adoptions`) carries a carried adapter's base files to the tenant's
 repo as a pull request, and any other connect output is left in the handoff folder for a person to commit. A merged
-`main` is published by the next launch-time publish (a run or a drain start). `cli/learning/revert_lesson.py` stays.
+`main` is published by the next launch-time publish (a run or a drain start). `cli/learning/revert_lesson.py` is gone
+too since #1592: a lesson is reverted in Forgejo's editor.
 
 A tenant's `<data root>/<T>/runs` is now made by the lifecycle's `prepare` step, and the job lane no longer makes it (a
 missing one fails the worker's claim `worker_error`). Once, with `DEFENDER_DATABASE_DSN` and `DEFENDER_DATA_ROOT` set, make
@@ -352,16 +423,15 @@ investigation for the worker instead, or run it by hand with `run.py <alert> --t
 ## Upgrade from before #1414
 
 Feedback issues on the tenant's Forgejo repository need the bot to write issues, labels and comments. Run
-migrations (revision `0011_merge_eligibility`), then rotate each existing tenant's forge credential once
+migrations (revision 0011), then rotate each existing tenant's forge credential once
 (`POST /api/admin/tenants/<T>/rotate-forge-credential`): only an integration created or rotated by this code is granted
 `write:issue`. Until a tenant rotates, its issue calls are refused (403) and logged every feedback tick; its
 open-issue requests and replies wait in the queue and are all served on the first tick after the rotation. Nothing is
 given up. The first feedback tick after the upgrade lists each existing feedback issue's comments once; after
 that, a tick reads only the issues the forge lists new comments on.
 
-The management service reads each active tenant's merge whitelist when its record is older than 20 s, and the feedback
-tick reads no comments from a record older than `LEARNING_FEEDBACK_ELIGIBILITY_MAX_AGE` (default 60 s). Keep that bound
-well above 20 s, or the tick will find the record stale between the service's reads.
+Since #1592 the feedback tick takes in a comment only when its author's login is `p-<id>` of a user wanted in the
+tenant, read from the product's memberships once per tick.
 
 ## Upgrade from before #1345
 
@@ -534,10 +604,11 @@ records from `DEFENDER_DATABASE_DSN`, at exactly this code's revision, and works
    VALUES ('<T>', now(), 'creating', 'create', 'names', 'service', 'registered before #1214: record
    its forge wiring if it has a repository, then resume')`.
 3. Record the lab's repository by hand, so the create job keeps it and its clone instead of making
-   `tenants/<T>`: `INSERT INTO tenancy.forge_wiring (tenant_id, repo, origin) VALUES ('<T>', '<repo>',
-   '<origin>')`, where `<origin>` is exactly what `git -C <data root>/<T>/knowledge remote get-url
-   origin` prints (prepare keeps only the clone at `<T>/knowledge`, and refuses a clone of anything
-   else) and `<repo>` is its `<org>/<name>` path. It refers to the row from step 2.
+   a new one: `INSERT INTO tenancy.forge_wiring (tenant_id, repo, origin) VALUES ('<T>', 't-<T>/knowledge',
+   '<origin>')`, where the repository is `t-<T>/knowledge` (since #1592 the database refuses any other: move it into
+   organisation `t-<T>` and name it `knowledge` first) and `<origin>` is exactly what `git -C <data root>/<T>/knowledge
+   remote get-url origin` prints (prepare keeps only the clone at `<T>/knowledge`, and refuses a clone of anything
+   else). It refers to the row from step 2.
 4. With the lifecycle's settings in place and `serve` running, `POST /api/admin/tenants/<T>/resume`
    and wait for `active` (`GET /api/admin/tenants/<T>`).
 5. Then delete by hand what the old setup left: `<data root>/<T>/tenant.json`, `client/<T>/` in

@@ -46,7 +46,7 @@ describe("addressOf (Home's links)", () => {
 describe("the alerts address (O4)", () => {
   it("is returnable, so sign-in brings a person back to it, as it does the home and an investigation", () => {
     expect(RETURNABLE.has("alerts")).toBe(true);
-    expect([...RETURNABLE].sort()).toEqual(["alerts", "home", "investigation"]);
+    expect([...RETURNABLE].sort()).toEqual(["alerts", "home", "investigation", "repo"]);
   });
 
   it("is the whole path `/t/<uuid>/alerts`: nothing before it, after it, or in other letters", () => {
