@@ -49,6 +49,9 @@ def _facts(repo, forge, **over):
         "rendering": {path: base64.b64encode(data).decode() for path, data in RENDERING.items()},
         "forge_origin": forge.wired,
         "forge_repo": "t-blue/knowledge",
+        # #1546 r10 (b): adoption's container builds a `JobTenant` like every container entry, from the launch facts, and
+        # keeps `inputs_dir` (the claim's inputs folder, absolute, apart from the job root).
+        "inputs_dir": over.pop("inputs_dir", "/job-inputs"),
     }
     return {**facts, **over}
 
@@ -62,7 +65,9 @@ def _enter(repo, forge, tmp_path, *, facts=None, token=None):
     tenant = str(repo[0].id)
     runs = location_path(repo[0].tenant_root) / "runs"
     runs.mkdir(exist_ok=True)
-    own = _facts(repo, forge, job_id=job_id)
+    inputs = tmp_path / "inputs"
+    inputs.mkdir(exist_ok=True)
+    own = _facts(repo, forge, job_id=job_id, inputs_dir=str(inputs))
     handed = own if facts is None else facts(own)
     minted = fixture_identity(tenant).token()
     answer = token if token is not None else (lambda fields: {"token": minted})
@@ -157,7 +162,11 @@ def test_facts_saying_the_tenant_is_not_active_are_failed_tenant_not_active_not_
 
 
 #: The keys of the adoption launch facts (surface §4), as `_facts` hands them.
-FACT_KEYS = ("kind", "tenant", "job", "tenant_state", "system", "digest", "rendering", "forge_origin", "forge_repo")
+FACT_KEYS = ("kind", "tenant", "job", "tenant_state", "system", "digest", "rendering", "forge_origin", "forge_repo",
+             "inputs_dir")
+#: The fact the entry's tenant step reads (#1546 r10 (b), `job_tenant_from_launch`): refused there, before any forge call; the
+#: design names no reason for it, so either fixed reason of a refused setup is honest (WRITE-TESTS CHOICE).
+TENANT_STEP_KEYS = ("inputs_dir",)
 #: The facts' post-step key the adoption entry has no use for (the API base comes from `forge_origin`, surface §4).
 UNREAD_KEYS = ("forge_repo",)
 
@@ -187,6 +196,9 @@ def test_facts_missing_a_key_or_holding_a_value_of_another_type_end_in_a_record_
     assert record is not None, "the entry ended with no record"
     if key == "tenant_state":
         assert record in ({"outcome": "failed", "reason": "handover"}, {"outcome": "failed", "reason": "tenant_not_active"})
+    elif key in TENANT_STEP_KEYS:
+        assert record in ({"outcome": "failed", "reason": "handover"}, {"outcome": "failed", "reason": "delivery_failed"}), record
+        assert forge.creates == []
     elif key in UNREAD_KEYS:
         assert record in ({"outcome": "failed", "reason": "handover"}, {"outcome": "opened", "pr_number": record.get("pr_number")}), record
     else:

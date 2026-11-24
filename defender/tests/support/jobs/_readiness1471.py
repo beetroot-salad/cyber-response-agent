@@ -260,21 +260,26 @@ def claim_check(scene: HelperScene, rid: str) -> None:
     """The running readiness row `rid` and its claim under `scene.claim`, as the worker's claim transaction leaves them
     (#1546 PR7). A second check in one scene first ends the previous live row (`failed/worker_error`, as a lapse would) and
     drops the previous claim's rows, so the scene's one claim token names this check."""
+    host_claim(scene, "readiness", rid)
+
+
+def host_claim(scene: HelperScene, kind: str, rid: str, *, system: str | None = None) -> None:
+    """`claim_check` for a host request of `kind` (readiness or adoption; an adoption row names its `system`)."""
     from defender.tests.support.jobs._host_requests1471 import plant
     from defender.tests.support.shared._postgres1339 import execute
 
-    if execute(scene.dsn, "SELECT 1 FROM jobs.claims WHERE token = %s AND kind = 'readiness' AND host_request_id = %s",
-               (scene.claim, rid)):
-        return  # the case planted this check's own row and claim: kept as it wrote them
+    if execute(scene.dsn, "SELECT 1 FROM jobs.claims WHERE token = %s AND kind = %s AND host_request_id = %s",
+               (scene.claim, kind, rid)):
+        return  # the case planted this request's own row and claim: kept as it wrote them
     execute(scene.dsn, "UPDATE jobs.host_requests SET stage = 'failed', failure_reason = 'worker_error', finished_at = now(), "
-                       "lease_expires_at = NULL WHERE tenant_id = %s AND kind = 'readiness' AND stage IN ('queued', 'running') "
-                       "AND id <> %s", (scene.tenant, rid))
+                       "lease_expires_at = NULL WHERE tenant_id = %s AND kind = %s AND stage IN ('queued', 'running') "
+                       "AND id <> %s", (scene.tenant, kind, rid))
     for table in ("staged_facts", "uploads", "claims"):
         execute(scene.dsn, f"DELETE FROM jobs.{table} WHERE token = %s", (scene.claim,))  # noqa: S608 — fixed names
     if not execute(scene.dsn, "SELECT 1 FROM jobs.host_requests WHERE id = %s", (rid,)):
-        plant(scene.dsn, scene.tenant, "readiness", stage="running", request_id=rid)
+        plant(scene.dsn, scene.tenant, kind, system=system, stage="running", request_id=rid)
     execute(scene.dsn, "INSERT INTO jobs.claims (token, tenant_id, kind, host_request_id, launch, inputs) "
-                       "VALUES (%s, %s, 'readiness', %s, '{}'::jsonb, '[]'::jsonb)", (scene.claim, scene.tenant, rid))
+                       "VALUES (%s, %s, %s, %s, '{}'::jsonb, '[]'::jsonb)", (scene.claim, scene.tenant, kind, rid))
 
 
 # --- test-only doubles and planted trees ----------------------------------------------------------------------------
