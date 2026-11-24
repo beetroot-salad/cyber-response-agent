@@ -2012,11 +2012,11 @@ async def test_b11_a_hand_back_lapses_the_lease_keeps_the_row_running_and_copies
     assert (got.stage, got.cost_usd, got.knowledge) == ("running", 3.0, KNOWLEDGE)
     assert lease_left(dsn, running) < 0
     assert accounting_written(dsn, running) is not None
-    # D15: the figure is the last staged `progress`, not a sealed final one, so it is marked a lower limit (the design is silent on
-    # a hand-back's mark: reported as an assumption)
-    assert lower_limit(dsn, running) is True
-    assert _changed(before, _snap(dsn, running)) == {
-        "lease_expires_at", "cost_usd", "cost_is_lower_limit", "knowledge", "accounting_written_at"}
+    # D15 marks the figure a lower limit only after a cancel, an offboard or a take-over (design-r9 lines 67, 225, 407): a
+    # hand-back's mark is unspecified, so neither value is pinned here (a take-over's mark is pinned by
+    # test_ending_apply_1546 `test_a_taken_over_run_ends_with_the_last_progress_as_its_cost...` and `test_a_taken_over_learning_job_stores_its_last_progress_cost_marked_a_lower_limit`).
+    assert _changed(before, _snap(dsn, running)) - {"cost_is_lower_limit"} == {
+        "lease_expires_at", "cost_usd", "knowledge", "accounting_written_at"}
     assert audit.events() == []
 
 
@@ -2957,11 +2957,11 @@ def _plant_queued(dsn: str, kind: str) -> str:
     job = str(uuid.uuid4())
     execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, "
                  "status, created_at, sibling_cost_usd, publish_state) "
-                 "VALUES (%s, %s, %s, %s, 'k-late', 1, 'explicit', 'queued', %s, 0, 'none')", (job, T1, alert, parent, NOW))
+                 "VALUES (%s, %s, %s, %s, 'k-late', 1, 'explicit', 'queued', now(), 0, 'none')", (job, T1, alert, parent))  # D10: the database's now(), as the store stamps it
     return job
 
 
-async def _into_shape(dsn: str, store: Any, kind: str, shape: str, row_id: str) -> None:
+async def _into_shape(dsn: str, store: Any, kind: str, shape: str, row_id: str, *, offboarding: bool = False) -> Any:
     """Bring the queued row to `shape` the way the system does: the store's own claim (a worker that still reads the
     tenant `active`) and hand-back, and a lease lapsed by the database's clock (the worker died; no take-over ran yet)."""
     if shape == "queued":
@@ -2976,8 +2976,13 @@ async def _into_shape(dsn: str, store: Any, kind: str, shape: str, row_id: str) 
         table = "investigations" if kind == "investigation" else "learning_jobs"
         execute(dsn, f"UPDATE jobs.{table} SET lease_expires_at = now() - interval '1 second' WHERE id = %s", (row_id,))  # noqa: S608
     elif shape == "handed_back":
-        handed = await asyncio.wait_for(hand_back_learning(store, T1, row_id), 20)  # bounded: it must not wait on the offboard
+        if offboarding:
+            # #1546 PR9: a hand-back is an `apply`, which takes the tenant share lock first, so one arriving while the offboard
+            # holds the tenant waits for it (and is then fenced); the caller awaits it after the offboard commits.
+            return asyncio.ensure_future(hand_back_learning(store, T1, row_id))
+        handed = await asyncio.wait_for(hand_back_learning(store, T1, row_id), 20)  # bounded: nothing else holds the tenant
         assert handed is not None, "premise: the running job was handed back"
+    return None
 
 
 @pytest.mark.parametrize("arrives", ["at_start", "behind_a_held_row"])
@@ -2993,6 +2998,7 @@ async def test_1360_o3_every_live_shape_of_either_kind_ends_whether_there_at_the
     tenant to fail, retry or start. A lapsed running row is live until it ends; leaving it to the take-over queues a
     retry for a tenant being removed. (#1360 O3, O4 invariant, Flow 1 step 3 fresh read, as amended by D3)"""
     held = str(uuid.uuid4())
+    arriving = None
     _plant_running_pair(dsn, [held] if kind == "investigation" else [], [held] if kind == "learning" else [])
     table = "investigations" if kind == "investigation" else "learning_jobs"
     async with job_store(dsn) as store:
@@ -3005,11 +3011,14 @@ async def test_1360_o3_every_live_shape_of_either_kind_ends_whether_there_at_the
                 await until_blocked(dsn, 1)  # the offboard waits for the held row
                 if arrives == "behind_a_held_row":
                     late = _plant_queued(dsn, kind)
-                    await _into_shape(dsn, store, kind, shape, late)
+                    arriving = await _into_shape(dsn, store, kind, shape, late, offboarding=True)
             except BaseException:
                 offboard.cancel()
                 raise
         await asyncio.wait_for(offboard, 20)
+        if arriving is not None:
+            # the hand-back that waited behind the offboard finds its row already ended: fenced, nothing written
+            assert await asyncio.wait_for(arriving, 20) is None, "a hand-back that arrived during the offboard was written"
 
         assert _live_of(dsn, T1) == 0, f"a {shape} {kind} row of the offboarding tenant is still live"
         for ended in (late, held):
