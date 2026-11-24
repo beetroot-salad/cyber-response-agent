@@ -8,10 +8,11 @@ the typed refusal), and refuses every other request `unknown-request`. Every req
 
 It injects inputs and records calls; it decides nothing the entries' tests are about. The helper's own answers (its
 policy) are pinned over the real helper in `tests/jobs/test_job_helper_learning.py` and
-`tests/jobs/test_learning_container_entry.py`. `copy_make(tenant_id)` is the answer `copy.make(commit=)` gets from the
-real helper's side (#1618 F3, K5: `export.materialise` merged into it): a copy of that commit's (else `main`'s) `agent/`
-and `settings/`, made by the product's fetch from the tenant's Forgejo repository into a fresh folder, refused `delivery`
-when it cannot be."""
+`tests/jobs/test_learning_container_entry.py`. `copy_make(tenant_id, pin=)` is the answer `copy.make(commit=)` gets from
+the real helper's side (#1618 F3, K5: `export.materialise` merged into it): a copy of that commit's (else `main`'s)
+`agent/` and `settings/`, made by the product's fetch from the tenant's Forgejo repository into a fresh folder, refused
+`delivery` when it cannot be; with `pin` (#1546 r10 (a), owner decision H1) a `commit=` other than the pin is refused
+`not-for-kind`, naming it, before any fetch, as the real helper refuses it."""
 from __future__ import annotations
 
 import contextlib
@@ -130,18 +131,25 @@ def stubbed_port() -> Iterator[StubPort]:
         yield stub
 
 
-def copy_make(tenant_id: str, remote: Path | str | None = None) -> Callable[[dict[str, Any]], dict[str, Any]]:
+def copy_make(tenant_id: str, remote: Path | str | None = None, *,
+              pin: str | None = None) -> Callable[[dict[str, Any]], dict[str, Any]]:
     """`copy.make(commit=)` answered as the helper's side does it (#1618 F3): the product's fetch
     (`_fetch_standin_1618.fetch_line`) of `commit` (else `main`) from the tenant's bare `remote` (default: the data root's
     served remote) into a fresh folder this stand-in owns, answered `{path, commit}`; refused `delivery`, naming why,
-    when the fetch is refused or brings another commit."""
+    when the fetch is refused or brings another commit. `pin`: the claim's `knowledge_commit` (#1546 r10 (a), H1); a
+    `commit=` that is not it is refused `not-for-kind`, naming the commit, before any fetch. A `world=` (a sibling's copy)
+    is not this answer's: it is refused `unknown-request` (the real helper's answer is pinned over the real helper)."""
     from defender.tests.support.tenancy._fetch_standin_1618 import fetch_line
 
     def answer(fields: dict[str, Any]) -> dict[str, Any]:
         from defender import tenancy
         from defender.tenancy import run_knowledge
 
+        if fields.get("world") is not None:
+            raise job_socket.Refused("this stand-in makes no sibling's copy", "unknown-request")
         commit = fields.get("commit")
+        if pin is not None and commit is not None and commit != pin:
+            raise job_socket.Refused(f"copy.make(commit={commit}) is not this job's pin", "not-for-kind")
         dest = Path(tempfile.mkdtemp(prefix="copy-make-"))
         line = fetch_line(tenant_id, dest, data_root=tenancy.resolve_data_root(), commit=commit,
                           remote=None if remote is None else Path(str(remote)))
@@ -184,32 +192,3 @@ def handed_records(directory: Any, tenant: str) -> dict[str, Any]:
     from defender.tenancy import requested_tenant_id
 
     return directory.current_records(requested_tenant_id(tenant)).as_wire()
-
-
-def placed_inputs(tenant_id: str, inputs: Path, pin: str) -> Path:
-    """#1546: the inputs folder a learning job's helper fills before the launch (design "The job's folders": the pinned
-    export, written only by the helper, under `.job-inputs/<claim>/`): the tenant's export of `pin`, materialised from its
-    clone on the host as the helper's side does it, copied to where the container's `JobTenant` looks for it
-    (`export_folder(pin)` over `inputs`, the real class's answer). Returns that folder."""
-    from defender import tenancy
-    from defender.learning.author.version_control import materialise_export
-
-    root = tenancy.resolve_data_root()
-    export = materialise_export(tenancy.requested_tenant(root, tenant_id), pin)
-    target = Path(str(tenancy.JobTenant(id=tenant_id, data_root=Path(os.environ["DEFENDER_DATA_ROOT"]),
-                                        inputs=inputs).export_folder(pin)))
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(Path(str(export.path)), target)
-    return target
-
-
-def pinned_materialise(pin: str, placed: Path) -> Callable[[dict[str, Any]], dict[str, Any]]:
-    """#1546 `export.materialise(commit=)` as the helper answers a learning job: the export it placed in the inputs for the pin,
-    any other commit refused (design: "`export.materialise` refuses any commit but the pin")."""
-
-    def answer(fields: dict[str, Any]) -> dict[str, Any]:
-        if fields.get("commit") != pin:
-            raise job_socket.Refused(f"only the pin {pin} is materialised for this job", "delivery")
-        return {"commit": pin, "path": str(placed)}
-
-    return answer
