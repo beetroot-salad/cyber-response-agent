@@ -363,3 +363,17 @@ def _handed_back(dsn: str, inv: str, *, cost: float | None = None, knowledge: ob
         assert handed["knowledge"] == knowledge
     if at_least is not None:
         assert lower_limit(dsn, inv) is at_least, f"the hand-back's lower-limit mark is not {at_least}"
+
+
+def _delete_out_of_band(dsn: str, inv: str) -> None:
+    """A running investigation row deleted from under its worker, by SQL in one transaction: #1546 (design: Claims
+    lifecycle, "deleting an investigation removes its claims, staged facts and uploads in the same transaction") its
+    claims' facts and upload rows, its claims, then the row (the store's own delete refuses a running row)."""
+    import psycopg
+
+    with psycopg.connect(dsn) as conn, conn.transaction():
+        tokens = "SELECT token FROM jobs.claims WHERE investigation_id = %s"
+        conn.execute(f"DELETE FROM jobs.staged_facts WHERE token IN ({tokens})", (inv,))  # noqa: S608
+        conn.execute(f"DELETE FROM jobs.uploads WHERE token IN ({tokens})", (inv,))  # noqa: S608
+        conn.execute("DELETE FROM jobs.claims WHERE investigation_id = %s", (inv,))
+        conn.execute("DELETE FROM jobs.investigations WHERE id = %s", (inv,))

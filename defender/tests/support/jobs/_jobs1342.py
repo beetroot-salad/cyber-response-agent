@@ -181,6 +181,14 @@ def accounting_written(dsn: str, investigation_id: str) -> Any:
     return found[0][0] if found else None
 
 
+def launch_facts(dsn: str, investigation_id: str) -> dict[str, Any] | None:
+    """#1546 (design: Claim): the launch facts of the investigation's one claim row (`jobs.claims.launch`), None without one."""
+    found = execute(dsn, "SELECT launch FROM jobs.claims WHERE kind = 'investigation' AND investigation_id = %s",
+                    (investigation_id,))
+    assert len(found) <= 1, f"{len(found)} claims name investigation {investigation_id}"
+    return found[0][0] if found else None
+
+
 def row(dsn: str, investigation_id: str) -> dict[str, Any] | None:
     """The investigation row as the database holds it (read on a separate connection)."""
     cols = ("stage", "attempt", "request_key", "started_at", "finished_at", "disposition",
@@ -353,6 +361,18 @@ CHILD_SCRIPT = textwrap.dedent("""
             path.symlink_to(target)
         stage_rows(spec.get("stage"))
 
+    def box_token_of_claim(box):
+        # #1546 (design: Claim): the investigation's box token is a launch fact of its claim row, not a launch record.
+        if not box.get("dsn"):
+            raise RuntimeError("a box stamped with its claim's box token needs the child's `dsn` (ScriptedChild.dsn)")
+        sys.path.insert(0, spec["worktree"])
+        from defender.tests.support.shared._postgres1339 import execute
+        found = execute(box["dsn"], "SELECT launch->>'box_token' FROM jobs.claims WHERE kind = 'investigation' "
+                                    "AND investigation_id = %s", (run_id,))
+        if len(found) != 1 or not found[0][0]:
+            raise RuntimeError(f"the stand-in found no box token on {run_id}'s claim: {found}")
+        return found[0][0]
+
     def claim_token(stage):
         sys.path.insert(0, spec["worktree"])
         from defender.tests.support.jobs._evidence_flows1546 import claim_of
@@ -372,6 +392,16 @@ CHILD_SCRIPT = textwrap.dedent("""
             stage_fact(stage["dsn"], token, name, body)
         for name, text in stage["objects"].items():
             stage_upload(stage["dsn"], token, name, None if text is None else text.encode("utf-8"))
+
+    def claim_launch_at_start():
+        dsn = (spec.get("stage") or {}).get("dsn")
+        if not dsn:
+            return None
+        sys.path.insert(0, spec["worktree"])
+        from defender.tests.support.shared._postgres1339 import execute
+        found = execute(dsn, "SELECT launch FROM jobs.claims WHERE kind = 'investigation' AND investigation_id = %s",
+                        (run_id,))
+        return found[0][0] if len(found) == 1 else None
 
     sealed_by = {}  # r7.3 T1: what a child that ends cleanly seals: set once its ledger rows are being written
 
@@ -410,6 +440,8 @@ CHILD_SCRIPT = textwrap.dedent("""
         "claim": os.environ.get("DEFENDER_BOX_CLAIM"),
         "launch_at_start": (runs / f"{run_id}.launch.json").is_file(),
         "alert_at_start": (runs / f"{run_id}.alert.json").is_file(),
+        # #1546: the launch facts its claim row held as it started (None: no staging `dsn`, or no claim row yet)
+        "claim_launch_at_start": claim_launch_at_start(),
         "stdio": [[os.fstat(fd).st_dev, os.fstat(fd).st_ino] for fd in (1, 2)],
     }), encoding="utf-8")
     os.replace(part, seen_dir / f"{run_id}.json")
@@ -417,8 +449,8 @@ CHILD_SCRIPT = textwrap.dedent("""
     if spec.get("print"):
         print(spec["print"]); print(spec["print"], file=sys.stderr)
     box = spec.get("box")
-    if box:  # the box this child's start created: stamped with the token its launch record handed it, or another
-        launch_token = json.loads((runs / f"{run_id}.launch.json").read_text(encoding="utf-8")).get("box_token") or ""
+    if box:  # the box this child's start created: stamped with the box token its claim's launch facts hand it, or another
+        launch_token = box_token_of_claim(box) if box["token"] == "launch" else ""
         stamp = {"launch": launch_token, "other": "f" * 32, "none": ""}[box["token"]]
         # Its own start's box carries the claim its worker handed it; another start's carries none. A
         # docker stand-in's box holds it as its third line; a `StandInContainers` one is filed under it.
@@ -655,7 +687,8 @@ class ScriptedChild:
     printed: str | None = None
     die_by: int | None = None
     #: A box the child leaves behind, as a start would have made it: `box_dir` is where, `box_token`
-    #: whose (`launch`: its own start's, stamped with its launch record's token and, as a
+    #: whose (`launch`: its own start's, stamped with its claim's box token (#1546: read from the claim row, so the
+    #: child needs `dsn`) and, as a
     #: `StandInContainers` marker, carrying its claim; `other`: another start's; `none`: no token
     #: label), `box_state` the docker stand-in's state word (unset: a `StandInContainers` marker).
     box_dir: Path | str | None = None
@@ -715,7 +748,7 @@ class ScriptedChild:
             "dirs": self.dirs, "exit": self.exit, "term": self.term, "term_mark": self.term_mark,
             "grandchild": self.grandchild, "print": self.printed, "die_by": self.die_by,
             "box": None if self.box_dir is None else {"dir": str(self.box_dir), "token": self.box_token,
-                                                     "state": self.box_state},
+                                                     "state": self.box_state, "dsn": self.dsn},
             "claimed": None if self.claimed_dir is None else {"dir": str(self.claimed_dir),
                                                                "names": list(self.claimed_names)},
             "wait_for": None if self.wait_for is None else str(self.wait_for),
