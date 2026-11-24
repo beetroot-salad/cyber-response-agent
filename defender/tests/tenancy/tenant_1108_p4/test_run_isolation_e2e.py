@@ -2,11 +2,12 @@
 surface, all from the run copy.
 
 Entry: `run.main` over the real driver with replay models (`_replay_harness.Turn` scripts),
-production's lifecycle in the replay harness's unsandboxed mode, the real `materialize`, and a
-`publish=` seam reporting `fresh`; a second tenant shares the data root. Each scenario advances
-`current` (a merge, published for real) at the model's first request, after the run copied its
-export, so every surface must answer from the seeded revision (`SEEDED_MARK`), never the merge
-(`MERGED_MARK`) or the clone's working tree. Surfaces: typed read, bash `cat`, bash
+production's lifecycle in the replay harness's unsandboxed mode, the real `materialize`, and the
+`fetch=` seam (`B.fetching`, #1618 flow 1); a second tenant shares the data root. Each scenario advances
+`main` (a merge, then another reader's fetch of it) at the model's first request, after the run copied its
+knowledge, so every surface must answer from the seeded revision (`SEEDED_MARK`), never the merge
+(`MERGED_MARK`), another reader's copy or the old clone's place (#1618 K8: there is no clone or export; a decoy
+sits where the clone was). Surfaces: typed read, bash `cat`, bash
 `defender-lessons`, the opening message's orientation, the gather dispatch's descriptor index, the
 tacit adapter, and the read gate.
 """
@@ -22,8 +23,7 @@ from defender.tests.e2e import _replay_harness as R
 from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 from defender.tests.tenancy.tenant_1108_p4._support import (
     OTHER_LESSON,
-    current_commit,
-    export_dir,
+    plant_old_clone,
     second_tenant,
 )
 
@@ -43,20 +43,26 @@ def tenants(tmp_path, data_root):
 
 
 class AdvancingReplay(R.ReplayFn):
-    """`ReplayFn` that, at its first request, merges and publishes on the tenant (a human merge
-    followed by another launch's publish), so `current` moves while this run is live."""
+    """`ReplayFn` that, at its first request, merges on the tenant's `main` and has another reader fetch it into
+    `other_copy` (a human merge followed by another launch's fetch), so `main` moves while this run is live and a
+    copy of the merge sits on the host."""
 
     __name__ = "AdvancingReplay"
 
-    def __init__(self, turns: list[R.Turn], tenant: Any) -> None:
+    def __init__(self, turns: list[R.Turn], tenant: Any, other_copy: Path | None = None) -> None:
         super().__init__(turns)
         self.tenant = tenant
+        self.other_copy = other_copy
         self.merged: str | None = None
+        self.line: str | None = None
 
     def __call__(self, messages, info):
         if self.merged is None:
             self.merged = self.tenant.merge(B.MERGE_FILES)
-            self.tenant.publish()
+            if self.other_copy is not None:
+                self.other_copy.mkdir(parents=True)
+                self.line = B.fetching(self.tenant)(self.tenant.tenant_id, self.other_copy,
+                                                    data_root=self.tenant.data_root)
         return super().__call__(messages, info)
 
 
@@ -69,37 +75,39 @@ def _read(surface: str, path: str) -> R.Turn:
 @pytest.mark.parametrize("surface", ["typed", "bash"])
 def test_o2_own_copy_reads_answer_at_the_copied_revision_and_every_other_root_is_refused(
         tenants, tmp_path, monkeypatch, surface):
-    """The run's own lesson reads back the seeded revision after `current` moved; the other
-    tenant's export, this tenant's clone and its export folder are refused (only the run copy is
-    a read root)."""
+    """The run's own lesson reads back the seeded revision after `main` moved; the other tenant's knowledge on the
+    host (its seed checkout), this tenant's old clone place (a K8 decoy) and another reader's copy of the merge are
+    refused (only the run copy is a read root). (#1618: was the other tenant's export, the clone and the export
+    folder, none of which exists now.)"""
     t, other = tenants
-    # The clone is left clean (P3 refuses to publish a dirty clone); the mid-run publish
-    # fast-forwards its working tree to MERGED, so a clone read would show MERGED_MARK.
-    clone_lesson = B.clone_dir(t) / B.LESSON
-    other_path = export_dir(other.tenant, other.commit) / OTHER_LESSON[0]
-    own_export = export_dir(t.tenant, t.commit) / B.LESSON
+    other_path = Path(other.checkout) / OTHER_LESSON[0]
+    assert other_path.is_file(), "premise: the other tenant's content is on the host"
+    decoy = plant_old_clone(t, {B.LESSON: B.lesson_text(B.CLONE_ONLY_MARK)}) / B.LESSON
+    other_copy = tmp_path / "another-reader" / "copy"
     main = AdvancingReplay([
         _read(surface, LESSON_IN_BOX),
         _read(surface, str(other_path)),
-        _read(surface, str(clone_lesson)),
-        _read(surface, str(own_export)),
+        _read(surface, str(decoy)),
+        _read(surface, str(other_copy / B.LESSON)),
         R.Turn(text="done"),
-    ], t)
+    ], t, other_copy)
 
     out = B.drive_main(t, tmp_path, monkeypatch, main=main)
 
     assert out.reached, out.text()
     assert out.rc == 0, out.text()
     assert main.calls == 5, f"the model did not finish its script: {main.calls}"
-    assert current_commit(t.tenant) == main.merged, "premise: current advanced mid-run"
+    assert main.line == f"ok {main.merged}", f"premise: main advanced and another reader fetched it: {main.line}"
+    assert B.MERGED_MARK.encode() in (other_copy / B.LESSON).read_bytes(), "premise: the other copy holds the merge"
     assert B.SEEDED_MARK in main.seen[1], (
         f"the run's own lesson ({surface}) did not answer at the copied revision")
     everything = "\n".join(main.seen)
-    assert B.MERGED_MARK not in everything, "a read answered from the advanced `current`"
+    assert B.MERGED_MARK not in everything, "a read answered from the advanced `main`"
+    assert B.CLONE_ONLY_MARK not in everything, "a read answered from the old clone's place"
     assert "Second-tenant fixture content" not in everything, "another tenant's file read"
     # `seen[i]` is the whole conversation so far: each refused read adds exactly one `Blocked`.
-    for i, what in ((2, "the other tenant's export"), (3, "this tenant's clone"),
-                    (4, "this tenant's export folder")):
+    for i, what in ((2, "the other tenant's knowledge"), (3, "this tenant's old clone place"),
+                    (4, "another reader's copy of this tenant")):
         assert main.seen[i].count("Blocked") == main.seen[i - 1].count("Blocked") + 1, (
             f"the read of {what} was not refused: {main.seen[i][-400:]}")
 

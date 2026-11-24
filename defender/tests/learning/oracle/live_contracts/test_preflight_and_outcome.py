@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an entry's one knowledge fetch, in-process
 from defender.tests.support.learning.judge._memory_store import MemoryStore
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core import _typed_output1579 as TY
@@ -245,7 +246,7 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
     try:
         # The tenant and the source run by id.
         rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID)],
-                      spawn=spawn, **seams)
+                      spawn=spawn, **{"fetch": in_process_fetch(), **seams})
     except SystemExit as stop:
         if isinstance(stop.code, int):
             rc = stop.code

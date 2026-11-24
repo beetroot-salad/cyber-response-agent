@@ -143,6 +143,15 @@ def plant_lessons(tenant_id: str, data_root: Path | None = None, *,
     return lessons
 
 
+def publish_lessons(tenant_id: str, data_root: Path) -> str:
+    """Commit `LESSONS` (as `lesson_text` writes them) on `main` of tenant `tenant_id`'s served remote under `data_root`,
+    as a tenant admin's merge lands knowledge (#1618 D2: knowledge changes only on Forgejo). Returns the new `main`."""
+    from defender.tests.support.tenancy._fetch_standin_1618 import commit_on_main
+
+    files = {f"agent/lessons/{name}.md": lesson_text(name) for name in LESSONS}
+    return commit_on_main(data_root, tenant_id, files, "clock lessons")
+
+
 def _argv_tenant(argv: Iterable[str]) -> str | None:
     args = list(argv)
     return args[args.index("--tenant") + 1] if "--tenant" in args[:-1] else None
@@ -244,14 +253,15 @@ def drive_clocked(  # noqa: PLR0913 — one keyword per seam a clock scenario va
         review_stages: Any = None) -> dict:
     """Drive a natural replay with an injected clock and the standard harness defaults. With
     no `tenant` the replay runs as the fixture tenant, into whose folder `LESSONS` are planted
-    first (the harness publishes the folder as it stands); a named tenant gets them in its agent
-    half, which the harness reads as it stands."""
+    first (the harness commits the folder as it stands to the tenant's Forgejo `main` and reads that commit); a named
+    tenant's knowledge lives only on its served remote (#1618 K8, D2: an estate's `place()` seeds it there and places
+    no folder), so `LESSONS` are committed on that remote's `main`, which the run fetches."""
     if tenant is None:
         from defender.tests.support.tenancy import _tenants1106
 
         plant_lessons(str(_tenants1106.fixture_tenant().id))
-    elif getattr(tenant, "agent", None) is not None:
-        plant_lessons(str(tenant.id), agent=Path(location_path(tenant.agent)))
+    else:
+        publish_lessons(str(tenant.id), data_root=Path(location_path(tenant.data_root)))
     return H.drive(run_dir, run_id=run_dir.name, main=main, gather=gather, verbs=verbs,
                    limits=limits, tenant=tenant, review_stages=review_stages, clock=clock)
 
@@ -319,18 +329,18 @@ def run_main(  # noqa: PLR0913 — the composition's seams, one keyword each
         else functools.partial(box_mod.start_box, docker=_no_daemon),
         stop_box=lambda *_a, **_k: None,
         scrub=lambda *_a, **_k: None)
-    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_fetch
 
     tenant_id = _argv_tenant(argv)
     if tenant_id is not None:
         plant_lessons(tenant_id)
     try:
-        # The launch-time publish, in-process: it publishes the tenant for real.
+        # The launch-time fetch, in-process: the tenant seeded to its forge and fetched for real.
         launched.exit = run_mod.main(
             argv, directory=directory_for_argv(argv), lifecycle=lifecycle, preflight=lambda *_a, **_k: 0,
             visualize=lambda *_a, **_k: None,
             enqueue=enqueue if enqueue is not None else (lambda *_a, **_k: False),
-            oracle=oracle, verifier=verifier, publish=in_process_publish(), **(seams or {}))
+            oracle=oracle, verifier=verifier, fetch=in_process_fetch(), **(seams or {}))
     except SystemExit as refused:
         launched.exit = "SystemExit"
         launched.refusal = str(refused.code)

@@ -1,6 +1,7 @@
 """The adoption delivery step (#1471 A3, P-9): a carried adapter's base files offered to a tenant's repository as one pull request.
 
-`adopt(repository, *, system, rendering, digest)` fetches `origin/main` itself, reads the repository's pull requests in every state,
+`adopt(repository, *, system, rendering, digest)` reads `main` as the operation's private repository fetched it, and the
+repository's pull requests in every state,
 and answers one `AdoptionRecord`, deciding in A3's order from the digest `d` of the current rendering:
 
 1. any pull request of the system (head label `adopt/<system>/...`, any digest) is open: `already_open`;
@@ -13,8 +14,7 @@ and answers one `AdoptionRecord`, deciding in A3's order from the digest `d` of 
 A pull request is matched by its head label, which keeps the branch name after the branch is deleted (G-A11). A refused push or a
 refused or lost pull-request create is settled by reading the forge again: a pull request that now names the branch is answered by
 steps 1-4; none, and the branch (when it is pushed) holds the rendering at every path, opens it; anything else is `delivery_failed`.
-The step never merges, closes, deletes or force-pushes, and makes no store record. Fetching has one owner, here, and a ref-lock
-collision on the shared clone is `repository_busy`.
+The step never merges, closes, deletes or force-pushes, and makes no store record.
 """
 from __future__ import annotations
 
@@ -31,8 +31,7 @@ from .repository import GitRepository
 
 _logger = logging.getLogger(__name__)
 
-#: The fixed reasons `adopt` answers (`job_lane.ADOPTION_CONTAINER_REASONS`).
-REPOSITORY_BUSY = "repository_busy"
+#: The fixed reason `adopt` answers on a failure (`job_lane.ADOPTION_CONTAINER_REASONS`).
 DELIVERY_FAILED = "delivery_failed"
 #: How many times a pull-request create is made (a refused or lost first one is read back, then made once more).
 _CREATE_ATTEMPTS = 2
@@ -50,14 +49,11 @@ class _Matches:
 def adopt(repository: GitRepository, *, system: str, rendering: dict[str, bytes], digest: str) -> AdoptionRecord:
     """Offer `rendering` (`{agent/<path>: bytes}`, digest `digest`) to the repository's `main` for `system` (module doc)."""
     branch = base_files.branch_of(system, digest)
-    refused = _fetch(repository)
-    if refused is not None:
-        return refused
     try:
         decided = _decide(repository, system, branch, rendering)
         if decided is not None:
             return decided
-        main = repository.revision("refs/remotes/origin/main")
+        main = repository.revision("refs/heads/main")
         commit, _after = repository.make_commit(main, _change_set(rendering), _commit_message(system, digest))
         return _push_and_open(repository, system, branch, rendering, commit, digest)
     except Exception:  # noqa: BLE001 — A3: whatever a step raised, a fixed reason; the cause goes to the log
@@ -65,23 +61,15 @@ def adopt(repository: GitRepository, *, system: str, rendering: dict[str, bytes]
         return AdoptionRecord.failed(DELIVERY_FAILED)
 
 
-def _fetch(repository: GitRepository) -> AdoptionRecord | None:
-    """The one fetch of `origin` both of `adopt`'s fetches use: None when it succeeded, else the failed record, a ref-lock
-    collision on the shared clone being `repository_busy` and any other fault `delivery_failed`."""
+def _fetch(repository: GitRepository, branch: str) -> AdoptionRecord | None:
+    """The fetch after a refused push, by name (`main` and the racer's `branch`): None when it succeeded, else the failed
+    record."""
     try:
-        repository.fetch()
-    except _git.GitError as fault:
-        return AdoptionRecord.failed(REPOSITORY_BUSY if _ref_lock_collision(fault) else DELIVERY_FAILED)
-    except Exception:  # noqa: BLE001 — A3: any other fetch fault, the forge token's refusal included, is a fixed reason
+        repository.fetch("refs/heads/main", f"refs/heads/{branch}")
+    except Exception:  # noqa: BLE001 — A3: any fetch fault, the forge token's refusal included, is a fixed reason
         _logger.exception("adoption: the fetch of origin failed")
         return AdoptionRecord.failed(DELIVERY_FAILED)
     return None
-
-
-def _ref_lock_collision(fault: _git.GitError) -> bool:
-    """Whether a failed fetch collided on a ref the shared clone holds locked: its one local ref transaction
-    (`update-ref --stdin`, `GitTransport.fetch`) names `cannot lock ref` (git 2.47, probed)."""
-    return "update-ref" in str(fault) and "cannot lock ref" in fault.stderr
 
 
 def _adoption_matches(prs: list[PullRequest], system: str, branch: str) -> _Matches:
@@ -101,7 +89,7 @@ def _decide(repository: GitRepository, system: str, branch: str, rendering: dict
         return AdoptionRecord("already_open", pr_number=found.open[0].number)
     if found.merged_on_d:
         return AdoptionRecord("nothing_to_adopt")
-    if _tree_holds(repository, "refs/remotes/origin/main", rendering):
+    if _tree_holds(repository, "refs/heads/main", rendering):
         return AdoptionRecord("nothing_to_adopt")
     if found.closed_on_d:
         return AdoptionRecord("rejected", pr_number=found.closed_on_d[0].number)
@@ -137,13 +125,13 @@ def _after_refused_push(repository: GitRepository, system: str, branch: str, ren
     """The branch refused our push (git refuses a non-fast-forward: a racer's commit of the same tree has another id).
     The branch is fetched; a pull request now naming it is answered by steps 1-4; none, and its tip holding the rendering at
     every path, the pull request is opened on that tip; anything else fails. The branch is never moved."""
-    refused = _fetch(repository)
+    refused = _fetch(repository, branch)
     if refused is not None:
         return refused
     decided = _decide(repository, system, branch, rendering)
     if decided is not None:
         return decided
-    tip = f"refs/remotes/origin/{branch}"
+    tip = f"refs/heads/{branch}"
     if not repository.holds_ref(tip) or not _tree_holds(repository, tip, rendering):
         return AdoptionRecord.failed(DELIVERY_FAILED)
     return _open_pull_request(repository, system, branch, rendering, digest)

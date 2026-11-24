@@ -32,7 +32,7 @@ r9 additions (slice 0):
   `git.sealed` (what `network_git` puts in the sealed memfd config) and never in `git.calls` argv/env,
   unless the caller itself put it there. Tests assert `jwt in git.sealed_tokens()` (positive control)
   and `not git.argv_env_contains(jwt)`.
-- `RecordingPublish` answers a `fresh <commit>` line (RC-7); `publish.answers` queues other lines.
+- `RecordingFetch` answers an `ok <commit>` line (RC-7; #1618 flow 5: the fetch child's report); `fetch.answers` queues other lines.
 
 Fidelity review 1 additions (F-1, F-6):
 - `FakeForge.client(token)` defaults to the admin token; `client(None)` carries NO credential (the host actor's
@@ -50,7 +50,7 @@ Fidelity review 1 additions (F-1, F-6):
   `identity/oidc/token/<entity.metadata.oidc_role>` (else 403, also with no alias/entity or a destroyed entity);
   a minted JWT carries `iss`, `aud` (the role's client id), `role` and the entity's `metadata.tenant_id`
   (`claims(jwt)`, `mint_entity(jwt)`).
-- `Fakes(tmp_path)` bundles forge, integration, openbao, git, publish and wires JWT resolution.
+- `Fakes(tmp_path)` bundles forge, integration, openbao, git, fetch and wires JWT resolution.
 
 r8 additions (slice S1, probes P-a/P-b/P-c of design r8.2/r8.3):
 - Forge branch protection (P-a, Forgejo 17.0.1): a rule stores its lists as Forgejo does -- a whitelisted user
@@ -968,29 +968,32 @@ class RoutedGit:
         return any(secret in part for args, env in self.calls for part in (*args, *env, *env.values()))
 
 
-class RecordingPublish:
-    """The host actor's first-publish seam (`launch_publish`'s shape): records and answers one line.
-    Default `fresh <commit>` (RC-7); queue other lines (`stale`, an error text) in `answers`."""
+class RecordingFetch:
+    """The host actor's first-fetch seam (#1618: `fetch(tenant_id, dest, *, data_root, commit=None) -> line`, the shape
+    `launch_publish` binds): records and answers one line without filling `dest` (prepare throws its copy away).
+    Default `ok <commit>` (RC-7); queue other lines (a refusal, an error text) in `answers`. For a lock case only: the
+    lifecycle's own fetch cases run the real child (`_fetch_1618`)."""
 
     def __init__(self) -> None:
-        self.calls: list[tuple[str, Path]] = []
+        self.calls: list[tuple[str, Path, Path | None]] = []
         self.answers: list[str] = []
 
-    def __call__(self, tenant_id: str, *, data_root: Path, **_kw: Any) -> str:
-        self.calls.append((str(tenant_id), Path(data_root)))
+    def __call__(self, tenant_id: str, dest: Path | None = None, *, data_root: Path, commit: str | None = None,
+                 **_kw: Any) -> str:
+        self.calls.append((str(tenant_id), Path(data_root), None if dest is None else Path(dest)))
         if self.answers:
             return self.answers.pop(0)
-        return f"fresh {uuid.uuid4().hex}{uuid.uuid4().hex[:8]}"
+        return f"ok {uuid.uuid4().hex}{uuid.uuid4().hex[:8]}"
 
 
 class Fakes:
     """Every boundary fake of the lifecycle, wired: the forge resolves a bot's JWT through OpenBao's mints.
-    `Fakes(tmp_path)` then `.forge .integration .openbao .git .publish`."""
+    `Fakes(tmp_path)` then `.forge .integration .openbao .git .fetch`."""
 
     def __init__(self, tmp_path: Path, *, sign_policy: str = SIGN_POLICY) -> None:
         self.forge = FakeForge(tmp_path / "forge")
         self.integration = FakeIntegrationCommand(self.forge)
         self.openbao = FakeOpenBao(sign_policy=sign_policy)
         self.git = RoutedGit(self.forge)
-        self.publish = RecordingPublish()
+        self.fetch = RecordingFetch()
         self.forge.jwt_claims = self.openbao.claims

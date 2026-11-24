@@ -148,7 +148,7 @@ def test_c3_a_changed_declaration_gets_a_fresh_access_token(tmp_path, data_root,
             tok = r.tok()
             assert r.ask(tok=tok)["fault"] is None
             r.t.merge({ACCESS: change(r.up.url, tok_url)}, "change the declaration")
-            r.t.publish()
+            # #1618 D7/K8: the merge is `main`, which the proxy's next read fetches; there is no publish step.
             after = r.ask(tok=tok, url=r.up.url + after_path)
 
     assert after["fault"] is None, after
@@ -171,7 +171,7 @@ def test_c3_republishing_an_unchanged_declaration_keeps_the_access_token(tmp_pat
             same = json.dumps(json.loads(H.declaration(r.up.url + BASE,
                                                        scheme=H.oauth_scheme(tok_url))))
             r.t.merge({ACCESS: same + "\n"}, "reformat the declaration")
-            r.t.publish()
+            # #1618 D7/K8: the merge is `main`, which the proxy's next read fetches; there is no publish step.
             assert r.ask(tok=tok)["fault"] is None
 
     assert issued == ["AT-1-canary-1163"], issued

@@ -63,7 +63,7 @@ def _run_start(tenant: str, tmp_path: Path, directory: Any = ..., calls: _Calls 
         with contextlib.redirect_stderr(err):
             run_py.main([str(alert), "--tenant", tenant, "--no-learn"], **given,
                         preflight=calls.hook("preflight", 0), visualize=calls.hook("visualize", None),
-                        enqueue=calls.hook("enqueue", False), publish=calls.hook("publish", ""),
+                        enqueue=calls.hook("enqueue", False), fetch=calls.hook("fetch", ""),
                         lifecycle=calls.hook("lifecycle", {"output": "", "requests": 0, "truncated_by": None}))
     except SystemExit as refused:
         return f"{refused.code}\n{err.getvalue()}"
@@ -158,7 +158,7 @@ def _the_learning_store_is_reached_not_used(monkeypatch) -> None:
 
 @pytest.mark.parametrize("state", ["creating", "offboarding", "offboarded"])
 def test_run_start_refuses_a_tenant_that_is_not_active_naming_its_state_before_any_work(tmp_path, data_root, state):
-    """Run start refuses any non-`active` state, naming it, before preflight or publish run (Flow 4, P3)."""
+    """Run start refuses any non-`active` state, naming it, before preflight or the knowledge fetch run (Flow 4, P3)."""
     admitted = _Calls()
     assert _admits(_run_start(TENANT, tmp_path, active_directory(data_root, TENANT), admitted))  # control: active passes
     assert admitted.reached, "control: an active tenant reaches the run's first stand-in"
@@ -255,17 +255,20 @@ def test_run_start_whose_database_goes_away_after_the_version_check_refuses_on_o
     assert H.exclusive_free(data_root, TENANT)
 
 
-def test_the_publish_child_reports_an_unreachable_database_as_transient(data_root, monkeypatch):
-    """The publish child with an unreachable database: `stale:transient` (the next run may find it up), not
-    `misconfigured`, which asks a human to fix the deployment (O-SEE)."""
+def test_the_fetch_child_reports_an_unreachable_database_as_transient(data_root, tmp_path, monkeypatch, capsys):
+    """The fetch child with an unreachable database: `refused transient` (the next run may find it up), not `lasting`,
+    which asks a human to fix the deployment (O-SEE; #1618 D11: a refusal carries `transient|lasting` and a reason)."""
     from defender.learning.author import version_control as vc
-    from defender.learning.author.version_control.status import STALE_TRANSIENT
 
     monkeypatch.setenv(DSN_ENV, UNREACHABLE)
-    line = vc.publish_for_run(TENANT, data_root=data_root)
-    assert line.startswith(STALE_TRANSIENT + " "), line
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    assert vc.fetch_child_main([TENANT, "--data-root", str(data_root), "--dest", str(dest)]) == 0
+    line = capsys.readouterr().out.strip()
+    assert line.startswith("refused transient "), line
     assert "could not be reached" in line, line
     assert "not-the-password" not in line, line
+    assert list(dest.iterdir()) == [], "a refused fetch filled its destination"
 
 
 @pytest.mark.postgres
@@ -441,15 +444,33 @@ def _launcher(directory: Any, calls: _Calls, **kw: Any) -> tuple[Any, str]:
                     render_page=calls.hook("render_page", None), **kw)
 
 
+@pytest.fixture
+def served(tmp_path):
+    """#1618 (flow 4): `TENANT`'s knowledge on a served remote, read through the real fetch child (`fetch=`)."""
+    from defender.tests.tenancy.lifecycle_1214._served_ret1618 import served_fetch
+
+    with served_fetch(tmp_path / "served", TENANT) as fetch:
+        yield fetch
+
+
+def _knowledge_seams(main: Any, fetch: Any) -> dict[str, Any]:
+    """`fetch=` for a command that reads a fetched copy of the tenant's knowledge (#1618 flow 4), else nothing."""
+    import inspect
+
+    return {"fetch": fetch} if "fetch" in inspect.signature(main).parameters else {}
+
+
 @pytest.mark.parametrize("state", ["offboarding", "creating"])
 @pytest.mark.parametrize("name", list(H.COMMANDS))
-def test_a_host_command_refuses_a_tenant_that_is_not_active_before_its_folder_and_holds_nothing(data_root, name, state):
+def test_a_host_command_refuses_a_tenant_that_is_not_active_before_its_folder_and_holds_nothing(data_root, name, state,
+                                                                                                served):
     """Each command of the design's table refuses a non-`active` tenant naming it and its state, before the folder
     rules, holds nothing and writes nothing under the tenant's folder; an active tenant passes the check (r10 O-A1, O-A6)."""
     main, argv = H.command_main(name), H.COMMANDS[name][1]
-    _, admitted = _command(main, argv(TENANT), active_directory(data_root, TENANT))
+    seams = _knowledge_seams(main, served)
+    _, admitted = _command(main, argv(TENANT), active_directory(data_root, TENANT), **seams)
     assert _no_state_refusal(admitted), f"control: an active tenant was refused for its state: {admitted}"
-    code, refused = _command(main, argv(OTHER), active_directory(data_root, OTHER, state=state), refusal=True)
+    code, refused = _command(main, argv(OTHER), active_directory(data_root, OTHER, state=state), refusal=True, **seams)
     assert code not in (0, None), refused
     _has(refused, OTHER, state)
     assert H.recorded(data_root, OTHER) == [], "the refusal kept a record"
@@ -457,7 +478,8 @@ def test_a_host_command_refuses_a_tenant_that_is_not_active_before_its_folder_an
     assert not (data_root / OTHER).exists(), f"the refusal made the folderless tenant's folder: {_tree(data_root / OTHER)}"
     before = _tree(data_root / TENANT)
     assert before, "control: the placed tenant's folder has something to compare"
-    code, refused = _command(main, argv(TENANT), active_directory(data_root, TENANT, state=state), refusal=True)
+    code, refused = _command(main, argv(TENANT), active_directory(data_root, TENANT, state=state), refusal=True,
+                             **seams)
     assert code not in (0, None), refused
     _has(refused, TENANT, state)
     assert _tree(data_root / TENANT) == before, "the refusal wrote under the placed tenant's folder"
@@ -535,9 +557,10 @@ def _referencing(name: str) -> set[str]:
     return found
 
 
-def test_the_forge_credential_has_only_the_delivery_and_publish_callers():
-    """P3 census (RC-9): `forge_credential` is reached only from the delivery opener and the publish child's module."""
-    allowed = {"learning/author/version_control/delivery.py", "learning/author/version_control/publish.py",
+def test_the_forge_credential_has_only_the_delivery_and_fetch_callers():
+    """P3 census (RC-9): `forge_credential` is reached only from the delivery opener and the fetch child's module (#1618
+    flow 1: the fetch child, `version_control/fetch.py`, replaced the publish child, `publish.py`)."""
+    allowed = {"learning/author/version_control/delivery.py", "learning/author/version_control/fetch.py",
                # #1170 (C23, A6): the per-job host helper's drain half mints the post-step's forge credential
                "job_host/_learning.py",
                # #1471 (r11): the adoption helper's host half mints the adoption's (`forge.token`)
@@ -583,16 +606,21 @@ def test_the_census_method_exemption_still_sees_the_provider():
                                  "forge_credential", not_on=("vc", "version_control"))
 
 
-def test_the_publish_child_is_spawned_only_by_run_start_and_prepare():
-    """P3 census (RC-9): `launch_publish` is referenced by `run.py`, the host actor's prepare, and its own module."""
-    allowed_prefixes = ("run.py", "investigation/publish_launch.py", "investigation/__init__.py", "lifecycle/",
-                        # #1170 (A6): run start's publish moved to the host half run start shares with the job's
-                        # helper (`run_common.default_publish`, called by `run.py` and the helper's prepare)
-                        "run_common.py")
-    callers = _referencing("launch_publish")
-    assert "run.py" in callers or "run_common.py" in callers
-    assert [c for c in callers if not c.startswith(allowed_prefixes)] == []
-    assert any(c.startswith("lifecycle/") for c in callers), "prepare must launch the first publish"
+def test_the_fetch_child_is_spawned_only_through_its_launcher_by_the_design_s_readers():
+    """P3 census (RC-9), #1618 flows 1-5: the fetch child's launcher (`launch_publish`) is referenced by its own module
+    (its `default_fetch`) and the host actor's prepare (onboarding) alone; every other reader reaches it through
+    `default_fetch`, and those readers are the design's: run start's shared host half, the per-job helper, the operator
+    tools and the branch launcher. (Retired: "only run start and prepare" — r5 flow 4 makes the operator tools and the
+    branch launcher readers of a fetched copy.)"""
+    launchers = _referencing("launch_publish")
+    assert any(c.startswith("lifecycle/") for c in launchers), "prepare must launch the first fetch"
+    assert [c for c in launchers if not c.startswith(("investigation/publish_launch.py", "investigation/__init__.py",
+                                                      "lifecycle/"))] == []
+    readers = _referencing("default_fetch")
+    assert "run_common.py" in readers, "control: run start's host half reaches the real fetch"
+    allowed = ("investigation/", "run.py", "run_common.py", "job_host/", "cli/", "learning/frontend/serialize.py",
+               "learning/branch/cli.py", "tenancy/run_knowledge.py")
+    assert [c for c in readers if not c.startswith(allowed)] == []
 
 
 def test_the_opened_delivery_is_reached_only_by_drains_and_the_connect_command():
@@ -647,9 +675,13 @@ def _units(rel: str, tree: ast.Module) -> list[tuple[str, bool, list[ast.AST]]]:
 
 
 #: The A3 entry units: where a starter-covered process takes the folder raw. Their private helpers are not entries.
-A3_ENTRIES = frozenset({("learning/author/version_control/publish.py", "publish_for_run"),
-                        ("learning/author/version_control/publish.py", "publish_child_main"),
-                        ("investigation/publish_launch.py", "launch_publish")})
+#: #1618 (flow 1): the fetch child (`fetch_copy`, its process entry `fetch_child_main`) accepts its tenant itself; its
+#: launcher hands it identifiers only and accepts nothing (`launch_publish` no longer reaches the raw step).
+A3_ENTRIES = frozenset({("learning/author/version_control/fetch.py", "fetch_copy"),
+                        ("learning/author/version_control/fetch.py", "fetch_child_main")})
+#: #1618: of `H.A3_SET` (the modules a starter covers), the ones that reach the raw acceptance: the child's alone. Its
+#: launcher stays in the set (it may spell the folder rules' names, `test_entry_boundaries`), reaching none of them.
+A3_REACHING = frozenset({"learning/author/version_control/fetch.py"})
 
 
 def _is_barrier(rel: str, name: str) -> bool:
@@ -738,7 +770,7 @@ def test_a_function_reaches_the_raw_acceptance_only_in_the_host_acceptance_and_t
     reaching = _reaching(_production())
     assert set(H.IN_BOX_ENTRIES) <= reaching, "control: each in-box entry takes its tenant by the folder rules"
     assert (H.HOST_MODULE_PATH, H.HOST_ACCEPTANCE) in reaching, "control: the host acceptance accepts the tenant"
-    assert {rel for rel, _ in reaching if rel in H.A3_SET} == set(H.A3_SET), "the A3 set is exactly these modules"
+    assert {rel for rel, _ in reaching if rel in H.A3_SET} == set(A3_REACHING), "the A3 set's reach is exactly the fetch child's"
     assert sorted(_offenders(reaching)) == []
 
 
@@ -791,11 +823,11 @@ def test_the_reachability_census_sees_through_the_host_modules_and_the_starter_s
         "learning/branch/cli.py": ("from defender.systems.run_tenant import resolve_tenant\n"
                                    "def _launch(argv):\n    return resolve_tenant(1, argv[0])\n"),
         "cli/private.py": "from defender.systems.run_tenant import _load\ndef main(argv):\n    return _load(1, argv[0])\n",
-        "cli/a3.py": ("from defender.learning.author.version_control.publish import _accept\n"
+        "cli/a3.py": ("from defender.learning.author.version_control.fetch import _accept\n"
                       "def main(argv):\n    return _accept(1, argv[0])\n"),
-        "learning/author/version_control/publish.py": ("from defender.tenancy._tenant import accept_tenant\n"
-                                                       "def _accept(r, t):\n    return accept_tenant(r, t)\n"
-                                                       "def publish_for_run():\n    return _accept(1, 2)\n"),
+        "learning/author/version_control/fetch.py": ("from defender.tenancy._tenant import accept_tenant\n"
+                                                     "def _accept(r, t):\n    return accept_tenant(r, t)\n"
+                                                     "def fetch_copy():\n    return _accept(1, 2)\n"),
         "cli/__init__.py": "",
         "cli/sub/deep.py": "from defender.tenancy._tenant import accept_tenant\ndef go():\n    return accept_tenant(1, 2)\n",
         "cli/other.py": "from defender.cli import go\ndef run():\n    return go()\n",
@@ -863,8 +895,8 @@ def test_the_host_census_sees_a_helper_owned_scope_and_spares_a_commands_own():
 
 
 def test_the_starter_covered_set_never_calls_the_host_acceptance():
-    """A3: the publish child, its in-process launcher and the scaffold validator load the folder with the folder rules
-    only; none opens a host acceptance (they have no database address and run under prepare's exclusive hold)."""
+    """A3: the fetch child and its launcher load the folder with the folder rules only (#1618: the child accepts; the
+    launcher only hands it ids); none opens a host acceptance (they have no database address and run under prepare's exclusive hold)."""
     callers = _referencing(H.HOST_ACCEPTANCE)
     assert callers, "control: the host acceptance is referenced"
     assert sorted(callers & set(H.A3_SET)) == []
@@ -932,7 +964,7 @@ def test_nothing_the_lifecycle_runs_calls_the_host_acceptance():
     """A4: no module reachable from `defender.lifecycle` references the host acceptance step (prepare holds the lock
     exclusive in that process; a shared hold there would block its own prepare)."""
     closure = _lifecycle_closure()
-    assert "investigation/publish_launch.py" in closure, "control: prepare's in-process publish launcher is reached"
+    assert "investigation/publish_launch.py" in closure, "control: prepare's fetch launcher is reached"
     callers = _referencing(H.HOST_ACCEPTANCE)
     assert callers, "control: the host acceptance step exists and is referenced"
     assert sorted(callers & closure) == []

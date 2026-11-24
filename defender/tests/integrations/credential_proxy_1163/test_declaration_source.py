@@ -1,6 +1,6 @@
-"""#1163 the proxy obeys only the declaration in the export `current` names: never the clone's
-working tree or an unmerged commit, read without following a link; a merged change applies from
-the next request."""
+"""#1163 the proxy obeys only the declaration the tenant's current records hold (#1366 O7), here derived from its
+Forgejo `main` (#1618: no export or `current`): never a working copy on the host or an unmerged commit, read without
+following a link; a merged change applies from the next request."""
 from __future__ import annotations
 
 import base64
@@ -19,25 +19,24 @@ from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.integrations.credential_proxy_1163._target import (
     ACCESS_FILE,
 )
+from defender.tests.support.tenancy._fetch_standin_1618 import copy_at_main
 from defender.tests.tenancy.tenant_1108_p4._support import (
-    current_commit,
-    export_dir,
     git,
+    plant_old_clone,
 )
 
 ACCESS = ACCESS_FILE.format(system="identity")
 
 
 def test_d1_a_merged_removal_applies_from_the_next_request(tmp_path, data_root):
-    """A base replaced by a merged, published change refuses the old base on the next request
-    with the same, earlier-minted token. O2, P-2."""
+    """A base replaced by a merged change refuses the old base on the next request with the same, earlier-minted
+    token (#1618: merged is `main`; nothing publishes). O2, P-2."""
     with T.rig(tmp_path / "forge", data_root) as r:
         tok = r.tok()
         before = r.ask(tok=tok)
         merged = r.t.merge({ACCESS: H.declaration(f"http://127.0.0.1:{H.free_port()}/")},
                            "move the base")
-        r.t.publish()
-        assert current_commit(r.t.tenant) == merged
+        assert r.t.origin_main() == merged
         after = r.ask(tok=tok)
 
     assert (before["fault"], before["status"]) == (None, 200)
@@ -53,11 +52,9 @@ def test_d1_a_merged_deletion_and_a_merged_addition_apply_from_the_next_request(
         tok = r.tok()
         assert r.ask(tok=tok)["fault"] is None
         r.t.merge({ACCESS: None}, "retire the declaration")
-        r.t.publish()
         gone = r.ask(tok=tok)
         seen_when_gone = len(r.up.seen)
         r.t.merge({ACCESS: H.declaration(r.up.url + T.BASE_PATH)}, "declare it again")
-        r.t.publish()
         back = r.ask(tok=tok)
 
     assert (gone["fault"], seen_when_gone) == ("ConfigFault", 1)
@@ -66,11 +63,10 @@ def test_d1_a_merged_deletion_and_a_merged_addition_apply_from_the_next_request(
 
 
 def test_d2_a_working_tree_edit_has_no_effect(tmp_path, data_root):
-    """A base added only in the clone's working tree is refused unsent; the merged base still
-    works. O2, C28."""
+    """A base added only in a working copy on the host (#1618 K8: the old clone's place, `<T>/knowledge`) is refused
+    unsent; the merged base still works. O2, C28."""
     with H.upstream() as wt_up, T.rig(tmp_path / "forge", data_root) as r:
-        (Path(r.t.clone) / ACCESS).write_text(
-            H.declaration(wt_up.url + T.BASE_PATH), encoding="utf-8")
+        _working_copy(r.t, wt_up.url)
         refused = r.ask(url=f"{wt_up.url}{T.BASE_PATH}/users/x")
         control = r.ask()
 
@@ -79,28 +75,38 @@ def test_d2_a_working_tree_edit_has_no_effect(tmp_path, data_root):
     assert (control["fault"], r.up.paths()) == (None, ["/api/v2/users/x"])
 
 
-def _unmerged_export(t, wt_up_url: str) -> str:
-    """Commit a declaration for `wt_up_url` on a side branch of the clone and materialise an
-    export of that commit (C33), leaving `main`, the working tree and `current` as they were."""
-    from defender.learning.author import version_control
+def _working_copy(t, wt_up_url: str) -> Path:
+    """The tenant's halves as its seed holds them, with a declaration for `wt_up_url`, at the old clone's place
+    (`plant_old_clone`, #1618 K8): a working copy on the host no reader may take for the tenant's knowledge."""
+    files = {p.relative_to(t.checkout).as_posix(): p.read_bytes()
+             for half in ("agent", "settings") for p in sorted((Path(t.checkout) / half).rglob("*")) if p.is_file()}
+    files[ACCESS] = H.declaration(wt_up_url + T.BASE_PATH)
+    return plant_old_clone(t, files)
 
-    git(t.clone, "checkout", "-q", "-b", "unmerged-proposal")
-    (Path(t.clone) / ACCESS).write_text(H.declaration(wt_up_url + T.BASE_PATH), encoding="utf-8")
-    git(t.clone, "commit", "-q", "-am", "unmerged declaration")
-    commit = git(t.clone, "rev-parse", "HEAD")
-    git(t.clone, "checkout", "-q", "main")
-    version_control.materialise_export(t.tenant, commit)
+
+def _unmerged_export(t, wt_up_url: str) -> str:
+    """Commit a declaration for `wt_up_url` on a side branch of the tenant's Forgejo repository (C33; #1618: an export
+    of it can no longer be materialised, the commit itself is what a pinned reader could fetch), leaving `main` as it
+    was."""
+    work = Path(t.checkout)
+    git(work, "fetch", "-q", t.remote, "refs/heads/main")
+    git(work, "checkout", "-q", "-b", "unmerged-proposal", "FETCH_HEAD")
+    (work / ACCESS).write_text(H.declaration(wt_up_url + T.BASE_PATH), encoding="utf-8")
+    git(work, "commit", "-q", "-am", "unmerged declaration")
+    commit = git(work, "rev-parse", "HEAD")
+    git(work, "push", "-q", t.remote, "unmerged-proposal:refs/heads/unmerged-proposal")
+    git(work, "checkout", "-q", "main")
     return commit
 
 
 def test_d2_a_declaration_only_in_an_unmerged_commits_export_has_no_effect(
         tmp_path, data_root):
-    """An export of an unmerged commit holds a declaration for another base; `current` names
-    the merged one, so that base is refused and the merged one works. O2, C33."""
+    """An unmerged commit on the tenant's repository holds a declaration for another base; `main` is the merged one,
+    so that base is refused and the merged one works. O2, C33."""
     with H.upstream() as unmerged_up, T.rig(tmp_path / "forge", data_root) as r:
         commit = _unmerged_export(r.t, unmerged_up.url)
-        assert export_dir(r.t.tenant, commit).is_dir()
-        assert current_commit(r.t.tenant) == r.t.commit
+        assert git(r.t.remote, "cat-file", "-t", commit) == "commit"
+        assert r.t.origin_main() == r.t.commit
         refused = r.ask(url=f"{unmerged_up.url}{T.BASE_PATH}/users/x")
         control = r.ask()
 
@@ -139,7 +145,7 @@ def test_d4_a_system_name_outside_the_grammar_is_refused_without_reading_beyond_
     with T.rig(tmp_path / "forge", data_root) as r:
         r.verifier = H.FakeVerifier(True)  # the forged payload's wire form is not under test
         r.rebuild()
-        settings = export_dir(r.t.tenant, r.t.commit) / "settings"
+        settings = copy_at_main(r.data_root, r.t.tenant_id) / "settings"  # what the records are derived from
         # A declaration wherever the name would resolve, so a proxy that skips the grammar
         # check finds one and reads the store: traversal targets, and the name itself when it
         # is a legal path component.
@@ -203,7 +209,6 @@ def test_d5_a_malformed_declaration_is_a_config_fault_unsent(tmp_path, data_root
     name) refuses the system. O2, A2, O7, r7 A19."""
     with T.rig(tmp_path / "forge", data_root) as r:
         r.t.merge({ACCESS: _bad_declarations(r.up.url)[kind]}, "bad declaration")
-        r.t.publish()
         refused = r.ask()
 
     assert refused["fault"] == "ConfigFault"
@@ -212,14 +217,13 @@ def test_d5_a_malformed_declaration_is_a_config_fault_unsent(tmp_path, data_root
 
 def test_d3_adapter_over_the_working_tree_reaches_nothing_the_merged_declaration_forbids(
         tmp_path, data_root):
-    """An adapter whose run record is the clone's working tree (preflight, C34) and whose base exists only
+    """An adapter whose run record is a working copy on the host (preflight, C34; #1618 K8: the old clone's place) and whose base exists only
     there is refused by the proxy, which enforces the system's CURRENT record; the run record built from
     the current records reaches the merged base. O7, A3."""
 
     with H.upstream() as wt_up, T.rig(tmp_path / "forge", data_root) as r:
-        (Path(r.t.clone) / ACCESS).write_text(
-            H.declaration(wt_up.url + T.BASE_PATH), encoding="utf-8")
-        working_tree = R.run_tenant_for(r.t.tenant, dispatches_lead_zero=False)
+        copy = _working_copy(r.t, wt_up.url)
+        working_tree = R.run_tenant_for(r.t.tenant, dispatches_lead_zero=False, settings_root=copy / "settings")
         with A.proxy_for(r.t, r.store, verifier=r.verifier, audit=r.audit) as (proxy_url, tap):
             tok = r.tok()
             with pytest.raises(ConfigFault):

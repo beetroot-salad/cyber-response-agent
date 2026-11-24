@@ -1,31 +1,23 @@
-"""The run launcher's half of the launch-time publish (#1108 P4 U7, O-BUDGET, U11, O8).
+"""The run launcher's half of the knowledge fetch (#1618 flow 1, O-BUDGET, O8).
 
-Before a run starts, its launcher spawns the publish child (a separate short-lived process: the
-run process never imports tenant delivery, P-3) and waits for its one-line report. It hands the
-child identifiers and a number only — the tenant id, the data root and the child's own budget,
-as argv — and the host children's scrubbed environment (`provider_scrubbed_environ`) with the
-database address added back (`DEFENDER_DATABASE_DSN`, #1214 DC-9: the child is a host process
-that reads its tenant's records and mints its own credential through the tenant's live
-generation; no login material passes, O8).
+Before a run starts, its launcher spawns the fetch child (a separate short-lived process: the run process never
+imports tenant delivery, P-3) and waits for its one-line report. It hands the child identifiers and a number only:
+the tenant id, the data root, the empty folder it made (`dest`), a pinned commit and the child's own budget, as argv,
+with the host children's scrubbed environment (`provider_scrubbed_environ`) and the database address added back
+(`DEFENDER_DATABASE_DSN`: the child is a host process that reads its tenant's records and mints its own credential;
+no login material passes, O8).
 
-The child holds its own deadline over its network phase, a little inside the launcher's
-`budget`, and reports (and records) running out of it itself. The launcher's wait is the
-backstop: a child still in its network phase when `budget` runs out is stopped; a child that
-has taken the tenant lock (its local phase) is never stopped, so a kill never leaves
-`index.lock` or a half-swapped `current` behind. A SIGTERM to the launcher's process while the
-child runs (teardown stopping the run) is the same request as the budget running out: it is noted,
-the child is stopped by that one rule (a child that took the lock is waited for, never signalled),
-and the signal is delivered again once the child is gone
-(#1379 r3). Whatever the child does, the launcher returns one report line of the child's
-vocabulary:
+The child holds its own deadline over its network phase, a little inside the launcher's `budget`, and reports running
+out of it itself. The launcher's wait is the backstop. A SIGTERM to the launcher's process while the child runs
+(teardown stopping the run) is the same request as the budget running out: it is noted, the child is stopped, its
+process group killed, and the signal is delivered again once the child is gone (#1379 r3). A child killed mid-fill
+leaves a half-filled folder its live caller discards. Whatever the child does, the launcher returns one report line of
+the child's vocabulary:
 
-- the child's own line, when it exited 0 having printed a valid one (OD20);
-- `stale:transient ...` when the backstop stopped it in the network phase;
-- `stale:operator publish child failed: <summary>` for a child that could not be started,
-  crashed, exited non-zero, or printed nothing valid (U11) — never fresh.
-
-Those last two the child never got to record, so the launcher records them (O-SEE) in the tenant
-records it is handed (`directory`).
+- the child's own line, when it exited 0 having printed a valid one;
+- `refused transient ...` when the backstop stopped it;
+- `refused lasting fetch child failed: <summary>` for a child that could not be started, crashed, exited non-zero, or
+  printed nothing valid, never `ok`.
 """
 from __future__ import annotations
 
@@ -38,29 +30,20 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from defender.execution import end_group, kill_group
 from defender.box import provider_scrubbed_environ
-from defender.tenancy import run_knowledge
-from defender.tenancy import knowledge_lock_holder
-from defender.tenancy import STALE_TRANSIENT, record_report
-from defender.tenancy import Tenant, data_root_from_path, database_address_variable, requested_tenant
-from defender.records.formats import TenantId, TenantRefused
-
-if TYPE_CHECKING:
-    from defender.tenancy import TenantDirectory
+from defender.tenancy import database_address_variable, run_knowledge
+from defender.records.formats import TenantId
 
 #: The real child's process entry, named (never imported: P-3).
-CHILD_MODULE = "defender.learning.author.version_control.publish_child"
+CHILD_MODULE = "defender.learning.author.version_control.fetch_child"
 #: Where the child's `-m` resolves `defender` from: this checkout's root.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 #: How far inside the launcher's budget the child's own deadline falls (at most a quarter of
 #: it), so the child reports running out itself before the backstop fires.
 _REPORT_MARGIN = 5.0
-#: Who records an outcome only the launcher sees, unless the caller names its own trigger (a readiness check's publish
-#: is recorded `readiness`, #1471): an investigation's launch.
-LAUNCH_TRIGGER = "launch-time publish"
 #: How long a child asked to stop (SIGTERM) may take to unwind before it is killed.
 _STOP_GRACE = 5.0
 #: How often the launcher looks at the child it waits for.
@@ -69,23 +52,8 @@ _POLL = 0.1
 Spawn = Callable[..., Any]
 
 
-def _tenant(tenant_id: str, data_root: Path) -> Tenant | None:
-    try:
-        return requested_tenant(data_root_from_path(Path(data_root)), tenant_id)
-    except (TenantRefused, OSError):
-        return None
-
-
-def _recorded(directory: TenantDirectory | None, tenant_id: TenantId, line: str, *, trigger: str) -> str:
-    """`line`, an outcome the child never recorded, recorded by the child's own recorder
-    (`record_report`) in the tenant records as `trigger`'s, so it reads as the child's would. With
-    no records handed in nothing is recorded."""
-    record_report(directory, tenant_id, line, by=trigger)
-    return line
-
-
 def child_environ() -> dict[str, str]:
-    """The publish child's environment: the one base scrub (no provider key, no issuer or forge
+    """The fetch child's environment: the one base scrub (no provider key, no issuer or forge
     login variable, no database address), with the database address added back when this
     process has one (#1214 DC-9: the child reads its tenant's records itself)."""
     env = provider_scrubbed_environ()
@@ -105,30 +73,26 @@ def launch_publish(
     tenant_id: TenantId,
     *,
     data_root: Path,
+    dest: Path,
+    commit: str | None = None,
     budget: float = 60.0,
     command: Sequence[str] | None = None,
     spawn: Spawn | None = None,
-    directory: TenantDirectory | None = None,
-    trigger: str = LAUNCH_TRIGGER,
+    trigger: str = "",
 ) -> str:
-    """Run the publish child for `tenant_id` under `data_root` and return its report line (module
-    doc). `command` replaces the child's argv prefix (the launcher appends `<tenant id>
-    --data-root <root> --budget <seconds> --trigger <trigger>`); `spawn` is `subprocess.Popen`'s
-    stand-in; `directory` the tenant records the launcher records the outcomes only it sees in;
-    `trigger` who asked for the publish, recorded as the outcome's `by` (#1471: `readiness` for a
-    readiness check, else an investigation's launch).
+    """Run the fetch child for `tenant_id` under `data_root`, filling the empty folder `dest` (at `commit` by id, else
+    `main`), and return its report line (module doc). `command` replaces the child's argv prefix (the launcher appends
+    `<tenant id> --data-root <root> --dest <folder> [--commit <id>] --budget <seconds> --trigger <trigger>`); `spawn` is
+    `subprocess.Popen`'s stand-in; `trigger` is who asked, for a caller that also wants main's protection checked
+    (`readiness`, `onboarding`).
 
-    The child's own report, whenever it printed one, is the outcome, however the wait ended
-    (the child recorded it). Only a child with no valid report gets the launcher's line, which
-    the launcher records. It never raises: a fault of the launcher itself (a budget that is
-    not positive among them) is U11's failed line, recorded, never a run start's to catch."""
+    It never raises: a fault of the launcher itself (a budget that is not positive among them) is a failed line."""
     with _sigterm_noted() as asked:
         try:
-            return _launch_child(tenant_id, data_root=data_root, budget=budget, command=command,
-                                 spawn=spawn, directory=directory, asked=asked, trigger=trigger)
-        except Exception as failed:  # noqa: BLE001 — U11: whatever fails here is a failed publish child, recorded
-            return _recorded(directory, tenant_id, run_knowledge.failed_line(
-                f"the launcher failed: {type(failed).__name__}: {failed}"), trigger=trigger)
+            return _launch_child(tenant_id, data_root=data_root, budget=budget, command=command, spawn=spawn,
+                                 asked=asked, trigger=trigger, dest=dest, commit=commit)
+        except Exception as failed:  # noqa: BLE001 — whatever fails here is a failed fetch child
+            return run_knowledge.failed_line(f"the launcher failed: {type(failed).__name__}: {failed}")
 
 
 @contextlib.contextmanager
@@ -151,74 +115,58 @@ def _sigterm_noted() -> Iterator[list[int]]:
 
 
 def _launch_child(  # noqa: PLR0913 — `launch_publish`'s inputs
-    tenant_id: TenantId, *, data_root: Path, budget: float, command: Sequence[str] | None,
-    spawn: Spawn | None, directory: TenantDirectory | None, asked: list[int], trigger: str,
+    tenant_id: TenantId, *, data_root: Path, budget: float, command: Sequence[str] | None, spawn: Spawn | None,
+    asked: list[int], trigger: str, dest: Path, commit: str | None,
 ) -> str:
     if not budget > 0:
-        raise ValueError(f"the launch-time publish budget must be positive, not {budget!r}")
+        raise ValueError(f"the fetch budget must be positive, not {budget!r}")
     prefix = list(command) if command is not None else [sys.executable, "-m", CHILD_MODULE]
-    argv = [*prefix, str(tenant_id), "--data-root", str(data_root),
-            "--budget", f"{child_budget(budget):g}", "--trigger", trigger]
+    argv = [*prefix, str(tenant_id), "--data-root", str(data_root), "--dest", str(dest),
+            "--budget", f"{child_budget(budget):g}", *(["--trigger", trigger] if trigger else []),
+            *(["--commit", commit] if commit else [])]
     start = spawn if spawn is not None else subprocess.Popen
     try:
         proc = start(
             argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=child_environ(), cwd=str(_REPO_ROOT), start_new_session=True)
     except (OSError, ValueError) as unstarted:
-        return _recorded(directory, tenant_id, run_knowledge.failed_line(
-            f"it could not be started: {type(unstarted).__name__}: "
-            f"{getattr(unstarted, 'strerror', None) or unstarted}"), trigger=trigger)
+        return run_knowledge.failed_line(
+            f"it could not be started: {type(unstarted).__name__}: {getattr(unstarted, 'strerror', None) or unstarted}")
     try:
-        out, err, stopped = _wait(proc, budget=budget, asked=asked,
-                                  holds_lock=lambda: _holds_lock(proc, tenant_id, data_root))
+        out, err, stopped = _wait(proc, budget=budget, asked=asked)
     finally:
-        # One publish is one process group (the child's session; its network git joins it):
-        # whatever the child left running is gone (not only signalled) once it ends, however it
-        # ended.
+        # One fetch is one process group (the child's session; its network git joins it): whatever the child left
+        # running is gone (not only signalled) once it ends, however it ended.
         end_group(proc.pid)
     line, failed = _read_report(proc.returncode, out, err)
-    if not failed:
-        return line
-    if stopped is not None:
-        # Stopped in its network phase with nothing to say (a stopped child prints nothing).
-        line = f"{STALE_TRANSIENT} the launch-time publish {stopped}"
-    return _recorded(directory, tenant_id, line, trigger=trigger)
+    if failed and stopped is not None:
+        # Stopped with nothing to say (a stopped child prints nothing).
+        return f"refused transient the fetch child {stopped}"
+    return line
 
 
-def _wait(
-    proc: Any, *, budget: float, asked: list[int], holds_lock: Callable[[], bool],
-) -> tuple[Any, Any, str | None]:
-    """Until the child itself has exited, reading its pipes meanwhile so it never blocks writing them
-    (not until they close: a grandchild in its group can hold them open, and is killed with the
-    group once the child is gone).
+def _wait(proc: Any, *, budget: float, asked: list[int]) -> tuple[Any, Any, str | None]:
+    """Until the child itself has exited, reading its pipes meanwhile so it never blocks writing them (not until they
+    close: a grandchild in its group can hold them open, and is killed with the group once the child is gone).
 
-    The one stop rule, once the budget runs out or the run is asked to stop: a child that has taken
-    the tenant lock is let finish, never signalled (O-BUDGET: its locked phase, and the report it
-    writes and prints after it); any other is asked to end (it unwinds its network calls) and, if it
-    has not ended or taken the lock within `_STOP_GRACE`, killed with its group. Returns everything
-    the child wrote, and why it was asked to end (None when it never was)."""
+    Once the budget runs out or the run is asked to stop, the child is asked to end (it unwinds its network calls)
+    and, if it has not ended within `_STOP_GRACE`, killed with its group. Returns everything the child wrote, and why
+    it was asked to end (None when it never was)."""
     deadline = time.monotonic() + budget
     told_at: float | None = None
-    settled = False  # spared or killed: nothing more to decide
+    killed = False
     stopped: str | None = None
     while (ended := _ended(proc)) is None:
         now = time.monotonic()
-        if settled:
-            continue
         if told_at is None:
-            if not (asked or now >= deadline):
-                continue
-            if holds_lock():
-                settled = True
-                continue
-            stopped = ("was stopped with its run" if asked
-                       else f"did not finish its network phase within the {budget:g}s budget")
-            proc.send_signal(signal.SIGTERM)
-            told_at = now
-        elif now >= told_at + _STOP_GRACE:
-            settled = True
-            if not holds_lock():
-                _kill(proc)
+            if asked or now >= deadline:
+                stopped = ("was stopped with its run" if asked
+                           else f"did not finish within the {budget:g}s budget")
+                proc.send_signal(signal.SIGTERM)
+                told_at = now
+        elif not killed and now >= told_at + _STOP_GRACE:
+            killed = True
+            _kill(proc)
     return ended[0], ended[1], stopped
 
 
@@ -239,16 +187,6 @@ def _kill(proc: Any) -> None:
         os.killpg(proc.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         proc.kill()
-
-
-def _holds_lock(proc: Any, tenant_id: str, data_root: Path) -> bool:
-    """Has the child taken the tenant's knowledge lock (its holder writes its pid there)? Then
-    it is past its network phase, doing local work that must not be cut off."""
-    tenant = _tenant(tenant_id, data_root)
-    try:
-        return tenant is not None and knowledge_lock_holder(tenant) == proc.pid
-    except OSError:
-        return False
 
 
 def _read_report(
@@ -276,3 +214,11 @@ def _read_report(
         return run_knowledge.failed_line(
             f"its report is not one of the publish outcomes: {line!r}"), True
     return line, False
+
+
+def default_fetch() -> run_knowledge.FetchSeam:
+    """The real fetch: a separate child process (O-BUDGET, P-3) under the launcher."""
+    def fetch(tenant_id: TenantId, dest: Path, *, data_root: Path, commit: str | None = None, **named: Any) -> object:
+        return launch_publish(tenant_id, data_root=data_root, dest=dest, commit=commit, **named)
+
+    return fetch

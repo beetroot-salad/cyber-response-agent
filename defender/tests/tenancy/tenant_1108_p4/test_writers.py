@@ -31,8 +31,6 @@ from defender.tests.support.learning.curation import _spec773 as S
 from defender.tests.tenancy.tenant_1108_delivery._support import forge_pulls, merge_on_remote
 from defender.tests.tenancy.tenant_1108_p4._support import (
     DEFENDER,
-    current_commit,
-    export_dir,
     git,
 )
 from defender.tests.tenancy.tenant_1108_p4._drain_support import (
@@ -436,20 +434,26 @@ def test_f_hardlink_the_comparison_sees_a_hard_linked_pair_and_not_a_copy(tmp_pa
 
 
 @postgres
-def test_f_hardlink_a_drafts_files_share_no_inode_with_the_export_while_the_box_runs(
+def test_f_hardlink_a_drafts_files_share_no_inode_with_any_other_file_while_the_box_runs(
         world, caplog):  # noqa: F811 — the imported fixture
-    """While the model step runs (the draft mounted writable), no file under the draft's
-    `agent/` is the export's own file (device and inode), so a write through the box never
-    reaches the export the next run copies. At least one pair is compared."""
+    """While the model step runs (the draft mounted writable), no file under the draft's `agent/` has a second name
+    anywhere (its link count is 1), and none is the tenant content's own file in the test's seed checkout of `main`
+    (device and inode), so a write through the box reaches no other copy. At least one pair is compared.
+
+    #1618 K8: there is no export (`<T>/exports/<commit>`) for the next run to copy, so the pairing is against the seed
+    checkout of the same commit; a run's copy is a fresh fetch into its own empty folder (Flow 2). The link-count rule
+    covers any other name, the old export's place included."""
     t, paths = world.t, world.paths
     queue(paths, [S.finding_row("f1", run_id="f1")])
     seen: list[tuple[str, list[str], list[str]]] = []
 
     def during_run(*_a: Any) -> None:
-        export = export_dir(t.tenant, current_commit(t.tenant)) / "agent"
+        seed = t.checkout / "agent"
         for agent in sorted(p for p in drafts_dir(t).rglob("agent")
                             if p.is_dir() and not p.is_symlink()):
-            seen.append((str(agent), _paired(agent, export), _shared_inodes(agent, export)))
+            named_twice = sorted(f.relative_to(agent).as_posix() for f in agent.rglob("*")
+                                 if f.is_file() and not f.is_symlink() and f.lstat().st_nlink > 1)
+            seen.append((str(agent), _paired(agent, seed), _shared_inodes(agent, seed) + named_twice))
 
     curator = S.FakeCurator(writes={"p4-inode.md": S.lesson("f1")}, also=during_run)
 

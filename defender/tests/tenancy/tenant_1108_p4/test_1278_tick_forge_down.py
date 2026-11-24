@@ -22,6 +22,7 @@ from defender.tests.tenancy.tenant_1108_p4._drain_support import (
 )
 from defender.tests.tenancy.tenant_1108_p4.test_1278_tick import (
     _batches,
+    _opened,
     _seed,
     _stranded,
     _tick,
@@ -96,3 +97,25 @@ def test_o5_repeated_refusals_on_a_takeover_send_the_batch_to_a_person_at_the_ce
     assert _asked(w.t.forge, "POST", "/pulls") == []
     assert _work(w)[("finding", "f1")].status == "in_batch", "the item is not lost"
     assert [r for r in w.t.forge.prs if r["state"] == "open"] == []
+
+
+@pytest.mark.parametrize(("status", "counted"), [(403, True), (503, False)])
+def test_d11_a_lasting_refusal_at_the_reconcile_counts_toward_the_person_ceiling_and_a_transient_one_does_not(world, caplog, status, counted):  # noqa: F811 — the imported fixture
+    """The forge refusing the bot (403, lasting) on a batch in review counts one refusal a tick and parks it at three; refusing with 503
+    (transient) counts none and parks nothing, the items kept either way. (D11, K9)"""
+    w = world
+    writer = LessonWriter({LESSON_NAME: lesson_citing("f1")})
+    _seed(w, "f1")
+    batch_id, _branch, _pr = _opened(w, writer, caplog)
+    assert (_batches(w)[batch_id].phase, _batches(w)[batch_id].refusals) == ("in_review", 0), "control: in review, nothing counted"
+    w.t.forge.refuse("", status)
+    w.t.forge.requests.clear()
+    seen = []
+    for _ in range(3):
+        _tick(w, writer)
+        seen.append((_batches(w)[batch_id].phase, _batches(w)[batch_id].refusals))
+
+    assert w.t.forge.requests, "the tick never asked the forge, so the refusal was not what it met"
+    expected = [("in_review", 1), ("in_review", 2), ("needs_person", 3)] if counted else [("in_review", 0)] * 3
+    assert seen == expected, seen
+    assert _work(w)[("finding", "f1")].status == "in_batch", "the item is not lost"

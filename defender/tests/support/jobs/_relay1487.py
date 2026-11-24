@@ -164,7 +164,12 @@ class PostStepHelper:
         self.scene = scene
         argv = scene.argv("post-step", None)
         argv[-1] = "@worker"
-        self._process = J.ProcessHelper(scene, root / f"helper-{PostStepHelper._count}", argv, worker=True)
+        from defender.tests.tenancy.tenant_1108_p4._support import issuer_token
+
+        # #1618 B12: the post-step's `forge.token` and `batch.start` (its own delivery) need the tenant's forge credential;
+        # the scene's is the token its git listener accepts (the generation's host secret file is not written)
+        self._process = J.ProcessHelper(scene, root / f"helper-{PostStepHelper._count}", argv, worker=True,
+                                        forge_token=issuer_token(scene.tenant))
         try:
             self._process.container_pid(timeout=60)
             (record,) = self._process.records().values()

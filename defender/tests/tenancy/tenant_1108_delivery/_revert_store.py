@@ -14,7 +14,7 @@ import pytest
 from defender.tests.support.learning.core._store1278 import ONE, finding
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture the store needs
 
-from ._support import LANES, ForgeHTTP, delivery, merge_on_remote
+from ._support import LANES
 
 OWNER = "revert-test"
 
@@ -63,29 +63,3 @@ def reviewed(store, held, result):
     """The batch's PR is open: the store has it in review, as the tick leaves it."""
     store.in_review(held, int(result.url.rstrip("/").rsplit("/", 1)[-1]), {})
 
-
-def wrote(repo, tmp_path, store, name, commits, *, style="merge", merge=True):
-    """A lesson the commit-maker wrote, as the author tick writes one: a claimed author batch whose `commits`
-    (a list of `{path: bytes or None}`, `None` deleting the file) are made by the batch's commit-maker, each
-    recorded, then delivered as a PR and (`merge`) merged by a person in `style`, the batch then ended merged.
-    Unmerged, the batch stays in review. Returns the batch id."""
-    d = delivery(repo, ForgeHTTP())
-    batch, held = claimed_batch(repo, store, d, name)
-    for files in commits:
-        for path, content in files.items():
-            file = batch.draft_root / path
-            if content is None:
-                file.unlink()
-            else:
-                file.parent.mkdir(parents=True, exist_ok=True)
-                file.write_bytes(content)
-        batch.commit(batch.change_set(), f"learning {name}")
-        batch.reset()
-    result = d.finish(batch)
-    assert result.status == "opened", result
-    reviewed(store, held, result)
-    if merge:
-        merge_on_remote(repo, tmp_path, batch.branch, style)
-        store.end_review(str(repo[0].id), str(held.batch_id), expect_phase="in_review", outcome="merged",
-                         published=[], held=[])
-    return str(held.batch_id)

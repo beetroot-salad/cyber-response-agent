@@ -171,30 +171,40 @@ def leftovers(root: Path, *, trace: bytes, worktree: bytes) -> None:
 # -- git and forge state of a published tenant `t` (tests/tenancy/tenant_1108_p4/_support.PublishedTenant) -----
 
 
+def _synced_checkout(t: Any) -> Path:
+    """`t`'s seed checkout (the test's own copy, outside the data root: #1618 K8, there is no host clone) with its
+    `main` ref moved to the origin's, so a commit planted on it builds on what Forgejo holds."""
+    from defender.tests.tenancy.tenant_1108_p4._support import git
+
+    git(t.checkout, "fetch", "-q", t.remote, "refs/heads/main")
+    git(t.checkout, "update-ref", "refs/heads/main", "FETCH_HEAD")
+    return Path(t.checkout)
+
+
 def land_on_main(t: Any, files: dict[str, str]) -> str:
-    """A merged change: `files` (repo-relative path -> text) committed on `main` of the clone and the origin.
-    Returns the new `main`."""
+    """A merged change: `files` (repo-relative path -> text) committed on `main` of the origin (planted through the
+    seed checkout). Returns the new `main`."""
     from defender.tests.tenancy.tenant_1108_delivery._support import plant_raw_commit
     from defender.tests.tenancy.tenant_1108_p4._support import git
 
-    tip = ""
+    checkout, tip = _synced_checkout(t), ""
     for path, text in files.items():
-        tip = plant_raw_commit(t.clone, "refs/heads/main", path, text.encode("utf-8"))
-    git(t.clone, "push", "-q", t.remote, "refs/heads/main:refs/heads/main")
+        tip = plant_raw_commit(checkout, "refs/heads/main", path, text.encode("utf-8"))
+    git(checkout, "push", "-q", t.remote, "refs/heads/main:refs/heads/main")
     return tip
 
 
 def local_branch(t: Any, branch: str, files: dict[str, str], *, push: bool = False) -> str:
-    """`branch` (a ref in the clone) one commit past `main` writing `files`; pushed to the origin when `push`.
-    Returns its tip."""
+    """`branch` (a ref in the seed checkout) one commit past the origin's `main` writing `files`; pushed to the origin
+    when `push`. Returns its tip."""
     from defender.tests.tenancy.tenant_1108_delivery._support import plant_raw_commit
     from defender.tests.tenancy.tenant_1108_p4._support import git
 
-    ref, tip = f"refs/heads/{branch}", ""
+    checkout, ref, tip = _synced_checkout(t), f"refs/heads/{branch}", ""
     for path, text in files.items():
-        tip = plant_raw_commit(t.clone, ref, path, text.encode("utf-8"), base="refs/heads/main")
+        tip = plant_raw_commit(checkout, ref, path, text.encode("utf-8"), base="refs/heads/main")
     if push:
-        git(t.clone, "push", "-q", t.remote, f"{ref}:{ref}")
+        git(checkout, "push", "-q", t.remote, f"{ref}:{ref}")
     return tip
 
 

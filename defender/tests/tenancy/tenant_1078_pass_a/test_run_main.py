@@ -144,12 +144,19 @@ def test_o5_resume_without_tenant_refused(tmp_path, data_root, capsys):
     assert got["tenant"].id == recorded
 
 
-def test_launch_whose_source_tenant_folder_disappears_before_the_siblings_start(tmp_path, data_root):
+def test_launch_whose_source_tenant_folder_stops_passing_acceptance_before_the_siblings_start(tmp_path, data_root):
+    """Each sibling accepts its tenant again: a `<T>` that stopped passing acceptance after the launch (here moved away
+    and linked back, so the episode is still reachable through it) refuses every sibling with acceptance's own words.
+    (#1618 K8: acceptance judges `<T>` alone, so the change is to `<T>`; it removed `<T>/knowledge` while acceptance
+    required the clone.)"""
     src, manifest = _sibling(data_root, fixture_uuid("tenant:acme"))
     # The launcher accepts the request's tenant.
     assert H.accept(data_root, fixture_uuid("tenant:acme")).id == fixture_uuid("tenant:acme"), (
         "the launcher's own acceptance must pass first")
-    shutil.rmtree(data_root / fixture_uuid("tenant:acme") / "knowledge")
+    folder = data_root / fixture_uuid("tenant:acme")
+    moved = tmp_path / "moved-tenant-folder"
+    shutil.move(folder, moved)
+    folder.symlink_to(moved, target_is_directory=True)
     owner = H.owner_refusal(H.accept, data_root, fixture_uuid("tenant:acme"))  # the tenant stays active in the directory
     for world in ("a", "b", "c"):
         said = _refused(H.sibling_argv(manifest, world, "--tenant", fixture_uuid("tenant:acme")),

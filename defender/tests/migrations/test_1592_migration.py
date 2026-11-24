@@ -57,12 +57,13 @@ def _unchanged(dsn: str) -> None:
 
 
 def test_the_revision_sits_directly_on_the_host_requests_revision_and_is_the_head():
-    """S1-19: 0027's down-revision is `0026_host_requests`, and it is the one head."""
+    """S1-19: 0027's down-revision is `0026_host_requests`, and the one head is it or descends from it (#1618's
+    `0028_drop_publish_status` follows it)."""
     from defender.migrations import head, heads
 
     assert revisions.down_of(_revision()) == PRIOR
     assert heads() == (head(),)
-    assert head() == _revision()
+    assert head() == _revision() or _revision() in revisions.ancestors(head())
 
 
 @pytest.mark.postgres
@@ -129,7 +130,9 @@ def test_canonical_wiring_and_nothing_pending_upgrades_to_head(empty_database):
         tenant = fixture_uuid(f"tenant:1592-mig-ok{n}")
         _tenant(empty_database, tenant, state, repo=_canonical(tenant))
     upgrade(empty_database)
-    assert _version(empty_database) == [(_revision(),)]
+    from defender.migrations import head
+
+    assert _version(empty_database) == [(head(),)]
 
 
 @pytest.mark.postgres

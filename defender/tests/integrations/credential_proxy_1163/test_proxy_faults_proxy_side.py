@@ -391,7 +391,7 @@ def test_f6_an_operator_config_value_of_the_wrong_type_is_a_config_fault(tmp_pat
 
 @pytest.mark.parametrize("key", [*REMOVED_CONFIG_KEYS, "bogus_key"])
 def test_a26_a_removed_or_unknown_config_key_is_a_config_fault(tmp_path, key):
-    """`tenant_keys`, `tenant_exports`, `transit_mount`, `openbao_addr` and `max_response_bytes`
+    """`tenant_keys`, `tenant_exports`, `transit_mount`, `openbao_addr` and `max_response_bytes`  # lint-stale-ref: ok — the retired #1163 proxy config key, not the removed function
     are unknown keys: an old config refuses to start, as any unknown key does. A26, r8.2; #1412:
     nothing tests a run above the one limit, so an operator cannot raise it."""
     value = {} if key.startswith("tenant_") else "x"

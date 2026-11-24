@@ -18,7 +18,7 @@ import pytest
 from defender import run as run_py
 from defender import run_common
 from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
-from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
+from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_fetch
 from defender.tests.support.sandbox._curation_store1278 import reach_store
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,
@@ -129,12 +129,12 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None, directory: An
         alert = plant_alert(arm / f"alert-{arm.name}")
         argv = [str(alert), "--tenant", str(tenant.id)]
         try:
-            # Plus the in-process launch-time publish.
+            # Plus the in-process launch-time fetch.
             given = directory(root, str(tenant.id)) if directory is not None else directory_for_argv(argv)
             outcome: Any = run_py.main(argv, directory=given, lifecycle=lifecycle,
                                        visualize=tail.visualize,
                                        enqueue=tail.enqueue,
-                                       publish=in_process_publish(),
+                                       fetch=in_process_fetch(),
                                        **({} if signer is None else {"signer": signer}))
         except Exception as exc:  # noqa: BLE001 — a raising step's propagation is observed
             outcome = exc

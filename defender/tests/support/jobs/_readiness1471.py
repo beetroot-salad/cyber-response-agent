@@ -182,11 +182,11 @@ def entry_of(scene: HelperScene, rid: str, done: Readied, *, roster: Any = None,
 
 def readiness(  # noqa: PLR0913 — one keyword per seam the helper takes
               scene: HelperScene, *, signer: Any = None, docker: ContainerStandIn | None = None, rid: str | None = None,
-              container: Callable[[Any], int] | None = None, roster: Any = None, publish: Callable[..., str] | None = None,
+              container: Callable[[Any], int] | None = None, roster: Any = None, fetch: Callable[..., str] | None = None,
               defender_dir: Path | None = None, directory: Any = None) -> Readied:
     """The helper for a readiness check of the scene's tenant (kind `readiness`, job id `rid`), its container the real
-    `readiness_main` unless `container(Container) -> rc` says otherwise. `publish` is the launch-time publish seam
-    (default: `fresh` at the published commit). `defender_dir`: the code tree the container entry reads. `directory`: the tenant records the helper is handed (`job_host.main(directory=)`),
+    `readiness_main` unless `container(Container) -> rc` says otherwise. `fetch` is the one knowledge fetch seam (#1618:
+    default the real fetch child over the scene's remote, `drive_helper`'s). `defender_dir`: the code tree the container entry reads. `directory`: the tenant records the helper is handed (`job_host.main(directory=)`),
     passed only when given. Never raises for the subject's absence: the caller reads `.result()`."""
     rid = rid or str(uuid.uuid4())
     done = Readied(scene, rid, HelperRan(), ContainerStandIn(), "")
@@ -199,7 +199,7 @@ def readiness(  # noqa: PLR0913 — one keyword per seam the helper takes
 
     stand_in.job = captured
     done.docker = stand_in
-    seams: dict[str, Any] = {} if publish is None else {"publish": publish}
+    seams: dict[str, Any] = {} if fetch is None else {"fetch": fetch}
     if directory is not None:
         seams["directory"] = directory
     err = io.StringIO()
@@ -294,8 +294,7 @@ def listed_runs(scene: HelperScene) -> list[str]:
     from defender import tenancy
     from defender._paths import process_defender_dir
 
-    accepted = tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=process_defender_dir(),
-                                     clone_tree=False)
+    accepted = tenancy.accept_tenant(tenancy.resolve_data_root(), scene.tenant, defender_dir=process_defender_dir())
     return [str(r) for r in accepted.runs_repository().list()]
 
 

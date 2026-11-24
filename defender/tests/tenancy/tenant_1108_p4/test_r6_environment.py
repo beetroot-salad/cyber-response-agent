@@ -1,12 +1,13 @@
 """#1108 P4: the environment scrub over every issuer-named variable the design lists (each
 narrowing was a wrong-but-green production variant), for the publish child and every other host
 child (`provider_scrubbed_environ`, `run_env`), plus the publish child's lack of model-provider
-keys."""
+keys. #1618: the publish child is now the fetch child, launched by the same `launch_publish` with its `dest`; what it is
+handed is read off the launcher's spawn seam."""
 from __future__ import annotations
 
 import pytest
 
-from defender.tests.tenancy.tenant_1108_p4.test_publish_child import _RecordingSpawn
+from defender.tests.tenancy.knowledge_1618._spawn_1618 import RecordingSpawn as _RecordingSpawn
 
 #: Names that could carry issuer or forge login material (the design's list: BAO/Vault/OpenBao,
 #: ISSUER, AppRole, role_id, secret_id, a forge token), as bare names and embedded in others.
@@ -30,7 +31,7 @@ def test_r6_the_publish_child_gets_none_of_the_issuer_named_variables(planted, t
     from defender.investigation import publish_launch
 
     spawn = _RecordingSpawn()
-    publish_launch.launch_publish("some-tenant", data_root=tmp_path, budget=5.0, spawn=spawn)
+    publish_launch.launch_publish("some-tenant", data_root=tmp_path, dest=tmp_path / "dest", budget=5.0, spawn=spawn)
     (_argv, env), = spawn.calls
     assert env.get("R6_ORDINARY") == "ordinary", "control: the env channel is read"
     leaked = sorted(name for name in planted if name in env)
@@ -57,6 +58,6 @@ def test_r6_the_publish_child_gets_no_model_provider_key(monkeypatch, tmp_path, 
 
     monkeypatch.setenv(name, "r6-model-provider-key")
     spawn = _RecordingSpawn()
-    publish_launch.launch_publish("some-tenant", data_root=tmp_path, budget=5.0, spawn=spawn)
+    publish_launch.launch_publish("some-tenant", data_root=tmp_path, dest=tmp_path / "dest", budget=5.0, spawn=spawn)
     (_argv, env), = spawn.calls
     assert name not in env, f"the publish child was handed {name}"

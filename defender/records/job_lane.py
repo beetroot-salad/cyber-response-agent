@@ -382,7 +382,7 @@ def unreadable_findings() -> dict[str, Any]:
 REFUSED, READY, FAILED = "refused", "ready", "failed"
 #: A readiness refusal's steps (surface §5): P-1's sequence (`runs_folder` is machinery, never a step: R13-1.1), then
 #: the container's tenant step and its systems step.
-READINESS_STEPS = ("tenant", "records", "alert_mapping", "publish", "knowledge_copy", "run_tenant", "roster",
+READINESS_STEPS = ("tenant", "records", "alert_mapping", "publish", "run_tenant", "roster",
                    "tenant_verdict", "signing", "first_pass", "container_tenant", "systems")
 #: The steps after `publish`: a refusal there carries the knowledge record's status, as `ready` does (R3, R13-1.5).
 READINESS_STEPS_WITH_KNOWLEDGE = frozenset(READINESS_STEPS[READINESS_STEPS.index("publish") + 1:])
@@ -828,8 +828,8 @@ class JobLane:
 
     def knowledge(self, run_id: object) -> dict[str, str | None] | None:
         """The run's knowledge in the API's shape (`api_knowledge`): `None` when the run never
-        started; otherwise its host record, read no-follow — missing or unreadable is stale,
-        operator kind, no commit."""
+        started; otherwise its host record, read no-follow — missing or unreadable is
+        unreadable, no commit."""
         run_id = _run_id(run_id)
         if not self.run_started(run_id):
             return None
@@ -839,7 +839,7 @@ class JobLane:
     @staticmethod
     def unreadable_knowledge() -> dict[str, str | None] | None:
         """A started run's knowledge when its record cannot be read (OD22'), in the API's shape:
-        stale, operator kind, no commit. What `knowledge` gives for a missing or garbled record, and
+        unreadable, no commit. What `knowledge` gives for a missing or garbled record, and
         what the worker records when the read itself faults (#1396)."""
         return api_knowledge(UNREADABLE)
 

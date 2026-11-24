@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 HERE = Path(__file__).resolve()
 REPO_ROOT = HERE.parents[3]
@@ -28,20 +28,12 @@ if TYPE_CHECKING:
     from defender.tenancy import Tenant, TenantDirectory
 
 
-def build(tenant: Tenant) -> int:
+def build(tenant: Tenant, agent_root: Path) -> int:
     """Both pages and their contracts, published into the accepted tenant's learning area (#1279
     O1). Refuses before building when there is nowhere to publish: outside `dev` (O4), or a
     `dev` deployment with no publish folder set (A11). The lessons page shows the tenant's
-    published knowledge; with nothing published it shows no lesson (and says why), and the queue
-    page is built all the same."""
-    from defender.tenancy import DeliveryRefused
-
+    knowledge at `agent_root` (a copy of its `main`, #1618 F4)."""
     publisher = Publisher.for_tenant(tenant)
-    agent_root = None
-    try:
-        agent_root = serialize.published_agent_root(tenant)
-    except DeliveryRefused as refused:
-        print(f"note: no published knowledge to show lessons from: {refused}", file=sys.stderr)
     queues = serialize_queues.stamped_view(LoopPaths.for_tenant(tenant))
     view = serialize.stamped_view(agent_root)
 
@@ -60,16 +52,18 @@ def build(tenant: Tenant) -> int:
     return 0
 
 
-def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
+def main(argv: list[str], *, directory: TenantDirectory | None = None, fetch: Any = None) -> int:
     """`lessons_page.py --tenant T`: the tenant through the one host acceptance (r10 A1), held
-    while both pages are built and published (`build`). `directory` is the tenant records a test
-    hands in; a production process passes none and reads them from `DEFENDER_DATABASE_DSN`. A
-    refusal is one stderr line and exit 2, before anything is built."""
+    while both pages are built and published (`build`) over a copy of its `main` (made by the
+    fetch child, `fetch` when a test hands one in, removed after). `directory` is the tenant records
+    a test hands in; a production process passes none and reads them from `DEFENDER_DATABASE_DSN`. A
+    refusal, a knowledge fetch's too, is one stderr line and exit 2, before anything is built."""
     import argparse
 
-    from defender import tenancy
+    from defender import run_common, tenancy
     from defender.records.formats import TenantRefused
     from defender.systems.run_tenant import host_tenant
+    from defender.tenancy import run_knowledge
 
     parser = argparse.ArgumentParser(description="Build this tenant's learning queue pages")
     parser.add_argument("--tenant", required=True)
@@ -81,8 +75,9 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
         return 2
     with admitted:
         try:
-            return build(admitted.tenant)
-        except NoPublishRoot as refused:
+            with run_common.temporary_copy(admitted.tenant.id, data_root=tenancy.resolve_data_root(), fetch=fetch) as copy:
+                return build(admitted.tenant, copy / "agent")
+        except (NoPublishRoot, run_knowledge.KnowledgeRefused) as refused:
             print(f"{parser.prog}: {refused}", file=sys.stderr)
             return 2
 

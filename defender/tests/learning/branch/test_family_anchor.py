@@ -16,6 +16,7 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
 
 
 @pytest.fixture(autouse=True)
@@ -90,7 +91,7 @@ class Launch:
             spawn=self.spawn, questioner=self.questioner, judge=self.judge,
             preflight=lambda model, **_kw: self.roles.append(model) or 0,
             live_tree=self.live_tree, roster=self.estate.roster(), oracle=self.oracle.model,
-            verifier=self.verifier.model,
+            verifier=self.verifier.model, fetch=in_process_fetch(),  # #1618 flow 4: the launch's one fetch
             directory=self.estate.launch_directory(self.src.parent.parent.name))
         return self.rc
 
@@ -384,16 +385,18 @@ def test_976_the_override_waives_dirt_on_both_sides_and_the_family_is_accepted(t
 # (the verify tier judging the source's own dirt: retired into test_1344_family_check)
 
 
-def test_976_two_problems_are_reported_at_once_before_anything_is_spent(tmp_path):
-    """A dirty live tree and a pre-#1204 source are both named in one refusal that offers the flag; the flag waives both."""
-    launch = _prepare(tmp_path, live_tree=T.source_capture(dirty=True))
-    _restamp(launch.src, knowledge=T.NO_KNOWLEDGE_KEY)
-    message = _refused_before_spending(launch)
-    _waivable(message, "live tree", "not certified clean", "records no tenant knowledge")
-
-    waived = _prepare(tmp_path, live_tree=T.source_capture(dirty=True))
-    _restamp(waived.src, knowledge=T.NO_KNOWLEDGE_KEY)
-    assert _accepted(waived, "--allow-dirty")["allow_dirty"] is True
+def test_1618_a_dirty_live_tree_beside_a_source_naming_no_knowledge_is_refused_for_the_pin_the_flag_cannot_reach(tmp_path):
+    """A dirty live tree and a pre-#1204 source (no host knowledge record, a stamp naming no knowledge): refused before
+    anything is spent for the pin the source cannot give, with and without the flag that waives the dirt. Was #976's "two
+    problems at once, the flag waives both": the second was waivable only by the fallback to the tenant's `current`, which
+    #1618 retires (K8) and does not replace with `main` (r5.1-b; the launch-side case is
+    `tenant_1108_p4/test_branch_replay.py::test_1618_r51b_...`)."""
+    for argv in ((), ("--allow-dirty",)):
+        launch = _prepare(tmp_path, live_tree=T.source_capture(dirty=True))
+        _restamp(launch.src, knowledge=T.NO_KNOWLEDGE_KEY)
+        message = _refused_before_spending(launch, *argv)
+        assert "no knowledge commit to pin its siblings to" in message, (argv, message)
+        assert "not waived by --allow-dirty" in message, (argv, message)
 
 
 def test_976_unwaivable_faults_are_listed_first_and_the_flag_is_offered_only_for_dirt_alone(

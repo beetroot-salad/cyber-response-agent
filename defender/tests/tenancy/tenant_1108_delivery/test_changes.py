@@ -15,9 +15,9 @@ import pytest
 
 
 from ._support import (
+    deliver,
     LANES,
     ForgeHTTP,
-    LockHolder,
     agent_blobs,
     batch_base,
     bounded,
@@ -79,9 +79,9 @@ def test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_fil
                for c in change_set)
 
     sha = batch.commit(change_set, "claim one")
-    clone = repo[0].knowledge
+    clone = batch.repository.path  # #1618 K8: the batch's branch is in its delivery's private repository
     assert branch_tip(clone, batch.branch) == sha
-    assert git(clone, "rev-parse", f"{sha}^") == batch.export.commit
+    assert git(clone, "rev-parse", f"{sha}^") == batch.base_commit
     assert _name_status(clone, sha) == {"agent/lessons/seed.md": "M", "agent/lessons/merged.md": "D",
                                         "agent/lessons/tool.md": "M", "agent/lessons/deep/new.md": "A",
                                         "agent/lessons/new.md": "A"}
@@ -107,7 +107,7 @@ def test_an_existing_lesson_rewritten_lf_to_crlf_with_the_same_text_is_a_change_
     change_set = batch.change_set()
     assert _changes(change_set) == {rel: crlf}, "an LF-to-CRLF rewrite is not a change of its bytes"
     sha = batch.commit(change_set, "crlf only")
-    clone = repo[0].knowledge
+    clone = batch.repository.path  # #1618 K8: the batch's branch is in its delivery's private repository
     assert _name_status(clone, sha) == {rel: "M"}
     assert git_bytes(clone, "cat-file", "blob", f"{sha}:{rel}") == crlf
 
@@ -130,10 +130,10 @@ def test_the_commit_maker_stores_the_boxs_bytes_whatever_mains_attributes_say(re
     """The commit-maker stores each changed file's bytes exactly as the box wrote them."""
     attributes, driver = _BYTE_CHANGERS[changer]
     push_to_remote(repo, tmp_path, lambda c: _write(c / ".gitattributes", attributes))
-    clone = repo[0].knowledge
+    batch = delivery(repo, ForgeHTTP()).start_batch("bytes", lanes=LANES)
+    clone = batch.repository.path  # #1618 K8: the batch's branch is in its delivery's private repository
     if driver is not None:
         git(clone, "config", "filter.p3upper.clean", driver)
-    batch = delivery(repo, ForgeHTTP()).start_batch("bytes", lanes=LANES)
     data = b"Line One\r\n$Id: 0123456789abcdef $\r\nlower case, mixed endings\n"
     (batch.draft_root / "agent/lessons/exact.md").write_bytes(data)
     sha = batch.commit(batch.change_set(), "exact bytes")
@@ -149,10 +149,10 @@ def test_claim_after_claim_the_box_sees_exactly_the_committed_bytes(repo, tmp_pa
         (checkout / "agent/lessons/human.md").write_bytes(b"a human's lesson\n")
     push_to_remote(repo, tmp_path, human)
     batch = delivery(repo, ForgeHTTP()).start_batch("crlf", lanes=LANES)
-    # Precondition: a checkout here converts (the clone's own checkout of the new lesson).
-    assert (repo[0].agent / "lessons/human.md").read_bytes() == b"a human's lesson\r\n"
-    agent, clone = batch.draft_root / "agent", repo[0].knowledge
-    assert files_under(agent) == agent_blobs(clone, batch.export.commit) == files_under(batch.export.path / "agent")
+    # (#1618 K8: no host clone or export exists, so the old precondition on a converting checkout and the export's
+    # third copy go; the draft is git's committed bytes at the base, which is the claim.)
+    agent, clone = batch.draft_root / "agent", batch.repository.path
+    assert files_under(agent) == agent_blobs(clone, batch.base_commit)
 
     claim1 = {"agent/lessons/seed.md": b"seed, revised by the box\n",
               "agent/lessons/new.md": b"$Id$\nwritten by the box with LF\n"}
@@ -186,8 +186,8 @@ def test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole(
             for rel, text in _REFUSED_BASE[entry].items():
                 _write(checkout / rel, text)
         push_to_remote(repo, tmp_path, base)
-    clone = repo[0].knowledge
     batch = delivery(repo, ForgeHTTP()).start_batch("inert", lanes=LANES)
+    clone = batch.repository.path  # #1618 K8: the batch's branch is in its delivery's private repository
     agent = batch.draft_root / "agent"
     lane = agent / "lessons"
     outside = tmp_path / "host-folder"
@@ -229,7 +229,7 @@ def test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole(
 @pytest.mark.parametrize("plant", [_gitdir_file, _nested_repository], ids=["gitdir-file", "repository"])
 def test_git_metadata_in_a_lane_never_becomes_a_commit(repo, plant):
     batch = delivery(repo, ForgeHTTP()).start_batch("nested", lanes=LANES)
-    clone = repo[0].knowledge
+    clone = batch.repository.path  # #1618 K8: the batch's branch is in its delivery's private repository
     lane = batch.draft_root / "agent/lessons"
     _write(lane / "valid.md", "a valid change beside it\n")
     plant(lane, clone)
@@ -246,8 +246,8 @@ def test_the_commit_maker_takes_nothing_but_a_change_set(repo, shape):
     """The commit-maker's sole input is a `ChangeSet`; anything else, however close in shape,
     is refused before any branch moves. A real `ChangeSet` commits (control)."""
     mod = target()
-    clone = repo[0].knowledge
     batch = delivery(repo, ForgeHTTP()).start_batch("only", lanes=LANES)
+    clone = batch.repository.path  # #1618 K8: the batch's branch is in its delivery's private repository
     change = mod.AgentChange("agent/lessons/x.md", b"x\n")
     not_a_change_set = {"list-of-changes": [change], "tuple-of-changes": (change,),
                         "bare-change": change, "path-list": ["agent/lessons/x.md"],
@@ -262,8 +262,8 @@ def test_the_commit_maker_takes_nothing_but_a_change_set(repo, shape):
 
 
 def test_a_change_set_cannot_change_once_built(repo):
-    clone = repo[0].knowledge
     batch = delivery(repo, ForgeHTTP()).start_batch("frozen", lanes=LANES)
+    clone = batch.repository.path  # #1618 K8: the batch's branch is in its delivery's private repository
     _write(batch.draft_root / "agent/lessons/ok.md", "ok\n")
     built = batch.change_set()
     [change] = list(built)
@@ -301,8 +301,8 @@ def test_a_change_set_cannot_change_once_built(repo):
 ])
 def test_no_change_set_commits_outside_the_lanes_or_touches_a_forbidden_name(repo, path, content):
     mod = target()
-    clone = repo[0].knowledge
     batch = delivery(repo, ForgeHTTP()).start_batch("bounded", lanes=LANES)
+    clone = batch.repository.path  # #1618 K8: the batch's branch is in its delivery's private repository
     state = _clone_state(clone)
     with pytest.raises((mod.DeliveryRefused, ValueError, TypeError)):
         batch.commit(mod.ChangeSet((mod.AgentChange("agent/lessons/ok.md", b"ok\n"),
@@ -316,7 +316,7 @@ def test_claims_commit_and_reset_one_after_another_within_one_batch(repo):
     d = delivery(repo, http)
     batch = d.start_batch("loop", lanes=LANES)
     lane = batch.draft_root / "agent/lessons"
-    clone = repo[0].knowledge
+    clone = batch.repository.path  # #1618 K8: the batch's branch is in its delivery's private repository
     shas = []
 
     _write(lane / "a.md", "a, first\n")
@@ -339,14 +339,14 @@ def test_claims_commit_and_reset_one_after_another_within_one_batch(repo):
     _write(lane / "b.md", "b\n")
     shas.append(batch.commit(batch.change_set(), "claim 4"))
 
-    assert [git(clone, "rev-parse", f"{sha}^") for sha in shas] == [batch.export.commit, *shas[:2]]
+    assert [git(clone, "rev-parse", f"{sha}^") for sha in shas] == [batch.base_commit, *shas[:2]]
     assert [_name_status(clone, sha) for sha in shas] == [
         {"agent/lessons/a.md": "A"},
         {"agent/lessons/a.md": "M", "agent/lessons/seed.md": "D"},
         {"agent/lessons/b.md": "A"}]
-    opened(d.finish(batch))
+    opened(deliver(d, batch))
     assert git(repo[1], "rev-parse", f"refs/heads/{batch.branch}") == shas[-1]
-    assert git(repo[1], "rev-parse", "main") == batch.export.commit
+    assert git(repo[1], "rev-parse", "main") == batch.base_commit
     assert [(c["base"], c["head"]) for c in http.creates] == [("main", batch.branch)]
 
 
@@ -375,7 +375,7 @@ def test_a_claim_reset_resyncs_the_draft_and_never_follows_box_links(repo, tmp_p
     for name in ("a.md", "edited.md", "fifo.md", "deep/b.md"):
         assert plain_file(lane / name, b"committed\n"), name
     assert odd_entries(batch.draft_root) == []
-    assert files_under(batch.draft_root / "agent") == agent_blobs(repo[0].knowledge, sha)
+    assert files_under(batch.draft_root / "agent") == agent_blobs(batch.repository.path, sha)
 
 
 def test_the_first_commit_makes_the_branch_and_never_takes_one_over(repo):
@@ -383,10 +383,10 @@ def test_the_first_commit_makes_the_branch_and_never_takes_one_over(repo):
     expects no branch at all: it creates it."""
     http = ForgeHTTP()
     d = delivery(repo, http)
-    clone = repo[0].knowledge
     batch = d.start_batch("taken-over", lanes=LANES)
+    clone = batch.repository.path  # #1618 K8: the batch's branch is in its delivery's private repository
     laid = plant_raw_commit(clone, f"refs/heads/{batch.branch}", "agent/lessons/raw.md",
-                            b"raw git, not the commit-maker\n", base=batch.export.commit)
+                            b"raw git, not the commit-maker\n", base=batch.base_commit)
     _write(batch.draft_root / "agent/lessons/new.md", "the first claim\n")
     with pytest.raises(target().DeliveryRefused):
         batch.commit(batch.change_set(), "the first claim")
@@ -399,21 +399,20 @@ def test_the_commit_maker_takes_no_lock_and_leaves_main_the_index_and_the_checko
         repo, tmp_path):
     """The commit-maker writes git objects and moves its own branch by compare-and-swap, with
     no lock (a lock there would fall inside a box window)."""
-    tenant = repo[0]
-    clone = tenant.knowledge
     batch = delivery(repo, ForgeHTTP()).start_batch("lockless", lanes=LANES)
+    clone = batch.repository.path  # #1618 K8: the batch's branch is in its delivery's private repository
     state = _clone_state(clone)
-    with LockHolder(tenant, tmp_path / "holder"):
-        for number in (1, 2):
-            _write(batch.draft_root / f"agent/lessons/claim-{number}.md", f"claim {number}\n")
-            (batch.draft_root / "agent/lessons/seed.md").write_bytes(f"seed, claim {number}\n".encode())
-            for step in (lambda: batch.commit(batch.change_set(), "claim"), batch.reset):
-                _, error, hung = bounded(step)
-                assert not hung, "the commit-maker waited on the tenant's lock"
-                assert error is None, error
+    # #1618 K1: no knowledge lock remains for a holder to hold; the steps are still bounded (they wait on nothing).
+    for number in (1, 2):
+        _write(batch.draft_root / f"agent/lessons/claim-{number}.md", f"claim {number}\n")
+        (batch.draft_root / "agent/lessons/seed.md").write_bytes(f"seed, claim {number}\n".encode())
+        for step in (lambda: batch.commit(batch.change_set(), "claim"), batch.reset):
+            _, error, hung = bounded(step)
+            assert not hung, "the commit-maker waited"
+            assert error is None, error
     assert _clone_state(clone) == state
     tip = branch_tip(clone, batch.branch)
-    assert git(clone, "rev-parse", f"{tip}^^") == batch.export.commit
+    assert git(clone, "rev-parse", f"{tip}^^") == batch.base_commit
     assert agent_blobs(clone, tip)["lessons/seed.md"] == b"seed, claim 2\n"
     assert files_under(batch.draft_root / "agent") == agent_blobs(clone, tip)
 
@@ -448,6 +447,6 @@ def test_every_tenant_commit_is_the_commit_maker_s_whatever_identity_the_shell_h
         monkeypatch.setenv("GIT_COMMITTER_NAME", "operator")
         monkeypatch.setenv("GIT_COMMITTER_EMAIL", "operator@example.invalid")
     commit = batch.commit(change_set, "a claim")
-    who = git(repo[0].knowledge, "log", "-1", "--format=%an%x00%ae%x00%cn%x00%ce", commit).split("\x00")
+    who = git(batch.repository.path, "log", "-1", "--format=%an%x00%ae%x00%cn%x00%ce", commit).split("\x00")
     assert who == [COMMIT_IDENTITY["GIT_AUTHOR_NAME"], COMMIT_IDENTITY["GIT_AUTHOR_EMAIL"],
                    COMMIT_IDENTITY["GIT_COMMITTER_NAME"], COMMIT_IDENTITY["GIT_COMMITTER_EMAIL"]], who

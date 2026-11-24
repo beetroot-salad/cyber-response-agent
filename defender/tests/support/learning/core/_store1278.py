@@ -342,7 +342,9 @@ def world(p4_tenant, migrated_database, monkeypatch, tmp_path):  # noqa: F811 â€
 
     t = p4_tenant
     bind_forge(t)
-    register_tenant(migrated_database, t.tenant_id)
+    # the database's forge wiring names the tenant's served origin (as `helper_scene` records it, C23): a process that reads
+    # the tenant's records from the database (#1618: the post-step helper, the container's relay) reaches the same remote
+    register_tenant(migrated_database, t.tenant_id, origin=t.origin)
     monkeypatch.setenv(DSN_ENV, migrated_database)
     monkeypatch.setenv(LEASE_ENV, "600")
     monkeypatch.setenv(GRACE_ENV, "300")

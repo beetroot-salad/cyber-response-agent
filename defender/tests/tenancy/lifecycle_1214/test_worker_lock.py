@@ -75,16 +75,16 @@ class _BlockingIntegration:
         return self.inner(arguments)
 
 
-class _BlockingPublish:
-    """The first publish, held open."""
+class _BlockingFetch:
+    """The first fetch (#1618 flow 5: prepare's fetch of `main`), held open."""
 
     def __init__(self, inner: Any, inside: threading.Event, release: threading.Event) -> None:
         self.inner, self.inside, self.release = inner, inside, release
 
-    def __call__(self, tenant_id: str, **kw: Any) -> str:
+    def __call__(self, tenant_id: str, *args: Any, **kw: Any) -> str:
         self.inside.set()
         assert self.release.wait(WAIT)
-        return self.inner(tenant_id, **kw)
+        return self.inner(tenant_id, *args, **kw)
 
 
 def _config(tmp_path):
@@ -92,7 +92,7 @@ def _config(tmp_path):
 
 
 def _pass(dsn: str, kind: str, fakes: Fakes, config: Any, *, identity: Any = None, integration: Any = None,
-          publish: Any = None) -> int:
+          fetch: Any = None) -> int:
     """One `work()` pass of one actor on its own loop, repository and connection."""
     from defender.lifecycle import HostActor, ManagementService
     from defender.tenancy.postgres import PostgresTenantRepository
@@ -107,7 +107,7 @@ def _pass(dsn: str, kind: str, fakes: Fakes, config: Any, *, identity: Any = Non
                     git=fakes.git, config=config, clock=lambda: NOW)
             else:
                 actor = HostActor(repo, forge=fakes.forge.client(None), openbao_login=fakes.openbao.client(None), git=fakes.git,
-                                  publish=publish or fakes.publish, config=config, clock=lambda: NOW)
+                                  fetch=fetch or fakes.fetch, config=config, clock=lambda: NOW)
             return await actor.work()
         finally:
             await repo.close()
@@ -548,10 +548,10 @@ def test_the_host_actor_holds_the_same_lock_and_an_offboard_mid_prepare_makes_it
     t = _request_create(dsn)
     _settle(dsn, t, fakes, config, lambda row: row[2] == "prepare", identity=identity)
     inside, release = threading.Event(), threading.Event()
-    blocking = _BlockingPublish(fakes.publish, inside, release)
-    host, host_out = _in_thread(_pass, dsn, "host", fakes, config, publish=blocking)
+    blocking = _BlockingFetch(fakes.fetch, inside, release)
+    host, host_out = _in_thread(_pass, dsn, "host", fakes, config, fetch=blocking)
     try:
-        assert inside.wait(WAIT), f"the host never reached the first publish: {host_out}"
+        assert inside.wait(WAIT), f"the host never reached the first fetch: {host_out}"
         assert len(_advisory_holders(dsn)) == 1, "the host actor holds no lock for its step"
         _offboard(dsn, t)
         assert _pass(dsn, "service", fakes, config, identity=identity) == 0

@@ -33,6 +33,8 @@ from defender.tests.tenancy.lifecycle_1214._job_cases import (  # noqa: E402
     sweep_failure,
 )
 from defender.tests.tenancy.lifecycle_1214._support import REPO_WINDOW, LifecycleWorld  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._fetch_1618 import FetchWorld  # noqa: E402
+from typing import Any  # noqa: E402
 from defender.tests.support.tenancy._active1214 import CREATED  # noqa: E402
 from defender.tests.support.shared._postgres1339 import execute  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL  # noqa: E402
@@ -45,7 +47,8 @@ ITEM_KEYS = ("state", "pending_action", "step", "step_actor")
 
 @pytest.fixture
 def world(tmp_path, data_root):
-    w = LifecycleWorld(tmp_path, data_root)
+    """#1618: the host actor reads knowledge through the one fetch seam (the real child over the forge's repositories)."""
+    w = FetchWorld(tmp_path, data_root)
     yield w
     w.close()
 
@@ -64,10 +67,6 @@ def _git_push(world):
     world.host_actor = world.new_host(world.tenants, git=failing)
 
 
-def _stale_publish(world):
-    world.publish.answers.append("stale 0123abc")
-
-
 #: key -> (set up the failure, (restart step, restart actor), step named in the failure, text the failure carries)
 FAILURES = {
     "provider": (lambda w: openbao_failing(w, _role_write), ("provider", "service"), "provider", "500"),
@@ -81,7 +80,9 @@ FAILURES = {
     # DC-4: a login failing after the unwrap has spent the wrapper restarts at `wrap`, in the service.
     "install after the unwrap": (lambda w: host_openbao_failing(w, lambda r: r.url.path.endswith("/approle/login")),
                                  ("wrap", "service"), "install", "500"),
-    "prepare": (_stale_publish, ("prepare", "host"), "prepare", "stale 0123abc"),
+    # 1618 D1/D2: the `prepare` row, re-armed: the first-publish `stale` line is gone; the fault is now the fetch child's refusal
+    # (the listener rejects the first upload-pack), which prepare records and stays at.
+    "prepare": (lambda w: w.refuse_next_fetch("auth"), ("prepare", "host"), "prepare", "refused"),
 }
 
 
@@ -92,7 +93,7 @@ def _names(world, tenant) -> tuple[str, ...]:
 
 def _calls(world) -> int:
     return len(world.forge.calls) + len(world.openbao.calls) + len(world.git.calls) + len(world.integration.calls) \
-        + len(world.publish.calls)
+        + len(world.fetch.calls)
 
 
 @pytest.mark.parametrize("failing", list(FAILURES))
@@ -160,47 +161,104 @@ def test_a_spent_wrapper_found_when_install_is_taken_up_fails_loudly_and_restart
     assert world.openbao.secret_accessors(live.sign_approle) == {live.sign_secret_accessor}
 
 
-@pytest.mark.parametrize("line", ["stale 0123abc", "fresh", "error: remote refused", "fresh-ish 0123abc"])
-def test_prepare_fails_unless_the_first_publish_answers_fresh_and_a_commit(world, line):
-    """The first publish must answer `fresh <commit>`; any other line fails prepare, which records the line and
-    stays at prepare; the default answer completes it (RC-7, O1)."""
-    world.publish.answers.append(line)
+# 1618 D1/D2/D9: prepare reads the tenant's knowledge through the fetch child (no clone); the first-publish line (`fresh <commit>`), the
+# clone it needed (`_plant_clone`) and the "keeps an existing clone of the recorded repo, refuses any other" case are retired.
+
+def _fetch_calls_after_prepare(world, tenant):
+    world.drive()
+    assert world.item(tenant)["state"] == "active", world.item(tenant)
+    return world.fetch.calls
+
+
+def test_d1_prepare_makes_no_clone_and_activates_once_a_fetch_of_main_validates(world):
+    """Prepare fetches `main` into an empty folder it made, discards it, and the tenant goes active with no clone, no `exports` and no
+    `current` under `<T>`; the runs folder is still made. (D1, F5, K8)"""
+    tenant = world.create()
+    calls = _fetch_calls_after_prepare(world, tenant)
+    [call] = calls
+    assert (call["tenant"], call["data_root"], call["was_empty_dir"]) == (tenant, world.data_root, True)
+    assert call["commit"] is None, "prepare read a pinned commit, not main"
+    assert call["line"].startswith("ok "), call
+    assert not call["dest"].exists(), "the temporary copy was kept"
+    folder = world.data_root / tenant
+    assert sorted(p.name for p in folder.iterdir() if p.name != "runs") == [], sorted(p.name for p in folder.iterdir())
+    assert (folder / "runs").is_dir(), "control: prepare still made the tenant's host folder"
+    assert not [c for c, _env in world.git.calls if "clone" in c], "prepare cloned"
+
+
+@pytest.mark.parametrize(("how", "klass"), [("down", "transient"), ("auth", None), ("crash", None)],
+                         ids=["forge-unreachable", "listener-rejects", "child-killed-prints-nothing"])
+def test_d2_prepare_stays_at_prepare_when_the_fetch_child_refuses(world, how, klass):
+    """A refusal by the real fetch child (Forgejo's git port closed, or its listener rejecting the read) fails prepare, which
+    records the child's line and stays at prepare, the tenant `creating` and nothing left in `<T>`; after resume the
+    next fetch completes it (the same channel's control). (D2, F5, K4)"""
+    world.refuse_next_fetch(how)
     tenant = world.create()
     world.drive()
     item = world.item(tenant)
-    assert (item["state"], item["step"], item["step_actor"]) == ("creating", "prepare", "host")
-    assert item["failure"] and line in item["failure"]
-    assert len(world.publish.calls) == 1
+    assert (item["state"], item["step"], item["step_actor"]) == ("creating", "prepare", "host"), item
+    [call] = world.fetch.calls
+    if how == "crash":  # a child that died before it reported prints nothing: the caller refuses on the empty line, never on a guess
+        assert call["line"] == "", call["line"]
+    else:
+        assert call["line"].startswith("refused "), call["line"]
+    if klass is not None:
+        assert call["line"].split()[1] == klass, call["line"]
+    assert item["failure"], item
+    line = call["line"].strip()
+    if line:  # the child's line in the failure: its class and its cause (the reason's last clause), whatever else it says
+        head, cause = " ".join(line.split()[:2]), line.rsplit(": ", 1)[-1]
+        assert head in item["failure"], f"the failure does not carry the child's class: {item['failure']!r}"
+        assert cause in item["failure"], f"the failure does not carry the child's cause {cause!r}: {item['failure']!r}"
+    assert not call["dest"].exists(), "a refused prepare left its temporary copy"
+    assert not (world.data_root / tenant / "knowledge").exists()
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
     world.drive()
     assert world.item(tenant)["state"] == "active"
-    assert len(world.publish.calls) == 2
+    assert len(world.fetch.calls) == 2 and world.fetch.calls[1]["line"].startswith("ok ")
 
 
-def _plant_clone(world, tenant: str, origin: str) -> None:
-    folder = world.data_root / tenant / "knowledge"
-    folder.mkdir(parents=True)
-    for args in (["init", "-q", str(folder)], ["-C", str(folder), "remote", "add", "origin", origin]):
-        subprocess.run(["git", *args], check=True, capture_output=True)  # noqa: S603, S607
-    (folder / "keep.txt").write_text("mine")
-
-
-def test_prepare_keeps_an_existing_clone_of_the_recorded_repo_and_refuses_any_other(world):
-    """A clone whose origin is the recorded one is kept; one with another origin fails prepare and is left as it
-    was, publishing nothing (Flow 1.9, O1)."""
-    good, bad = world.create(), world.create()
-    world.drive(stop=lambda: world.item(good)["step"] == "prepare" and world.item(bad)["step"] == "prepare")
-    origin = world.call(world.tenants.forge_wiring, good).origin
-    _plant_clone(world, good, origin)
-    _plant_clone(world, bad, "http://elsewhere.test/other.git")
+def test_d2_a_prepare_refused_by_the_fetch_over_an_old_export_does_not_fall_back_to_it(world):
+    """A tenant folder still holding a pre-upgrade `exports/current` is no reason to activate when the fetch refuses: the tenant stays at
+    prepare (no stale fallback, D3). (D2, K4)"""
+    tenant = world.create()
+    world.drive(stop=lambda: world.item(tenant)["step"] == "prepare")
+    (world.data_root / tenant / "exports").mkdir(parents=True)
+    (world.data_root / tenant / "exports" / "current").write_text("0" * 40 + "\n", encoding="utf-8")
+    world.refuse_next_fetch("down")
     world.drive()
-    assert world.item(good)["state"] == "active"
-    assert (world.data_root / good / "knowledge" / "keep.txt").read_text() == "mine"
-    item = world.item(bad)
-    assert (item["state"], item["step"], item["step_actor"]) == ("creating", "prepare", "host")
-    assert item["failure"]
-    assert (world.data_root / bad / "knowledge" / "keep.txt").read_text() == "mine"
-    assert [t for t, _ in world.publish.calls] == [good]
+    assert (world.item(tenant)["state"], world.item(tenant)["step"]) == ("creating", "prepare")
+
+
+def _unprotect_main(world, tenant) -> None:
+    world.forge.repos[repo_of(tenant)]["protections"].pop("main")
+
+
+def _main_reads_after(world, mark) -> list[Any]:
+    return [c for c in world.forge.calls[mark:] if c.method == "GET" and c.path.endswith("/branches/main")
+            and world.forge.credential_of(c) == "bearer"]
+
+
+def test_d4_prepare_checks_that_main_is_protected_and_refuses_when_it_is_not(world):
+    """Prepare reads `branches/main` as the bot: with the rule gone it stays at prepare (failure naming the protection); once the rule is
+    back, resume completes and the read is seen again (the control on the same channel). (D4, D9)"""
+    tenant = world.create()
+    world.drive(stop=lambda: world.item(tenant)["step"] == "prepare")
+    full = repo_of(tenant)
+    rule = dict(world.forge.rule(full))
+    _unprotect_main(world, tenant)
+    mark = len(world.forge.calls)
+    world.drive()
+    item = world.item(tenant)
+    assert (item["state"], item["step"], item["step_actor"]) == ("creating", "prepare", "host"), item
+    assert "protect" in (item["failure"] or "").lower(), item["failure"]
+    assert _main_reads_after(world, mark), "prepare never read `main`'s protection as the bot"
+    world.forge.repos[full]["protections"]["main"] = rule
+    assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
+    mark = len(world.forge.calls)
+    world.drive()
+    assert world.item(tenant)["state"] == "active", world.item(tenant)
+    assert _main_reads_after(world, mark), "control: a protected `main` was read too"
 
 
 def _tree(path) -> list[str]:
@@ -228,7 +286,7 @@ def test_prepare_refuses_a_link_at_the_tenant_folder_and_resumes_once_removed(wo
     item = world.item(tenant)
     assert (item["state"], item["step"], item["step_actor"]) == ("creating", "prepare", "host"), item
     assert item["failure"]
-    assert world.publish.calls == []
+    assert world.fetch.calls == []
     assert link.is_symlink() and _tree(target) == before and target.exists() == (linked != "dangling tenant")
     link.unlink()
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/resume").status_code == 202
@@ -384,15 +442,17 @@ def lab(world) -> Lab:
     return Lab(world)
 
 
-def test_a_working_copy_at_the_tenant_folder_itself_is_not_its_clone(world):
-    """The tenant's clone is `<T>/knowledge`, where every entry point accepts it; a working copy at `<T>` itself is
-    not kept as the clone: prepare clones the recorded origin into `knowledge` (Flow 1.9)."""
+def test_a_working_copy_at_the_tenant_folder_itself_is_never_read_and_no_clone_is_made(world):
+    """#1618 (D1, K8; was "prepare clones the recorded origin into `knowledge`", Flow 1.9): a working copy at `<T>` itself is
+    no source of knowledge; prepare fetches the recorded repository's `main` through the fetch seam, makes no clone and no
+    `knowledge/`, and the tenant goes active."""
     lab = Lab(world, clone_in=".")
     lab.resume()
     world.drive()
-    assert world.item(LAB)["state"] == "active"
-    assert [1 for args, _e in world.git.calls[lab.git_calls:] if "clone" in args], "the working copy at <T> was kept"
-    assert (lab.folder / "knowledge" / ".git").exists()
+    assert world.item(LAB)["state"] == "active", world.item(LAB)
+    assert not [1 for args, _e in world.git.calls[lab.git_calls:] if "clone" in args], "prepare cloned"
+    assert not (lab.folder / "knowledge").exists(), "prepare made a clone folder"
+    assert [(c["tenant"], c["line"].split()[0]) for c in world.fetch.calls] == [(LAB, "ok")], world.fetch.calls
 
 
 def test_a_backfilled_row_does_nothing_until_resumed(world, lab):
@@ -405,7 +465,8 @@ def test_a_backfilled_row_does_nothing_until_resumed(world, lab):
 
 def test_the_job_keeps_the_recorded_wiring_skips_repo_and_template_and_keeps_the_clone(world, lab):
     """Resumed, the actors finish the job on the existing repo `t-<LAB>/knowledge`: wiring kept, no repo created, no
-    template push, the clone kept and not re-cloned, no `learning/` made (RC-9, Flow 1.9, O10)."""
+    template push, an old clone left as it was and nothing cloned, no `learning/` made (RC-9, Flow 1.9, O10); prepare
+    reads the recorded repository through the fetch seam (#1618 D1)."""
     lab.resume()
     world.drive()
     assert world.item(LAB)["state"] == "active"
@@ -421,7 +482,8 @@ def test_the_job_keeps_the_recorded_wiring_skips_repo_and_template_and_keeps_the
     assert "main" in world.forge.repos[LAB_REPO]["protections"]
     [made] = [c for c in world.integration.created if c["user"] == world.live(LAB).bot_login]
     assert made["repos"] == [LAB_REPO], "the integration names the recorded repo, not one derived from the id (FR-2)"
-    assert world.publish.calls == [(LAB, world.data_root)]
+    assert [(c["tenant"], c["data_root"], c["line"].split()[0]) for c in world.fetch.calls] == [
+        (LAB, world.data_root, "ok")], world.fetch.calls
 
 
 def test_the_job_leaves_one_fresh_generation_and_only_its_bot_on_the_repo(world, lab):
@@ -614,7 +676,7 @@ def test_install_fails_loudly_when_the_bot_could_push_or_merge_main_and_resumes_
     assert item["state"] == "creating" and "install" in item["failure"], item
     assert (item["step"], item["step_actor"]) == ("wrap", "service"), item  # DC-4: the check runs after the unwrap; the wrapper is spent
     assert not [g for g in world.generations(tenant) if g.status == "live"]
-    assert world.publish.calls == []
+    assert world.fetch.calls == []
     assert len(world.git.pushes()) == 1, "only the template commit may be pushed"
     assert not [1 for args, _e in world.git.calls if "--dry-run" in args]
     world.forge.repos[repo_of(tenant)]["protections"]["main"] = saved  # control: the same channel, protected again

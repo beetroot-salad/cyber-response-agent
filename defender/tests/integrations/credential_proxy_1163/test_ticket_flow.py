@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
@@ -14,7 +15,7 @@ from defender.tests.integrations.credential_proxy_1163 import _harness as H
 from defender.tests.integrations.credential_proxy_1163 import _tenant as T
 from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
-from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, export_dir, published_tenant
+from defender.tests.tenancy.tenant_1108_p4._support import DEFENDER, published_tenant
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.runtime.engine._spec767 import ticket_link_for
 
@@ -183,7 +184,7 @@ def test_t6b_a_write_the_proxy_refuses_at_call_time_is_a_refusal_not_a_transport
         store = H.FakeStore({(t.tenant_id, SYSTEM): T.static_set()})
         tok = T.token(t.tenant_id, {(SYSTEM, "rw", KEY)})
         rec, run = _run(tmp_path)
-        started = R.derive(export_dir(t.tenant, t.commit) / "settings")  # covers the comment route at the published base
+        started = R.derive(Path(t.checkout) / "settings")  # covers the comment route at the published base
         started_with = T.run_record(t, records=started)
         held = {t.tenant_id: started}  # the records the proxy reads, one lookup per call
         base = up.url + ("/moved-store" if base_moved else STORE)

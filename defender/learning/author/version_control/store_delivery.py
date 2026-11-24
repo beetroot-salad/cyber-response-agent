@@ -90,11 +90,4 @@ def tip_commits_recorded(repository: GitRepository, base: str, tip: str, mine: f
     return bool(sent) and all(commit in mine for commit in sent)
 
 
-def remote_tip(repository: GitRepository, branch: str) -> str | None:
-    """The tip of `branch` as the last fetch saw it on the origin, or `None`."""
-    ref = f"refs/remotes/origin/{branch}"
-    return repository.revision(ref) if repository.holds_ref(ref) else None
-
-
-__all__ = ["StoreRecord", "cited_in_paths", "cited_in_tree", "open_pr_on", "remote_tip",
-           "tip_commits_recorded"]
+__all__ = ["StoreRecord", "cited_in_paths", "cited_in_tree", "open_pr_on", "tip_commits_recorded"]

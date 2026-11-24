@@ -1,6 +1,7 @@
 """The operator commands and the settings loaders read the data root's copy of a tenant."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618: an entry's one knowledge fetch, in-process
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -48,9 +49,18 @@ def _policy_gather(tmp_path: Path, tenant_id: str) -> tuple[int | None, str]:
     — a `sys.exit(msg)` refusal comes back as `(None, msg)`."""
     argv = ["show", "gather", "--run-dir", str(tmp_path / "policy-run"), "--tenant", tenant_id]
     try:
-        return policy_cli.main(argv, directory=directory_for_argv(argv)), ""
+        return policy_cli.main(argv, directory=directory_for_argv(argv), fetch=in_process_fetch()), ""
     except SystemExit as refused:
         return None, H.exit_text(refused)
+
+
+def _copys_table_named(text: str, data_root: Path) -> list[str]:
+    """The `.../settings/verb-grants.yaml` paths `text` names outside the running checkout and outside the folder placed for
+    the tenant under `data_root`: a tool reads the table of its own copy of the tenant's fetched knowledge (#1618 K8: no
+    host folder is read, the placed one included), so its refusal names that copy's table."""
+    named = re.findall(r"(/\S*?/settings/verb-grants\.yaml)", text)
+    hosts = (H.KNOWLEDGE_ROOT, H.DEFENDER, Path(data_root))
+    return [p for p in named if not any(Path(p).is_relative_to(h) for h in hosts)]
 
 
 def _census_lint(repo: Path) -> Any:
@@ -71,7 +81,9 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
     # policy_cli: the data-root table decides gather's grant.
     rc, text = _policy_gather(tmp_path, tid)
     assert rc is None, "policy_cli built gather's policy from a table that grants it no query"
-    assert str(table) in text, f"policy_cli's refusal does not name the data-root table:\n{text}"
+    # #1618 K8: the table refused is the copy's of what the tenant holds (placed here, served as its main), never a
+    # host folder; restoring the tenant's table is what makes it pass (below).
+    assert _copys_table_named(text, data_root), f"policy_cli's refusal does not name its copy's table:\n{text}"
     assert str(H.KNOWLEDGE_ROOT) not in text, f"policy_cli read the checkout's knowledge/:\n{text}"
     shutil.copyfile(H.FIXTURE / "settings" / "verb-grants.yaml", table)
     rc, text = _policy_gather(tmp_path, tid)
@@ -143,7 +155,8 @@ def _launch(source: Path) -> BaseException | int:
     spawn = _SpawnRecorder()
     argv = ["--tenant", source.parent.parent.name, source.name, str(T947.BRANCH_MESSAGE_ID)]
     try:
-        return branch_entry.main(argv, directory=directory_for_argv(argv), spawn=spawn, preflight=T947.no_preflight)
+        return branch_entry.main(argv, directory=directory_for_argv(argv), spawn=spawn, preflight=T947.no_preflight,
+                                 fetch=in_process_fetch())
     except SystemExit as refused:
         return refused
     finally:
@@ -177,12 +190,12 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
 
     launched = _launch(_launcher_source(data_root))
     assert isinstance(launched, SystemExit), f"the launcher did not refuse: {launched!r}"
-    assert str(table) in H.exit_text(launched), (
+    assert _copys_table_named(H.exit_text(launched), data_root), (  # #1618 K8: its copy's table
         f"the launcher did not refuse the unloadable table naming it: {launched!r}")
 
     rc, text = _policy_gather(tmp_path, H.TID)
     assert rc is None, f"policy_cli built gather's policy over an unloadable table: {rc}"
-    assert str(table) in text, f"policy_cli did not refuse naming the table: {text!r}"
+    assert _copys_table_named(text, data_root), f"policy_cli did not refuse naming its copy's table: {text!r}"  # #1618 K8
 
 
 def _mount_specs(argv: list[str]) -> list[dict[str, str]]:
@@ -218,11 +231,11 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
         start_box=start_box, stop_box=lambda *a, **k: None, scrub=lambda tree, **kw: None)
     rec = H.RunRecorder(tmp_path / "run")
     try:
-        from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+        from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
-        # Plus the in-process launch-time publish.
+        # Plus the in-process launch-time fetch.
         argv = [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"]
-        rc = run_py.main(argv, **with_publish({**rec.seams(), "lifecycle": lifecycle}, argv))
+        rc = run_py.main(argv, **with_fetch({**rec.seams(), "lifecycle": lifecycle}, argv))
     except SystemExit as refused:
         pytest.fail(f"run.main refused a finished tenant: {H.exit_text(refused)}")
     assert rc == 0
@@ -421,11 +434,11 @@ def test_1484_an_operator_run_whose_box_start_is_refused_exits_1_in_one_line_and
         investigate=lambda **kw: investigated.append(kw) or {"output": "", "requests": 0, "truncated_by": None},
         start_box=start_box, stop_box=lambda *a, **k: None, scrub=lambda tree, **kw: None)
     rec = H.RunRecorder(tmp_path / "run")
-    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
     argv = [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"]
     capsys.readouterr()
-    assert run_py.main(argv, **with_publish({**rec.seams(), "lifecycle": lifecycle}, argv)) == 1
+    assert run_py.main(argv, **with_fetch({**rec.seams(), "lifecycle": lifecycle}, argv)) == 1
     assert not investigated
     err = capsys.readouterr().err
     assert " CRITICAL " not in err, err
@@ -467,11 +480,11 @@ def test_1469_an_operator_run_whose_box_check_does_not_pass_leaves_the_did_not_r
             raise
 
     rec = H.RunRecorder(tmp_path / "run")
-    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
     argv = [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID, "--no-learn"]
     capsys.readouterr()
-    assert run_py.main(argv, **with_publish({**rec.seams(), "lifecycle": lifecycle}, argv)) == 1
+    assert run_py.main(argv, **with_fetch({**rec.seams(), "lifecycle": lifecycle}, argv)) == 1
     assert docker.checks.runs, "premise: the refusal is the check's, which ran"
     for check in docker.checks.runs:
         assert check.folder.resolve().is_relative_to((data_root / ".box-checks").resolve()), (check.folder, data_root)

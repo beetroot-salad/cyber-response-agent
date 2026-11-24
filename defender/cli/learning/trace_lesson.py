@@ -42,7 +42,7 @@ import sys
 from collections.abc import Iterable
 from datetime import date, datetime, UTC
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
@@ -64,14 +64,6 @@ if TYPE_CHECKING:
     from defender.tenancy import Tenant, TenantDirectory
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-
-
-def published_lessons_dir(tenant: Tenant) -> Path:
-    """The lessons of the export the accepted `tenant`'s `current` names
-    (`<export>/agent/lessons`). `DeliveryRefused` when nothing is published for it."""
-    from defender.tenancy import current_export
-
-    return KnowledgePaths(current_export(tenant).path / "agent").lessons_dir
 
 
 def _echo_value(raw: object) -> str:
@@ -196,19 +188,7 @@ def _scanned_runs(tenant: Tenant) -> list[Run] | None:
         return None
 
 
-def _published_or_none(tenant: Tenant) -> Path | None:
-    """`published_lessons_dir`, or `None` with the refusal on stderr (one line)."""
-    from defender.tenancy import DeliveryRefused
-
-    try:
-        return published_lessons_dir(tenant)
-    except (TenantRefused, DeliveryRefused) as refused:
-        print(f"error: the lessons of tenant {one_line(str(tenant.id))} cannot be found: "
-              f"{one_line(str(refused))}", file=sys.stderr)
-        return None
-
-
-def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
+def main(argv: list[str], *, directory: TenantDirectory | None = None, fetch: Any = None) -> int:
     """The tracer's command line: `--tenant T` through the one host acceptance (r10 A1), held
     for the whole scan. `directory` is the tenant records a test hands in; a production process
     reads `DEFENDER_DATABASE_DSN`'s. A refusal is one stderr line and exit 1."""
@@ -238,33 +218,45 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
               file=sys.stderr)
         return 1
     with admitted:
-        return _trace(ns, admitted.tenant)
+        return _trace(ns, admitted.tenant, fetch=fetch)
 
 
-def _trace(ns: argparse.Namespace, tenant: Tenant) -> int:
-    """`main`'s work for the accepted `tenant`."""
-    lessons_dir = ns.lessons_dir
-    if lessons_dir is None:
-        lessons_dir = _published_or_none(tenant)
+def _trace(ns: argparse.Namespace, tenant: Tenant, *, fetch: Any) -> int:
+    """`main`'s work for the accepted `tenant`: without `--lessons-dir` the lessons are those of a temporary copy of
+    the tenant's `main`, which the fetch child makes and this removes on exit (#1618 F4)."""
+    import contextlib
+
+    from defender import run_common, tenancy
+    from defender.tenancy import run_knowledge
+
+    with contextlib.ExitStack() as stack:
+        lessons_dir = ns.lessons_dir
         if lessons_dir is None:
+            try:
+                copy = stack.enter_context(run_common.temporary_copy(
+                    tenant.id, data_root=tenancy.resolve_data_root(), fetch=fetch))
+            except (TenantRefused, run_knowledge.KnowledgeRefused) as refused:
+                print(f"error: the lessons of tenant {one_line(str(tenant.id))} cannot be found: "
+                      f"{one_line(str(refused))}", file=sys.stderr)
+                return 1
+            lessons_dir = KnowledgePaths(copy / "agent").lessons_dir
+
+        if not lessons_dir.is_dir():
+            print(f"no lessons dir: {lessons_dir}", file=sys.stderr)
             return 1
 
-    if not lessons_dir.is_dir():
-        print(f"no lessons dir: {lessons_dir}", file=sys.stderr)
-        return 1
+        runs = _scanned_runs(tenant)
+        if runs is None:
+            return 1
 
-    runs = _scanned_runs(tenant)
-    if runs is None:
-        return 1
+        if ns.all:
+            _print_index(lessons_dir, runs)
+            return 0
 
-    if ns.all:
-        _print_index(lessons_dir, runs)
-        return 0
-
-    if not ns.lesson_name:
-        print("give a <lesson_name> or --all", file=sys.stderr)
-        return 1
-    return _trace_one(lessons_dir, ns.lesson_name, runs)
+        if not ns.lesson_name:
+            print("give a <lesson_name> or --all", file=sys.stderr)
+            return 1
+        return _trace_one(lessons_dir, ns.lesson_name, runs)
 
 
 def _trace_one(lessons_dir: Path, lesson_name: str, runs: list[Run]) -> int:

@@ -269,14 +269,14 @@ def drive_tail(main, alert: Path, tail: SpecTail, *args: str) -> int:
 
     require_tail_seam(main)
     tenant_id = ensure_d9_tenant()
-    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv, in_process_fetch
 
-    # The in-process launch-time publish (it publishes the tenant for real), when `main` takes one.
+    # The in-process launch-time fetch (the tenant fetched for real), when `main` takes one.
     argv = [str(alert), "--tenant", tenant_id, *args]
-    publish = ({"publish": in_process_publish(), "directory": directory_for_argv(argv)}
-               if "publish" in inspect.signature(main).parameters else {})
+    fetch = ({"fetch": in_process_fetch(), "directory": directory_for_argv(argv)}
+             if "fetch" in inspect.signature(main).parameters else {})
     return main(argv, lifecycle=tail.lifecycle,
-                visualize=tail.visualize, **publish)
+                visualize=tail.visualize, **fetch)
 
 
 def plant_alert(tmp_path: Path, *, alert_bytes: bytes | None = None) -> Path:

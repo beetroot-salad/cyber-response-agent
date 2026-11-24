@@ -1,7 +1,7 @@
 """A run copy's stage for a test that starts a run box over a bare agent folder.
 
 A run box's agent folder is always a run copy's `stage/agent/` with the startup token beside it
-(`start_box` refuses one without). Production builds that stage in `run_knowledge.copy_for_run`;
+(`start_box` refuses one without). Production builds that stage in `run_knowledge.place`;
 a test that only needs some tenant's agent half in a box stages a copy here, shaped as
 `_check_stage` judges: exactly `agent/` and the token.
 """

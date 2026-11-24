@@ -1,4 +1,9 @@
-"""accept_tenant: a tenant id and its knowledge folder halves are accepted only as plain, unlinked directories under the data root."""
+"""accept_tenant: a tenant id is accepted only as a plain, unlinked directory under the data root; the knowledge folder's
+halves are plain, unlinked directories by the folder rules.
+
+#1618 K8: a tenant holds no knowledge folder, so `accept_tenant` judges `<T>` alone and a `Tenant` has no `agent`/`settings`
+half; the folder rules stand unchanged (K6) in `check_knowledge_folder` (`tenant.py check --folder`), which the half and
+in-folder link cases below drive over the same planted `<T>/knowledge` (as `test_accept_tenant.py` does)."""
 from __future__ import annotations
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -21,6 +26,18 @@ def _refusal(root: Path, tenant_id: str) -> str:
     return str(caught.value)
 
 
+def _check_folder(root: Path, tenant_id: str) -> None:
+    """The folder rules over `<root>/<T>/knowledge`, held to `tenant_id` (#1618 K8, K6)."""
+    owner = T.mod("tenancy._tenant")
+    owner.check_knowledge_folder(root / tenant_id / "knowledge", tenant_id=owner.TenantId(tenant_id))
+
+
+def _folder_refusal(root: Path, tenant_id: str) -> str:
+    with pytest.raises(_refused()) as caught:
+        _check_folder(root, tenant_id)
+    return str(caught.value)
+
+
 # ---- the positive control every refusal below is measured against -----------------------------
 
 def test_a_well_formed_tenant_resolves_to_its_two_halves_under_root_and_id(tmp_path):
@@ -29,20 +46,17 @@ def test_a_well_formed_tenant_resolves_to_its_two_halves_under_root_and_id(tmp_p
     assert knowledge == root / fixture_uuid("tenant:acme") / "knowledge"
     td = T.accept(root, fixture_uuid("tenant:acme"))
     assert td.id == fixture_uuid("tenant:acme")
-    assert td.settings == knowledge / "settings"
-    assert td.agent == knowledge / "agent"
-    assert td.settings.resolve() == (knowledge / "settings").resolve()
-    assert td.agent.resolve() == (knowledge / "agent").resolve()
-    # Read through the accepted half: the file the table loader will open is the one planted.
-    assert (td.settings / "verb-grants.yaml").read_text(encoding="utf-8") == T.TABLE_A
+    # #1618 K8: a `Tenant` names no halves (its `agent`/`settings` are deleted); the folder rules pass the planted folder.
+    assert _check_folder(root, fixture_uuid("tenant:acme")) is None
 
 
 def test_a_tenant_without_any_config_env_still_resolves(tmp_path):
     """A tenant whose systems carry no `config.env` at all is not refused at start (an
     MCP-path or config-less adapter is legal)."""
     root = tmp_path / "tenants"
-    knowledge = T.place_tenant(root, fixture_uuid("tenant:acme"), configs={})
-    assert T.accept(root, fixture_uuid("tenant:acme")).settings == knowledge / "settings"
+    T.place_tenant(root, fixture_uuid("tenant:acme"), configs={})
+    assert T.accept(root, fixture_uuid("tenant:acme")).id == fixture_uuid("tenant:acme")
+    assert _check_folder(root, fixture_uuid("tenant:acme")) is None  # #1618 K8: the folder rules, not acceptance
 
 
 # ---- the id -------------------------------------------------------------------------------
@@ -73,9 +87,9 @@ def test_an_agent_half_linked_to_a_sibling_tenants_agent_is_refused(tmp_path):
     b = T.place_tenant(root, fixture_uuid("tenant:bravo"))
     _swap_for_link(a / "agent", Path("..") / ".." / fixture_uuid("tenant:bravo") / "knowledge" / "agent")
     assert (a / "agent").resolve() == (b / "agent").resolve()
-    message = _refusal(root, fixture_uuid("tenant:acme"))
+    message = _folder_refusal(root, fixture_uuid("tenant:acme"))
     assert "agent" in message, message
-    assert T.accept(root, fixture_uuid("tenant:bravo")).agent == b / "agent"
+    assert _check_folder(root, fixture_uuid("tenant:bravo")) is None
 
 
 def test_an_agent_half_linked_to_its_own_settings_is_refused(tmp_path):
@@ -83,7 +97,7 @@ def test_an_agent_half_linked_to_its_own_settings_is_refused(tmp_path):
     a = T.place_tenant(root, fixture_uuid("tenant:acme"))
     _swap_for_link(a / "agent", Path("settings"))
     assert (a / "agent").resolve() == (a / "settings").resolve()
-    message = _refusal(root, fixture_uuid("tenant:acme"))
+    message = _folder_refusal(root, fixture_uuid("tenant:acme"))
     assert "agent" in message, message
 
 
@@ -95,7 +109,7 @@ def test_a_settings_half_linked_to_a_sibling_tenants_settings_is_refused(tmp_pat
     b = T.place_tenant(root, fixture_uuid("tenant:bravo"), table=T.TABLE_B)
     _swap_for_link(a / "settings", Path("..") / ".." / fixture_uuid("tenant:bravo") / "knowledge" / "settings")
     assert (a / "settings").resolve() == (b / "settings").resolve()
-    message = _refusal(root, fixture_uuid("tenant:acme"))
+    message = _folder_refusal(root, fixture_uuid("tenant:acme"))
     assert "settings" in message, message
 
 
@@ -109,7 +123,8 @@ def test_a_tenant_folder_linked_to_a_sibling_tenant_inside_the_root_is_refused(t
         "the link must be a working one for the refusal to mean anything"
     message = _refusal(root, fixture_uuid("tenant:acme"))
     assert fixture_uuid("tenant:acme") in message, message
-    assert T.accept(root, fixture_uuid("tenant:bravo")).settings == bravo / "settings"
+    assert T.accept(root, fixture_uuid("tenant:bravo")).id == fixture_uuid("tenant:bravo")  # #1618 K8: no halves
+    assert _check_folder(root, fixture_uuid("tenant:bravo")) is None
 
 
 @pytest.mark.parametrize("target", [Path("settings") / "systems", Path("..")],
@@ -119,14 +134,14 @@ def test_an_agent_half_linked_inside_its_own_tenant_but_not_to_itself_is_refused
     root = tmp_path / "tenants"
     knowledge = T.place_tenant(root, fixture_uuid("tenant:acme"))
     acme = knowledge.parent
-    assert T.accept(root, fixture_uuid("tenant:acme")).agent == knowledge / "agent"
+    assert _check_folder(root, fixture_uuid("tenant:acme")) is None  # #1618 K8: the folder rules, not acceptance
     _swap_for_link(knowledge / "agent", target)
     exposed = (knowledge / "agent").resolve()
     assert exposed.is_relative_to(acme.resolve())
     assert exposed != (knowledge / "settings").resolve()
     assert any(p.name == "config.env" for p in exposed.rglob("*")), \
         "the link must really expose settings files for the refusal to mean anything"
-    message = _refusal(root, fixture_uuid("tenant:acme"))
+    message = _folder_refusal(root, fixture_uuid("tenant:acme"))
     assert "agent" in message, message
 
 
@@ -153,13 +168,13 @@ def test_a_required_file_linked_to_another_tenants_copy_is_refused(tmp_path, lin
     root = tmp_path / "tenants"
     a = T.place_tenant(root, fixture_uuid("tenant:acme"), table=T.TABLE_A)
     b = T.place_tenant(root, fixture_uuid("tenant:bravo"), table=T.TABLE_B)
-    assert T.accept(root, fixture_uuid("tenant:acme")).id == fixture_uuid("tenant:acme")
+    assert _check_folder(root, fixture_uuid("tenant:acme")) is None  # #1618 K8: the folder rules, not acceptance
     own = a / "settings" / linked
     theirs = b / "settings" / linked
     own.unlink()
     os.symlink(os.path.relpath(theirs, own.parent), own)
     assert own.is_file(), "the link must really read as a file for the refusal to mean anything"
-    message = _refusal(root, fixture_uuid("tenant:acme"))
+    message = _folder_refusal(root, fixture_uuid("tenant:acme"))
     assert str(own) in message, message
 
 
@@ -174,7 +189,7 @@ def test_a_linked_settings_systems_directory_is_refused_as_a_link(tmp_path):
     _swap_for_link(systems, Path(os.path.relpath(b / "settings" / "systems", systems.parent)))
     assert (systems / "elastic" / "config.env").is_file(), \
         "the link must be a working one for the refusal to mean anything"
-    message = _refusal(root, fixture_uuid("tenant:acme"))
+    message = _folder_refusal(root, fixture_uuid("tenant:acme"))
     assert f"{systems} is a link" in message, message
     assert "required settings file is missing" not in message, message
 
@@ -201,7 +216,7 @@ def test_any_link_inside_a_tenant_folder_is_refused_not_only_the_required_files(
         else:
             own.unlink()
         os.symlink(os.path.relpath(theirs, own.parent), own)
-    message = _refusal(root, fixture_uuid("tenant:acme"))
+    message = _folder_refusal(root, fixture_uuid("tenant:acme"))
     assert str(own) in message, message
 
 
@@ -217,7 +232,7 @@ def test_a_hard_linked_file_inside_a_tenant_folder_is_refused(tmp_path):
         own.unlink()
     theirs = b / "settings" / "verb-grants.yaml"
     os.link(theirs, own)
-    message = _refusal(root, fixture_uuid("tenant:acme"))
+    message = _folder_refusal(root, fixture_uuid("tenant:acme"))
     assert "hard link" in message, message
     assert str(own) in message, message
 
@@ -231,7 +246,7 @@ def test_a_directory_the_link_check_cannot_read_is_refused_not_skipped(tmp_path)
     hidden.mkdir(parents=True)
     hidden.chmod(0)
     try:
-        message = _refusal(root, fixture_uuid("tenant:acme"))
+        message = _folder_refusal(root, fixture_uuid("tenant:acme"))
     finally:
         hidden.chmod(0o755)
     assert "could not be checked" in message, message

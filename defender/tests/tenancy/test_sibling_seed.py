@@ -1,6 +1,7 @@
 """A branched sibling runs on its episode's tenant, handed the data root by env; no stamped tenant refuses."""
 from __future__ import annotations
 
+from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch  # #1618 flow 4: the launch's one fetch
 from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 from defender.tests.support.shared._locations_1210 import location_path
 
@@ -144,7 +145,7 @@ def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None,
         directory = directory_for_argv(argv, records=records)
         R.assert_records_within_roster(directory, src.parent.parent.name, roster)  # the roster stands for the catalog
         outcome = T.mod("cli.learning.branch").main(
-            argv, directory=directory,
+            argv, directory=directory, fetch=in_process_fetch(),
             spawn=spawn, questioner=O.questioner_for() if questioner is None else questioner,
             preflight=O.no_preflight,
             live_tree=P.source_capture(tenant_id=stamp_tenant), roster=roster,
@@ -334,7 +335,7 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
     argv = ["--tenant", fixture_uuid("tenant:acme"), src.name, str(P.BRANCH_MESSAGE_ID)]
     with pytest.raises((Exception, SystemExit)) as refused:  # noqa: PT011 — the launcher's refusal type is not what is pinned; its text and timing are
         T.mod("cli.learning.branch").main(
-            argv, directory=directory_for_argv(argv),
+            argv, directory=directory_for_argv(argv), fetch=in_process_fetch(),
             spawn=spawn, questioner=questioner,
             preflight=O.no_preflight, live_tree=P.source_capture(tenant_id=fixture_uuid("tenant:acme")))
     text = f"{refused.value} {capsys.readouterr().err}"

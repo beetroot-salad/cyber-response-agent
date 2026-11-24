@@ -346,13 +346,13 @@ def drive_main(argv: list[str], rec: Recorder, *, directory: Any = None) -> tupl
     launch-time publish (it publishes the requested tenant's folder for real). `directory` defaults to
     `directory_for_argv(argv)`: `--tenant` active whatever its folder. Returns
     `(exit status, None)` or `(None, the SystemExit it refused with)`."""
-    from defender.tests.support.tenancy._launch_publish_p4 import with_publish
+    from defender.tests.support.tenancy._launch_publish_p4 import with_fetch
 
     seams = dict(rec.seams())
     if directory is not None:
         seams["directory"] = directory
     try:
-        return run_py().main(list(argv), **with_publish(seams, argv)), None
+        return run_py().main(list(argv), **with_fetch(seams, argv)), None
     except SystemExit as refused:
         return None, refused
 
@@ -424,6 +424,11 @@ def drive_launch(source: Path, *, spawn: Any = None, tenant_id: str | None = Non
     preflight neutralised (`no_preflight`) so a refusal is never the host's credentials.
     Returns the exit status, or the refusal it raised."""
     seams.setdefault("preflight", no_preflight)
+    # #1618 flow 4: the launch reads the episode's tenant through its one fetch seam; here the product's fetch in-process
+    # over the data root's served remote (what the test placed stands for the tenant's main).
+    from defender.tests.support.tenancy._fetch_standin_1618 import in_process_fetch
+
+    seams.setdefault("fetch", in_process_fetch())
     argv = launch_argv(source, tenant_id=tenant_id)
     seams.setdefault("directory", directory_for_argv(argv))  # r10 A1/C9: the launcher admits through the tenant records
     # The fixture tenant's elastic is proxied (#1391 D12): the launcher signs its read token through a port, here

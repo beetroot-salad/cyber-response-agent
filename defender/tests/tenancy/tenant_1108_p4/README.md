@@ -17,6 +17,16 @@ the whole record a code session needs; the working notes it was built from are n
   (`DraftLane`, `draft_lane`), `_spec773.py`, `_lead_author_1134.py`.
 - Run locally with `PYTHONPATH=<worktree>`; affected files only.
 
+**#1618 supersedes the knowledge half of this record** (design r5: knowledge lives only in Forgejo). There is no host
+clone, no `<T>/exports/`, no `current`, no tenant lock over knowledge and no `publish_status` table (K8, K1, D7); run
+start fetches its copy from Forgejo through one `fetch=` seam whose child reports `ok <commit>` or
+`refused <transient|lasting> <reason>` (flow 1, D11: `stale` and `misconfigured` are retired; K9 reads a missing or
+garbled record as `unreadable`). Retired here: `test_publish_child.py` (flow-1 publish, the lock, the recorders) and <!-- lint-stale-ref: ok — names the files #1618 retired -->
+`test_materialise.py` (flow 2), whole; the surviving promises are ported in place or covered by <!-- lint-stale-ref: ok — names the files #1618 retired -->
+`tests/tenancy/knowledge_1618/` (`test_run_start_1618`, `test_fetch_child_1618`, `test_refusal_classes_1618`,
+`test_sweep_1618`, `test_unreadable_record_1618`) and `test_r6_launcher.py` / `test_r6_publish_stop.py`. Sections 1-6
+below are the P4 record as it was, except where section 2 and the coverage map now name the #1618 seams.
+
 ## 1. Design identity
 
 r3 obligations O1, O2, O-A, O-B, O-PIN, O4, O-TEXT, O5, O6, O7, O7b, O-STALE, O-WARN, O-SEE,
@@ -111,14 +121,12 @@ logs in to OpenBao itself with AppRole). Human decisions U1–U8 are in r3; U9�
 
 Spelled as the tests call them. One line each; the test file named holds the full doc.
 
-**Run start and the publish child** (`_s_b_support.py`, `test_run_start.py`, `test_publish_child.py`)
-- `run.main(argv, *, publish=...)`: called once per unpinned launch with identifiers only (tenant id, data root); returns a report line.
-- `run.py --knowledge-commit <sha>`: starts on `<T>/exports/<sha>/`, skips publish; refuses `../current`, `current`, a short id, and a commit with no export, before the box (not by argparse).
+**Run start and the fetch** (`_s_b_support.py`, `test_run_start.py`; #1618 flow 1 replaced the publish child)
+- `run.main(argv, *, fetch=..., directory=...)`: `fetch(tenant_id, dest, *, data_root, commit=None)` is called once per launch with identifiers and the owned empty folder it fills; it returns the child's report line. `publish=` is gone.
+- `run.py --knowledge-commit <sha>`: the fetch is asked for that commit (no export is read); a commit the forge does not hold refuses before the box.
 - A branch family's knowledge commit is its source run's host-held knowledge record's (never its stamp's), written once by the launcher into the episode as `knowledge_pin.json`. A sibling (`--episode`) reads that pin itself (a `--knowledge-commit` naming another commit refuses); the judge reads post-move lesson bodies at it.
-- `publish_launch.launch_publish(tenant_id, *, data_root, budget=60.0, command=None, spawn=None) -> str`: default budget 60.0; `spawn` has `subprocess.Popen`'s signature (`test_publish_child.py:683`); waits for the network phase only; never kills a child holding the tenant lock.
-- `version_control.publish_for_run(tenant_id, *, data_root, issuer_config=None, client=None, issuer_transport=None, identity=None, network_timeout=None, locked_hook=None, budget=None) -> str`: reads the forge binding and the config it names itself (`issuer_config` is an in-process stand-in for that path); misconfiguration decided before any network call; `budget` is the one deadline over the network phase, past which it reports and records `stale:transient`.
-- `version_control.publish_child_main(argv, *, issuer_config=None, client=None, identity=None, network_timeout=None, locked_hook=None) -> int`: argv `<tenant id> --data-root <root> [--budget <seconds>]` (no config path); `locked_hook` called once under the tenant lock before the clone is touched; rc 0 for every reported outcome (OD20).
-- Report-line vocabulary: `fresh <commit>` / `stale:transient <reason>` / `stale:operator <reason>` / `misconfigured <reason>`; the reason is one line; U11 line `stale:operator publish child failed: <summary>`.
+- `publish_launch.launch_publish(tenant_id, *, data_root, dest, commit=None, budget=60.0, command, spawn, trigger) -> str`: starts the fetch child (`fetch.fetch_copy`), waits within the budget, kills its group past it; a non-positive budget refuses (`test_r6_launcher.py`, `test_r6_publish_stop.py`, `test_review_1288.py`).
+- Report-line vocabulary (#1618 D11): `ok <commit>` / `refused transient <reason>` / `refused lasting <reason>`; one line; a broken child is `refused lasting fetch child failed: <summary>` (`run_knowledge.read_publish_report`).
 - Run copy layout `<T>/run-knowledge/<run_id>/{owner, settings/, stage/{agent/, <token>}}`, removed in `finally`; box mounts `stage/` read-only; startup reads the token back; `DEFENDER_AGENT_DIR=/agent`.
 - `RunPaths(run_dir).knowledge_source(runs_base=None) -> <runs base>/<run_id>.knowledge-source.json`, JSON `{kind, commit, stale_kind, reason}` (host-held; U12).
 - Stamp `knowledge_source` limited to keys `{kind, commit, stale_kind}`; `STAMP_FIELD_CLASSES["knowledge_source"]` is informational (`test_family_knowledge`).
@@ -128,14 +136,14 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 **Delivery API** (`defender.learning.author.version_control`)
 - `forge_credential(tenant_id, purpose, *, directory, config, transport=None) -> TenantForgeCredential`: logs in with the live generation's host secret file (`config` is an in-process issuer stand-in).
 - Issuer client config: JSON `{"issuer", "ca_cert" (PEM path), "role_id", "secret_id"}`, one file per tenant, `<repo>/playground-issuer/client/<tenant id>/issuer.json` in dev; identity endpoint `<issuer>/v1/identity/oidc`. No default path and no CLI flag (PR #1288 review).
-- Tenant row forge binding: `<T>/tenant.json` `forge: {origin, audience, issuer_role, issuer_config}` (`issuer_config` an absolute path); origin required even with an injected identity.
-- `materialise_export(tenant, commit) -> TenantExport`: no identity/client/origin; refusals `DeliveryRefused`, lock still busy after a bounded retry (assumed ≤60 s) `LockBusy`.
+- Tenant forge binding: the tenant directory's (#1214 O6; nothing is written to the tenant folder), read through `directory=`; origin required even with an injected identity.
+- (#1618 K8: `materialise_export` and its lock retry are retired with the exports; a delivery's open fetches into a private repository.)
 - Draft layout `<T>/drafts/<id>/{owner, stage/{agent/, <token>}}`: `batch.draft_root` is `stage/`; `batch.box_request().workdir` is `stage/agent`.
 - Owner record: JSON `{"pid": int, "start": <`/proc/<pid>/stat` field 22, compared as text>}`; same pid with another start = dead; publish sweeps dead owners under the lock.
 
 **Drains and lanes** (`_drain_support.py`, `_curator1134.py:482`)
-- `author_drain(paths, *, trigger_author=, client=, identity=, issuer_config=, issuer_transport=, start_box=, stop_box=)`; `branch=`/`scrub=` gone; drain refusal exit 2.
-- `lead_author_drain(paths, *, run_lead_author=, run_pitfalls=, client=, identity=, issuer_config=, issuer_transport=, start_box=, stop_box=, git_timeout=)`.
+- `author_drain(paths, *, trigger_author=, client=, identity=, directory=, credential_config=, issuer_transport=, start_box=, stop_box=, ...)`; `branch=`/`scrub=` gone; drain refusal exit 2.
+- `lead_author_drain(paths, *, run_lead_author=, run_pitfalls=, client=, identity=, directory=, credential_config=, issuer_transport=, start_box=, stop_box=, git_timeout=, ...)`.
 - `trigger_author(paths, state, channel, threshold_env, module_name, pending_label, *, batch, box, ...)`; extra keywords forwarded to the config builder.
 - Drain steps: `run_lead_author(paths, state, run, *, batch, box, on_done, ...)` and `run_pitfalls(paths, state, *, batch, box, on_curated, ...)` (the drain's wrapper, today `_invoke_pitfalls`; distinct from the curator function below).
 - `open_drain_trees(paths, label, *, batch)`: holds the lanes under `batch.draft_root`.
@@ -166,7 +174,7 @@ Spelled as the tests call them. One line each; the test file named holds the ful
 - `lessons_push.corpus_dir(deps)` from the deps' tenant agent root, not `of_defender_dir`.
 - `defender-lessons` and the lessons engine read `$DEFENDER_AGENT_DIR/lessons` on every lane.
 - Judge: `git_show(cwd, rev, path)` stays its only product-repo reader (pre-move test and body read).
-- `_replay_harness.drive(..., agent=)` / `_default_tenant`: the run gets `<T>/exports/<commit>/{agent,settings}`.
+- `_replay_harness.drive(..., agent=)` / `_default_tenant`: the run gets the copy its fetch made (#1618; formerly `<T>/exports/<commit>/`).
 
 **Store and API**
 - `test_stale_visibility._store_run_knowledge(dsn, investigation_id, record_text: str | None, *, stamp_knowledge_source: Mapping | None = None)` writes the row's knowledge as the worker does, on the test database (#1496): `(None, None)` → `knowledge` null; `(None, present)` → stale/operator, commit null; unparseable → stale/operator, commit null; a record → the record→wire mapping.
@@ -178,9 +186,9 @@ Spelled as the tests call them. One line each; the test file named holds the ful
   `<system> --tenant <T> --staged <dir>` stands; the 10 `e2e/test_consumers_e2e.py` cases (formerly
   `--agent-dir`) are re-spelled onto it, naming a set-up tenant under a data root of the
   scaffold's own and keeping `DEFENDER_DIR` for the code tree. Their assertions are unchanged.
-- `launch_publish(spawn=)` is used by `test_publish_child.py` but absent from `_s_b_support.py`'s docstring; the test is authoritative.
+- `launch_publish(spawn=)`: `_s_b_support.py`'s docstring now names it; `test_review_1288.py` and `test_r6_launcher.py` drive it.
 - Two `run_pitfalls` symbols exist by design (drain step vs `pitfalls_curator.run_pitfalls`); not a conflict.
-- `run.main`'s default when `publish=` is omitted: the real publish child (OD14 clarification; agent decision for the owner to confirm).
+- `run.main`'s default when `fetch=` is omitted: the real fetch child (OD14 clarification, carried to #1618's seam).
 - **`declared_systems` marker half: resolved by the owner (repair r5 item 1).** The implementation's seam is adopted
   (above, "Drains and lanes") and `learning/catalog/test_declared_systems_resolution.py` is re-spelled onto it.
 
@@ -198,22 +206,22 @@ Files are under `tenant_1108_p4/` unless a path is given.
 - O5 lesson load recorded → `test_lesson_load.py`, `learning/retrieval/test_record_lesson_load.py`
 - O6 judge pre/post-move, unreadable → `test_judge_bodies.py`, `learning/judge/test_render.py`
 - O7 all corpus writes via TenantDelivery, legacy delivery deleted → `test_writers.py`, `test_drains.py`, `test_connect_propose.py`, lane suites (#773/#869/#870/#1134/lead author/pitfalls)
-- O7b merged PR read or recorded stale → `test_publish_child.py`
-- O-STALE child classification → `test_publish_child.py`, `test_run_start.py`, `learning/branch/test_family_knowledge.py`
+- O7b merged PR read → `knowledge_1618/test_fetch_child_1618.py` (#1618: nothing is recorded stale)
+- O-STALE child classification (#1618: `ok`/`refused transient|lasting`) → `knowledge_1618/test_refusal_classes_1618.py`, `test_run_start.py`, `test_r6_inputs.py`, `learning/branch/test_family_knowledge.py`
 - O-WARN page/ticket/API → `test_stale_visibility.py`, `test_run_page.py`
 - O-SEE `tenant.py check` → `test_tenant_cli.py`
-- O-BUDGET child and parent halves (real subprocesses) → `test_publish_child.py`
-- O8 login material host-side only → `test_publish_child.py`, `test_run_start.py`, `test_run_copy.py`, `test_drain_credentials.py`, `test_dev_compose.py`
-- O9 refusals named, misconfiguration before model → `test_drain_credentials.py`, `test_drains.py`, `test_publish_child.py`, `test_run_start.py`
+- O-BUDGET child and parent halves (real subprocesses) → `test_r6_launcher.py`, `test_r6_publish_stop.py`, `test_review_1288.py`
+- O8 login material host-side only → `knowledge_1618/test_fetch_child_1618.py`, `test_r6_run_copy.py`, `test_run_start.py`, `test_run_copy.py`, `test_drain_credentials.py`, `test_dev_compose.py`
+- O9 refusals named before the model → `test_drain_credentials.py`, `test_drains.py`, `knowledge_1618/test_refusal_classes_1618.py`, `test_run_start.py`
 - O-SWEEP owner records, dead-owner sweep → `test_drains.py`, `test_run_copy.py`, `tenant_1108_delivery/test_batches.py`
 - O-U5 retired corpora gone → `test_layout.py`, `test_lessons_frontend.py`
 - O-U6 no lesson-history panel, no git in presentation → `test_layout.py`, `test_run_page.py`
-- O11 machinery, `publish=` seam, real-publish fixture → `test_support_selfcheck.py`, `test_run_start.py`
+- O11 machinery, `fetch=` seam (#1618), real-fetch fixture → `test_support_selfcheck.py`, `test_run_start.py`
 - O12 dev OpenBao auto-unseal, live delivery → `test_dev_compose.py`, `test_live_dev_issuer.py` (live)
 - O13 Forgejo bind mount survives `down -v` → `test_dev_compose.py`, `test_live_dev_issuer.py` (live)
 - O14 lab continuity → `test_cutover.py` (live; red until F-CUT is done)
-- Flow 1 publish → `test_support_selfcheck.py`, `test_publish_child.py`
-- Flow 2 materialise → `test_materialise.py`
+- Flow 1 fetch (#1618) → `test_support_selfcheck.py`, `knowledge_1618/test_fetch_child_1618.py`, `knowledge_1618/test_run_start_1618.py`
+- Flow 2 materialise: retired with the exports (#1618 K8); a delivery's open is covered by `tenant_1108_delivery/test_credential.py`
 - Flow 3 run start → `test_run_start.py`, `test_run_copy.py`, `tests/tenancy/test_tenant_settings_location.py`, `e2e/test_tenant_run_start_e2e.py`
 - Flow 4 drain → `test_drains.py`, `test_refused_claims.py`
 - Flow 6 connect → `test_connect_propose.py`, `e2e/test_consumers_e2e.py`
@@ -221,7 +229,7 @@ Files are under `tenant_1108_p4/` unless a path is given.
 - A-ID drain AppRole login → `test_drain_credentials.py`, `test_live_dev_issuer.py`
 - U9 stage layout → `test_run_copy.py`, `test_drains.py`, `test_run_isolation_e2e.py`, `tenant_1108_delivery/test_batches.py`, `tenant_1108_delivery/test_box.py`, `e2e/test_tenant_box_mount.py`
 - U10 refused claims (OD18/19/23) → `test_refused_claims.py`, `learning/curation/test_curator_drain.py`, `test_drain_commit.py`, `test_lead_author.py`
-- U11 broken child (OD20) → `test_publish_child.py`
+- U11 broken child (OD20) → `test_r6_launcher.py`, `test_review_1288.py`
 - U12 host record (OD17/21/22') → `test_stale_visibility.py`, `test_run_page.py`, `test_run_start.py`
 - U14 (OD21 consequence) resumed box never sees the source's `runtime.html` or its reason → `e2e/test_branch_resume.py::test_od21_a_resumed_box_sees_neither_the_source_run_page_nor_its_raw_knowledge_reason`
 - Also: P4 wiring (delivery has production callers outside the run process; replaces P3's dormancy ban) → `tenant_1108_delivery/test_architecture.py`.
@@ -261,8 +269,8 @@ Deleted (OD12 class i) or re-spelled in contract repair rounds 1–2 (merged as 
   - `learning/curation/test_curator_glm_survival.py`: the staged-index half (unrelated staged work not swept into the commit)
     → `test_changes.py::test_change_set_is_the_draft_against_the_batch_base_and_commits_as_plain_files`.
   - `tenancy/test_knowledge_revision.py`: the six `materialize_run` clone-stamp cases (versioned, plain-copy `unversioned`, unreadable `.git`,
-    two read-fault rows, fork sibling) → `test_run_start.py::test_o_b_the_stamp_is_the_export_copied_never_the_clones_head`,
-    `::test_o11_o_b_...`, `::test_o_a_no_current_and_a_failed_publish_refuses_before_message_zero`, `::test_o_pin_...`, `test_branch_replay.py::test_flow7_...`,
+    two read-fault rows, fork sibling) → `test_run_start.py::test_o_b_the_stamp_is_the_export_copied_never_the_clones_head`, <!-- lint-stale-ref: ok — historical record: names a test #1618 retired -->
+    `::test_o11_o_b_...`, `::test_o_a_no_current_and_a_failed_publish_refuses_before_message_zero`, `::test_o_pin_...`, `test_branch_replay.py::test_flow7_...`, <!-- lint-stale-ref: ok — historical record: names a test #1618 retired -->
     `::test_o_b_the_live_capture_...`; the arm's no-lineage fields → `storage/ids_1187/test_roster_sibling.py::test_natural_and_arm_stamps_carry_no_world_lineage`.
   - `learning/branch/test_family_knowledge.py`: the two `--allow-dirty` waiver rows for an `unversioned`/`unavailable` source (OD9)
     → `test_branch_replay.py::test_od9_a_source_with_no_knowledge_commit_refuses_naming_why_even_with_allow_dirty`.
@@ -284,7 +292,7 @@ Deleted (OD12 class i) or re-spelled in contract repair rounds 1–2 (merged as 
 Repair round r4 (this round), all additive or stricter:
 - `learning/branch/test_family_knowledge.py::test_1204_the_stamp_table_classes_every_record_field_exactly_as_d4_states`: the table is the
   bare record's wire keys plus the one optional `knowledge_source` (OD17 "may carry"), whose class and carried keys are asserted (F1).
-- `test_run_start.py::test_o_b_a_broken_tenant_clone_does_not_stop_the_run_or_reach_its_stamp` (gitfile to nowhere, `.git` removed, uncommitted edit; F3).
+- `test_run_start.py::test_o_b_a_broken_tenant_clone_does_not_stop_the_run_or_reach_its_stamp` (gitfile to nowhere, `.git` removed, uncommitted edit; F3). <!-- lint-stale-ref: ok — historical record: names a test #1618 retired -->
 - `test_check.py` git-absent V16 loop: no census-not-taken line and no census git cause (F4).
 - `runtime/state/test_clock_box.py`: the run copy's stage is told by source prefix (one mount or several), and the mounts set aside are only
   the agent and token mounts, read-only, each kind once (F5).

@@ -121,11 +121,11 @@ def test_serve_gives_the_host_the_credentialless_clients_and_the_service_the_cre
     assert expected.forge_admin_token not in str(headers["host forge"]) and expected.openbao_login not in str(headers["host bao"])
     assert headers["service forge"]["authorization"] == f"token {expected.forge_admin_token}"
     assert headers["service bao"]["x-vault-token"] == expected.openbao_login
-    # The first publish records what only its launcher sees (a child with no report) in the tenant records, as run
-    # start's does, so `tenant.py check` can say why a tenant stuck at prepare never published.
-    from defender.tenancy import TenantDirectory
+    # #1618 (flow 5): the host's first fetch is the real fetch child's launcher, as given. (Retired, D7: the first publish
+    # recorded its outcome in the tenant records through a `directory=` partial; the `publish_status` writers are gone.)
+    from defender.investigation.publish_launch import launch_publish
 
-    assert isinstance(getattr(built["host"]["publish"], "keywords", {}).get("directory"), TenantDirectory)
+    assert built["host"]["fetch"] is launch_publish, built["host"].get("fetch")
 
 
 # --- #1592: the people worker beside the actors (S2-40) --------------------------------------------------------

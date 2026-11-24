@@ -120,34 +120,10 @@ def _create_new_at(dir_fd: int, name: str, data: bytes) -> None:
         handle.write(data)
 
 
-def _sweep_temporaries(folder: Path, prefix: str) -> None:
-    """Remove every entry of `folder` named with `prefix` (a build cut off left it), as the
-    entry it is: a folder removed with no link below it followed, anything else unlinked.
-    Called under the tenant's lock, so no live builder is writing one."""
-    if not _io.entry_present(folder):
-        return
-    fd = os.open(folder, _FOLDER_FLAGS)
-    try:
-        with os.scandir(fd) as entries:
-            stale = [
-                (entry.name, entry.is_dir(follow_symlinks=False))
-                for entry in entries
-                if entry.name.startswith(prefix)
-            ]
-        for name, is_folder in stale:
-            if is_folder:
-                shutil.rmtree(name, dir_fd=fd)
-            else:
-                with contextlib.suppress(FileNotFoundError):
-                    os.unlink(name, dir_fd=fd)
-    finally:
-        os.close(fd)
-
-
 def _rename_new(folder: Path, source: str, name: str) -> None:
     """Rename `folder/source` to `folder/name`, refusing any entry already at `name` (a plain
     rename would replace an empty folder there). Both relative to one held, no-follow folder
-    descriptor. The caller holds the tenant's lock, under which alone such names are made."""
+    descriptor. `source` is the caller's own owned temporary, which no other process writes."""
     fd = os.open(folder, _FOLDER_FLAGS)
     try:
         try:

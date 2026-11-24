@@ -1,7 +1,7 @@
 """The helper's state for its one job, and the registry its requests and job kinds are answered from (#1170).
 
 `Session` is what every request handler and kind hook is handed: the job's identity (kind, id, tenant, claim), the
-helper's seams (docker, signer, publish, forge, command), the signal state, the ids this helper minted for the claim,
+helper's seams (docker, signer, fetch, forge, command), the signal state, the ids this helper minted for the claim,
 and the boxes it started. `Prepared` is what a kind's `prepare` hands back: the `launch` answer, the container's
 command, the pass mint and the kind's own state, and what to undo at the end.
 
@@ -154,7 +154,7 @@ class Session:
     docker: Any
     defender_dir: Path
     signer: Any = None
-    publish: Any = None
+    fetch: Any = None
     forge: Any = None
     client: Any = None
     command: list[str] | None = None

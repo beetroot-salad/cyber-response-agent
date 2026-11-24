@@ -17,7 +17,6 @@ from defender.tests.support.tenancy import _systems1366 as R
 from defender.tests.tenancy.tenant_1108_p4._support import (
     OTHER_TENANT_ID,
     PublishedTenant,
-    export_dir,
     published_tenant,
 )
 
@@ -35,18 +34,20 @@ def identity_via_proxy(scratch: Path, root: Path, decl: str,
 
 
 def exports_of(t: PublishedTenant) -> Path:
-    """`<T>/exports/`: what the proxy is told it reads for this tenant."""
-    return export_dir(t.tenant, t.commit).parent
+    """`<T>/exports/`, spelt only (it need not exist): the per-tenant folder the proxy's deps map names, from which
+    `data_root_of` reads the one data root."""
+    return Path(t.data_root) / t.tenant_id / "exports"
 
 
 def run_record(t: PublishedTenant, records: Any = R.DERIVED, *, catalog: Any = None) -> Any:
     """The run's record as run start resolves it, built from RECORDS (#1366 R10: `run_tenant_for(..., records=)`, no folder
     read for systems, access or case). `records` is a `R.RecordsSpec` (exactly that), `None` (the tenant is NOT imported,
-    as everywhere in this contract) or `R.DERIVED` (the default: what the first export's planted `settings/` stands for).
-    Grants still come from the first export's settings. `catalog` is the one the builder reads adapters' lists from (#1504 O3;
-    none: the checkout's)."""
+    as everywhere in this contract) or `R.DERIVED` (the default: what the seed commit's planted `settings/` stands for).
+    Grants still come from the seed commit's settings, read from the test's own seed checkout (#1618 K8: no export or
+    clone holds them on the host). `catalog` is the one the builder reads adapters' lists from (#1504 O3; none: the
+    checkout's)."""
     return R.run_tenant_for(t.tenant, dispatches_lead_zero=False, records=records, catalog=catalog,
-                            settings_root=export_dir(t.tenant, t.commit) / "settings")
+                            settings_root=Path(t.checkout) / "settings")
 
 
 def static_set(key: str = H.CANARY_KEY, version: int = 1) -> Any:

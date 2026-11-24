@@ -8,13 +8,20 @@ fixed sentence naming the commit used and the kind in customer words (temporary 
 operator action), never the raw reason; fresh and pinned runs carry none. The wording is not
 frozen: it is recovered as what the stale comment adds to the same run's fresh comment, then held
 to those properties. The API serves `Investigation.knowledge = {status, commit, stale_kind}`.
+
+#1618 K9 ("stale retired"): no run writes a `stale` record any more (a refused fetch refuses the run: D3, no stale
+fallback), so what stays here is the READER side, over host records planted as an older run left them: a stored `stale`
+record still reads back as stored (its sentence, its API answer), and a missing or garbled record reads `unreadable`
+(G3: its own value; the ticket still carries the operator-kind sentence and no commit). The writer side retires with
+the #1108 P4 stale obligations (U7, U8, O7b, O-STALE, O-WARN's writer): `run.main` handing a stale publish outcome to
+the record and page is deleted below, its successor being the fetch child's refusal ending the run
+(`tenant_1108_p4/test_run_start.py::test_o_a_*`).
 """
 from __future__ import annotations
 
 from defender.tests.support.api._mount1161 import API
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-import html
 import json
 import re
 from pathlib import Path
@@ -323,88 +330,6 @@ def test_o_warn_the_comment_follows_the_hosts_outcome_not_a_box_planted_record(
     assert "evil.invalid" not in stale
 
 
-# --- the wiring: run.py hands the run's knowledge source to the writer and the page ----------
-
-def _stale_outcome(stale_kind: str, reason: str) -> str:
-    """The `publish=` seam's report line for a stale launch."""
-    return f"stale:{stale_kind} {reason}"
-
-
-@pytest.mark.e2e
-@pytest.mark.parametrize("stale_kind", STALE_KINDS)
-def test_run_main_hands_a_stale_publish_outcome_to_the_page_and_record(
-        tmp_path, monkeypatch, p4_tenant, stale_kind):
-    """Through `run.main`, a stale launch runs on `current` and run start writes the host record
-    (kind, commit, raw reason); the saved run page names the commit used, while no file the box
-    can read carries the raw reason. The saved `runtime.html`, written after the box stops, is an
-    operator surface and must show it (OD21). The operator run posts no comment (#1471 W7): the
-    stale sentence of the job lane's comment is held by the record-step tests below and by
-    `jobs/test_job_entry.py::test_1471_p6_a_stale_runs_comment_opens_with_the_tag_then_the_stale_sentence_then_the_disposition_then_the_link`."""
-    from defender.records import RunPaths
-    from defender.tests.support.runtime.engine._spec767 import write_report
-    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
-
-    publish_calls: list[tuple[tuple, dict]] = []
-
-    def publish(*args: Any, **kwargs: Any) -> str:
-        publish_calls.append((args, kwargs))
-        return _stale_outcome(stale_kind, RAW_REASON[stale_kind])
-
-    box_readable: dict[str, bytes] = {}
-
-    def before_lifecycle(run_dir: Path) -> None:
-        # The box window: everything under the run dir, plus every run copy's `stage/` (the only
-        # part of a copy the box mounts). A copy's `settings/` is host-only and legitimately
-        # carries the fixture's `https://` endpoints.
-        from defender.tests.tenancy.tenant_1108_p4._s_b_support import run_copies
-
-        stages = sorted(run_copies(p4_tenant).glob("*/stage"))
-        for root in (Path(run_dir), *stages):
-            for path in sorted(root.rglob("*")) if root.is_dir() else ():
-                if path.is_file() and not path.is_symlink():
-                    box_readable[str(path)] = path.read_bytes()
-        write_report(run_dir)  # its store and pointer are the page's too (#1534): a second store would replace the pointer
-
-    alert = S1107.plant_alert(tmp_path / "alert")
-    rec = S1107.RunRecorder(tmp_path / "unused" / "s-c-wiring", before_lifecycle=before_lifecycle)
-    argv = [str(alert), "--tenant", p4_tenant.tenant_id, "--no-learn"]
-    # The real `materialize` (run start: resolve the export, copy it, stamp the record).
-    seams = {k: v for k, v in rec.seams().items() if k != "materialize"}
-    from defender import run as run_py
-
-    rc = run_py.main(argv, directory=p4_tenant.directory, publish=publish, **seams)
-
-    assert rc == 0, f"a stale launch with a snapshot must run to the end; rc={rc}"
-    assert len(publish_calls) == 1, f"the launch published {len(publish_calls)} times"
-    commit = p4_tenant.commit
-    run_dir = Path(rec.lifecycle_calls[0]["run"].run_dir)
-    host = json.loads(host_record_path(run_dir).read_text(encoding="utf-8"))
-    assert host.get("kind") == "stale", host
-    assert host.get("stale_kind") == stale_kind, host
-    assert host.get("commit") == commit, host
-    assert host.get("reason") == RAW_REASON[stale_kind], (
-        f"the host record does not keep the child's raw reason for operators: {host}")
-    stamp = json.loads(RunPaths(run_dir).provenance.read_text(encoding="utf-8"))
-    if "knowledge_source" in stamp:  # optional, informational, never the reason
-        assert "reason" not in stamp["knowledge_source"], stamp
-
-    assert box_readable, "fixture: the box window saw no run-dir files"
-    assert [n for n in box_readable if "/stage/" in n], (
-        "fixture: the box window saw no run copy's stage/ files")
-    leaked = [(name, f) for name, data in box_readable.items() for f in REASON_FRAGMENTS
-              if f.encode() in data]
-    assert leaked == [], (
-        f"the raw publish reason sits in files the box can read: {leaked}")
-
-    page = (run_dir / "runtime.html").read_text(encoding="utf-8")
-    assert names_commit(page, commit), (
-        "the saved run page of a stale run carries no banner naming its commit")
-    assert stale_kind in page.lower(), (
-        "the saved run page of a stale run carries no banner naming its kind")
-    assert html.escape(RAW_REASON[stale_kind]) in page or RAW_REASON[stale_kind] in page, (
-        "the run page does not show operators the raw reason from the host record")
-
-
 #: The commit a tampering box writes into the run record: never the export the run used.
 TAMPERED_COMMIT = "0ddba110ddba110ddba110ddba110ddba110ddba"
 
@@ -575,7 +500,8 @@ def test_o_warn_api_maps_the_run_records_knowledge_source_to_the_wire_through_th
 
 def test_o_warn_api_published_contract_declares_the_knowledge_field():
     """`/openapi.json` declares `Investigation.knowledge` with exactly the statuses
-    current/stale/pinned and stale kinds transient/operator (or null)."""
+    current/stale/pinned/unreadable and stale kinds transient/operator (or null). (#1618 K9/G3: `unreadable` is its own
+    value; `stale` and its kinds stay declared because stored old values read back as stored.)"""
     pytest.importorskip("fastapi")
     from defender.tests.support.api._identity1306 import World
 
@@ -606,7 +532,7 @@ def test_o_warn_api_published_contract_declares_the_knowledge_field():
                 values.add(n["const"])
         return values
 
-    assert enum_of(props["status"]) == {"current", "stale", "pinned"}, props["status"]
+    assert enum_of(props["status"]) == {"current", "stale", "pinned", "unreadable"}, props["status"]
     assert enum_of(props["stale_kind"]) == {"transient", "operator", None}, props["stale_kind"]
 
 
@@ -615,8 +541,8 @@ def test_o_warn_api_published_contract_declares_the_knowledge_field():
 #   (1) an investigation with no run yet: API `knowledge: null`;
 #   (2) a pre-P4 run (no host record, no `knowledge_source` in its stamp): no banner, API null,
 #       ticket unchanged;
-#   (3) host record missing while the stamp names a source, or unparseable: stale/operator, no
-#       commit.
+#   (3) host record missing while the stamp names a source, or unparseable: `unreadable`, no
+#       commit (#1618 K9/G3: was stale/operator; the ticket keeps the operator-kind sentence).
 # ---------------------------------------------------------------------------------------------
 
 #: Case (3): how the host record fails while a record should exist (the stamp names a source).
@@ -711,17 +637,17 @@ def test_od22_an_investigation_with_no_run_serves_null_knowledge():
 API_RUN_CASES = {
     "pre-p4": (None, None, None),
     "missing-with-stamp": (None, stamp_view(knowledge_source("fresh")),
-                           {"status": "stale", "commit": None, "stale_kind": "operator"}),
+                           {"status": "unreadable", "commit": None, "stale_kind": None}),
     "corrupt": (UNREADABLE_RECORDS["corrupt"], stamp_view(knowledge_source("fresh")),
-                {"status": "stale", "commit": None, "stale_kind": "operator"}),
+                {"status": "unreadable", "commit": None, "stale_kind": None}),
 }
 
 
 @pytest.mark.parametrize("case", list(API_RUN_CASES))
 def test_od22_the_api_fails_closed_only_where_a_record_should_exist(case):
     """Through the store: a pre-P4 run serves null; a missing record whose stamp names a source,
-    or a corrupt record, serves stale/operator with no commit. Control: a fresh record's text is
-    `current`."""
+    or a corrupt record, serves `unreadable` with no commit and no stale kind (#1618 K9: "a missing or garbled
+    knowledge record reads `unreadable`"). Control: a fresh record's text is `current`."""
     text, stamp_source, expected = API_RUN_CASES[case]
     inv = _investigation(f"inv-od22-{case}", None)
     world, client = _served(inv)

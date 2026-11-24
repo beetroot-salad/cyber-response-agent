@@ -51,6 +51,19 @@ then brings Forgejo's teams, suspensions and sessions in line with the restored 
 lists, and leaves unchanged, every account on that source whose login is not `p-<user id>` and every `p-` account whose
 `login_name` is not its user's sub: fix or delete those by hand. It writes nothing to Forgejo itself.
 
+## Upgrade from before #1618
+
+A tenant's knowledge lives only in its Forgejo repository; the host keeps no clone, no `exports/` and no `current`, and
+no lock. Upgrade from before #1592 (below) first, if it applies. Stop everything (the API, the workers, the learning
+drains, the lifecycle service) first. Deliver or abandon the
+in-flight learning batches with the old code, since their unpushed commits live on the clone and are not recovered
+afterwards (work not pushed is redone). Then, once per tenant, delete `<data root>/<T>/knowledge`, `<data root>/<T>/exports/`
+and `<data root>/<T>/knowledge.lock`, and run migrations (revision `0028_drop_publish_status`, after #1592's `0027_people_requests`: it drops
+`tenancy.publish_status`). Everything that reads knowledge now needs Forgejo: a run, a learning job, a readiness check and
+the operator tools refuse, naming why, while it is unreachable; there is no stale fallback. A stored `stale` knowledge
+status is still read back as it was stored; new records say `fresh`, `pinned` or `unreadable`. The readiness check's
+`knowledge_copy` step is merged into `publish`.
+
 ## Upgrade from before #1592
 
 Tenant people use Forgejo's own web interface, signed in with their product account. Each tenant's repository is
