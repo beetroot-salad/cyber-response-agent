@@ -607,7 +607,6 @@ def render_runtime_page(run_dir: Path, *, cost: LedgerCost, closing: closing_rec
         byline_parts.append(f'started {esc(md["started"][:19].replace("T", " "))}')
     if md["models"]:
         byline_parts.append(f'models {esc(", ".join(md["models"]))}')
-    byline_parts.append(f'run_dir {esc(md["run_dir"])}')
     byline = _byline(byline_parts)
 
     return f"""<!doctype html>

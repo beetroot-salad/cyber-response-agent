@@ -113,9 +113,9 @@ def fault(kind: str, detail: str, *, run_id: object = "") -> CouldNotLook:
 
 
 def for_run(run: Run) -> Lookup:
-    """The run-handle route: the run's pointer, read beside its folder, and the database it recorded. The recorded
-    path, not one derived from the run's own folder: a branch arm's folder is in its episode while its database is
-    its source's."""
+    """The run-handle route: the run's pointer, read beside its folder, and the database it recorded, resolved against
+    the run's folder (`CasePointer.database`). The recorded path, not one derived from the run's case id: a branch
+    arm's folder is in its episode while its database is its source's."""
     run_id = str(run.id)
     pointer = run.observability.session_pointer
     try:
@@ -127,7 +127,7 @@ def for_run(run: Run) -> Lookup:
     from defender.records.session_store import _LEGACY_LINK_NAME
 
     return from_pointer(
-        read, where=str(pointer.path), run_id=run_id, locate=lambda found: found.store_path,
+        read, where=str(pointer.path), run_id=run_id, locate=lambda found: found.database(run.run_dir),
         legacy_link=lambda: os.path.lexists(Path(run.run_dir) / _LEGACY_LINK_NAME))
 
 

@@ -130,7 +130,7 @@ def open_source_store(run_dir: Path, *, source_run: Run) -> AbstractContextManag
     try:
         pointer = json.loads(
             source_run.observability.session_pointer.read())
-        recorded = Path(pointer["store_path"]).resolve()
+        recorded = session_store.run_store_path(run_dir, pointer["store_path"]).resolve()
         case_id = pointer["case_id"]
         derived = session_store.store_path_for(case_id, sessions=sessions).resolve()
     except (OSError, ValueError, KeyError, TypeError) as e:
