@@ -173,6 +173,12 @@ jobs:
       - name: Start Garage for the evidence-store contract
         run: tooling/testing/start_garage.sh
 
+      # #1546 (triage 1, Family C): a second Garage whose `s3_region` is not Garage's default, so a store client that
+      # ignores `DEFENDER_EVIDENCE_REGION` is refused (`tests/jobs/test_1546_deployment_wiring.py`); its variables are
+      # `DEFENDER_TEST_GARAGE_REGIONAL_*`.
+      - name: Start a Garage in a region of its own for the deployment wiring test
+        run: tooling/testing/start_garage.sh defender-garage-regional 3910 eu-ci-1 DEFENDER_TEST_GARAGE_REGIONAL
+
       - name: Run unit tests
         working-directory: defender
         # ONE collection root. This used to read `tests/ learning/`, because test

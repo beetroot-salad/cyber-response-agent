@@ -102,6 +102,28 @@ def test_a_job_containers_binds_are_exactly_its_kinds_allowlist_and_its_folders_
         assert (folder / "kept").read_text(encoding="utf-8") == other_claim, "another live claim's folder was touched"
 
 
+@pytest.mark.parametrize("kind", [k for k in ALL_KINDS if k != "post-step"])
+def test_a_jobs_root_inputs_and_spool_are_each_mode_0700_and_owned_by_the_helper_while_the_job_runs(
+        request, scene, checkout, kind):
+    """Each of the three claim folders the helper makes for a job (`.job-roots/<claim>`, `.job-inputs/<claim>`,
+    `.job-spool/<claim>`) is, seen from inside the running job, a directory of mode exactly 0700 owned by the helper's uid:
+    no other host user can read the spooled bytes or swap them before their put, nor reach the root or the inputs. Every
+    kind that has the folders. (amendment r10: "the spool is 0700 and bound into nothing"; A-O3, A-O9)"""
+    planted = plant(scene, kind)
+    seen: dict = {}
+
+    def job(c) -> int:
+        seen["folders"] = {name: os.lstat(path) for name, path in (
+            ("root", job_root(scene)), ("inputs", job_inputs(scene)), ("spool", job_spool(scene)))}
+        return 0
+
+    drive(scene, planted, job, **_seams(request, kind))
+    assert set(seen.get("folders", {})) == {"root", "inputs", "spool"}, "premise: the job ran with its three folders"
+    held = {name: (stat.S_ISDIR(st.st_mode), oct(stat.S_IMODE(st.st_mode)), st.st_uid)
+            for name, st in seen["folders"].items()}
+    assert held == {name: (True, oct(0o700), os.getuid()) for name in held}, held
+
+
 # --- every file the helper places has link count 1 ----------------------------------------------------------------------------------
 
 def _walk(folder: Path) -> list[tuple[Path, os.stat_result]]:

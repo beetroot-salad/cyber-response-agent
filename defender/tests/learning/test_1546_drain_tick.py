@@ -112,3 +112,52 @@ def test_a_drain_tick_serves_the_run_in_its_set_kills_the_expired_and_tainted_an
     assert items[("curation_request", outside)].status == "waiting", "a clean run outside the set was killed, not left for the next drain"
     assert not (pulled / "lead_author").exists(), "a marker was written into the source run"
     assert not list(root.rglob("pitfalls_collected")), "a pitfalls marker file was written"
+
+
+#: A drain claim's input set over a tenant of mixed runs (triage 1, family D4): `(name, evidence_state, scrub, its request)`,
+#: the request `open` (waiting), `closed` (published) or `none` (no request names it). In the set: exactly the runs an open
+#: request names whose investigation is usable (`clean`, evidence not `expired`).
+MIXED_RUNS = [
+    ("named-clean-complete", "complete", "clean", "open"),
+    ("named-clean-partial", "partial", "clean", "open"),
+    ("named-clean-lost", "lost", "clean", "open"),
+    ("named-clean-expired", "expired", "clean", "open"),
+    ("named-tainted", "partial", "tainted", "open"),
+    ("named-not-run", "complete", "not_run", "open"),
+    ("closed-clean-complete", "complete", "clean", "closed"),
+    ("unnamed-clean-complete", "complete", "clean", "none"),
+    ("unnamed-clean-partial", "partial", "clean", "none"),
+]
+IN_THE_SET = {"named-clean-complete", "named-clean-partial", "named-clean-lost"}
+
+
+def test_a_drain_claims_exactly_the_usable_runs_its_open_requests_name_over_a_tenant_of_mixed_runs(world):  # noqa: F811
+    """Over every combination of usability and naming: the claim's input set is exactly the clean, unexpired runs an open
+    curation request names. A clean run no open request names (none, or a closed one) stays out, as does any named run
+    that is not usable; the set is each in-set run's bundle once. (D7, PR6, A-O6; triage 1 family D4)"""
+    tenant = world.t.tenant_id
+
+    async def claimed() -> tuple[str, dict[str, str]]:
+        runs: dict[str, str] = {}
+        async with job_store(world.dsn) as store:
+            for name, state, scrub, _named in MIXED_RUNS:
+                runs[name] = await _owner(world, store, state=state, scrub=scrub)
+            for name, _state, _scrub, request in MIXED_RUNS:
+                if request != "none":
+                    _request(world, runs[name])
+                if request == "closed":
+                    execute(world.dsn, "UPDATE learning.work_items SET status = 'published' WHERE tenant_id = %s "
+                                       "AND kind = 'curation_request' AND source_run = %s", (tenant, runs[name]))
+            drain = (await store.create_drain(tenant, actor="u-1"))[0]
+            assert (await store.claim_host_request()).record.request_id == drain.request_id
+            return drain.request_id, runs
+
+    rid, runs = asyncio.run(claimed())
+    items = _items(world)
+    assert {name for name, *_rest, request in MIXED_RUNS if request == "open"} == {
+        name for name, run in runs.items() if items.get(("curation_request", run)) is not None
+        and items[("curation_request", run)].status == "waiting"}, "premise: exactly the open requests are waiting"
+    got = _inputs(world, rid)
+    named = {run: name for name, run in runs.items()}
+    assert sorted(named.get(owner, owner) for owner, _obj in got) == sorted(IN_THE_SET), got
+    assert {obj for _owner_id, obj in got} == {BUNDLE}, got

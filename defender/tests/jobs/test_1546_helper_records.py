@@ -24,6 +24,7 @@ from defender.tests.support.evidence._facts1546 import (
     sent_page,
     staged_arms,
     staged_knowledge,
+    up,
 )
 from defender.tests.support.jobs._ending1546 import decide
 from defender.tests.support.jobs import _job_helper as J
@@ -193,6 +194,135 @@ def test_a_malformed_record_of_any_kind_and_name_is_staged_refused_and_a_refused
     if name in ("outcome", "result"):
         end = decide(DECIDE_KIND[kind], staged, {}, "exited")
         assert (end.stage, end.failure_reason) == ("failed", "bad_record"), (end.stage, end.failure_reason)
+
+
+# --- PR2: whole-class records the store cannot hold ----------------------------------------------------------------------
+
+#: Text the store cannot hold (JSONB refuses `\u0000` and a lone surrogate): each text position gets each, appended.
+UNSTORABLE_TEXT = {"nul": "\x00", "lone-surrogate": "\ud800"}
+#: Numbers the store cannot hold (no JSON number is NaN or infinite; an int past float range overflows a float column).
+UNSTORABLE_NUMBER = {"nan": float("nan"), "infinity": float("inf"), "past-float-range": 10**400}
+#: Positions left out of the walk, with why: `findings.text` is the findings screen's raw input, parsed and never stored as
+#: sent (its unscreenable text is `findings: refused` inside a valid outcome, pinned by the findings tests below).
+NOT_STORED_AS_SENT = {("learning-outcome", ("findings", "text"))}
+#: Positions screened by their own field's rule as well: a learning outcome's `findings` field that is not `{state: ok, text}`
+#: may be `findings: refused{reason}` inside a valid outcome (the findings tests below) rather than the whole outcome refused;
+#: either holds only what the store can hold, and neither is the sent value.
+SCREENED_BY_ITS_FIELD = {("learning-outcome", "findings")}
+
+
+def _positions(value, path=()):
+    """Every (path, kind) of `value`: `text`, `number` and `null` leaves, `empty-list` leaves and `object` levels (a key
+    position). A bool is no position: it has no unstorable member of its own type."""
+    if isinstance(value, dict):
+        yield path, "object"
+        for key, member in value.items():
+            yield from _positions(member, (*path, key))
+    elif isinstance(value, list):
+        if not value:
+            yield path, "empty-list"
+        for i, member in enumerate(value):
+            yield from _positions(member, (*path, i))
+    elif isinstance(value, str):
+        yield path, "text"
+    elif value is None:
+        yield path, "null"
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        yield path, "number"
+
+
+def _replaced(value, path, new):
+    """`value` with the member at `path` replaced by `new(old)` (copies along the path; `value` is untouched)."""
+    if not path:
+        return new(value)
+    head, rest = path[0], path[1:]
+    if isinstance(value, dict):
+        return {**value, head: _replaced(value[head], rest, new)}
+    return [_replaced(m, rest, new) if i == head else m for i, m in enumerate(value)]
+
+
+def _members_for(where: str) -> dict[str, object]:
+    """The replacements (label -> `old -> new`) a position of kind `where` gets: a text each unstorable text appended, a
+    number each unstorable number, a null (a nullable field, text or number) each of both, an empty list one element of
+    each, and an object level a key holding each unstorable text."""
+    texts = {label: (lambda old, bad=bad: old + bad) for label, bad in UNSTORABLE_TEXT.items()}
+    numbers = {label: (lambda _old, bad=bad: bad) for label, bad in UNSTORABLE_NUMBER.items()}
+    fresh_texts = {label: (lambda _old, bad=bad: f"text{bad}") for label, bad in UNSTORABLE_TEXT.items()}
+    elements = {f"element-{label}": (lambda _old, bad=bad: [bad])
+                for label, bad in {**{k: f"text{v}" for k, v in UNSTORABLE_TEXT.items()}, **UNSTORABLE_NUMBER}.items()}
+    keys = {f"key-{label}": (lambda old, bad=bad: {**old, f"key{bad}": 1}) for label, bad in UNSTORABLE_TEXT.items()}
+    return {"text": texts, "number": numbers, "null": {**numbers, **fresh_texts}, "empty-list": elements,
+            "object": keys}[where]
+
+
+def _unstorable(record):
+    """(path, label, record) for every position of `record` crossed with every member the store cannot hold that fits it
+    (`_members_for`)."""
+    for path, where in _positions(record):
+        at = ".".join(map(str, path)) or "record"
+        for label, new in _members_for(where).items():
+            yield path, f"{at}-{label}", _replaced(record, path, new)
+
+
+def _unstorable_cases():
+    """Every `VALID` case (every kind by every record name) crossed with `_unstorable` of its valid record."""
+    return [pytest.param(case, bad, (case, path[:1] and path[0]) in SCREENED_BY_ITS_FIELD, id=f"{case}-{label}")
+            for case, (_kind, _verb, record, _name, _staged) in sorted(VALID.items())
+            for path, label, bad in _unstorable(record) if (case, path) not in NOT_STORED_AS_SENT]
+
+
+def test_the_unstorable_cases_reach_every_kind_and_every_position_kind():
+    """The generator's own premise: every `VALID` case has cases, and text, number, null, list and key positions all occur."""
+    cases = {p.values[0] for p in _unstorable_cases()}
+    assert any(p.values[2] for p in _unstorable_cases()), "premise: findings positions are generated"
+    assert cases == set(VALID), set(VALID) - cases
+    ids = " ".join(p.id for p in _unstorable_cases())
+    for label in (*UNSTORABLE_TEXT, *UNSTORABLE_NUMBER, "key-nul", "element-nul", "summary-nul", "cost_usd-past-float-range",
+                  "message-nul", "sibling_cost_usd-nan", "record-past-float-range"):
+        assert label in ids, label
+
+
+@pytest.mark.parametrize(("case", "bad", "in_findings"), _unstorable_cases())
+def test_a_record_the_store_cannot_hold_is_staged_refused_and_a_refused_outcome_still_owes_its_bundle(
+        request, scene, evidence_store, case, bad, in_findings):
+    """Whole class, every kind by every record name by every text, number, null, list and key position: a record carrying a
+    value the store cannot hold (NUL, a lone surrogate, NaN or infinity, an int past float range) is screened once at the
+    helper like any malformed record: staged `refused/<name>{reason}`, never `<name>`, and never a fault that stages
+    nothing. A refused `outcome` still owes the bundle, which is uploaded, and the ending reads `bad_record` with evidence
+    `partial`; a refused `result` reads `bad_record`. Inside a learning outcome's `findings` the field's own rule may hold instead:
+    the outcome staged with `findings: refused`, never the sent value. (PR2, PR8, r8 "Done when": a malformed outcome or
+    result of every kind ends `bad_record`)"""
+    kind, verb, _record, name, _staged = VALID[case]
+    _base_files_for(request, kind)
+    planted = plant(scene, kind)
+    owes_bundle = name == "outcome"
+
+    def job(c) -> int:
+        _send_record(c, verb, bad)
+        if owes_bundle:
+            put_object(c, "bundle", BUNDLE)
+        return 0
+
+    drive(scene, planted, job, **evidence_store.seams)
+    staged = facts(scene.dsn, scene.claim)
+    rows = uploads(scene.dsn, scene.claim)
+    if in_findings and name in staged:  # the findings field's own rule, inside a valid outcome
+        assert f"refused/{name}" not in staged, staged
+        assert staged[name]["findings"]["state"] == "refused", staged[name]["findings"]
+        assert rows["bundle"]["status"] == "uploaded", rows
+        return
+    _refused(staged, name)
+    assert name not in staged, "a record the store cannot hold was staged as a fact"
+    if not owes_bundle:
+        assert rows == {}, "a refused record owes nothing"
+    else:
+        assert set(rows) == {"bundle"}, rows
+        assert rows["bundle"]["status"] == "uploaded", rows
+    if name in ("outcome", "result"):
+        end = decide(DECIDE_KIND[kind], staged, {o: up(r["status"], r["scrub"]) for o, r in rows.items()}, "exited")
+        assert (end.stage, end.failure_reason) == ("failed", "bad_record"), (end.stage, end.failure_reason)
+        if owes_bundle:
+            assert end.evidence_state == "partial", end.evidence_state
 
 
 @pytest.mark.parametrize("kind", ["readiness", "investigation", "learning", "adoption", "drain"])

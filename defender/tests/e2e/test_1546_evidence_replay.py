@@ -174,10 +174,11 @@ async def test_a_replayed_investigation_ends_complete_with_only_allowlisted_moun
                 assert sha(body) == digest
                 fetched[name] = body
             # the page is the renderer's output over the run the job's own bundle holds, computed here (not the job's call).
-            # The bundle is the job's tenant folder from its root (members tenant-relative), and its run names its session store
-            # and its own folder by their paths there (the session pointer's `store_path`; the page's byline its `run_dir`).
-            # So it is unpacked where the job's root was, once that root is shown gone (above): the render here then reads the
-            # paths the job's render read.
+            # The bundle is the job's tenant folder from its root (members tenant-relative). Its run names its session store
+            # relative to its own folder (the session pointer's run-relative `store_path`), and the page names no folder of the
+            # host (its byline no longer carries `run_dir`: `presentation/test_run_page_record.py`, #1546), so the render reads
+            # the same bytes wherever the bundle is unpacked; it is unpacked where the job's root was, once that root is shown
+            # gone (above).
             unpacked = root / ROOTS / token / t.tenant_id
             unpacked.mkdir(parents=True)
             with tarfile.open(fileobj=io.BytesIO(fetched["bundle"]), mode="r:gz") as bundle_tar:

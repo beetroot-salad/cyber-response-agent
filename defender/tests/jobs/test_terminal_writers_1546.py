@@ -51,9 +51,14 @@ ANY_TABLE = frozenset().union(*(v for k, v in TERMINAL_BY_TABLE.items() if k != 
 RENEWAL_EXEMPT = frozenset({"knowledge"})
 JOB_ROWS = frozenset(TERMINAL_BY_TABLE)
 SCOPE = re.compile(r"InvestigationRow|LearningJobRow|HostRequestRow|UploadRow|jobs\.(investigations|learning_jobs|"
-                   r"host_requests|uploads)")
-RAW = re.compile(r"UPDATE\s+(jobs\.)?(?P<table>investigations|learning_jobs|host_requests|uploads)\b(?P<rest>.*)",
-                 re.I | re.S)
+                   r"host_requests|uploads)|UPDATE\s+jobs\.", re.I)
+#: A part of SQL text the census cannot read statically: an f-string's `{...}`, a `.format` or `%` placeholder, or a string
+#: concatenated with a name. Read as any table (after `jobs.`) or any column (before `=` in the SET list).
+HOLE = "\x00"
+RAW = re.compile(r"UPDATE\s+(?:(?:jobs\.)?(?P<table>investigations|learning_jobs|host_requests|uploads)\b|jobs\.(?P<any>"
+                 + HOLE + r"))(?P<rest>.*)", re.I | re.S)
+FORMAT_HOLE = re.compile(r"\{[^{}]*\}|%\(\w+\)s|%s")
+HOLE_COLUMN = re.compile(r"(?:\bSET\s+|,\s*)" + HOLE + r"\s*=", re.I)
 EXPIRE_ONLY = re.compile(r"SET\s+evidence_state\s*=\s*'expired'\s*(WHERE|$)", re.I)
 LIVE_WORDS = ("running", "queued")
 
@@ -140,11 +145,51 @@ class _Census(ast.NodeVisitor):
                     self._flag(node, f".{t.attr} = ...")
         self.generic_visit(node)
 
-    def visit_Constant(self, node: ast.Constant) -> None:
-        if (isinstance(node.value, str) and (m := RAW.search(node.value)) and not EXPIRE_ONLY.search(node.value)
-                and any(re.search(rf"\b{c}\b", m["rest"].split("WHERE")[0], re.I)
-                        for c in TERMINAL_BY_TABLE[SQL_TABLE[m["table"].lower()]])):
+    def _raw_sql(self, node: ast.AST, text: str) -> None:
+        """SQL text (a literal, an f-string, a concatenation or a format template, holes marked `HOLE`): an UPDATE of a
+        job table, named or formatted, that sets a terminal column, named or formatted, is a terminal write."""
+        text = FORMAT_HOLE.sub(HOLE, text)
+        m = RAW.search(text)
+        if m is None or EXPIRE_ONLY.search(text):
+            return
+        columns = ANY_TABLE if m["any"] else TERMINAL_BY_TABLE[SQL_TABLE[m["table"].lower()]]
+        sets = re.split(r"\bWHERE\b", m["rest"], maxsplit=1, flags=re.I)[0]
+        if HOLE_COLUMN.search(sets) or any(re.search(rf"\b{c}\b", sets, re.I) for c in columns):
             self._flag(node, "raw UPDATE of a terminal column")
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        if isinstance(node.value, str):
+            self._raw_sql(node, node.value)
+
+    def visit_JoinedStr(self, node: ast.JoinedStr) -> None:  # an f-string: its formatted parts are holes
+        self._raw_sql(node, _sql_text(node) or "")  # its parts are not visited again: one write, one finding
+
+    def visit_BinOp(self, node: ast.BinOp) -> None:  # `"UPDATE jobs." + table + " SET ..."`, `"... %s ..." % x`
+        text = _sql_text(node)
+        if text is None:
+            self.generic_visit(node)
+            return
+        self._raw_sql(node, text)
+        for side in (node.left, node.right):  # a nested call or name is still visited; its string parts are not re-read
+            if not isinstance(side, ast.Constant | ast.JoinedStr | ast.BinOp):
+                self.visit(side)
+
+
+def _sql_text(node: ast.AST) -> str | None:
+    """The text a string expression builds, with each part the census cannot read as `HOLE`; None for no string at all."""
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else None
+    if isinstance(node, ast.JoinedStr):
+        return "".join(v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else HOLE
+                       for v in node.values)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+        return _sql_text(node.left)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _sql_text(node.left), _sql_text(node.right)
+        if left is None and right is None:
+            return None
+        return (HOLE if left is None else left) + (HOLE if right is None else right)
+    return None
 
 
 def census(files: dict[str, str]) -> list[tuple[str, str, int, str]]:
@@ -213,6 +258,52 @@ def test_the_census_flags_every_spelling_of_a_terminal_write_outside_the_applier
     got = census({"jobs/store.py": SYNTHETIC})
     assert sorted({qual for _, qual, _, _ in got}) == ["S.attr", "S.insert_ended", "S.promote", "S.promote_raw", "S.raw",
                                                         "S.sneaky", "S.splat"]
+
+
+SYNTHETIC_BUILT = textwrap.dedent('''
+    from sqlalchemy import text
+    class B:
+        async def reaper(self, s):
+            for table, column in (("investigations", "stage"), ("learning_jobs", "status")):
+                await s.execute(text(f"UPDATE jobs.{table} SET {column} = 'failed', finished_at = now() "
+                                     f"WHERE {column} = 'running'"))
+        async def formatted_table(self, s, table):
+            await s.execute(text(f"UPDATE jobs.{table} SET evidence_state = 'none' WHERE id = :i"))
+        async def formatted_column(self, s, column):
+            await s.execute(text(f"UPDATE jobs.investigations SET {column} = 'failed' WHERE id = :i"))
+        async def concatenated(self, s, table):
+            await s.execute(text("UPDATE jobs." + table + " SET status = 'failed' WHERE id = :i"))
+        async def templated(self, s, table):
+            await s.execute(text("UPDATE jobs.{} SET finished_at = now() WHERE id = :i".format(table)))
+        async def percent(self, s, table):
+            await s.execute(text("UPDATE jobs.%s SET failure_reason = 'x' WHERE id = :i" % table))
+        async def plain(self, s):
+            sql = "UPDATE jobs.learning_jobs SET reason = 'x' WHERE id = :i"
+            await s.execute(text(sql))
+        async def _apply_built(self, s, table):
+            await s.execute(text(f"UPDATE jobs.{table} SET stage = 'failed' WHERE id = :i"))
+        async def built_lease(self, s, table, at):
+            await s.execute(text(f"UPDATE jobs.{table} SET lease_expires_at = {at}, cost_usd = %s WHERE id = :i"))
+        async def built_expiry(self, s, table):
+            await s.execute(text(f"UPDATE jobs.{table} SET evidence_state = 'expired' WHERE id = :i"))
+        async def other_schema(self, s, table):
+            await s.execute(text(f"UPDATE tenancy.{table} SET stage = 'failed' WHERE id = :i"))
+        async def built_queue(self, s, table):
+            await s.execute(text(f"UPDATE jobs.{table} SET attempt = attempt + 1 WHERE id = :i"))
+''')
+
+
+def test_the_census_reads_sql_built_at_run_time_as_a_write_to_every_job_table():
+    """On a synthetic source: an UPDATE whose table or column is an f-string part, a concatenation, a `.format` or `%`
+    template, or a plain string held in a name, setting a terminal column (or a formatted one), is found outside `apply`;
+    the same text inside `_apply*`, a built lease or queue write, a built expiry, and another schema's table are not.
+    (PR9, triage 1 family D3: a table name formatted in is a write to every job table)"""
+    got = census({"jobs/store.py": SYNTHETIC_BUILT})
+    assert sorted({qual for _, qual, _, _ in got}) == ["B.concatenated", "B.formatted_column", "B.formatted_table",
+                                                        "B.percent", "B.plain", "B.reaper", "B.templated"], got
+    assert len([q for _, q, _, _ in got if q == "B.reaper"]) == 1, "one built statement is one finding"
+    assert census({"worker/elsewhere.py": SYNTHETIC_BUILT}), (
+        "a module outside jobs/ that only builds its job-table SQL is not in the census's scope")
 
 
 def test_nothing_in_production_outside_the_applier_writes_a_terminal_column_of_a_job_row():
