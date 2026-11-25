@@ -58,17 +58,20 @@ def _asked_unusable(ask: Callable[..., dict[str, Any]], tenant_id: str) -> Calla
 def _unpack_inputs(ask: Callable[..., dict[str, Any]], launch: Mapping[str, Any], root: Path, tenant_root: Path) -> None:
     """The claim's input set (`input_set`, each `{owner, object}`) pulled and unpacked into the drain's root: each bundle
     pulled (`job_socket.pull_object`) and unpacked into a staging folder of its own in the root (a bundle writes every
-    member exclusively, and each carries its own `scrub-findings.json`), then its files moved into `<root>/<T>/` at the
-    same relative path where none is there yet: on a clash the first placed is kept and this one's left out (logged). A
-    member whose pull or unpack fails is left out (logged): its work item waits."""
+    member exclusively, and each carries its own `scrub-findings.json`), then only its owner's run folder moved into
+    `<root>/<T>/` (`_merge_tree`, #1546 r11). The owners are the input set's, each once, so no two bundles place one path.
+    A member whose pull or unpack fails (a bundle the format refuses is refused whole) is left out (logged): its work item
+    waits."""
     from defender.evidence import bundle
 
     members = launch.get("input_set")
+    seen: set[str] = set()
     for n, member in enumerate(members if isinstance(members, list) else []):
         owner = member.get("owner") if isinstance(member, dict) else None
         obj = member.get("object") if isinstance(member, dict) else None
-        if not isinstance(owner, str) or obj != "bundle":
+        if not isinstance(owner, str) or obj != "bundle" or owner in seen:
             continue
+        seen.add(owner)
         packed, staging = root / f".pull-{n}.bundle", root / f".unpack-{n}"
         try:
             job_socket.pull_object(ask, owner, obj, packed)
@@ -82,8 +85,10 @@ def _unpack_inputs(ask: Callable[..., dict[str, Any]], launch: Mapping[str, Any]
 
 
 def _merge_tree(staging: Path, target: Path, owner: str) -> None:
-    """`staging`'s files moved under `target` at the same relative path, but its root `scrub-findings.json` (the bundle's
-    own listing); a path already there is left as it is."""
+    """The owner's own run folder of `staging` (`runs/<owner>/`, the input's run id from the claim, never a name the bundle
+    gives) moved under `target` at the same relative path (#1546 r11; PR1: one owner per output). Every other member (another
+    run's folder, a sibling of the owner's such as its `<owner>.session-pointer.json` or `<owner>-x/`, a root-level file) is
+    dropped and logged, naming it and the owner; the bundle's own root `scrub-findings.json` (its listing) is never placed."""
     for folder, _dirs, files in os.walk(staging):
         here = Path(folder)
         for name in files:
@@ -91,11 +96,11 @@ def _merge_tree(staging: Path, target: Path, owner: str) -> None:
             rel = source.relative_to(staging)
             if rel == Path("scrub-findings.json"):
                 continue
-            dest = target / rel
-            if dest.exists() or dest.is_symlink():
-                _logger.warning("drain input of %s: %s is already placed by another bundle; this one's is left out",
-                                owner, rel)
+            if len(rel.parts) < 3 or rel.parts[:2] != ("runs", owner):
+                _logger.warning("drain input of %s: %s lies outside the owner's runs/%s/ and is dropped",
+                                owner, rel.as_posix(), owner)
                 continue
+            dest = target / rel
             dest.parent.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the drain's own root
             os.rename(source, dest)
 
