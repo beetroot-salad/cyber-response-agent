@@ -323,3 +323,25 @@ async def test_claims_of_ended_references_older_than_the_longest_retention_go_wi
     for name in ("mid", "live"):
         assert execute(dsn, "SELECT count(*) FROM jobs.claims WHERE token = %s", (made[name]["claim"],)) == [(1,)], name
         assert "started" in facts(dsn, made[name]["claim"]), name
+
+
+async def test_a_long_ended_claim_that_still_has_an_upload_row_stays_and_the_others_still_go(migrated_database, garage):
+    """A claim whose investigation ended 100 days ago but whose accepted bundle is still kept (a running learning job names
+    it as its source, so expiry passes it by) stays with its upload row, and does not keep a claim with no upload row,
+    ended as long ago, from going: the claim pass judges each claim, and an upload row refers to its claim. ("Claims
+    lifecycle": "a claim that still has an upload row stays"; A-O7)"""
+    dsn = migrated_database
+    tenant = _fresh_tenant(dsn)
+    set_retention(dsn, tenant, 30, 90)
+    async with job_store(dsn) as store:
+        kept = make_owner(dsn, garage, tenant, "T-kept", accepted_days_ago=100, ended_days_ago=100)
+        _learning_job(dsn, kept["owner"], "running", "kept")
+        old = make_owner(dsn, garage, tenant, "T-old", state="none", accepted_days_ago=None, put_object=False,
+                         ended_days_ago=100)
+        execute(dsn, "DELETE FROM jobs.uploads WHERE token = %s", (old["claim"],))
+        await _run(store, garage)
+    assert evidence_state(dsn, "investigation", kept["owner"]) == "complete", "premise: expiry kept the learning source"
+    assert execute(dsn, "SELECT count(*) FROM jobs.claims WHERE token = %s", (kept["claim"],)) == [(1,)]
+    assert list(uploads(dsn, kept["claim"])) == ["bundle"] and present(garage, kept["key"])
+    assert execute(dsn, "SELECT count(*) FROM jobs.claims WHERE token = %s", (old["claim"],)) == [(0,)], \
+        "a claim with no upload row, ended past the longest retention, stayed"

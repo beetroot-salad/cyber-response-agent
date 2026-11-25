@@ -102,6 +102,80 @@ def test_a_job_tenant_is_refused_for_a_relative_root_or_one_inside_the_code_tree
             JobTenant(id=ID, data_root=root, inputs=inputs)
 
 
+def _placements(tmp_path: Path) -> dict[str, tuple[Path, Path]]:
+    """Every (root, inputs) placement the constructor refuses, by name: each folder relative, each inside the checkout's
+    `defender/` tree (an existing folder there, so only placement can refuse it), each holding the other (as given and
+    through a link), and the two the same folder."""
+    root, inputs = _layout(tmp_path)
+    code = Path(__file__).resolve().parents[2]  # the checkout's `defender/` (a namespace package: no __file__)
+    in_code = code / "tests"
+    assert in_code.is_dir(), "premise: a folder that exists inside the code tree"
+    linked = tmp_path / "link-into-root"
+    linked.symlink_to(root / ID / "runs", target_is_directory=True)
+    return {
+        "relative-root": (Path("relative/root"), inputs),
+        "relative-inputs": (root, Path("relative/inputs")),
+        "root-in-code-tree": (in_code, inputs),
+        "inputs-in-code-tree": (root, in_code),
+        "inputs-inside-root": (root, root / ID / "inputs"),
+        "root-inside-inputs": (inputs / "root", inputs),
+        "inputs-linked-into-root": (root, linked),
+        "the-same-folder": (root, root),
+    }
+
+
+PLACEMENTS = ["relative-root", "relative-inputs", "root-in-code-tree", "inputs-in-code-tree", "inputs-inside-root",
+              "root-inside-inputs", "inputs-linked-into-root", "the-same-folder"]
+
+
+@pytest.mark.parametrize("placement", PLACEMENTS)
+def test_a_job_tenant_is_refused_for_every_placement_of_root_or_inputs_the_design_forbids(tmp_path, monkeypatch, placement):
+    """Whole class, root and inputs each the offender: a relative path, a folder inside the checkout's `defender/` tree,
+    and a root and inputs where one holds the other (either way, as given or through a link, or the same folder) are
+    refused by the constructor; two separate absolute folders outside the tree are the control. The working directory is
+    outside the code tree, so a relative path is refused for being relative, not for where it happens to resolve.
+    (design: JobTenant "a relative or unresolvable path, a folder inside the running checkout's `defender/` tree, or a root
+    and inputs where one holds the other")"""
+    from defender.records.formats import TenantRefused
+    from defender.tenancy import JobTenant
+
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    placements = _placements(tmp_path)
+    assert set(placements) == set(PLACEMENTS)
+    assert JobTenant(id=ID, data_root=tmp_path / "root", inputs=tmp_path / "inputs")  # the control
+    root, inputs = placements[placement]
+    with pytest.raises((TenantRefused, ValueError)):
+        JobTenant(id=ID, data_root=root, inputs=inputs)
+
+
+def test_a_job_tenants_root_names_name_each_of_its_three_folders_in_every_spelling(tmp_path):
+    """`root_names()` names the job's root `<data root>`, its tenant folder `<tenant folder>` and its inputs `<job inputs>`,
+    each as given and as resolved (root and inputs reached through links here), and `name_roots` with it rewrites an
+    absolute path under each folder, in either spelling, to its name: no text shown to a model or an operator locates a
+    job's folders. (design: JobTenant `root_names()`, a census member; #1256 spellings)"""
+    from defender._paths import name_roots
+    from defender.tenancy import JobTenant
+
+    real_root, real_inputs = _layout(tmp_path / "real")
+    root, inputs = tmp_path / "root-link", tmp_path / "inputs-link"
+    root.symlink_to(real_root, target_is_directory=True)
+    inputs.symlink_to(real_inputs, target_is_directory=True)
+    names = JobTenant(id=ID, data_root=root, inputs=inputs).root_names()
+    assert set(names.values()) == {"<data root>", "<tenant folder>", "<job inputs>"}, names
+    for spelling, named in ((root, "<data root>"), (real_root, "<data root>"), (root / ID, "<tenant folder>"),
+                            (real_root / ID, "<tenant folder>"), (inputs, "<job inputs>"),
+                            (real_inputs, "<job inputs>")):
+        assert names.get(str(spelling)) == named, (spelling, names)
+    for under, named in ((root / "other" / "x.json", "<data root>/other/x.json"),
+                         (real_root / ID / "runs" / "r.json", "<tenant folder>/runs/r.json"),
+                         (root / ID / "episodes", "<tenant folder>/episodes"),
+                         (real_inputs / "run-knowledge" / "a", "<job inputs>/run-knowledge/a"),
+                         (inputs / "run-knowledge", "<job inputs>/run-knowledge")):
+        assert name_roots(f"see {under} now", names) == f"see {named} now", under
+
+
 # --- the entries run over a job root ------------------------------------------------------------------------------------------------
 
 @pytest.mark.postgres

@@ -1,17 +1,21 @@
 #!/bin/sh
 # #1546: start a single-node Garage (S3) for the evidence-store tests and lay it out: one zone, one key, one bucket.
 # CI's test job runs it after the gVisor step (the daemon restart there kills an earlier container), like Postgres/OpenBao.
-# Usage: start_garage.sh [container-name] [host-port]. Prints the DEFENDER_TEST_GARAGE_* variables (and appends them to
-# $GITHUB_ENV when set). The config is `docker cp`'d in: a bind mount fails under docker-outside-of-docker (#1082 r3).
+# Usage: start_garage.sh [container-name] [host-port] [s3-region] [variable-prefix]. Prints the <prefix>_* variables
+# (default prefix DEFENDER_TEST_GARAGE; appended to $GITHUB_ENV when set), and `<prefix>_REGION` when a region is given.
+# The config is `docker cp`'d in: a bind mount fails under docker-outside-of-docker (#1082 r3). A region other than
+# Garage's `garage` is a store a client must sign for by name, as a hosted one is (#1546: the deployment wiring test).
 set -eu
 NAME="${1:-defender-garage}"
 PORT="${2:-3900}"
+REGION="${3:-garage}"
+PREFIX="${4:-DEFENDER_TEST_GARAGE}"
 BUCKET=defender-evidence-ci
 ACCESS_KEY=GK000000000000000000000001
 SECRET_KEY=0000000000000000000000000000000000000000000000000000000000000001
 CONF="$(mktemp)"
 trap 'rm -f "$CONF"' EXIT
-cat >"$CONF" <<'TOML'
+cat >"$CONF" <<TOML
 metadata_dir = "/var/lib/garage/meta"
 data_dir = "/var/lib/garage/data"
 db_engine = "sqlite"
@@ -20,7 +24,7 @@ rpc_bind_addr = "127.0.0.1:3901"
 rpc_secret = "0000000000000000000000000000000000000000000000000000000000000000"
 
 [s3_api]
-s3_region = "garage"
+s3_region = "$REGION"
 api_bind_addr = "0.0.0.0:3900"
 TOML
 docker create --name "$NAME" --runtime runc -p "127.0.0.1:$PORT:3900" dxflrs/garage:v2.1.0 >/dev/null
@@ -34,9 +38,11 @@ garage layout apply --version 1 >/dev/null
 garage key import --yes -n ci "$ACCESS_KEY" "$SECRET_KEY" >/dev/null
 garage bucket create "$BUCKET" >/dev/null
 garage bucket allow --read --write --owner "$BUCKET" --key ci >/dev/null
-VARS="DEFENDER_TEST_GARAGE_ENDPOINT=http://127.0.0.1:$PORT
-DEFENDER_TEST_GARAGE_ACCESS_KEY=$ACCESS_KEY
-DEFENDER_TEST_GARAGE_SECRET_KEY=$SECRET_KEY
-DEFENDER_TEST_GARAGE_BUCKET=$BUCKET"
+VARS="${PREFIX}_ENDPOINT=http://127.0.0.1:$PORT
+${PREFIX}_ACCESS_KEY=$ACCESS_KEY
+${PREFIX}_SECRET_KEY=$SECRET_KEY
+${PREFIX}_BUCKET=$BUCKET"
+if [ -n "${3:-}" ]; then VARS="$VARS
+${PREFIX}_REGION=$REGION"; fi
 echo "$VARS"
 if [ -n "${GITHUB_ENV:-}" ]; then echo "$VARS" >>"$GITHUB_ENV"; fi

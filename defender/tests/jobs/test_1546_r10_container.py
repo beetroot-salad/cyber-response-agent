@@ -42,10 +42,11 @@ def test_1546_r10_the_drain_helper_unpacks_nothing_and_the_container_pulls_and_u
     with different bytes, and its own root `scrub-findings.json`), `broken` (stored bytes that are no bundle) and `absent`
     (nothing stored: its pull is refused). At the container's start the helper has placed no file in the drain's root or
     inputs (it unpacks nothing), and the launch facts name the claim's input set (`input_set`). By the tick, the drain entry
-    has pulled and unpacked the set into `<root>/<T>/`: both runs are there; the clashing session store is `first`'s (the
-    first placed is kept); no bundle's root `scrub-findings.json` was merged; `broken` and `absent` left nothing (a member
+    has pulled and unpacked the set into `<root>/<T>/`: both runs are there; the session store both carry at the same path
+    is placed from neither (amendment r11: a bundle contributes only its files under `runs/<owner>/`, so no two bundles
+    place the same path); no bundle's root `scrub-findings.json` was merged; `broken` and `absent` left nothing (a member
     whose pull or unpack fails is left out). The tick's status is the drain's staged `result` (control: the entry got past
-    its unpack to the tick). (r10 (c) "The drain's inputs", H3; (f) 5)"""
+    its unpack to the tick). (r10 (c) "The drain's inputs", H3; (f) 5; r11, replacing r10 (c)'s clash rule)"""
     from defender.learning.branch import drain_job
 
     from defender.tests.support.shared._postgres1339 import execute
@@ -92,7 +93,7 @@ def test_1546_r10_the_drain_helper_unpacks_nothing_and_the_container_pulls_and_u
     placed = seen["at_tick"]
     for name in ("first", "second"):
         assert placed.get(f"runs/{owners[name]}/report.md") == f"{name}'s run\n".encode(), (name, sorted(placed))
-    assert placed.get(clash) == b"first's store", "on a clash the first file placed is not the one kept"
+    assert clash not in placed, f"a member outside runs/<owner>/ was placed (r11): {placed.get(clash)!r}"
     assert "scrub-findings.json" not in placed, "a bundle's root `scrub-findings.json` was merged"
     for name in ("broken", "absent"):
         assert not [k for k in placed if owners[name] in k], f"the failed member `{name}` left files: {sorted(placed)}"

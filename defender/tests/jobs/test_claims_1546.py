@@ -245,6 +245,92 @@ async def test_a_write_racing_an_uncommitted_ender_waits_for_it_and_is_then_refu
     assert facts_of(dsn, token) == {}
 
 
+def _job_fact_names() -> dict[str, object]:
+    """Every fact name a job's helper stages, each with a body of its shape: the names `decide` reads that no record carries
+    (`started`, `knowledge`, `progress`), each record verb's fact (`_facts1546.VALID`, the generated record cases' table)
+    and that record's refusal (`refused/<name>`). Built from the shared vocabulary, so a fact name added there is covered."""
+    from defender.tests.support.evidence._facts1546 import VALID, VERB_PROGRESS
+
+    names: dict[str, object] = {"started": STARTED, "knowledge": KNOWLEDGE, VERB_PROGRESS: inv_progress(9.0)}
+    for _kind, _verb, _sent, name, body in VALID.values():
+        names[name] = body
+        names[f"refused/{name}"] = {"reason": "the record was refused"}
+    return names
+
+
+def _owner_row(dsn, inv):
+    return execute(dsn, "SELECT row_to_json(i)::text FROM jobs.investigations i WHERE id = %s", (inv,))
+
+
+@pytest.mark.parametrize("ender", ["take_over", "cancel", "offboard", "finish"])
+async def test_every_job_write_after_every_ender_is_refused_and_changes_nothing(migrated_database, ender):
+    """The whole class of a job's writes under a claim no longer live: a staged fact of every name (`_job_fact_names`),
+    `begin_upload` and `refuse_upload` of a new object, `finish_upload` of the pending one, and the helper's own end
+    (`decide` + `apply`) after a take-over, cancel, offboard or the row's own end: each is refused (`Conflict`, or `apply`
+    answering `None`), and the row, its facts and its upload rows are as the ender left them. (PR7, A-O3)"""
+    from defender.jobs import Conflict
+
+    dsn = migrated_database
+    register_tenant(dsn, T1)
+    names = _job_fact_names()
+    async with job_store(dsn) as store:
+        inv, token = await _running(store, dsn)
+        await _upload(store, token)
+        if ender == "take_over":
+            lapse_lease(dsn, inv)
+            await store.take_over()
+        elif ender == "cancel":
+            await store.cancel_investigation(T1, inv, actor="u-1")
+        elif ender == "offboard":
+            await store.offboard_tenant(T1, actor="u-1")
+        else:
+            await end_row(store, dsn, kind="investigation", tenant=T1, owner=inv, token=token, by="exited")
+        assert await store.claim_live(token) is False, "premise: the ender ended the claim"
+        before = (_owner_row(dsn, inv), facts_of(dsn, token), uploads_of(dsn, token))
+        landed = []
+        for name, body in names.items():
+            try:
+                await _fact(store, token, name, body)
+                landed.append(f"fact {name}")
+            except Conflict:
+                pass
+        writes = {"begin_upload": lambda: _upload(store, token, "page/late"),
+                  "refuse_upload": lambda: store.refuse_upload(token, "page/refused-late"),
+                  "finish_upload": lambda: store.finish_upload(token, BUNDLE, status="uploaded")}
+        for what, write in writes.items():
+            try:
+                await write()
+                landed.append(what)
+            except Conflict:
+                pass
+        _, applied = await end_row(store, dsn, kind="investigation", tenant=T1, owner=inv, token=token, by="exited")
+        if applied is not None:
+            landed.append("the helper's end")
+    assert landed == [], f"written under a claim no longer live ({ender}): {landed}"
+    assert (_owner_row(dsn, inv), facts_of(dsn, token), uploads_of(dsn, token)) == before
+
+
+async def test_a_helpers_end_after_its_hand_back_is_refused_and_leaves_the_row_handed_back(migrated_database):
+    """A stop that decided nothing hands the row back (running, lease lapsed, accounting written); the same claim's
+    helper end landing after it is refused by the fence (`apply` answers `None`) and the row stays as handed back, for
+    its take-over to decide. (PR7, D-end "a stop is handed back")"""
+    from defender.jobs import ending
+
+    dsn = migrated_database
+    register_tenant(dsn, T1)
+    async with job_store(dsn) as store:
+        inv, token = await _running(store, dsn)
+        await _fact(store, token)
+        decision, handed = await end_row(store, dsn, kind="investigation", tenant=T1, owner=inv, token=token, by="stopped")
+        assert isinstance(decision, ending.HandBack), f"premise: the stop decided nothing: {decision}"
+        assert handed is not None, "premise: the hand-back was applied"
+        before = _owner_row(dsn, inv)
+        await _fact(store, token, "outcome", inv_outcome())
+        _, applied = await end_row(store, dsn, kind="investigation", tenant=T1, owner=inv, token=token, by="exited")
+    assert applied is None, f"a helper's end landed on a handed-back row: {applied}"
+    assert _owner_row(dsn, inv) == before
+
+
 # --- A-O3: upload rows ----------------------------------------------------------------------------------------------------------
 
 
@@ -282,6 +368,31 @@ async def test_an_upload_row_is_create_once_moves_only_pending_to_uploaded_or_re
             await store.finish_upload(token, BUNDLE, status="uploaded")
     assert accepted(dsn, token) == [BUNDLE]
     assert uploads_of(dsn, token) == promoted
+
+
+async def test_every_fact_name_but_progress_is_create_once_and_its_first_body_stays(migrated_database):
+    """Over every fact name a job stages (`_job_fact_names`): a second stage of any name but `progress` is refused
+    (`Conflict`, the helper's "not staged") and the first body stays; `progress` alone takes the second. (PR7, staged facts)"""
+    from defender.jobs import Conflict
+
+    dsn = migrated_database
+    register_tenant(dsn, T1)
+    names = _job_fact_names()
+    second = {"a": "second body"}
+    async with job_store(dsn) as store:
+        _, token = await _running(store, dsn)
+        replaced = []
+        for name, body in names.items():
+            await _fact(store, token, name, body)
+            try:
+                await _fact(store, token, name, second)
+                replaced.append(name)
+            except Conflict:
+                pass
+    assert replaced == ["progress"], f"names a second stage replaced: {replaced}"
+    got = facts_of(dsn, token)
+    assert {name: got[name] for name in names if name != "progress"} == {n: b for n, b in names.items() if n != "progress"}
+    assert got["progress"] == second
 
 
 async def test_the_progress_fact_is_the_one_replaced_fact_and_every_other_is_create_once(migrated_database):

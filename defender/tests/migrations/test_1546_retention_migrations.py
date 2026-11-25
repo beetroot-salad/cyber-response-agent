@@ -143,3 +143,60 @@ def test_the_upgrade_adds_the_investigation_foreign_key_not_valid_so_old_rows_st
                  "VALUES ('00000000-0000-4000-8000-000000000003', %s, 'tickets', 'y', now(), now(), now(), '{}')", (FOURTH,))
     with pytest.raises(psycopg.errors.ForeignKeyViolation):
         execute(dsn, insert, ("00000000-0000-4000-8000-0000000000a3", FOURTH, "00000000-0000-4000-8000-000000000003", "k3"))
+
+
+def _tenant_states(dsn: str) -> list[str]:
+    """Every tenant state the schema allows, read from its `state` check (`ck_tenants_state`), not listed here."""
+    import re
+
+    [(definition,)] = execute(dsn, "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_tenants_state' "
+                                   "AND conrelid = 'tenancy.tenants'::regclass")
+    return re.findall(r"'([a-z_]+)'", definition)
+
+
+def _plant_tenant_in(dsn: str, tenant: str, state: str) -> None:
+    """A tenant row in `state`, with whichever pending action the schema allows it (none first, then each action its
+    `pending_action` check lists, in turn)."""
+    import re
+
+    [(actions,)] = execute(dsn, "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                                "WHERE conname = 'ck_tenants_pending_action' AND conrelid = 'tenancy.tenants'::regclass")
+    for action in (None, *re.findall(r"'([a-z_]+)'", actions)):
+        job = (action, "names", "service") if action else (None, None, None)
+        try:
+            execute(dsn, "INSERT INTO tenancy.tenants (id, created_at, state, pending_action, step, step_actor) "
+                         "VALUES (%s, now(), %s, %s, %s, %s)", (tenant, state, *job))
+            return
+        except psycopg.errors.CheckViolation:
+            continue
+    raise AssertionError(f"premise: no pending action lets a tenant be {state!r}")
+
+
+def test_the_upgrade_refuses_for_a_tenant_in_every_state_but_offboarded_that_has_no_row(empty_database):
+    """Over every state the schema allows: a lone tenant in that state with no retention row stops the upgrade, naming
+    it and changing nothing, unless the state is `offboarded`, which does not. (A-O7 rollout, D16: "refuses while any
+    non-offboarded tenant (`creating` included) lacks a row")"""
+    from defender.migrations import upgrade
+
+    dsn = empty_database
+    _upgrade_to(dsn, revisions.down_of(_revision()))
+    states = _tenant_states(dsn)
+    assert "offboarded" in states and len(states) >= 3, f"premise: the schema's states were read: {states}"
+    before = execute(dsn, "SELECT version_num FROM public.alembic_version")
+    let_through, refusals = [], {}
+    for state in [s for s in states if s != "offboarded"]:
+        _plant_tenant_in(dsn, THIRD, state)
+        try:
+            upgrade(dsn)
+            let_through.append(state)
+            break  # applied: the revision is gone, so the states after this one are not reached
+        except RuntimeError as stopped:
+            refusals[state] = str(stopped)
+        assert execute(dsn, "SELECT version_num FROM public.alembic_version") == before, state
+        assert _fk(dsn) == [], state
+        execute(dsn, "DELETE FROM tenancy.tenants WHERE id = %s", (THIRD,))
+    assert let_through == [], f"the upgrade applied with a tenant in {let_through} lacking a row"
+    assert {state: THIRD in message for state, message in refusals.items()} == dict.fromkeys(refusals, True), refusals
+    _plant_tenant_in(dsn, FOURTH, "offboarded")
+    upgrade(dsn)
+    assert execute(dsn, "SELECT version_num FROM public.alembic_version") != before, "an offboarded tenant stopped it"
