@@ -122,8 +122,9 @@ Live runs additionally need a provider API key (Anthropic by default; Fireworks 
 ## Running The Agent
 
 Every run names its tenant, and there is no default (#1078). A tenant is created through the
-platform API, not by hand (#1214): an administrator posts `POST /api/admin/tenants` (202, the new
-tenant's URL in `Location`), and `python -m defender.lifecycle serve` (dev: the management service
+platform API, not by hand (#1214): an administrator posts `POST /api/admin/tenants` with the tenant's evidence
+retention, `{"investigation_days": <30-730>, "learning_days": <30-730>}` (#1546; both required, no default, 422
+without them), and gets 202 with the new tenant's URL in `Location`; then `python -m defender.lifecycle serve` (dev: the management service
 and the host actor in one process) creates its repository from the committed template, its bot and
 credentials, and the clone and empty learning state under `$DEFENDER_DATA_ROOT/<id>/`, then marks it
 `active`. Follow it with `GET /api/admin/tenants/<id>`; a failed step is recorded there and resumed with

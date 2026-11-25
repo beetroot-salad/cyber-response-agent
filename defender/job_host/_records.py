@@ -14,6 +14,7 @@ import math
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from defender._text import postgres_cannot_hold
 from defender.records import job_facts, job_lane
 
 _logger = logging.getLogger(__name__)
@@ -40,17 +41,22 @@ class Malformed(Exception):  # noqa: N818 — named for what it reports
 def _object(record: Any, keys: tuple[str, ...], what: str, *, optional: tuple[str, ...] = ()) -> dict[str, Any]:
     if not isinstance(record, dict):
         raise Malformed(f"the {what} record is a {type(record).__name__}, not an object")
+    # Storable before its shape is judged, so a reason that names the record's own keys is itself storable: strict
+    # UTF-8 (a lone surrogate is a `UnicodeEncodeError`, a `ValueError`), no NaN or Infinity, no NUL in any key or string.
+    try:
+        size = len(json.dumps(record, ensure_ascii=False, allow_nan=False).encode("utf-8"))
+    except (TypeError, ValueError, RecursionError):
+        raise Malformed(f"the {what} record does not encode as JSON the store can hold") from None
+    if size > RECORD_CAP_BYTES:
+        raise Malformed(f"the {what} record is over {RECORD_CAP_BYTES} bytes")
+    unstorable = postgres_cannot_hold(record)
+    if unstorable is not None:
+        raise Malformed(f"the {what} record holds text the store cannot hold: {unstorable}")
     missing = set(keys) - set(record)
     extra = set(record) - set(keys) - set(optional)
     if missing or extra:
         raise Malformed(f"the {what} record's fields are not its shape (missing {sorted(missing)}, "
                         f"unknown {sorted(extra)[:5]})")
-    try:
-        size = len(json.dumps(record, ensure_ascii=False).encode("utf-8", "surrogatepass"))
-    except (TypeError, ValueError, RecursionError):
-        raise Malformed(f"the {what} record does not encode as JSON") from None
-    if size > RECORD_CAP_BYTES:
-        raise Malformed(f"the {what} record is over {RECORD_CAP_BYTES} bytes")
     return record
 
 
@@ -77,9 +83,13 @@ def _text_field(value: Any, field: str, *, nullable: bool = True) -> str | None:
 def _cost_field(value: Any, field: str, *, nullable: bool = False) -> float | None:
     if value is None and nullable:
         return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+    try:  # an int beyond a float's range is no number of dollars the cost columns (`Float`) can hold
+        dollars = None if isinstance(value, bool) or not isinstance(value, (int, float)) else float(value)
+    except OverflowError:
+        dollars = None
+    if dollars is None or not math.isfinite(dollars) or dollars < 0:
         raise Malformed(f"{field} is not a finite number of dollars at or above 0")
-    return float(value)
+    return dollars
 
 
 def _closing(value: Any) -> dict[str, Any] | None:

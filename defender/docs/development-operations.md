@@ -23,7 +23,9 @@ python3 defender/learning/loop.py --tenant "$TENANT_ID" --author-drain     # fol
 
 ### Creating a tenant (#1214)
 
-An administrator posts `POST /api/admin/tenants` (202; `Location` is the tenant's URL). The record is
+An administrator posts `POST /api/admin/tenants` with the tenant's evidence retention as its body,
+`{"investigation_days": <30-730>, "learning_days": <30-730>}` (#1546: both whole days, both required, no default;
+without them the call is a 422), and gets 202 with the tenant's URL in `Location`. The record is
 `creating` until the lifecycle has done its steps, which `python -m defender.lifecycle serve` runs
 (dev: the management service and the host actor in one process; hosted: one process each): the
 repository `tenants/<id>` from the committed template, a bot with write access to it alone, the

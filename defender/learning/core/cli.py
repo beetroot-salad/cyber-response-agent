@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from defender.learning.core.config import LoopPaths, RunAlreadyLive, RunUnprocessable
-from defender.learning.core.drains import author_drain, feedback_drain, lead_author_drain
+from defender.learning.core.drains import author_drain, feedback_drain
 from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.records.formats import TenantRefused
 
@@ -175,9 +175,6 @@ def _drain_admitted(ns: argparse.Namespace, records: TenantDirectory, paths: Loo
 
     if ns.author_drain:
         return _run_stage(lambda: author_drain(paths, directory=records))
-
-    if ns.lead_author_drain:
-        return _run_stage(lambda: lead_author_drain(paths, directory=records))
 
     if ns.feedback_drain:
         return _run_stage(lambda: feedback_drain(paths, directory=records))
