@@ -22,7 +22,8 @@ _SYSTEM = "nspname !~ '^pg_' AND nspname <> 'information_schema'"
 IDENTITY_TABLES = {"users", "memberships", "sessions", "programs", "program_credentials", "warning_deliveries", "signin_attempts"}  # #1161 D6: sign-in attempts in flight; #1214: `tenants` moved to `tenancy`; #1307 adds credentials and their warning deliveries; #1454 gives programs their own table
 LEARNING_TABLES = {"work_items", "batches", "commits", "commit_changes",
                    "feedback_issues", "feedback_comments", "feedback_tick"}  # #1278: learning's work tracking, A4 feedback (design: Schema)
-JOBS_TABLES = {"alerts", "investigations", "learning_jobs", "learning_checks", "host_requests"}  # #1342, #1344 (amendment 3: learning_checks), #1471 (host requests; stale, updated) (#1345 r5: the mapping table is a tenant record, in `tenancy`)
+JOBS_TABLES = {"alerts", "investigations", "learning_jobs", "learning_checks", "host_requests", "claims", "staged_facts",
+               "uploads"}  # #1342, #1344 (amendment 3: learning_checks), #1471 (host requests; stale, updated), #1546 (claims, staged facts, uploads: conflict updated) (#1345 r5: the mapping table is a tenant record, in `tenancy`)
 UNKNOWN_REVISION = "f00dfeedbeef"
 #: #1345 r5 Upgrade: the migration after `0006_job_leases`. r5 names no id: this one is DESIGN-IMPLIED for the code stage.
 ALERT_MAPPING_REVISION = "0007_alert_mapping"
@@ -410,13 +411,15 @@ def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated
     assert set(investigations) == {"id", "tenant_id", "alert_id", "request_key", "attempt", "stage", "created_at",
                                    "started_at", "finished_at", "disposition", "cost_usd", "knowledge",
                                    "failure_reason", "failure_message", "lease_expires_at", "accounting_written_at",
-                                   "cost_is_lower_limit", "update_ticket"}  # #1471: the request's flag
+                                   "cost_is_lower_limit", "update_ticket",  # #1471: the request's flag
+                                   "evidence_state", "scrub"}  # #1546 A-O4, A-O10: set by the applier on the ending
     # #1345 (data model): the store derives an alert's title and description from the tenant's mapping, so both are nullable.
     assert {n for n, (_, nullable, _) in alerts.items() if nullable} == {
         "title", "description", "outcome", "outcome_investigation_id", "outcome_created_at"}  # #1581: null until a completed investigation (conflict, updated)
     nullable = {n for n, (_, can_be_null, _) in investigations.items() if can_be_null}
     assert nullable == {"started_at", "finished_at", "disposition", "cost_usd", "knowledge", "failure_reason",
-                        "failure_message", "lease_expires_at", "accounting_written_at"}  # #1471: `update_ticket` is required
+                        "failure_message", "lease_expires_at", "accounting_written_at",  # #1471: `update_ticket` is required
+                        "evidence_state", "scrub"}  # #1546: null until the row ends (the terminal-status check, A-O4)
     assert alerts["raw"][0] == "bytea"
     assert investigations["cost_usd"][0] == "double precision"
     assert investigations["cost_is_lower_limit"][0] == "boolean"
@@ -427,8 +430,8 @@ def test_the_jobs_columns_are_the_designed_ones_without_server_defaults(migrated
 @pytest.mark.postgres
 def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
     """PKs, the tenant FK, the alert uniques, the composite FK, the attempt unique; on alerts the stored outcome's two CHECKs
-    and on investigations five CHECKs (stage, lease, lower-limit-needs-a-cost, completed-has-a-disposition, disposition value);
-    no other constraint (#1342 M10; #1377 S4; #1471 r9 R9-1; #1581)."""
+    and on investigations five CHECKs (stage, lease, lower-limit-needs-a-cost, completed-has-a-disposition, disposition value)
+    plus #1546's evidence/scrub checks and retention FK; no other constraint (#1342 M10; #1377 S4; #1471 r9 R9-1; #1581; #1546)."""
     alerts = _jobs_constraints(migrated_database, "alerts")
     assert [(kind, cols) for kind, cols, _ in alerts if kind != "c"] == sorted([
         ("f", ("tenant_id",)), ("p", ("id",)), ("u", ("id", "tenant_id")),
@@ -439,14 +442,21 @@ def test_the_jobs_constraints_are_exactly_the_designed_ones(migrated_database):
 
     investigations = _jobs_constraints(migrated_database, "investigations")
     assert sorted((kind, cols) for kind, cols, _ in investigations if kind != "c") == sorted([
-        ("f", ("alert_id", "tenant_id")), ("p", ("id",)),
-        ("u", ("alert_id", "attempt", "request_key", "tenant_id"))])
-    foreign = next(d for k, _, d in investigations if k == "f")
+        ("f", ("alert_id", "tenant_id")), ("f", ("tenant_id",)), ("p", ("id",)),
+        ("u", ("alert_id", "attempt", "request_key", "tenant_id"))])  # #1546 r9: the retention row's foreign key
+    foreign = next(d for k, cols, d in investigations if k == "f" and cols == ("alert_id", "tenant_id"))
     assert foreign == "FOREIGN KEY (tenant_id, alert_id) REFERENCES jobs.alerts(tenant_id, id)", \
         "no ON DELETE / ON UPDATE action: delete and cascade are the store's, under the alert lock (M10, O10)"
-    checks = [d for k, _, d in investigations if k == "c"]
+    retention = next(d for k, cols, d in investigations if k == "f" and cols == ("tenant_id",))
+    assert retention == "FOREIGN KEY (tenant_id) REFERENCES tenancy.evidence_retention(tenant_id) NOT VALID", \
+        "#1546 r9: the insert needs the tenant's retention row, old rows of offboarded tenants stay (NOT VALID, no action)"
+    every_check = [d for k, _, d in investigations if k == "c"]
+    evidence = [d for d in every_check if "evidence_state" in d or "scrub" in d]
+    assert any("evidence_state" in d and "stage" in d for d in evidence), \
+        "#1546 A-O4: a check keyed on terminal status gives every ended row an evidence state"
+    checks = [d for d in every_check if d not in evidence]
     assert len(checks) == 5, ("the stage CHECK, #1343's running-has-a-lease CHECK, #1377's mark-needs-a-cost CHECK and #1581's "
-                              "completed-has-a-disposition and disposition-value CHECKs, no other")
+                              "completed-has-a-disposition and disposition-value CHECKs, no other but #1546's on its two columns")
     [check] = [d for d in checks if "'queued'" in d]
     for stage in ("queued", "running", "completed", "unparseable", "failed", "aborted"):
         assert f"'{stage}'" in check

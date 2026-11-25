@@ -271,6 +271,10 @@ AuditAction = Literal[
     "adoption.claim",
     "adoption.finish",
     "adoption.takeover",
+    "drain.start",
+    "drain.claim",
+    "drain.finish",
+    "drain.takeover",
 ]
 
 

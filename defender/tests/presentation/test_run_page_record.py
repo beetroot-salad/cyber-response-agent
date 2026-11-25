@@ -233,3 +233,29 @@ def test_1471_w7_the_page_command_refuses_update_ticket_like_any_unknown_switch(
     assert "[--update-ticket]" not in refused, refused
     assert visualize_run.main(["visualize_run.py", "--tenant", "t", "--made-up", "rid"]) == 64  # noqa: PLR2004
     assert "unrecognized arguments: --made-up" in capsys.readouterr().err
+
+
+# --- #1546: the page names no folder of the host -----------------------------------------------------------------------------
+
+def test_1546_the_run_page_is_the_same_bytes_under_any_root_and_names_neither_its_run_folder_nor_its_root(tmp_path):
+    """One run, its whole root copied under another root of another name: the real renderer gives the same bytes over both,
+    and neither page holds the run folder's path, the root's path or the root's name. The page is rendered in the job's
+    root (`.job-roots/<claim>/...`) and stored as the object tenant users are served, so what it says cannot depend on where
+    it was rendered. (design r9 "The job's folders", Session pointer: "the run page header stops embedding the run
+    folder's path")"""
+    import shutil
+
+    from defender.presentation import visualize_run
+    from defender.tests.support.shared.contracts._spec1077 import fixture_run
+
+    first = tmp_path / "root-alpha-1546"
+    run_dir, run, _ = _page_run(first, "page-any-root")
+    second = tmp_path / "elsewhere-beta-1546"
+    shutil.copytree(first, second, symlinks=True)
+    moved = second / run_dir.relative_to(first)
+    pages = {first: visualize_run.render_page(run), second: visualize_run.render_page(fixture_run(moved))}
+    assert "spec 1471" in pages[first], "premise: a real page, over the planted alert"
+    for root, held in ((first, run_dir), (second, moved)):
+        for named in (str(held), str(held.resolve()), str(root), str(root.resolve()), root.name):
+            assert named not in pages[root], f"the page names {named!r}"
+    assert pages[first] == pages[second], "the page's bytes depend on where its run was rendered"

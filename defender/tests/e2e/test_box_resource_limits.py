@@ -41,17 +41,27 @@ HOG_MOST_MIB = 600
 #: Well into the cap: below this, the hog failed for some other reason than memory.
 HOG_LEAST_MIB = 256
 
-#: Touches every page, so the memory is really held. Records its progress on the run tree, which
-#: outlives the box, so the host can read how far it got even if the kill takes the whole box.
+#: Touches every page, so the memory is really held. Prints its progress, one line per step, on its stdout.
 MEMORY_HOG = f"""\
-import os
+import sys
 held = []
 while len(held) < {HOG_CEILING_MIB // 16}:
     held.append(bytearray(b"x") * (16 << 20))
-    with open("hog.progress", "w") as out:
-        out.write(str(len(held) * 16))
-        out.flush()
-        os.fsync(out.fileno())
+    sys.stdout.write(str(len(held) * 16) + "\\n")
+    sys.stdout.flush()
+"""
+
+#: The hog under a small watcher in the same box, which keeps the hog's last progress line and prints it with how the hog
+#: ended. #1546 (design "The box": "Run lane binds the run folder read-only") left the run box no tree the host can read
+#: back (its `/tmp` is the box's own), and a command killed on a signal answers no output (O6), so the watcher, which the
+#: memory kill does not pick (the hog is the cgroup's largest process), carries the measurement out.
+HOG_WATCH = f"""\
+import json, subprocess, sys
+hog = subprocess.Popen([sys.executable, "-c", {MEMORY_HOG!r}], stdout=subprocess.PIPE, text=True)
+last = None
+for line in hog.stdout:
+    last = int(line)
+print(json.dumps({{"held": last, "rc": hog.wait()}}))
 """
 
 #: Children outlive the parent, so they end as orphans the box's PID 1 must reap.
@@ -384,20 +394,30 @@ def test_a_process_past_the_memory_cap_is_stopped_at_the_cap(boxed, base, runtim
     box carries on. runsc holds every process's memory in one host process, so the kill may take
     the whole box."""
     box = boxed(memory=HOG_CAP)
-    res = None
+    if runtime == "runc":
+        # The hog alone: the kernel's kill of the one process, with the reason line (O6), and the box carries on.
+        killed = _program(box, base, "hog.py", MEMORY_HOG)
+        assert killed.rc == -9, f"expected the kernel's kill: {killed}"
+        assert "memory" in killed.err.decode().lower(), f"no reason line naming the cap (O6): {killed}"
+        assert _sh(box, "echo alive").rc == 0
     try:
-        res = _program(box, base, "hog.py", MEMORY_HOG)
+        res = _program(box, base, "hog_watch.py", HOG_WATCH)
     except box_mod.BoxFault:
         assert runtime == "runsc", "under runc the kill must take the process, not the box"
-    progress = next(base.glob("run-limits-*")) / "hog.progress"
-    assert progress.exists(), f"the hog never held its first step, so it proves nothing: {res}"
-    held = int(progress.read_text(encoding="utf-8"))
+        # The kill took the whole box, watcher and all: how far the hog got is not readable from the host since the run
+        # folder became read-only (#1546 D4). What stays checkable is that the box is gone, not answering.
+        with pytest.raises(box_mod.BoxFault):
+            _sh(box, "echo alive")
+        return
+    assert res.rc == 0, f"the watcher itself did not finish: {res}"
+    seen = json.loads(res.out.decode("utf-8").strip().splitlines()[-1])
+    assert seen["held"] is not None, f"the hog never held its first step, so it proves nothing: {res}"
+    held = seen["held"]
     assert held >= HOG_LEAST_MIB, f"stopped at {held} MiB, well short of the cap: {res}"
     assert held <= HOG_MOST_MIB, f"held {held} MiB in a box capped at {HOG_CAP}: {res}"
+    assert seen["rc"] != 0, f"the hog ran to its ceiling: {seen}"
     if runtime == "runc":
-        assert res is not None
-        assert res.rc == -9, f"expected the kernel's kill: {res}"
-        assert "memory" in res.err.decode().lower(), f"no reason line naming the cap (O6): {res}"
+        assert seen["rc"] == -9, f"the hog was not stopped by the kernel's kill: {seen}"
         assert _sh(box, "echo alive").rc == 0
 
 
@@ -411,9 +431,18 @@ def _kill_line(box: box_mod.BoxExecutor) -> bytes:
     return res.err
 
 
-def _size_failure_at_the_box_boundary(res: box_mod.BoxResult, kill_line: bytes) -> None:
+#: glibc's own end for a process that cannot get memory for a new thread's (or a loaded module's) thread-local storage:
+#: this exact line, then `_exit(127)` (elf/dl-tls.c, `_dl_fatal_printf`). Under runsc the sentry holds the box's memory and
+#: refuses the allocation itself (ENOMEM), where under runc the kernel's cgroup kill ends the process first; so near the
+#: cap a load in `defender-sql` (DuckDB starting a worker thread mid-load) can end this way instead of on a signal.
+LOADER_OUT_OF_MEMORY = b"cannot allocate memory for thread-local data: ABORT\n"
+
+
+def _size_failure_at_the_box_boundary(res: box_mod.BoxResult, kill_line: bytes, *, runtime: str) -> None:
     """P5: no stdout, no traceback, one line naming memory or room; exit 2 with the size text,
-    or a crash signal with exactly the O6 line (the occasional crash under the limit, C16)."""
+    or a crash signal with exactly the O6 line (the occasional crash under the limit, C16). Under runsc only, also the
+    loader's out-of-memory end, as itself: exit 127 with exactly `LOADER_OUT_OF_MEMORY` and nothing else (the load ran
+    out of the box's room; no wrapper turns this into the O6 line, since nothing died on a signal)."""
     assert res.out == b"", "a size failure is never an observation (P2)"
     assert b"Traceback" not in res.err, res.err[-400:]
     assert b"not valid JSON" not in res.err, res.err[-400:]
@@ -423,8 +452,34 @@ def _size_failure_at_the_box_boundary(res: box_mod.BoxResult, kill_line: bytes) 
     assert any(word in lines[0].lower() for word in ("memory", "room")), lines[0]
     if res.rc == EXIT_INPUT_ERROR:
         return
+    if runtime == "runsc" and (res.rc, res.err) == (127, LOADER_OUT_OF_MEMORY):
+        return
     assert res.rc in (-int(sig) for sig in KILL_OR_CRASH), res
     assert res.err == kill_line, "a crash must read as every other kill"
+
+
+_KILL_LINE = b"defender-bash: a process was killed, most likely at the box's memory cap. Nothing is shown; run something smaller.\n"
+
+
+@pytest.mark.parametrize(("runtime", "rc", "err"), [
+    ("runc", 127, LOADER_OUT_OF_MEMORY),  # under runc the cap is the kernel's kill, never this
+    ("runsc", 1, LOADER_OUT_OF_MEMORY),  # the loader's line on another exit is not its end
+    ("runsc", 127, b"sh: 1: defender-sql: not found\n"),  # the shell's 127: no tool ran at all
+    ("runsc", 127, b"defender-sql: no room: [Errno 30] Read-only file system: '/run/model-run/x'\n"),  # a read-only write
+    ("runsc", 127, b"Traceback (most recent call last):\n" + LOADER_OUT_OF_MEMORY),  # with more than the one line
+    ("runsc", 2, b"defender-sql: [Errno 30] Read-only file system: '/run/model-run/x'\n"),  # exit 2 naming no size
+    ("runsc", 1, b"defender-sql: [Errno 28] No space left on device\n"),  # ENOSPC: not memory, not a signal
+], ids=["loader-under-runc", "loader-line-other-exit", "shell-not-found", "read-only-127", "loader-plus-traceback",
+        "read-only-exit-2", "no-space-exit-1"])
+def test_the_size_failure_check_takes_the_loaders_end_only_under_runsc_and_only_as_itself(runtime, rc, err):
+    """The control for `_size_failure_at_the_box_boundary`'s runsc form: every near miss of it still fails the check,
+    and the forms it always took still pass. (O2, O3, P5)"""
+    for taken in [box_mod.BoxResult(rc=2, out=b"", err=b"defender-sql: the load needs more memory than the box has\n"),
+                  box_mod.BoxResult(rc=-9, out=b"", err=_KILL_LINE),
+                  box_mod.BoxResult(rc=127, out=b"", err=LOADER_OUT_OF_MEMORY)]:
+        _size_failure_at_the_box_boundary(taken, _KILL_LINE, runtime="runsc")
+    with pytest.raises(AssertionError):
+        _size_failure_at_the_box_boundary(box_mod.BoxResult(rc=rc, out=b"", err=err), _KILL_LINE, runtime=runtime)
 
 
 #: C19: shapes far past the edge, where both sides of the near-edge flip are behind them (O2).
@@ -439,7 +494,7 @@ LOADS_OUT_OF_ROOM = {
 @requires_box_daemon
 @RUNTIMES
 @pytest.mark.parametrize("room", list(LOADS_OUT_OF_ROOM))
-def test_o2_a_load_that_runs_out_of_room_below_the_maximum_is_a_size_refusal(boxed, base, room):
+def test_o2_a_load_that_runs_out_of_room_below_the_maximum_is_a_size_refusal(boxed, base, room, runtime):
     """Under the maximum, over what the box can hold: a size failure, memory's sometimes the tool's refusal, and the box carries on. (O2)"""
     memory, shape, args = LOADS_OUT_OF_ROOM[room]
     payload = shape()
@@ -454,7 +509,7 @@ def test_o2_a_load_that_runs_out_of_room_below_the_maximum_is_a_size_refusal(box
         assert _sh(box, "find /tmp -maxdepth 1 -name 'defender-sql-*' -exec rm -rf {} +").rc == 0
         results.append(_sh(box, f"cat {MODEL_RUN}/payload.json | defender-sql {args} 'SELECT 1 AS x'"))
     for res in results:
-        _size_failure_at_the_box_boundary(res, kill_line)
+        _size_failure_at_the_box_boundary(res, kill_line, runtime=runtime)
     if room == "memory":  # else the O6 line alone would pass with no load protection at all
         refusals = [res for res in results if res.rc == EXIT_INPUT_ERROR]
         assert refusals, f"every try crashed: {[r.rc for r in results]}"
@@ -469,14 +524,14 @@ O3_TRIES = 4
 
 @requires_box_daemon
 @RUNTIMES
-def test_o3_a_query_needing_too_much_memory_is_a_size_failure_and_is_sometimes_the_refusal(boxed):
+def test_o3_a_query_needing_too_much_memory_is_a_size_failure_and_is_sometimes_the_refusal(boxed, runtime):
     """Over N real tries every one is a size failure at the box boundary, no engine advice, the
     box carries on, and at least one is the tool's own refusal naming memory. (O3, P5)"""
     box = boxed(memory="512m")
     kill_line = _kill_line(box)
     results = [_sh(box, f"""echo '{{"a":1}}' | defender-sql '{O3_QUERY}'""") for _ in range(O3_TRIES)]
     for res in results:
-        _size_failure_at_the_box_boundary(res, kill_line)
+        _size_failure_at_the_box_boundary(res, kill_line, runtime=runtime)
         for engine_advice in (b"SET ", b"PRAGMA", b"duckdb.org", b"threads"):
             assert engine_advice not in res.err, res.err[-400:]
     refusals = [res for res in results if res.rc == EXIT_INPUT_ERROR]

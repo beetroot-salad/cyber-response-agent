@@ -22,18 +22,26 @@ from defender.tests.support.jobs._container_entry1170 import (
     ThreadCalls,
     enter,
 )
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — fixtures
 from defender.tests.support.jobs import _box_relay as R
+from defender.tests.support.jobs import _helper_evidence1546 as H
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
 from defender.tests.support.jobs._job_helper import OTHER_TENANT, claims_of, helper_scene, listing, until
+from defender.tests.support.jobs._job_helper import process_state  # noqa: F401 — autouse: the helper runs here (its store seams)
 from defender.tests.support.jobs._jobs1342 import DEFENDER, WORKTREE
 
-pytestmark = [pytest.mark.postgres, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
+evidence_store = H.evidence_store
+
+
+pytestmark = [pytest.mark.postgres, pytest.mark.garage, pytest.mark.openbao, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
 
 PROXY = "http://proxy.invalid"
 
 
 @pytest.fixture
 def scene(tmp_path, monkeypatch, migrated_database):
-    with helper_scene(tmp_path, monkeypatch, migrated_database, proxied=()) as s:
+    """On a tenant of its own: the Garage bucket is shared across files (F4)."""
+    with helper_scene(tmp_path, monkeypatch, migrated_database, proxied=(), tenant_id=str(uuid.uuid4())) as s:
         yield s
 
 
@@ -207,29 +215,44 @@ def test_a6_the_host_half_and_the_run_half_each_run_once_in_a_job_and_in_the_ope
         (lane, calls.by_thread, publishes, ran)
 
 
-def test_a10_the_job_leaves_its_page_in_its_run_folder_and_the_helper_copies_it_to_the_publish_folder_after_exit(
-        scene, monkeypatch, tmp_path):
-    """While the entry runs the shared publish folder is untouched; after the container exits the helper has copied the job's page there, under the tenant. (A10, A8)"""
+@pytest.mark.openbao
+@pytest.mark.garage
+def test_a10_the_run_page_stored_is_the_bytes_the_job_pushed_not_a_file_in_its_folder(scene, evidence_store, tmp_path):
+    """#1546 A-O8 (conflict updated: was the helper's page mirror): the stored page is exactly the bytes the job pushed over its
+    socket, not the `runtime.html` it left in its run folder, and nothing reached the publish folder. (A10, A-O8)"""
+    import shutil
+
+    from defender.tests.support.evidence._facts1546 import sent_page
+    from defender.tests.support.jobs import _helper_evidence1546 as H
+    from defender.tests.support.jobs._job_helper import host_path
+
+    golden = Path(__file__).resolve().parents[1] / "fixtures" / "e2e" / "golden-v2sshd"
+    pushed = b"<html>MARKER pushed over the socket " + uuid.uuid4().hex.encode() + b"</html>"
+    left = b"<html>written in the job's run folder</html>"
     publish_dir = tmp_path / "published"
     publish_dir.mkdir()
-    monkeypatch.setenv("DEFENDER_DEPLOYMENT", "dev")
-    monkeypatch.setenv("DEFENDER_RUN_VISUALIZATIONS_DIR", str(publish_dir))
-    inv, page = str(uuid.uuid4()), "<html>run page 1170</html>"
-    scene.plant(inv)
-    during: list[list[str]] = []
+    planted = H.plant(scene, "investigation")
 
-    def visualize(run: Any, **_kw: Any) -> None:
-        run.observability.runtime_html.write(page)  # the job's half of `publish_page`: the record in its run folder
-        during.append(sorted(str(p.relative_to(publish_dir)) for p in publish_dir.rglob("*") if p.is_file()))
+    def job(c: Any) -> int:
+        folder = host_path(c.mounts, str(H.job_root(scene) / scene.tenant)) / "runs" / planted.owner
+        shutil.copytree(golden, folder, dirs_exist_ok=True)  # the helper made the run folder already (#1170 A6)
+        (folder / "runtime.html").write_bytes(left)  # never read back
+        H.send(c, "outcome", record=H.inv_outcome())
+        H.send(c, "page", record=sent_page())
+        H.put_object(c, H.RUN_PAGE, pushed)
+        H.put_object(c, "bundle", b"bundle")
+        return 0
 
-    got = enter(scene, inv, lifecycle=_investigation(), preflight=lambda *a, **k: 0, visualize=visualize)
-
-    _clean(got)
-    assert during == [[]], f"the job wrote to the shared publish folder itself: {during}"
-    landed = [p for p in publish_dir.rglob("*") if p.is_file()]
-    assert [p.read_text(encoding="utf-8") for p in landed] == [page], "the helper did not copy the job's page"
-    assert landed[0].relative_to(publish_dir).parts[0] == scene.tenant, "the page is not under its tenant"
-    assert (scene.runs / inv).is_dir(), "control: the run folder (with the page record) is kept"
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("DEFENDER_DEPLOYMENT", "dev")
+        patch.setenv("DEFENDER_RUN_VISUALIZATIONS_DIR", str(publish_dir))
+        H.drive(scene, planted, job, **evidence_store.seams)
+    row = H.uploads(scene.dsn, scene.claim)[H.RUN_PAGE]
+    assert row["status"] == "uploaded"
+    stored = evidence_store.read(scene.tenant, "investigation", planted.owner, scene.claim, H.RUN_PAGE, row["wrapped_key"])
+    assert stored == pushed, "the stored page is not the bytes the job pushed"
+    assert stored != left, "the stored page is the run folder's runtime.html"
+    assert [p for p in publish_dir.rglob("*") if p.is_file()] == [], "the helper copied a page to the publish folder"
 
 
 # --- A5 and the signal: real processes -----------------------------------------------------------------------------
@@ -371,8 +394,8 @@ def test_o11_a_box_start_the_helper_refuses_is_a_start_fault_in_the_job_and_no_b
     docker = R.RelayDocker()
 
     def start_box(*a: Any, **kw: Any) -> Any:
-        if refused:
-            folder = scene.runs / inv
+        if refused:  # #1546: the run folder is the one the lifecycle starts the box over, in the job's root (not `<T>/runs/`)
+            folder = Path(a[0])
             folder.rename(folder.with_name(folder.name + ".moved"))
             folder.symlink_to(other, target_is_directory=True)
         return box_mod.start_box(*a, **kw)

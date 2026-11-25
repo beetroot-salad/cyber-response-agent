@@ -7,7 +7,8 @@ handed the tenant, the system, the rendering and its digest, and the tenant's re
 answered `launch` and `forge.token` and nothing else (N-A1: no pass, no box, no signing), and its entry is
 `python3 -m defender.adoption --job <id> --tenant <T>`, which fetches, decides and delivers (`adoption/__main__.py`).
 
-An ending the helper decides before the container is written here as the one create-only `{failed, reason}` record, in the
+The helper makes no repository (#1546 r10, #1618 flow 7): the container opens a private one in its own `/tmp` against the
+recorded forge origin and fetches, commits and pushes there with `forge.token`. An ending the helper decides before the container is staged here as the one `{failed, reason}` result, in the
 kind's own vocabulary (`job_lane.ADOPTION_HELPER_REASONS`): the record gone (`system_gone`), the release shipping none
 (`no_base_files`), a tenant that is not active at claim (`tenant_not_active`), any other refusal of a setup step, the lock, the
 credential or a tenant with no forge wiring (`setup_refused`), a container that cannot be started (`start_failed`), a crash
@@ -29,9 +30,7 @@ KIND = "adoption"
 def _adoption_lane() -> _host_request.ResultLane:
     from defender.records import job_lane
 
-    return _host_request.ResultLane(
-        kind=KIND, read=lambda lane, rid: lane.read_adoption(rid), write=lambda lane, rid, rec: lane.write_adoption(rid, rec),
-        failed=job_lane.AdoptionRecord.failed, refused_reason="setup_refused")
+    return _host_request.ResultLane(kind=KIND, failed=job_lane.AdoptionRecord.failed, refused_reason="setup_refused")
 
 
 _LANE = _adoption_lane()
@@ -123,7 +122,7 @@ def prepare_adoption(session: Session, hold: contextlib.ExitStack) -> Prepared:
     command = session.command or ["python3", "-m", "defender.adoption", "--job", job, "--tenant", session.tenant_id]
     facts = {"kind": KIND, "tenant": session.tenant_id, "job": job, "tenant_state": "active", "system": session.system,
              "digest": digest, "rendering": {path: base64.b64encode(data).decode("ascii") for path, data in rendering.items()},
-             "forge_origin": wiring.origin, "forge_repo": wiring.repo}
+             "forge_origin": wiring.origin, "forge_repo": wiring.repo, "inputs_dir": str(session.job_inputs)}
     return Prepared(launch=facts, command=list(command), state=_Adoption(credential), cleanup=cleanup, exited=_host_request.after_container(_LANE))
 
 

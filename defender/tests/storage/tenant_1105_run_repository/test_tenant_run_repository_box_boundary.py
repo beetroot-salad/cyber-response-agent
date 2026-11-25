@@ -1,8 +1,9 @@
-"""Box boundary: from a sandboxed box, writes to the runs folder, `_tenant.json` and `_episodes/` fail and sibling runs are invisible; one box session per runtime."""
+"""Box boundary: from a sandboxed box, writes to the run's own folder (read-only since #1546 D4), the runs folder, `_tenant.json` and `_episodes/` fail and sibling runs are invisible; one box session per runtime."""
 from __future__ import annotations
 
 from defender.tests.support.shared._locations_1210 import location_path
 
+import errno
 import functools
 import json
 import os
@@ -42,11 +43,10 @@ EXEC_TIMEOUT = 60.0
 RUN_ID = str(uuid.uuid4())
 SIBLING_ID = str(uuid.uuid4())
 SIBLING_SECRET = "SIBLING-RUN-SECRET-1105"
-CONTROL = b"box-control-1105"
-
-#: The probe's writes that must fail, keyed by what each tries to reach; its `control` write
-#: is the one that must land.
-_ATTEMPTS = ("tenant_record", "episode_record", "sibling_folder", "into_sibling", "dotdot")
+#: The probe's writes that must fail, keyed by what each tries to reach: #1546 D4 (A-O9) binds the run's own folder
+#: read-only, so a write into it fails too (EROFS); its `control` write, to the box's own `/tmp`, is the one that must land,
+#: so the failures are the boundary's and not the probe's.
+_ATTEMPTS = ("run_folder", "tenant_record", "episode_record", "sibling_folder", "into_sibling", "dotdot")
 
 _PROBE = r'''
 import json, os, sys
@@ -76,7 +76,8 @@ writes = [
     attempt("sibling_folder", lambda: os.mkdir(os.path.join(runs, "r9"))),
     attempt("into_sibling", write(os.path.join(runs, sibling, "forged.txt"), b"forged")),
     attempt("dotdot", write("../x", b"escaped")),
-    attempt("control", write(os.path.join(run_dir, "control.txt"), b"box-control-1105")),
+    attempt("run_folder", write(os.path.join(run_dir, "control.txt"), b"box-control-1105")),
+    attempt("control", write("/tmp/control.txt", b"box-control-1105")),
 ]
 try:
     listing = sorted(os.listdir(os.path.dirname(run_dir.rstrip("/"))))
@@ -124,8 +125,7 @@ def _skip_or_fail(reason: str, environ: Mapping[str, str]) -> NoReturn:
 
 
 def _outside_run(state: dict[str, Any]) -> dict[str, Any]:
-    """The runs folder's tree minus the run's own folder's contents (the box's rw bind, where
-    start_box plants its sentinel and the control write lands)."""
+    """The runs folder's tree minus the run's own folder's contents (where start_box plants its sentinel)."""
     return {k: v for k, v in state.items() if not k.startswith(f"{RUN_ID}/")}
 
 
@@ -155,13 +155,13 @@ def _session(root: Path, runtime: str) -> dict[str, Any]:
     finally:
         stop_box(box)
     probe = json.loads(result.out.decode("utf-8")) if result.rc == 0 else None
-    control = run_dir / "control.txt"
+    attempted = run_dir / "control.txt"
     return {
         "tenant": t, "runs": runs, "run_dir": run_dir, "rc": result.rc,
         "sandboxed": sandboxed, "name": name,
         "err": result.err.decode("utf-8", "replace"), "probe": probe,
         "before": before, "after": _outside_run(H.tree_state(runs)),
-        "control_on_host": control.read_bytes() if control.is_file() else None,
+        "attempt_on_host": attempted.read_bytes() if attempted.is_file() else None,
     }
 
 
@@ -182,7 +182,7 @@ def box_session(request: pytest.FixtureRequest,
     try:
         yield _session(base / "data", runtime)
     finally:
-        # The box writes through the rw bind as root; residue is gitignored.
+        # Residue is gitignored.
         shutil.rmtree(base, ignore_errors=True)
 
 
@@ -203,11 +203,12 @@ def test_1105_a_sandboxed_box_cannot_write_the_runs_folder_the_tenant_record_or_
     assert s["probe"] is not None, f"the probe did not complete in the box: rc={s['rc']} {s['err']}"
     writes = _writes(s)
     assert writes["control"]["ok"] is True, (
-        f"positive control: the in-run-folder write must succeed in the box: {writes['control']}")
-    assert s["control_on_host"] == CONTROL, (
-        f"positive control: the in-run-folder write must land on the host: {s['control_on_host']!r}")
+        f"positive control: a write to the box's own /tmp must succeed, so the failures are the boundary's: {writes['control']}")
     for label in _ATTEMPTS:
         assert writes[label]["ok"] is False, f"the sandboxed box wrote {label}: {writes[label]}"
+    assert writes["run_folder"]["errno"] == errno.EROFS, (
+        f"the run folder is bound read-only, so the write is refused as such: {writes['run_folder']}")
+    assert s["attempt_on_host"] is None, f"a write the box was refused landed on the host: {s['attempt_on_host']!r}"
     assert s["after"] == s["before"], (
         "the host's runs folder changed outside the run's own folder: "
         f"{sorted(set(s['after'].items()) ^ set(s['before'].items()))[:6]}")
@@ -229,8 +230,7 @@ def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record
     assert listing == ["current"], (
         f"inside the box the run folder's parent must hold the run's own folder only: {listing!r}")
     assert _writes(s)["control"]["ok"] is True, (
-        "positive control: the run's own folder is the box's writable bind")
-    assert s["control_on_host"] == CONTROL, "positive control: the control write lands on the host"
+        "positive control: the probe's write to the box's own /tmp lands")
     t = s["tenant"]
     for name in (SIBLING_ID, RUN_ID):
         assert t.runs_repository().open(RunId.parse(name)).run_dir.name == name, (

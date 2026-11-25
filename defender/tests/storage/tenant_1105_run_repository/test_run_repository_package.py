@@ -206,8 +206,8 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
         fields = dict(f.split("=", 1) for f in spec.split(",") if "=" in f)
         binds.append((Path(fields["source"]), "readonly" in spec.split(",")))
     writable = [src for src, ro in binds if not ro]
-    assert writable == [runs / rid], (
-        f"the box's writable binds are {writable}, not exactly the run's own folder")
+    assert (runs / rid, True) in binds, "the run's own folder is bound, read-only (#1546 D4)"
+    assert writable == [], f"the box's writable binds are {writable}, not none: the run's folder is read-only (#1546 D4, A-O9)"
     for protected in (runs, runs / neighbour):
         under = [src for src in writable if protected == src or src in protected.parents]
         assert under == [], f"{protected} sits under a writable box bind: {under}"

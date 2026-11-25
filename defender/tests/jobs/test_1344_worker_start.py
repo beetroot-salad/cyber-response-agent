@@ -289,7 +289,12 @@ def _live_store(dsn: str):
 
 
 def _queue_investigation(dsn: str, ticket: str, *, complete: bool = False, tenant: str = T1) -> str:
-    """One investigation through the store; `complete`: claimed and finished `completed` by the store, its auto job queued."""
+    """One investigation through the store; `complete`: claimed and ended `completed` by the store, its auto job queued.
+    #1546 (design Flows "Investigation end" 5: "A learning job is queued from an investigation only when its state is
+    `complete`"): the end is the worker's normal one, `decide` + `apply` over the claim's facts and an uploaded bundle
+    (`_ending1546.complete_through_the_store`); no source run is pulled here, since no job container starts."""
+    from defender.tests.support.jobs._ending1546 import complete_through_the_store
+
     async def go() -> str:
         store = _live_store(dsn)
         try:
@@ -298,7 +303,7 @@ def _queue_investigation(dsn: str, ticket: str, *, complete: bool = False, tenan
             if complete:
                 claim = await store.claim()
                 assert claim.record.investigation_id == inv.investigation_id, "premise: nothing else was queued"
-                await store.finish(tenant, inv.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
+                assert await complete_through_the_store(store, tenant, str(inv.investigation_id), disposition="malicious")
             return inv.investigation_id
         finally:
             await store.close()
@@ -551,8 +556,7 @@ def test_o15_the_default_child_commands_run_a_job_whose_source_is_missing_to_sou
         with W.serving(source, W.worker_env(data_root, dsn=db), ready=lambda: bool(W.code_copies(data_root)), watch=watch) as proc:
             children = watch.wait_for(lambda seen: _child_of(seen, "learning", job) and _child_of(seen, "post-step", job),
                                       timeout=120, what="the learning helper and the post-step helper")
-            W.wait_until(lambda: _job_status_by_id(db, job) == "failed" and (runs / f"{job}.learning-end.json").is_file(),
-                         timeout=120, what="the job's failed end", proc=proc)
+            W.wait_until(lambda: _job_status_by_id(db, job) == "failed", timeout=120, what="the job's failed end", proc=proc)
 
         entry = _child_of(children, "learning", job)
         assert entry is not None, f"no learning helper was observed; saw {[c['argv'] for c in children]}"
@@ -567,13 +571,12 @@ def test_o15_the_default_child_commands_run_a_job_whose_source_is_missing_to_sou
 
         # No job image here, so the container never starts: the job ends failed with a recorded reason (never a crash), and
         # the post-step is still started for it. `source_unavailable` is the entry's verdict inside the container
-        # (test_1344_job_end, test_job_container_entry).
-        end = json.loads((runs / f"{job}.learning-end.json").read_text(encoding="utf-8"))
-        assert end["status"] == "failed", end
-        assert end["reason"] in ("entry_error", "launch_refused"), end  # helper-decided endings before the container (A3, O11)
-        assert end["message"], end
+        # (test_1344_job_end, test_job_container_entry). #1546 (A-O2, PR2): the helper's decided end is its staged `outcome`
+        # under the claim, which the worker's `decide` + `apply` writes to the row; no learning-end file is written.
+        assert not (runs / f"{job}.learning-end.json").exists(), "an end record was written beside the runs (A-O2)"
         (status, reason, message) = execute(db, "SELECT status, reason, message FROM jobs.learning_jobs WHERE id = %s", (job,))[0]
-        assert (status, reason) == ("failed", end["reason"]), "the helper command crashed or was never wired"
+        assert status == "failed", "the helper command crashed or was never wired"
+        assert reason in ("entry_error", "launch_refused"), reason  # helper-decided endings before the container (A3, O11)
         assert message
 
 
@@ -588,7 +591,9 @@ def test_o15_the_default_post_step_command_hands_the_post_step_no_list_of_jobs(s
         runs = data_root / t.tenant_id / "runs"
         runs.mkdir(exist_ok=True)
         earlier = _job_of(db, _queue_investigation(db, "J-1", complete=True, tenant=t.tenant_id))
-        execute(db, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'done', "
+        # #1546 (ck_learning_jobs_ended_has_evidence): an ended row carries its evidence state; this one has no claim or
+        # upload, so `none`, as `test_1344_amend_wake` plants an ended job.
+        execute(db, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'done', evidence_state = 'none', "
                     "started_at = now(), finished_at = now(), lease_expires_at = NULL WHERE id = %s", (earlier,))
         new = _job_of(db, _queue_investigation(db, "J-2", complete=True, tenant=t.tenant_id))
         watch = W.ChildWatch()

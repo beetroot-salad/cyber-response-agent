@@ -29,7 +29,7 @@ from typing import Any
 
 from defender import tenancy
 from defender._paths import process_defender_dir
-from defender.learning.branch.container import JobContainer, NotInContainer, sigterm_on_stdin_eof
+from defender.learning.branch.container import JobContainer, NotInContainer, interrupt_on_sigterm, sigterm_on_stdin_eof
 from defender.records.formats import TenantRefused
 
 _logger = logging.getLogger(__name__)
@@ -47,13 +47,6 @@ def parse_post_step_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--tenant", required=True, help="the jobs' tenant")
     p.add_argument("--parent-pid", default=None, type=int, help=argparse.SUPPRESS)
     return p.parse_args(argv)
-
-
-def _interrupt(_signum: int, _frame: Any) -> None:
-    """The first SIGTERM is a `KeyboardInterrupt`; every later one is ignored, so the unwind it
-    starts is not itself interrupted."""
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    raise KeyboardInterrupt
 
 
 def _default_tick(paths: Any, *, store: Any) -> int:
@@ -79,7 +72,7 @@ def main(argv: list[str], *, author_tick: Callable[..., int] | None = None,
     except NotInContainer as outside:
         sys.exit(f"[post-step] {which}: {outside}; nothing was done")
     on_main = threading.current_thread() is threading.main_thread()
-    previous = signal.signal(signal.SIGTERM, _interrupt) if on_main else None
+    previous = signal.signal(signal.SIGTERM, interrupt_on_sigterm) if on_main else None
     try:
         if watch_stdin:
             sigterm_on_stdin_eof()

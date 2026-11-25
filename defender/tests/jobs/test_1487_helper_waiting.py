@@ -21,7 +21,11 @@ from defender.tests.support.shared._postgres1339 import execute, migrated_databa
 process_state = J.process_state
 scene = J.scene
 
-pytestmark = [pytest.mark.postgres, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: E402, F401 — fixtures the helper's store seams take
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: E402, F401 — fixture
+
+pytestmark = [pytest.mark.postgres, pytest.mark.garage, pytest.mark.openbao,
+              pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
 
 
 def _publish(scene: Any, key: str = "s/w/0/0") -> None:

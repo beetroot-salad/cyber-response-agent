@@ -5,6 +5,7 @@ lifecycle's `start_box` seam (never `DEFENDER_ALLOW_UNSANDBOXED`). Marks go in `
 
 - `replay` (O16): the real driver over a replay model that writes the golden investigation and
   closes with the golden's disposition.
+- `replay-container` (#1546): `replay` with the production post-run end (render, `page` fact, bundle and page puts) left in place.
 - `replay-fault-after-close`: the same, but the replay model's request after the close tool committed
   raises `KeyboardInterrupt` (the one exception every broad handler passes through), so the real
   driver raises after the close; it marks `fault-raised` first.
@@ -113,11 +114,16 @@ def _counted(name: str, then=None):
 
 
 def _session_database() -> Path:
+    """The run's session database, as its pointer names it: #1546 (design r9 "Session pointer") recorded relative to the
+    run's folder and joined back by the one resolver (`session_store.run_store_path`)."""
     import json
 
+    from defender.records.session_store import run_store_path
+
     job, tenant = argv[argv.index("--job") + 1], argv[argv.index("--tenant") + 1]
-    pointer = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs" / f"{job}.session-pointer.json"
-    return Path(json.loads(pointer.read_text(encoding="utf-8"))["store_path"])
+    runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
+    pointer = runs / f"{job}.session-pointer.json"
+    return run_store_path(runs / job, json.loads(pointer.read_text(encoding="utf-8"))["store_path"])
 
 
 def _ledger_trigger(sql: str):
@@ -248,5 +254,7 @@ elif mode.startswith("replay"):
     lifecycle = _replay_lifecycle(fault_after_close=mode == "replay-fault-after-close")
 else:
     lifecycle = _hold_lifecycle(closes=mode == "hold-committed")
-sys.exit(run_py.job_main(argv, lifecycle=lifecycle, preflight=lambda *a, **k: 0,
-                         visualize=lambda *a, **k: None))  # #1170 A6: no publish seam; the helper published
+# `replay-container` (#1546 done-when 1): the investigation's own end (its page, bundle and puts through the helper) with no
+# stand-in for the render; every other mode stubs the post-run render, as before (#1170 A6: no publish seam).
+_end = {} if mode == "replay-container" else {"visualize": lambda *a, **k: None}
+sys.exit(run_py.job_main(argv, lifecycle=lifecycle, preflight=lambda *a, **k: 0, **_end))

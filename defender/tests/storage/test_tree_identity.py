@@ -102,7 +102,6 @@ def test_every_run_dir_writer_stays_key_disjoint_at_the_composition_frame(tmp_pa
         claim("challenge_gate", owner.review_record(turn))
     for role in ("support", "ablation", "composer"):
         claim("challenge_gate", owner.review_trace(role))
-    claim("_alias", run_dir / ".alias-probe-deadbeefdeadbeef-symlink")
     claim("box", owner.box_sentinel)
     for fixed in ("tool_trace", "executed_queries", "policy_denials", "lessons_loaded",
                   "wire_log", "provenance"):

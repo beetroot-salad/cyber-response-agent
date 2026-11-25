@@ -20,15 +20,12 @@ import secrets
 import signal
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from defender.job_socket import Refused
 from defender.tenancy.run_knowledge import RunCopy
 
 from ._session import KINDS, Box, PassMint, Registry, Session, SetupRefused, Signing, StartFailed, setup_step
-
-if TYPE_CHECKING:
-    from defender.records import Run
 
 _logger = logging.getLogger(__name__)
 
@@ -36,7 +33,7 @@ _logger = logging.getLogger(__name__)
 DEFAULT_EXEC_TIMEOUT = 120.0
 DEFAULT_CWD = "/runs/current"
 #: The job kinds a box is started for (`box.*`): a host request starts none (#1471 C4).
-BOX_KINDS = ("investigation", "learning", "post-step")
+BOX_KINDS = ("investigation", "learning", "post-step", "drain")
 #: The runs-folder check's name in `StepRefused`: P-1's step 5, machinery and never a readiness refusal step
 #: (#1471 R13-1.1).
 RUNS_FOLDER = "runs_folder"
@@ -178,13 +175,14 @@ def _box_stop(session: Session, fields: dict[str, Any]) -> dict[str, Any]:
 
 def start_run_box(session: Session, run_dir: Path, copy: Any, *, start_token: str | None = None) -> Any:
     """A run's box over its run folder and its knowledge copy (the investigation's, a learning sibling's; #1343 B10,
-    its attached start held here). Before the start, the run folder and the copy's agent half must be real folders
-    inside the tenant's, and every other bind source the run lane makes under `<T>/` (its input folder, the copy's
-    stage, the run clock's folder) is judged along every component with no link followed (H10)."""
+    its attached start held here). Before the start, the run folder (in the job's root) and the copy's agent half (in its
+    inputs) must be real folders, and every other bind source the run lane makes there (its input folder, the copy's
+    stage, the run clock's folder) is judged along every component from the data root down with no link followed (H10,
+    #1546 A-O9: the job can swap any folder of its own root)."""
     from defender import box
 
-    session.inside_tenant(run_dir)
-    session.inside_tenant(Path(copy.agent))
+    session.inside(run_dir)
+    session.inside(Path(copy.agent))
     session.judge_binds(box.run_lane_sources(run_dir, session.defender_dir, Path(copy.agent), Path(copy.token)),
                         must_exist=False)
     return box.start_box(run_dir, session.defender_dir, docker=session.docker, tenant_agent=copy.agent,
@@ -214,24 +212,9 @@ def stop_boxes(session: Session) -> None:
             box.stopped = {"result": "stopped"}
 
 
-def mirror_run_page(run: Run, tenant: Any) -> None:
-    """After the container: the run page a job saved in its run folder (`run`, a run handle), copied to the tenant's
-    shared publish folder (A10). The job never reaches that folder; this is every kind's one copy (an investigation's
-    run, each of a learning job's siblings). No page is no copy; the copy itself never raises."""
-    from defender.presentation.visualize_run import mirror_page
-
-    try:
-        page = run.observability.runtime_html.read()
-    except Exception:  # noqa: BLE001 — no page is no copy; the run's own records say why
-        _logger.warning("the run page of %s could not be read", run.run_dir, exc_info=True)
-        return
-    if page:
-        mirror_page(page, run.run_dir.name, tenant)
-
-
 def settle_knowledge(session: Session, accepted: Any, records: Any, *, run_id: str, trigger: str | None = None) -> Any:
     """The knowledge the job reads (O5): `main` fetched by the fetch child (`session.fetch`) into the run copy `run_id`
-    (the job's own folder under `<T>/run-knowledge/`, owned by this helper), by run setup's shared step
+    (under `accepted.run_knowledge`: for a job, the claim's inputs, #1546), by run setup's shared step
     (`run_common.resolve_knowledge`, the operator command's too, A6). `trigger` (`readiness`) is who asked, when the child
     must also check main's branch protection (D9). Told to stop while the fetch ran, the helper starts no container
     (A1); any other refusal is `setup: refused` (`StepRefused` at `publish`, holding the report it was refused on)."""
@@ -329,8 +312,9 @@ def _launch_step(step: str, call: Callable[..., Any], *args: Any, **kwargs: Any)
         raise StepRefused(step, str(refused)) from None
 
 
-def tenant_launch_steps(session: Session, hold: contextlib.ExitStack, *, copy_id: str, facts: LaunchFacts,
-                        trigger: str | None = None, launch: Callable[[], Any] | None = None) -> LaunchFacts:
+def tenant_launch_steps(session: Session, hold: contextlib.ExitStack, *, copy_id: str, facts: LaunchFacts,  # noqa: PLR0913
+                        trigger: str | None = None, launch: Callable[[], Any] | None = None, job_tenant: Any = None,
+                        copy_tenant: Callable[[Any], Any] | None = None) -> LaunchFacts:
     """The launch's tenant-level steps (#1471 P-1, C2, R12-1), in order and as one code for an investigation and a
     readiness check: the tenant's lock and admission (entered on `hold`), its current records, its alert mapping, the
     knowledge fetch (`publish`, #1618: `main` fetched into the run copy named `copy_id`, whose own check belongs to it; `trigger`
@@ -338,8 +322,9 @@ def tenant_launch_steps(session: Session, hold: contextlib.ExitStack, *, copy_id
     pass (a non-empty grant only, signed under the job's id). An investigation's launch check, read after the
     admission as it always was, is `launch` (`job_lane.JobLane.check_launch` under its own refusal): its run is then
     built at the runs-folder step (`RunsRepository.launched`, which asks the same check); with none the runs-folder
-    check is asked alone. Each refusal is `StepRefused` naming its step, the copy removed; `facts` holds what was
-    settled, and is returned."""
+    check is asked alone. `job_tenant` is the job's own tenant over its root (#1546): its runs are checked and made there,
+    not in the tenant's folder; `copy_tenant(accepted)` the tenant the run copy is made for (in the claim's inputs). Each
+    refusal is `StepRefused` naming its step, the copy removed; `facts` holds what was settled, and is returned."""
     from defender import run_common
     from defender.records.formats import TenantRefused
     from defender.systems.run_tenant import host_tenant
@@ -358,10 +343,11 @@ def tenant_launch_steps(session: Session, hold: contextlib.ExitStack, *, copy_id
     # refused before its alert mapping is read. The container reads no database; it is handed these in the launch facts.
     facts.current = _launch_step("records", run_common.read_records, facts.records, facts.accepted.id)
     facts.mapping = _launch_step("alert_mapping", run_common.read_alert_mapping, facts.records, facts.accepted.id)
-    facts.source = settle_knowledge(session, facts.accepted, facts.records, run_id=copy_id, trigger=trigger)
-    facts.cleanup.callback(RunCopy(facts.accepted.run_knowledge / copy_id).remove)  # the fetch made it; whoever refuses below removes it
+    copied_for = copy_tenant(facts.accepted) if copy_tenant is not None else facts.accepted
+    facts.source = settle_knowledge(session, copied_for, facts.records, run_id=copy_id, trigger=trigger)
+    facts.cleanup.callback(RunCopy(copied_for.run_knowledge / copy_id).remove)  # the fetch made it; whoever refuses below removes it
     try:
-        repository = facts.accepted.runs_repository()
+        repository = (job_tenant if job_tenant is not None else facts.accepted).runs_repository()
         try:
             if facts.launched is not None:
                 facts.run = repository.launched(facts.launched)
@@ -369,20 +355,20 @@ def tenant_launch_steps(session: Session, hold: contextlib.ExitStack, *, copy_id
                 repository.require_runs_folder()
         except TenantRefused as refused:
             raise StepRefused(RUNS_FOLDER, str(refused)) from None
-        _copied_steps(session, facts, copy_id)
+        _copied_steps(session, facts, copy_id, copied_for)
     except BaseException:
         facts.cleanup.close()
         raise
     return facts
 
 
-def _copied_steps(session: Session, facts: LaunchFacts, copy_id: str) -> None:
+def _copied_steps(session: Session, facts: LaunchFacts, copy_id: str, copied_for: Any) -> None:
     """`tenant_launch_steps` from the run copy on (P-1 steps 6-12), the copy's removal on `facts.cleanup`."""
     from defender import run_common
     from defender.records.formats import TenantRefused
     from defender.systems.catalog import Catalog
 
-    facts.copy = _launch_step("publish", run_common.copy_knowledge, facts.accepted, facts.source, copy_id)  # D10: the copy's check is the fetch's step
+    facts.copy = _launch_step("publish", run_common.copy_knowledge, copied_for, facts.source, copy_id)  # D10: the copy's check is the fetch's step
     # The catalog's roster, read once and cold (no adapter code runs here, N7): the records' reads are judged against
     # its adapters' lists (#1504 O3), then the tenant's systems are narrowed to it.
     facts.roster = _launch_step("roster", run_common.run_roster, session.defender_dir)

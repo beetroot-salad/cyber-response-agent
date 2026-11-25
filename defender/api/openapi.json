@@ -870,6 +870,32 @@
         "title": "CredentialsPut",
         "type": "object"
       },
+      "EvidenceRetention": {
+        "additionalProperties": false,
+        "description": "How long a tenant keeps the evidence of its ended work, in days from the acceptance of each object: one value for\ninvestigations, one for learning jobs, each a whole number from 30 to 730 (#1546). Both are always given together,\nwhen a tenant is created and whenever they change; there is no default (#1082).",
+        "properties": {
+          "investigation_days": {
+            "description": "Days an investigation's accepted evidence is kept.",
+            "maximum": 730.0,
+            "minimum": 30.0,
+            "title": "Investigation Days",
+            "type": "integer"
+          },
+          "learning_days": {
+            "description": "Days a learning job's accepted evidence is kept.",
+            "maximum": 730.0,
+            "minimum": 30.0,
+            "title": "Learning Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "investigation_days",
+          "learning_days"
+        ],
+        "title": "EvidenceRetention",
+        "type": "object"
+      },
       "FieldError": {
         "description": "One part of a request that failed validation. The refused value is never echoed.",
         "properties": {
@@ -2397,7 +2423,8 @@
               "tacit_registry",
               "tacit_grant",
               "feedback_setting",
-              "retired_file"
+              "retired_file",
+              "evidence_key_missing"
             ],
             "title": "Kind",
             "type": "string"
@@ -2913,8 +2940,18 @@
         ]
       },
       "post": {
-        "description": "Mint a tenant and record it `creating`; the management service does the rest. No members.",
+        "description": "Mint a tenant and record it `creating` with the retention it is created with (both values, 30 to 730 days, no\ndefault); the management service does the rest. No members.",
         "operationId": "create_tenant_api_admin_tenants_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceRetention"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "202": {
             "content": {
@@ -5039,6 +5076,166 @@
         "summary": "Put Case Record",
         "tags": [
           "systems"
+        ]
+      }
+    },
+    "/api/tenants/{tenant_id}/evidence-retention": {
+      "get": {
+        "description": "How long the tenant keeps the evidence of its ended work: the values it was created with, or last changed to.",
+        "operationId": "get_evidence_retention_api_tenants__tenant_id__evidence_retention_get",
+        "parameters": [
+          {
+            "description": "The tenant the request acts in.",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "description": "The tenant the request acts in.",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceRetention"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Get Evidence Retention",
+        "tags": [
+          "evidence retention"
+        ]
+      },
+      "put": {
+        "description": "Replace both retention values together, each 30 to 730 days. It governs what the sweep expires from now on, from each\nobject's own acceptance; nothing changes for an object already expired.",
+        "operationId": "put_evidence_retention_api_tenants__tenant_id__evidence_retention_put",
+        "parameters": [
+          {
+            "description": "The tenant the request acts in.",
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "description": "The tenant the request acts in.",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceRetention"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceRetention"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Put Evidence Retention",
+        "tags": [
+          "evidence retention"
         ]
       }
     },

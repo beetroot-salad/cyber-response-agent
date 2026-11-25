@@ -161,6 +161,13 @@ def active_tenant_directory(data_root: Path) -> Callable[..., TenantDirectory]:
 _JOB = {"creating": ("create", "names", "service"), "offboarding": ("offboard", "offboard", "service")}
 
 
+#: #1546 r9 (D16): the retention a seeded tenant has (inv, learning days): the longest the checks allow, so no test's
+#: object expires by accident; a sweep test that wants an age sets its own (`_retention1546.set_retention` replaces it).
+SEED_RETENTION = (730, 730)
+#: #1546 r9: the values a tenant create request carries (`POST /admin/tenants` body; `request_create(**CREATE_RETENTION)`).
+CREATE_RETENTION = {"investigation_days": 90, "learning_days": 365}
+
+
 def record_repo_page(dsn: str, tenant: str, page: str | None) -> None:
     """Set the page the lifecycle records on the tenant row when it creates the repository (`<forge url>/<repo>`), as
     the home redesign's repository read serves it; `None` for none recorded."""
@@ -172,7 +179,8 @@ def record_repo_page(dsn: str, tenant: str, page: str | None) -> None:
 def insert_active_tenant(dsn: str, tenant: str, *, state: str = "active", repo: str | None = None,  # noqa: PLR0913
                          origin: str | None = None, wiring: bool = True,
                          data_root: Path | None = None, generations: Sequence[Mapping[str, Any]] = (),
-                         alert_mapping: Mapping[str, str | None] | None = None, records: Any = None) -> None:
+                         alert_mapping: Mapping[str, str | None] | None = None, records: Any = None,
+                         retention: tuple[int, int] | None = SEED_RETENTION) -> None:
     """#1470: records go in through the store's puts, for an active tenant only (a state that is not active holds none).
     #1345: `alert_mapping` (six entries) is saved through the store after the rows; the default saves none
     (lifecycle and identity tests do not start runs). `_jobs1342.register_tenant` defaults it to `FIXTURE_ALERT_MAPPING`."""
@@ -188,10 +196,24 @@ def insert_active_tenant(dsn: str, tenant: str, *, state: str = "active", repo: 
         insert_generation(dsn, tenant, fields)
     seed_postgres(dsn, tenant, alert_mapping)
     _plant_mark(dsn, tenant, state)
+    _plant_retention(dsn, tenant, state, retention)
     if state == "active":  # #1470 O8: the store's lock refuses a tenant that is not active, so only an active one has records
         seed_postgres_records(dsn, tenant, records, data_root)
     elif records is not None and records is not DERIVED:
         raise ValueError(f"records can only be seeded for an active tenant, not {state!r}")
+
+
+def _plant_retention(dsn: str, tenant: str, state: str, retention: tuple[int, int] | None) -> None:
+    """#1546 r9 (D16): the row the tenant create request writes with the tenants row, for every tenant not offboarded (an
+    offboarded one is the pre-#1546 case: investigations and no row). `retention=None` plants none. Where the table does not
+    exist yet (a base without #1546) it does nothing."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    if retention is None or state == "offboarded":
+        return
+    if execute(dsn, "SELECT to_regclass('tenancy.evidence_retention')::text")[0][0] is not None:
+        execute(dsn, "INSERT INTO tenancy.evidence_retention (tenant_id, investigation_days, learning_days) VALUES (%s, %s, %s)",
+                (tenant, *retention))
 
 
 def _plant_mark(dsn: str, tenant: str, state: str) -> None:

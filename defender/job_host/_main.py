@@ -33,7 +33,7 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 
-from . import _adoption, _common, _investigation, _learning, _readiness, _store_relay
+from . import _adoption, _common, _evidence, _folders, _investigation, _learning, _readiness, _store_relay
 from ._container import (
     STOP_GRACE,
     job_container_name,
@@ -66,6 +66,7 @@ def registry() -> Registry:
     _learning.register(built)
     _adoption.register_adoption(built)
     _store_relay.register_store(built)
+    _evidence.register_evidence(built)
     # The host requests' kinds (`KINDS`' last two): the readiness check here, the adoption beside it.
     _readiness.register_readiness(built)
     return built
@@ -117,6 +118,8 @@ class _Signals:
         self._installed = False
 
     def _on_term(self, _signum: int, _frame: object) -> None:
+        if self._session.signalled_at is None:
+            self._session.signalled_at = time.monotonic()
         self._session.signalled.set()
         if self.raising:
             self.raising = False
@@ -195,10 +198,83 @@ def _finish(session: Session, proc: Any, server: Server | None, hold: contextlib
         shutil.rmtree(socket_folder(session), ignore_errors=True)
         if session.prepared is not None:
             session.prepared.cleanup.close()
+        _folders.remove_claim_folders(session)
         if session.recorded:  # last: until it goes, the worker leaves the claim's folders to this helper (#1557 O5)
             shutil.rmtree(owner_folder(session), ignore_errors=True)
     finally:
-        hold.close()
+        try:
+            hold.close()
+        finally:
+            if session.rows is not None:
+                session.rows.close()
+
+
+def _open_claim(session: Session) -> None:
+    """The job store and the claim the worker minted for this helper (`DEFENDER_DATABASE_DSN`, the claim token): its
+    evidence state. A claim that is not there, or a store that cannot be reached, is the helper's own failure: it stages
+    nothing without its claim."""
+    from ._rows import Rows
+
+    dsn = os.environ.get("DEFENDER_DATABASE_DSN")
+    if not dsn:
+        raise _common.HelperFault("DEFENDER_DATABASE_DSN is not set: the helper stages its job's facts in the job store")
+    try:
+        session.rows = Rows(dsn)
+        claim = session.rows.claim(session.claim)
+    except Exception as down:  # noqa: BLE001 — a store the helper cannot reach is its own failure
+        raise _common.HelperFault(f"the job store cannot be read: {type(down).__name__}: {down}") from None
+    if claim is None or claim.tenant_id != str(session.tenant_id) or claim.kind != session.kind:
+        raise _common.HelperFault(f"no {session.kind} claim {session.claim} of this tenant is in the job store")
+    if session.kind == "investigation" and session.job_id is not None and claim.reference != str(session.job_id):
+        # The claim's reference column names the investigation it was minted for (#1546 Claim, "the lease reference
+        # (owner row)"; the `launch-names-another-id` arm it replaced was the investigation's alone).
+        raise _common.HelperFault(f"the claim {session.claim} is not job {session.job_id}'s")
+    session.evidence_state = _evidence.Evidence(
+        rows=session.rows, claim=claim, kind=session.kind, job_id=session.job_id, spool=None,
+        budget=_evidence.UPLOAD_BUDGET if session.upload_budget is None else float(session.upload_budget))
+
+
+def _set_up_evidence(session: Session) -> None:
+    """The claim's folders, then, for a kind that pushes evidence, the store and the key login: either unconfigured (no
+    seam, no setting) refuses the job at setup (`setup: refused`, no container)."""
+    if session.kind != "post-step":
+        _folders.make_claim_folders(session)
+    ev = _evidence.state(session)
+    ev.spool = session.job_spool
+    if session.kind == "drain" and ev.claim.inputs:
+        # A drain reads the bundles of its input set when it has one (#1546 D7), and pushes nothing.
+        ev.store = session.evidence if session.evidence is not None else _evidence.store_from_env()
+        ev.keys = session.evidence_keys if session.evidence_keys is not None else _evidence.keys_from_generation(session)
+    if session.kind not in _evidence.EVIDENCE_KINDS:
+        return
+    ev.store = session.evidence if session.evidence is not None else _evidence.store_from_env()
+    if ev.store is None:
+        raise SetupRefused("the evidence store is not configured (DEFENDER_EVIDENCE_*): the job could keep nothing")
+    ev.keys = session.evidence_keys if session.evidence_keys is not None else _evidence.keys_from_generation(session)
+    if ev.keys is None:
+        raise SetupRefused("the tenant's evidence key login is not recorded: the job's objects could not be keyed")
+
+
+def _started(session: Session) -> None:
+    """The helper's own facts once the container started: `started`, and an investigation's served knowledge."""
+    ev = session.evidence_state
+    if not isinstance(ev, _evidence.Evidence) or session.kind == "post-step":
+        return
+    ev.stage("started", {"container": "started"})
+    knowledge = (session.prepared.launch.get("knowledge") if session.prepared is not None else None)
+    if session.kind == "investigation" and isinstance(knowledge, dict):
+        from ._records import served_knowledge
+
+        served = served_knowledge(knowledge)
+        if served is not None:
+            ev.stage("knowledge", served)
+
+
+def _upload(session: Session) -> None:
+    """After the container: every whole object it pushed, stored (`_evidence.Evidence.upload_all`)."""
+    ev = session.evidence_state
+    if isinstance(ev, _evidence.Evidence) and session.kind in _evidence.EVIDENCE_KINDS and ev.store is not None:
+        ev.upload_all(signalled_at=session.signalled_at)
 
 
 def _start(session: Session, spec: KindSpec, signals: _Signals, hold: contextlib.ExitStack
@@ -211,6 +287,7 @@ def _start(session: Session, spec: KindSpec, signals: _Signals, hold: contextlib
     try:
         try:
             record_owner(session)  # before any claim folder is made (#1557 O5)
+            _set_up_evidence(session)
             session.prepared = spec.prepare(session, hold)
             path = socket_path(session)
             try:
@@ -224,6 +301,7 @@ def _start(session: Session, spec: KindSpec, signals: _Signals, hold: contextlib
             if session.signalled.is_set():
                 raise StartFailed("the helper was told to stop before its container started; none was started")
             proc = start(session, launch)
+            _started(session)
         except _common.HelperFault:
             raise  # the helper's own failure: no ending is recorded, and it exits non-zero (`_run`)
         except SetupRefused as refused:
@@ -262,6 +340,7 @@ def _run(session: Session, spec: KindSpec, signals: _Signals) -> int:
     proc, server = None, None
     try:
         try:
+            _open_claim(session)
             proc, server, ending = _start(session, spec, signals, hold)
         except _common.HelperFault as fault:
             _tell(session, f"the helper failed before its container started, and records no ending: {fault}")
@@ -269,6 +348,7 @@ def _run(session: Session, spec: KindSpec, signals: _Signals) -> int:
         signals.raising = False
         if ending is not None:
             _tell(session, ending[1])
+            session.ending_why = ending[1]
             spec.end(session, ending[0])
             return 0
         rc = _await_container(session, proc)
@@ -276,19 +356,24 @@ def _run(session: Session, spec: KindSpec, signals: _Signals) -> int:
         _say_unreached(session, rc, server)
         if session.prepared is not None and session.prepared.exited is not None:
             session.prepared.exited(session, rc)
+        _upload(session)
         return session.served_status
     finally:
         signals.raising = False
         _finish(session, proc, server, hold)
 
 
-def main(argv: list[str], *, docker: Any = None, signer: Any = None, fetch: Any = None, forge: Any = None,
-         command: list[str] | None = None, client: Any = None, directory: Any = None) -> int:
+def main(argv: list[str], *, docker: Any = None, signer: Any = None, fetch: Any = None, forge: Any = None,  # noqa: PLR0913
+         command: list[str] | None = None, client: Any = None, directory: Any = None, evidence: Any = None,
+         evidence_keys: Any = None, upload_budget: float | None = None) -> int:
     """The helper for one job (module doc). `docker` is the docker seam (the box package's real one by default),
     `signer` the request signer (the tenant's sign login), `fetch` the one knowledge fetch seam (#1618: the real fetch child),
     `forge` the forge credential's builder (the learning kinds'), `command` a container command line in place of the
     kind's entry, `client` the forge client the drain's delivery uses (a new one by default), `directory` the tenant
-    records the tenant is admitted through (`host_tenant(directory=)`; None: the process's own, #1471). Returns 0 once the helper
+    records the tenant is admitted through (`host_tenant(directory=)`; None: the process's own, #1471), `evidence` the
+    evidence store (`evidence.BlobStore`; None: the one `DEFENDER_EVIDENCE_*` names), `evidence_keys` the tenant's evidence
+    key login (`evidence.EvidenceKeys`; None: the one the tenant's live generation records), `upload_budget` the seconds an
+    object's upload is retried (None: 120, #1546). Returns 0 once the helper
     served the job to its end (its container ran and exited, whatever its status, or the helper wrote the ending it
     decided before the container), or, for a post-step whose container exited, its answer whether work still waits
     (`NOTHING_WAITS`, `WORK_WAITS`; #1487 Amendment r5.2); else another status: the worker reads any other status, with
@@ -319,7 +404,8 @@ def main(argv: list[str], *, docker: Any = None, signer: Any = None, fetch: Any 
                       defender_dir=process_defender_dir().resolve(), signer=signer, fetch=fetch, forge=forge,
                       client=client, command=list(command) if command is not None else None, directory=directory,
                       alert_digest=ns.alert_digest, system=ns.system, post_ticket=bool(ns.post_ticket),
-                      ticket_link=ns.ticket_link if ns.post_ticket else None)
+                      ticket_link=ns.ticket_link if ns.post_ticket else None, evidence=evidence,
+                      evidence_keys=evidence_keys, upload_budget=upload_budget)
     session.container = job_container_name(session)
     spec = registry().kinds.get(ns.kind)
     if spec is None:

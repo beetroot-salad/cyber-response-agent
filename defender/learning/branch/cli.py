@@ -50,7 +50,7 @@ import sqlite3
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -76,7 +76,7 @@ from defender.records import (
 )
 from defender.systems.catalog import Catalog
 from defender.systems.run_tenant import RunTenant
-from defender.tenancy import Tenant
+from defender.tenancy import JobTenant, Tenant
 from defender.tenancy.run_knowledge import KnowledgeRefused
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import seams
@@ -227,7 +227,7 @@ def _copy_source_input(episode: Episode, raw: bytes, record_text: str,
 
 
 def prepare_episode(
-    runs: RunsRepository[Tenant], source: Run, *,
+    runs: RunsRepository[Any], source: Run, *,
     prime: Callable[[Path, Episode], PrimeReport] = _PRIME_ALLOWING_EMPTY,
     knowledge_commit: str | None = None, episode_id: str | None = None,
 ) -> EpisodeRuns:
@@ -313,7 +313,7 @@ def _declared_or_refused(found: Any) -> str | None:
         raise ending(f"[branch] {unreadable}", reason=reason, brief=brief) from None
 
 
-def _open_launch_source(runs: RunsRepository[Tenant], source_run_id: str) -> Run:
+def _open_launch_source(runs: RunsRepository[Any], source_run_id: str) -> Run:
     """The source run, by id, in the request's tenant's natural container — or the refusal,
     before anything is spent. `runs.open` walks `<T>/runs` from the tenant's folder no-follow
     (a link at any level is refused) and takes only a real directory at the id; a path, or an
@@ -403,6 +403,17 @@ def _copy_of(tenant_id: TenantId, commit: str | None, *, container: JobContainer
     if commit is not None and answer.get("commit") != commit:
         raise KnowledgeRefused(f"the job's host helper answered another copy ({answer.get('commit')!r})")
     yield Path(str(answer.get("path")))
+
+
+def _launch_pin(container: JobContainer) -> str:
+    """A job's family pin: the launch facts' `knowledge_commit`, the claim's pin its host helper handed over (#1546 r10
+    (a)). The pulled source's knowledge record is ignored here: it neither moves the pin nor refuses the job. A launch
+    that names no full commit id refuses, before anything is fetched or spent."""
+    commit = container.launch.get("knowledge_commit")
+    if not isinstance(commit, str) or not formats.OID.fullmatch(commit):
+        raise ending(f"[branch] the job's launch facts pin no knowledge commit ({commit!r}): the family cannot be "
+                     "launched", reason=LAUNCH_REFUSED, brief=_UNPINNABLE)
+    return commit
 
 
 def _source_pin(source: Run) -> str:
@@ -724,7 +735,7 @@ class _ContainerAdmitted:
 
     directory: Any = None
 
-    def __init__(self, tenant: Tenant) -> None:
+    def __init__(self, tenant: Tenant | JobTenant) -> None:
         self.tenant = tenant
 
     def __enter__(self) -> _ContainerAdmitted:
@@ -734,11 +745,10 @@ class _ContainerAdmitted:
         return None
 
 
-def _admitted(data_root: Any, tenant_id: TenantId, *, box_mounted: tuple[Any, ...]) -> _ContainerAdmitted:
-    """The tenant of a launch inside a job container: the folder rules alone (`_ContainerAdmitted`). An operator's
-    launch opens the one host acceptance in `_launch` itself, the command that holds it."""
-    return _ContainerAdmitted(tenancy.accept_tenant(data_root, tenant_id, defender_dir=_DEFENDER_DIR,
-                                                    box_mounted=box_mounted))
+def _admitted(data_root: Any, tenant_id: TenantId, container: JobContainer) -> _ContainerAdmitted:
+    """The tenant of a launch inside a job container: a `JobTenant` over its own root and the inputs its launch facts name
+    (`_ContainerAdmitted`). An operator's launch opens the one host acceptance in `_launch` itself, the command that holds it."""
+    return _ContainerAdmitted(tenancy.job_tenant_from_launch(data_root, tenant_id, container.launch))
 
 
 def _handed_records(container: JobContainer) -> Any:
@@ -762,6 +772,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     signer: Any = None, proxy_url: str | None = None, issuer_transport: Any = None,
     container: JobContainer | None = None, fetch: Any = None,
     clock: Callable[[], float] = time.time,
+    environ: Mapping[str, str] | None = None,
 ) -> int:
     # Injected seams are resolved once and threaded inward non-`None`, so no two frames can
     # disagree about which preflight, roster or model an episode used.
@@ -769,7 +780,9 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
     # the source run and the siblings all resolve through it.
     try:
         tenant_id = tenancy.requested_tenant_id(ns.tenant)
-        data_root = tenancy.resolve_data_root()
+        # A job entry hands in its container's environment (#1546: its root is the claim's); an operator's launch
+        # reads this process's.
+        data_root = tenancy.resolve_data_root(environ)
     except TenantRefused as refusal:
         raise ending(f"[branch] {refusal}", reason=LAUNCH_REFUSED,
                      brief=f"the job's tenant was refused ({type(refusal).__name__})",
@@ -789,7 +802,7 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         box_mounted = (tenancy.box_mounted_episodes(data_root, tenant_id),)
         admitted = (run_tenant_mod.host_tenant(data_root, tenant_id, directory=directory, defender_dir=_DEFENDER_DIR,
                                                box_mounted=box_mounted)
-                    if container is None else _admitted(data_root, tenant_id, box_mounted=box_mounted))
+                    if container is None else _admitted(data_root, tenant_id, container))
     except TenantRefused as refusal:
         raise ending(f"[branch] the episode's tenant: {refusal}", reason=LAUNCH_REFUSED,
                      brief=f"the job's tenant was refused ({type(refusal).__name__})",
@@ -818,8 +831,9 @@ def _launch(  # noqa: PLR0913, PLR0915, C901 — see `main`; the launch checks, 
         runs = admitted.tenant.runs_repository()
         source = _open_launch_source(runs, ns.source_run_id)
         _source_stamp_agrees(source, admitted.tenant.id)
-        # What the family is pinned to is decided from the source alone, before anything is fetched or spent.
-        commit = _source_pin(source)
+        # What the family is pinned to is decided before anything is fetched or spent: an operator's launch from the source
+        # alone, a job's from its launch facts alone (#1546 r10: the claim's pin; a pulled source's record moves nothing).
+        commit = _source_pin(source) if container is None else _launch_pin(container)
         try:
             # The tenant's grants and settings are `main`'s at this moment (K8: the tenant has no knowledge folder), read from
             # a copy fetched for the check.
@@ -935,7 +949,7 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
     launch_waived: Sequence[str] = (), episode: Episode,
     view: EpisodeRuns, questioner: Any, spawn: Any, lessons_dir: Path, judge: Any = None,
     premise_check: Any = None,
-    tenant: RunTenant, runs: RunsRepository[Tenant], served: Sequence[str], oracle: Any,
+    tenant: RunTenant, runs: RunsRepository[Any], served: Sequence[str], oracle: Any,
     verifier: Any, roster: Any, started: threading.Event, render_page: PageRenderer | None,
     knowledge_commit: str | None = None, signer: Any = None, proxy_url: str | None = None,
     issuer_transport: Any = None, directory: Any = None, lane: JobLaneHooks | None = None,
@@ -1014,7 +1028,9 @@ def _run_episode(  # noqa: PLR0913, PLR0912, PLR0915, C901 — the episode's who
         # unservable and the `role: null` replicate included — before the first sibling
         # starts: each sibling's run start checks the roster names its world, and takes its
         # run id from it.
-        view.start_runs([world.world_id for world in family.worlds])
+        arm_ids = view.start_runs([world.world_id for world in family.worlds])
+        if lane is not None:
+            lane.runs_started(dict(arm_ids))
         ran: list[str] = []
 
         def sibling_ended(world_id: str, _code: int) -> None:

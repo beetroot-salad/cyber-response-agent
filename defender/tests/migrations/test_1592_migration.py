@@ -58,7 +58,7 @@ def _unchanged(dsn: str) -> None:
 
 def test_the_revision_sits_directly_on_the_host_requests_revision_and_is_the_head():
     """S1-19: 0027's down-revision is `0026_host_requests`, and the one head is it or descends from it (#1618's
-    `0028_drop_publish_status` follows it)."""
+    `0028_drop_publish_status` follows it, and #1546's revisions follow that)."""
     from defender.migrations import head, heads
 
     assert revisions.down_of(_revision()) == PRIOR
@@ -123,15 +123,14 @@ def test_a_wiring_other_than_the_tenants_knowledge_repository_stops_the_upgrade_
 @pytest.mark.postgres
 def test_canonical_wiring_and_nothing_pending_upgrades_to_head(empty_database):
     """S1-22: the control: with every tenant moved and idle the upgrade succeeds (and does not refuse everything)."""
-    from defender.migrations import upgrade
+    from defender.migrations import head
+    from defender.tests.migrations._marked1470 import upgrade_with_retention
 
     _upgrade_to(empty_database, PRIOR)
     for n, state in enumerate(("active", "offboarded")):
         tenant = fixture_uuid(f"tenant:1592-mig-ok{n}")
         _tenant(empty_database, tenant, state, repo=_canonical(tenant))
-    upgrade(empty_database)
-    from defender.migrations import head
-
+    upgrade_with_retention(empty_database)  # #1546 r9 B: past 0027, the active tenant needs its retention row
     assert _version(empty_database) == [(head(),)]
 
 

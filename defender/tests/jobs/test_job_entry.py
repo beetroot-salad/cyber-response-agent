@@ -30,6 +30,7 @@ from defender.tenancy import case_ticket
 from defender.tests.jobs import test_job_helper as _H1471
 from defender.tests.support.jobs._container_entry1170 import enter
 from defender.tests.support.jobs._job_helper import ContainerStandIn, helper_scene
+from defender.tests.support.jobs._job_helper import process_state  # noqa: F401 — autouse: the helper runs here (its store seams)
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     ALERT_DIGEST,
@@ -41,8 +42,6 @@ from defender.tests.support.jobs._jobs1342 import (
     TITLE,
     WORKTREE,
     ZWNBSP_ALERT_BYTES,
-    drop_tenant,
-    restate_tenant,
     tree,
 )
 from defender.tests.support.shared._postgres1339 import execute
@@ -57,7 +56,10 @@ OTHER_TENANT = str(uuid.UUID(int=0x1342))
 SETTLED = {"setup": "done", "box": "started", "report_committed": True, "scrub_verified": True, "cut_short": None}
 
 
-pytestmark = [pytest.mark.postgres, pytest.mark.skipif(
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — fixtures the helper's store seams take
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
+
+pytestmark = [pytest.mark.postgres, pytest.mark.garage, pytest.mark.openbao, pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="reads /proc/self/fd and uses prctl(PR_SET_PDEATHSIG), Linux only")]
 
 
@@ -75,6 +77,10 @@ class Scene:
 
     #: What the worker adds to the helper's argv for each planted job (#1471 r8 C-1): see `plant`.
     helper_args: dict[str, list[str]] = field(default_factory=dict)
+    #: #1546 (design: Claim): each planted job's claim token (a row is claimed at most once: one claim per job).
+    claims: dict[str, str] = field(default_factory=dict)
+    #: #1546: each run job's copy of the job root's `<T>/runs/` as its container left it (`_container_entry1170.keep_runs`).
+    kept: dict[str, Path] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """The helper's argv carries what `plant` recorded for its job beside `HelperScene.argv`'s own."""
@@ -91,29 +97,57 @@ class Scene:
         return {"investigation_id": run_id, "tenant_id": self.t.tenant_id, "alert_id": str(uuid.uuid4()),
                 "digest": hashlib.sha256(ALERT_BYTES).hexdigest(), "label": TITLE, "box_token": self.token, **over}
 
-    def plant(self, run_id: str, *, launch: Any = "default", alert: bytes | None = ALERT_BYTES,
+    def plant(self, run_id: str, *, launch: Any = "default", alert: bytes = ALERT_BYTES,
               flagged: bool | None = None, link: str | None = None, digest: str | None = None) -> None:
-        """The worker's two files, create-only, beside the run folder (`<T>/runs/` already made: R1), and what it hands
-        the helper at its start (C-1): the alert's digest (the launch record's own `digest` when the record is planted
-        as a dict; `digest` overrides it), always sent, and, when `flagged`, the flag and the screen `link`."""
-        held = launch.get("digest") if isinstance(launch, dict) else None
-        if launch == "default":
-            launch = json.dumps(self.launch_doc(run_id))
-        elif isinstance(launch, dict):
-            launch = json.dumps(launch)
-        if launch is not None:
-            (self.runs / f"{run_id}.launch.json").write_text(launch, encoding="utf-8")
-        if alert is not None:
-            (self.runs / f"{run_id}.alert.json").write_bytes(alert)
+        """#1546 (design: Claim; census "Worker writes alert and launch record beside the run -> claim row; the helper
+        writes the job's copies"): the worker's claim transaction for `run_id`, nothing written beside the run: its owner
+        row, its alert row holding `alert`, and a claim of its own whose launch facts are exactly `launch` (default
+        `launch_doc`; any JSON value, for a malformed case), the alert reference the alert row's id. And what the worker
+        hands the helper at its start (C-1): the alert's digest (the launch facts' own `digest`; `digest` overrides
+        it), always sent, and, when `flagged`, the flag and the screen `link`. The planted job is the active one."""
+        from defender.tests.support.jobs import _helper_evidence1546 as H
+
+        facts = self.launch_doc(run_id) if isinstance(launch, str) and launch == "default" else launch
+        held = facts.get("digest") if isinstance(facts, dict) else None
+        claim = uuid.uuid4().hex
+        self.claims[run_id] = claim
+        H.plant(self.helper, "investigation", claim=claim, owner=run_id, alert=alert,
+                launch=facts if isinstance(facts, dict) else None)
+        if isinstance(facts, dict):  # the alert reference is the row the worker's transaction made
+            ((alert_id,),) = execute(self.dsn, "SELECT launch->>'alert_id' FROM jobs.claims WHERE token = %s", (claim,))
+            facts = {**facts, "alert_id": alert_id} if "alert_id" in facts else facts
+        execute(self.dsn, "UPDATE jobs.claims SET launch = %s::jsonb WHERE token = %s", (json.dumps(facts), claim))
         worker_digest = digest or held or ALERT_DIGEST
         extra = ["--alert-digest", worker_digest]
         if flagged:
             extra += ["--post-ticket", "--ticket-link", link or ""]
         self.helper_args[run_id] = extra
+        self.activate(run_id)
+
+    def activate(self, run_id: str) -> None:
+        """The helper started next is `run_id`'s: the worker hands each child its own claim (`_worker._spawn`)."""
+        from defender.box import CLAIM_ENV
+
+        self.helper.claim = self.claims[run_id]
+        os.environ[CLAIM_ENV] = self.claims[run_id]  # helper_scene's monkeypatch restores it
+
+    def job_root_runs(self, run_id: str) -> Path:
+        """The job's own `<T>/runs/` under its root (`.job-roots/<claim>/<T>/runs`, design "The job's folders"), while
+        its helper runs."""
+        from defender.tests.support.jobs import _helper_evidence1546 as H
+
+        return H.job_root(self.helper, self.claims[run_id]) / self.t.tenant_id / "runs"
+
+    def run_dir(self, run_id: str) -> Path:
+        """The run's folder as its container left it (the kept copy; the job's root itself is gone, A-O1)."""
+        assert run_id in self.kept, f"premise: {run_id} was run"
+        return self.kept[run_id] / "runs" / run_id
 
     def job_end(self, run_id: str) -> dict[str, Any] | None:
-        path = self.runs / f"{run_id}.job-end.json"
-        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+        """The job's staged end facts (#1546 A-O2: the `outcome` fact under its claim, not a job-end file)."""
+        from defender.tests.support.jobs._job_helper import job_end_facts
+
+        return job_end_facts(self.dsn, self.claims[run_id])
 
     def argv(self, run_id: str) -> list[str]:
         """The in-container entry's command line (A5, A6: no `--parent-pid`)."""
@@ -187,7 +221,9 @@ def run_job(s: Scene, run_id: str, *, lifecycle: Any = None, preflight: Any = No
     publish is answered `fresh` at the published commit and counted in `calls["publish"]`). `docker`: the helper's docker
     (a prebuilt `ContainerStandIn`). `signer`: the helper's signer (default `enter`'s marked signer)."""
     result = Ran() if ran is None else ran
-    got = enter(s.helper, run_id, signer=signer,
+    s.activate(run_id)
+    s.kept[run_id] = s.work / f"kept-{uuid.uuid4().hex[:8]}"
+    got = enter(s.helper, run_id, signer=signer, keep=s.kept[run_id],
                 lifecycle=lifecycle if lifecycle is not None else verified_lifecycle(result),
                 preflight=preflight if preflight is not None else (lambda *a, **k: 0),
                 visualize=visualize if visualize is not None else (lambda *a, **k: None), docker=docker)
@@ -316,8 +352,8 @@ def test_o6_a_job_with_a_valid_launch_record_sets_up_and_runs_the_lifecycle(scen
     assert ran.exit is None or ran.exit.code in (0, None), ran
     assert ran.calls == {"lifecycle": 1, "publish": 1}
     assert ran.out.splitlines()[0] == f"run_id={run_id}"
-    assert (scene.runs / run_id).is_dir()
-    assert B.read_stamp(scene.runs / run_id)["alert_label"] == TITLE
+    assert (scene.run_dir(run_id)).is_dir()
+    assert B.read_stamp(scene.run_dir(run_id))["alert_label"] == TITLE
     assert scene.job_end(run_id) == SETTLED
 
 
@@ -327,21 +363,21 @@ def test_o6_a_job_with_a_valid_launch_record_sets_up_and_runs_the_lifecycle(scen
                               "decomposed unicode", "zero-width no-break space in a string",
                               "feff_rich"])
 def test_o6_the_runs_input_alert_is_the_launch_files_exact_bytes_and_hashes_to_the_record(scene, raw):
-    """The alert the run holds equals the alert file byte for byte (trailing newline, CRLF, padding whitespace and decomposed text too) and matches the launch digest. (O6, O2, M5)"""
+    """The alert the run holds equals the worker's alert byte for byte (trailing newline, CRLF, padding whitespace and decomposed text too) and matches the launch digest. #1546 (census: the alert beside the run became the alert row the claim references): the bytes are the row's. (O6, O2, M5)"""
     from defender.records import RunPaths, formats
 
     run_id = str(uuid.uuid4())
-    scene.plant(run_id, launch=scene.launch_doc(run_id, digest=hashlib.sha256(raw).hexdigest()), alert=raw)
-    wanted = json.loads((scene.runs / f"{run_id}.launch.json").read_text(encoding="utf-8"))["digest"]
+    wanted = hashlib.sha256(raw).hexdigest()
+    scene.plant(run_id, launch=scene.launch_doc(run_id, digest=wanted), alert=raw)
 
     ran = run_job(scene, run_id)
 
     assert ran.raised is None, ran
-    held = RunPaths(scene.runs / run_id).alert.read_bytes()
+    held = RunPaths(scene.run_dir(run_id)).alert.read_bytes()
     assert raw.endswith((b"\n", b"\r\n")), "premise: the fixture ends in a line end"
-    assert held == (scene.runs / f"{run_id}.alert.json").read_bytes() == raw
+    assert held == raw
     assert hashlib.sha256(held).hexdigest() == wanted
-    record = formats.parse_alert_record(RunPaths(scene.runs / run_id).alert_record.read_text(encoding="utf-8"))
+    record = formats.parse_alert_record(RunPaths(scene.run_dir(run_id)).alert_record.read_text(encoding="utf-8"))
     assert record is not None, "the run holds an alert record"
     assert record.digest == hashlib.sha256(held).hexdigest(), "the run's alert record digests the held alert"
 
@@ -368,7 +404,7 @@ def test_m5_the_alert_file_is_read_once_and_the_digest_is_checked_on_those_bytes
     assert reads == [alert_file.name], f"the alert file was read {len(reads)} times"
     assert ran.raised is None, ran
     assert ran.calls["lifecycle"] == 1, ran
-    assert RunPaths(scene.runs / run_id).alert.read_bytes() == ALERT_BYTES
+    assert RunPaths(scene.run_dir(run_id)).alert.read_bytes() == ALERT_BYTES
     assert scene.job_end(run_id) == SETTLED
 
 
@@ -390,121 +426,139 @@ def test_m5_a_file_that_changes_before_the_admission_read_is_refused_whatever_an
 
     assert ran.raised is None, ran
     assert ran.calls["lifecycle"] == 0, "the run went ahead on bytes its launch record does not name"
-    assert not (scene.runs / run_id).exists()
+    assert not (scene.run_dir(run_id)).exists()
     assert scene.job_end(run_id) == REFUSED  # #1421: the record carries a fifth fact, null here
 
 
+#: #1546 (census: "Worker writes alert and launch record beside the run -> claim row"): the launch facts are the claim's,
+#: planted exactly (`Scene.plant`); each arm is launch facts the helper must refuse.
 _REFUSALS = {
-    "no-launch-record": dict(launch=None),
-    "launch-names-another-tenant": dict(launch="tenant"),
-    "launch-names-another-id": dict(launch="id"),
-    "launch-not-json": dict(launch="{not json"),
-    "launch-empty": dict(launch=""),
-    "launch-not-an-object": dict(launch="[]"),
+    "no-launch-facts": dict(launch={}),
+    "launch-facts-not-an-object": dict(launch=[]),
     "launch-lacks-the-digest": dict(launch="nodigest"),
     "launch-lacks-the-box-token": dict(launch="notoken"),
-    "no-alert-file": dict(alert=None),
     "digest-mismatch-on-the-admitted-bytes": dict(alert=ALERT_BYTES.replace(b"1.50", b"1.51")),
-    "launch-record-symlinked": dict(tamper="launch-link"),
-    "launch-record-oversize": dict(tamper="launch-oversize"),
-    "alert-file-symlinked": dict(tamper="alert-link"),
 }
+# Retired arms (#1546 A-O2, census "Worker writes alert and launch record beside the run -> claim row; the helper writes the
+# job's copies"): `launch-not-json`, `launch-empty`, `launch-record-symlinked`, `launch-record-oversize`, `no-alert-file`,
+# `alert-file-symlinked` refused a worker-written FILE, which is no longer an input (the facts are a JSON row, the alert a row);
+# the refusal of missing or malformed launch facts survives in this test's `no-launch-facts`/`launch-facts-not-an-object`
+# arms, and the digest check on the alert's bytes in its `digest-mismatch-on-the-admitted-bytes` arm. `launch-names-another-id`
+# became `test_o6_a_helper_whose_claim_names_another_investigation_runs_nothing` (the claim's reference column names the job).
+# `launch-names-another-tenant` became `test_o6_a_helper_whose_claim_is_another_tenants_runs_nothing` (the claim's column).
 #: Box tokens that are not 32 lowercase hex characters: the launch check refuses each (r5 C1).
 _BAD_TOKENS = {"empty": "", "31-chars": "a" * 31, "33-chars": "a" * 33, "upper-case": "A" * 32,
                "non-hex": "g" * 32, "trailing-newline": "a" * 32 + "\n", "leading-space": " " + "a" * 31,
                "uuid-form": str(uuid.UUID(int=0x1342)), "integer": 12345678901234567890123456789012,
                "null": None, "list": ["a" * 32], "full-width": "\uff41" * 32}
 _REFUSALS.update({f"launch-box-token-{name}": dict(launch=("token", value)) for name, value in _BAD_TOKENS.items()})
-OVER_THE_LIMIT = 70 * 1024 * 1024
-
-
-def _tamper(scene: Scene, run_id: str, how: str) -> None:
-    """Plant the launch pair with one of its two files a symlink to a valid copy, or the launch record
-    padded with blanks past any size limit (still valid JSON)."""
-    elsewhere = scene.work / "elsewhere"
-    elsewhere.mkdir(exist_ok=True)
-    record = json.dumps(scene.launch_doc(run_id))
-    scene.plant(run_id, launch=None if how.startswith("launch") else "default",
-                alert=None if how == "alert-link" else ALERT_BYTES)
-    if how == "launch-link":
-        (elsewhere / "launch.json").write_text(record, encoding="utf-8")
-        (scene.runs / f"{run_id}.launch.json").symlink_to(elsewhere / "launch.json")
-    elif how == "launch-oversize":
-        (scene.runs / f"{run_id}.launch.json").write_text(record + " " * OVER_THE_LIMIT, encoding="utf-8")
-    else:
-        (elsewhere / "alert.json").write_bytes(ALERT_BYTES)
-        (scene.runs / f"{run_id}.alert.json").symlink_to(elsewhere / "alert.json")
-
 
 
 @pytest.mark.parametrize("kind", sorted(_REFUSALS))
 def test_o6_setup_refuses_an_id_without_a_launch_record_that_names_this_tenant_and_checks(scene, kind):
-    """No launch record, another tenant's, another id's, unparseable, symlinked or oversize, without a well-formed box token, an alert file that is a symlink, or a digest the alert bytes miss: refused and recorded `setup: refused`; nothing spent, nothing made. (O6, M1, M5, r5 C1)"""
+    """Launch facts missing, not an object, without the digest or a well-formed box token, or a digest the alert bytes miss:
+    refused and recorded `setup: refused`; nothing spent, nothing made, and (#1546 A-O2) nothing written beside the run in the
+    tenant's folder. (O6, M1, M5, r5 C1; #1546 census: the launch record is the claim's launch facts)"""
     run_id = str(uuid.uuid4())
     spec = dict(_REFUSALS[kind])
     launch = spec.pop("launch", "default")
-    tamper = spec.pop("tamper", None)
-    if launch == "tenant":
-        launch = scene.launch_doc(run_id, tenant_id=OTHER_TENANT)
-    elif launch == "id":
-        launch = scene.launch_doc(run_id, investigation_id=str(uuid.uuid4()))
-    elif launch == "nodigest":
+    if launch == "nodigest":
         launch = {k: v for k, v in scene.launch_doc(run_id).items() if k != "digest"}
     elif launch == "notoken":
         launch = {k: v for k, v in scene.launch_doc(run_id).items() if k != "box_token"}
     elif isinstance(launch, tuple):
         launch = scene.launch_doc(run_id, box_token=launch[1])
-    if tamper is None:
-        scene.plant(run_id, launch=launch, **spec)
-    else:
-        _tamper(scene, run_id, tamper)
+    scene.plant(run_id, launch=launch, **spec)
     before = sorted(p.name for p in scene.runs.iterdir())
 
     ran = run_job(scene, run_id)
 
     assert ran.raised is None, ran.raised
     assert ran.calls["lifecycle"] == 0
-    assert not (scene.runs / run_id).exists(), "a run folder was made past a refused launch"
+    assert not scene.run_dir(run_id).exists(), "a run folder was made past a refused launch"
     assert "run_id=" not in ran.out
     assert scene.job_end(run_id) == REFUSED  # #1421: the record carries a fifth fact, null here
     after = sorted(p.name for p in scene.runs.iterdir())
-    assert after == sorted([*before, f"{run_id}.job-end.json"]), f"{kind}: runs changed: {after}"
+    assert after == before, f"{kind}: the tenant's runs folder changed: {after}"
     if kind != "digest-mismatch-on-the-admitted-bytes":
         assert ran.calls["publish"] == 0, "the launch check comes before the knowledge publish"
-    if kind == "no-launch-record":
-        assert "launch" in ran.message.lower(), ran.message
 
 
-def test_o6_an_alert_that_admission_refuses_is_refused_and_recorded_even_with_a_matching_digest(scene):
-    """A launch record whose digest matches inadmissible bytes (a BOM): refused after the launch check, still `setup: refused`. (O6, M1)"""
-    run_id = str(uuid.uuid4())
-    bom = b"\xef\xbb\xbf" + ALERT_BYTES
-    scene.plant(run_id, launch=scene.launch_doc(run_id, digest=hashlib.sha256(bom).hexdigest()), alert=bom)
+def test_o6_a_helper_whose_claim_names_another_investigation_runs_nothing(scene):
+    """#1546 (design: Claim, "the lease reference (owner row)"; was the `launch-names-another-id` arm): the helper started for
+    a job whose claim token references another investigation starts no container, runs no lifecycle, and stages no outcome
+    on that other job's claim. Control: the same planting with the claim naming the job runs it."""
+    other, run_id = str(uuid.uuid4()), str(uuid.uuid4())
+    scene.plant(other)
+    scene.plant(run_id)
+    scene.claims[run_id] = scene.claims[other]  # the token the worker hands names `other`'s row, not `run_id`'s
 
     ran = run_job(scene, run_id)
 
-    assert ran.calls["lifecycle"] == 0
-    assert not (scene.runs / run_id).exists()
-    assert scene.job_end(run_id)["setup"] == "refused"
+    assert ran.raised is None, ran.raised
+    assert ran.calls["lifecycle"] == 0, "a job ran under a claim of another investigation"
+    assert not scene.run_dir(run_id).exists()
+    assert scene.job_end(other) is None, "an outcome was staged on another job's claim"
+
+    control = str(uuid.uuid4())
+    scene.plant(control)
+    assert run_job(scene, control).calls["lifecycle"] == 1, "control: a claim naming the job runs it"
+
+
+def test_o6_a_helper_whose_claim_is_another_tenants_runs_nothing(scene):
+    """#1546 (design: Claim "Holds tenant"; was the `launch-names-another-tenant` arm: the tenant is the claim's own column,
+    not a launch fact): the job's claim row names another (registered) tenant than the one the helper was started for: no
+    container, no lifecycle, no outcome staged. A store that refuses such a row outright makes the case impossible by
+    construction, which this test then pins instead."""
+    import psycopg
+
+    from defender.tests.support.jobs._jobs1342 import register_tenant
+
+    run_id = str(uuid.uuid4())
+    scene.plant(run_id)
+    register_tenant(scene.dsn, OTHER_TENANT, data_root=scene.root)
+    try:
+        execute(scene.dsn, "UPDATE jobs.claims SET tenant_id = %s WHERE token = %s", (OTHER_TENANT, scene.claims[run_id]))
+    except psycopg.Error:  # the store ties the claim's tenant to its owner's: no such row can exist
+        return
+
+    ran = run_job(scene, run_id)
+
+    assert ran.raised is None, ran.raised
+    assert ran.calls["lifecycle"] == 0, "a job ran under another tenant's claim"
+    assert not scene.run_dir(run_id).exists()
+    assert scene.job_end(run_id) is None, "an outcome was staged on another tenant's claim"
+
+
+# Retired (#1546 census: the alert beside the run became the alert row the claim references; the store admits the row's bytes
+# at intake, so inadmissible bytes, a BOM here, never reach a claim): `test_o6_an_alert_that_admission_refuses_is_refused_and_
+# recorded_even_with_a_matching_digest`. Guard: jobs/test_store.py::test_o2_what_admit_refuses_is_refused_and_nothing_is_stored
+# [byte-order mark].
 
 
 REFUSED = {"setup": "refused", "box": "not_started", "report_committed": False, "scrub_verified": False,
            "cut_short": None}
 
 
-@pytest.mark.parametrize("record", ["creating", "offboarding", "offboarded", "no wiring", "no record", "records unreachable"])
+@pytest.mark.parametrize("record", ["creating", "offboarding", "offboarded", "no wiring", "records unreachable"])
 def test_m1_a_tenant_acceptance_refusal_is_recorded_as_setup_refused(scene, monkeypatch, record):
-    """The door is opened before tenant acceptance, so a tenant the host refuses (any non-active state, no wiring, no record, unreachable records) leaves `setup: refused`, not `crashed`. (M1, R6-1)"""
+    """The door is opened before tenant acceptance, so a tenant the host refuses (any non-active state, no wiring) leaves
+    `setup: refused`, not `crashed`. #1546 (design: Claim, PR7; A-O2: a record reaches the worker only as a staged row): the
+    tenant moves after the worker's claim (its claim stays); a helper that cannot reach the store ("records unreachable")
+    is refused, not a crash, starts no container, and stages nothing, so the worker's end reads no record. Retired arm
+    `[no record]`: a claim names its tenant's row (foreign key), so no launched job has none; a helper handed a token that
+    is not its job's claim runs nothing (`test_o6_a_helper_whose_claim_names_another_investigation_runs_nothing`). (M1, R6-1)"""
+    from defender.tests.support.jobs._jobs1342 import move_tenant
+
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     if record == "records unreachable":
         monkeypatch.setenv("DEFENDER_DATABASE_DSN", "postgresql://nobody@127.0.0.1:1/none?connect_timeout=2")
-    elif record == "no record":
-        drop_tenant(scene.dsn, scene.t.tenant_id)
+    elif record == "no wiring":
+        execute(scene.dsn, "DELETE FROM tenancy.forge_wiring WHERE tenant_id = %s", (scene.t.tenant_id,))
     else:
-        restate_tenant(scene.dsn, scene.t.tenant_id, state="active" if record == "no wiring" else record,
-                       wiring=record != "no wiring", data_root=scene.root)
-    if record not in ("records unreachable", "no record"):  # premise: the records are there to be read
+        move_tenant(scene.dsn, scene.t.tenant_id, state=record)
+    if record != "records unreachable":  # premise: the records are there to be read
         assert execute(scene.dsn, "SELECT count(*) FROM tenancy.tenants WHERE id = %s", (scene.t.tenant_id,)) == [(1,)]
     if record == "no wiring":  # premise: an active tenant, and no forge wiring row
         assert execute(scene.dsn, "SELECT state FROM tenancy.tenants WHERE id = %s", (scene.t.tenant_id,)) == [("active",)]
@@ -514,7 +568,11 @@ def test_m1_a_tenant_acceptance_refusal_is_recorded_as_setup_refused(scene, monk
 
     assert ran.raised is None, f"a refusal was a crash: {ran.raised!r}"
     assert ran.calls["lifecycle"] == 0
-    assert scene.job_end(run_id) == REFUSED
+    if record == "records unreachable":
+        assert not scene.run_dir(run_id).exists(), "a container ran for a job the helper could not take"
+        assert scene.job_end(run_id) is None, "an outcome was staged with no claim to stage it under"
+    else:
+        assert scene.job_end(run_id) == REFUSED
     if record in ("creating", "offboarding", "offboarded"):
         assert record in ran.message, f"the refusal text names the tenant's state: {ran.message!r}"
 
@@ -617,75 +675,54 @@ def test_o8_a_setup_that_raises_otherwise_is_crashed_and_the_exception_reaches_t
                                      "report_committed": False, "scrub_verified": False, "cut_short": None}
 
 
-def test_o6_the_run_folder_is_still_made_exclusively(scene):
-    """An id whose folder exists is refused and the folder is left as it was; a job-end record beside it refuses too. (O6)"""
-    taken, used = str(uuid.uuid4()), str(uuid.uuid4())
-    for run_id in (taken, used):
-        scene.plant(run_id)
-    (scene.runs / taken).mkdir()
-    (scene.runs / taken / "mark").write_text("theirs", encoding="utf-8")
-    (scene.runs / f"{used}.job-end.json").write_text("{}", encoding="utf-8")
-
-    first, second = run_job(scene, taken), run_job(scene, used)
-
-    assert first.calls["lifecycle"] == second.calls["lifecycle"] == 0
-    assert first.raised is None, first.raised
-    assert scene.job_end(taken) == {"setup": "refused", "box": "not_started",
-                                    "report_committed": False, "scrub_verified": False, "cut_short": None}
-    assert (scene.runs / taken / "mark").read_text(encoding="utf-8") == "theirs"
-    assert sorted(p.name for p in (scene.runs / taken).iterdir()) == ["mark"]
-    assert not (scene.runs / used).exists()
-    assert (scene.runs / f"{used}.job-end.json").read_text(encoding="utf-8") == "{}", \
-        "the first job-end record was overwritten (D-i: create-only)"
-
-
-def test_r1_a_tenant_with_no_runs_container_is_refused_and_the_job_entry_does_not_make_one(scene):
-    """`<T>/runs` absent: the job does not go on and `runs/` is still absent after; with `runs/` present the same job runs. (R1)"""
-    import shutil
-
-    run_id = str(uuid.uuid4())
-    scene.plant(run_id)
-    shutil.rmtree(scene.runs)
-
-    ran = run_job(scene, run_id)
-
-    assert ran.calls == {"lifecycle": 0, "publish": 0}, ran
-    assert not scene.runs.exists(), "the job entry made the runs container"
-    assert not (scene.root / scene.t.tenant_id / "runs").exists()
-
-    scene.runs.mkdir()  # control: the same job with `runs/` present
-    scene.plant(run_id)
-    control = run_job(scene, run_id)
-    assert control.calls["lifecycle"] == 1, control
+# Retired (#1546 design "The job's folders": the run folder is made in the claim's own root `.job-roots/<claim>/<T>/runs/`,
+# fresh per claim, so a folder or job-end record of that id in the tenant's `runs/` no longer reaches the job; A-O2: no
+# job-end file is written): `test_o6_the_run_folder_is_still_made_exclusively`. Exclusive creation survives in
+# `storage/tenant_1105_run_repository/test_run_setup.py::test_1279_o8_make_run_dir_makes_the_run_dir_once_and_refuses_a_second_time`
+# and `::test_1279_o8_make_run_dir_refuses_anything_at_the_run_dir_without_following_it`.
+# Retired (same element: the job's `<T>/runs/` is its root's, which the helper makes): `test_r1_a_tenant_with_no_runs_container_
+# is_refused_and_the_job_entry_does_not_make_one`. The host's missing `runs/` refusal is the worker's, pinned by
+# `jobs/test_worker.py::test_o6_a_tenant_with_no_runs_container_fails_as_a_worker_error_and_nothing_is_made`.
 
 
 def test_m3_the_job_lane_removes_its_knowledge_copy_on_the_way_out(scene):
-    """The run copy `<T>/run-knowledge/<id>` is gone after a clean job, and after a lifecycle crash. (M3, D-q)"""
+    """The run copy is gone after a clean job, and after a lifecycle crash. #1546 (design "The job's folders": the run
+    (knowledge) copy is in the claim's inputs `.job-inputs/<claim>/`, A-O1: gone after the job): the copy is there while
+    the lifecycle runs, and neither it nor the inputs folder is left, nor a copy in the tenant's folder. (M3, D-q)"""
+    from defender.tests.support.jobs import _helper_evidence1546 as H
+
     copies = B.run_copies(scene.t)
     clean, crashed = str(uuid.uuid4()), str(uuid.uuid4())
     scene.plant(clean)
     scene.plant(crashed)
     seen: list[bool] = []
 
+    def inputs(run_id: str) -> Any:
+        return H.job_inputs(scene.helper, scene.claims[run_id])
+
+    def holds_a_copy(run_id: str) -> bool:
+        return inputs(run_id).is_dir() and any(p.is_file() for p in inputs(run_id).rglob("*"))
+
     def lifecycle_seeing_the_copy(ran: Ran):
         inner = verified_lifecycle(ran)
 
         def lifecycle(**kw: Any) -> dict[str, Any]:
-            seen.append(any(copies.glob("*")))
+            seen.append(holds_a_copy(clean))
             return inner(**kw)
         return lifecycle
 
     run_job(scene, clean, lifecycle=lifecycle_seeing_the_copy(Ran()))
     assert seen == [True], "control: the copy exists while the lifecycle runs"
-    assert not any(copies.glob("*")), "a clean job left its knowledge copy"
+    assert not inputs(clean).exists(), "a clean job left its knowledge copy"
 
     def boom(**_kw: Any) -> dict[str, Any]:
-        seen.append(any(copies.glob("*")))
+        seen.append(holds_a_copy(crashed))
         raise RuntimeError("investigation blew up")
 
     run_job(scene, crashed, lifecycle=_lifecycle(scene, investigate=boom))
     assert seen == [True, True]
-    assert not any(copies.glob("*")), "a crashed job left its knowledge copy"
+    assert not inputs(crashed).exists(), "a crashed job left its knowledge copy"
+    assert not copies.exists() or not any(copies.glob("*")), "a run copy was made in the tenant's folder"
 
 
 def test_m3_no_reader_of_the_run_folder_or_the_page_ran_before_the_lifecycle_returned_and_each_ran_after(
@@ -693,7 +730,7 @@ def test_m3_no_reader_of_the_run_folder_or_the_page_ran_before_the_lifecycle_ret
     """The lifecycle double sees no listing, cross-check or page render so far; afterwards the listing, one cross-check and one render through the injected seam have run. (M3)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
-    spies = ReaderSpies(monkeypatch, scene.runs / run_id)
+    spies = ReaderSpies(monkeypatch, scene.job_root_runs(run_id) / run_id)  # #1546: the run folder is in the job's root
     ran = Ran()
     inner = verified_lifecycle(ran)
     before_lifecycle: list[list[str]] = []
@@ -822,7 +859,7 @@ def _lifecycle(s: Scene, *, investigate: Any, start_box: Any = None, stop_box: A
     from defender import run as run_py
 
     def verdict_scrub(tree: Path, *, write_verdict: Any) -> None:
-        write_verdict({"ran": True, "reason": "walk completed"})
+        _clean_walk(tree, write_verdict)  # #1546 A-O10: the real walk's own `clean`, not a hand-written `ran: true`
 
     return functools.partial(
         run_py._run_investigation_lifecycle, investigate=investigate,
@@ -854,11 +891,28 @@ def _investigate(ran: Ran, *, without: str | None = None, closes: bool | str = T
     return investigate
 
 
-def _verdict_scrub(verdict: dict[str, Any] | None):
-    """A scrub seam that leaves this host verdict (`None`: none at all) beside the folder."""
+def _clean_walk(tree: Path, write_verdict: Any) -> None:
+    """The real scrub's walk of `tree`, through the lifecycle's verdict writer, which finds it clean: the verdict file then says
+    `clean` (#1546 A-O10: the three states, written by the scrub itself, not a hand-written `ran: true`). A seam that raises
+    `RunTainted` after it is the C2 case: the raise decides (design The box: "`scrub()` returns its verdict (`clean`, or
+    raises `RunTainted` = `tainted`)"), whatever the file says."""
+    from defender.box import _scrub
+
+    assert _scrub.scrub(tree, write_verdict=write_verdict) == "clean", "premise: the walk found the tree clean"
+
+
+def _verdict_scrub(verdict: str | None):
+    """A scrub seam that leaves this verdict (#1546 A-O10, the scrub's own writers): `clean` (the real walk), `not_run`
+    (`write_did_not_run`), `stateless` (a verdict naming no state) or None (none at all)."""
+    from defender.box import _scrub
+
     def scrub(tree: Path, *, write_verdict: Any) -> None:
-        if verdict is not None:
-            write_verdict(verdict)
+        if verdict == "clean":
+            _clean_walk(tree, write_verdict)
+        elif verdict == "not_run":
+            _scrub.write_did_not_run(tree, "unreadable entry")
+        elif verdict == "stateless":
+            write_verdict({"reason": "no state"})
     return scrub
 
 
@@ -874,7 +928,7 @@ def test_o8_report_committed_is_the_review_states_close_and_scrub_verified_the_s
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
     ran = Ran()
-    scrub = _verdict_scrub({"ran": verified, "reason": "walk"})
+    scrub = _verdict_scrub("clean" if verified else "not_run")
 
     run_job(scene, run_id, ran=ran, lifecycle=_lifecycle(
         scene, investigate=_investigate(ran, closes=committed), scrub=scrub))
@@ -895,8 +949,8 @@ def test_m2_the_record_reads_the_holders_review_state(scene, closes, want):
     assert scene.job_end(run_id) == {**SETTLED, "report_committed": want}
 
 
-@pytest.mark.parametrize("verdict", [{"ran": False, "reason": "unreadable entry"}, {"reason": "no ran key"}, None],
-                         ids=["ran-false", "ran-missing", "no-verdict-file"])
+@pytest.mark.parametrize("verdict", ["not_run", "stateless", None],
+                         ids=["not-run", "no-state", "no-verdict-file"])
 def test_o8_scrub_verified_comes_from_the_host_scrub_verdict_not_from_the_lifecycle_returning(scene, verdict):
     """A lifecycle that returns normally with `ran: false`, no `ran`, or no verdict file records `scrub_verified: false`. (O8)"""
     run_id = str(uuid.uuid4())
@@ -919,10 +973,10 @@ def test_o8_a_tree_the_scrub_found_tainted_is_not_verified(scene, monkeypatch):
     ran = Ran()
 
     def taint(tree: Path, *, write_verdict: Any) -> None:
-        write_verdict({"ran": True, "reason": "walk completed"})
+        _clean_walk(tree, write_verdict)
         raise RunTainted("a planted link")
 
-    spies = ReaderSpies(monkeypatch, scene.runs / run_id)
+    spies = ReaderSpies(monkeypatch, scene.job_root_runs(run_id) / run_id)  # #1546: the run folder is in the job's root
     got = run_job(scene, run_id, ran=ran, visualize=spies.seam,
                   lifecycle=_lifecycle(scene, investigate=_investigate(ran), scrub=taint))
 
@@ -965,12 +1019,35 @@ def test_c2_a_driver_raise_after_a_clean_close_and_a_clean_teardown_leaves_both_
     assert scene.job_end(run_id) == SETTLED
 
 
+def _drive_on_the_handed_tenant(run: Any, run_tenant: Any, *, box: Any, main: Any, review_state: dict) -> dict[str, Any]:
+    """The real driver (`driver.run_investigation`) over the `RunTenant` the job's lifecycle handed the investigation, with
+    `_replay_harness.driver_summary`'s fake model, review stages and roster. #1546 (design JobTenant: no `knowledge`, no
+    clone halves): the harness rebuilds a run tenant from a tenant's `agent`/`settings`, which a job's tenant does not have,
+    so the run's own `RunTenant` (its run copy's halves) is handed through as `run.py` hands it."""
+    import asyncio
+
+    from pydantic_ai.models import override_allow_model_requests
+
+    from defender.investigation import driver
+    from defender.records import RunPaths
+    from defender.tests.e2e import _replay_harness as H
+    from defender.tests.support.runtime.permissions import _review_bundle
+    from defender.tests.support.tenancy import _tenants1106
+
+    with override_allow_model_requests(False):
+        return asyncio.run(driver.run_investigation(
+            alert_path=RunPaths(run.run_dir).alert, run=run, defender_dir=DEFENDER,
+            make_model=H._fake_make_model(main, None, dispatches_correlation=False),  # noqa: SLF001 — the harness's model
+            tenant=run_tenant, orient_shim=H.no_orient_shims, box=box,
+            review_stages=_review_bundle.bundle(composer=_review_bundle.composer_reply("holds")),
+            roster=_tenants1106.tenants_roster(run_tenant, DEFENDER), review_state=review_state))
+
+
 def _lost_box_lifecycle(*, stop: Any = None, scrub: Any = None, main: Any = None,
                         exchange: tuple[str, ...] = ("sh", "-c", "exit 137"), status: str = "exited"):
     """The real lifecycle and the real driver, its bash tool on a sandboxed box that has died (C5):
     the exec ends 137 with no bytes and the daemon answers `exited`. `main` scripts another ending."""
     from defender import box as box_mod
-    from defender.tests.e2e import _replay_harness as H
     from defender.tests.e2e._box665 import RecordingDocker
     from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
@@ -985,8 +1062,7 @@ def _lost_box_lifecycle(*, stop: Any = None, scrub: Any = None, main: Any = None
     def investigate(*, run: Any, tenant: Any, box: Any, job_facts: Any = None, **_kw: Any) -> dict[str, Any]:
         # GAP G7: the driver gets only the holder's review state here; a fact set inside the driver would not arrive.
         script = main if main is not None else S.MainScript([S.call("bash", command="echo hello"), S.text(S.DONE)])
-        return H.driver_summary(run.run_dir, run_id=run.run_dir.name, main=script, box=box, tenant=tenant.tenant,
-                                review_state=job_facts.review_state)
+        return _drive_on_the_handed_tenant(run, tenant, box=box, main=script, review_state=job_facts.review_state)
 
     return _lifecycle(None, investigate=investigate, start_box=lambda *a, **k: dead, stop_box=stop, scrub=scrub)
 
@@ -998,9 +1074,11 @@ def _teardown_fault(*_a: Any, **_k: Any) -> None:
 
 
 def test_o8_a_box_lost_at_the_bash_tool_reaches_the_exit_code_and_the_job_record(scene):
-    """Bash tool to exit 5, the fifth fact, and the worker's failed `no_report` naming the class. (O8)"""
-    from defender.records import job_lane
-    from defender.worker._worker import _ending_from
+    """Bash tool to exit 5, the fifth fact, and the worker's failed `no_report` naming the class. #1546 (design The ending:
+    `decide`'s fallbacks are today's `_ending_from` rules, read from the staged facts): the worker's decision over this job's
+    staged facts; undecided (no committed close), so a take-over of it lapses rather than keeping a verdict. (O8)"""
+    from defender.tests.support.jobs import _helper_evidence1546 as H
+    from defender.tests.support.jobs._ending1546 import decide
 
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
@@ -1011,11 +1089,13 @@ def test_o8_a_box_lost_at_the_bash_tool_reaches_the_exit_code_and_the_job_record
     assert got.rc == 5
     record = scene.job_end(run_id)
     assert record == {**SETTLED, "report_committed": False, "cut_short": "box-lost"}
-    ending = _ending_from(job_lane.JobEnd.parse(json.dumps(record)), lambda: None)
+    staged = H.facts(scene.dsn, scene.claims[run_id])
+    ending = decide("investigation", staged, {}, "exited")
     assert ending.failure_reason == "no_report"
     assert "box-lost" in ending.failure_message
     assert "committed no report" in ending.failure_message
-    assert ending.decided_by_run is False
+    lapsed = decide("investigation", staged, {}, "lapsed")
+    assert (lapsed.stage, lapsed.failure_reason) == ("failed", "lease_lapsed"), "a run that committed no report was decided"
 
 
 def _ends_with(fault: Any):
@@ -1081,7 +1161,7 @@ def test_o8_a_teardown_fault_on_a_lost_box_skips_the_post_steps_and_still_exits_
     """The ending stands, the tree is not read, and the job record says what the scrub could not. (O8)"""
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
-    spies = ReaderSpies(monkeypatch, scene.runs / run_id)
+    spies = ReaderSpies(monkeypatch, scene.job_root_runs(run_id) / run_id)  # #1546: the run folder is in the job's root
 
     got = run_job(scene, run_id, visualize=spies.seam, lifecycle=_lost_box_lifecycle(stop=_teardown_fault))
 
@@ -1101,8 +1181,8 @@ def test_o8_a_tainted_tree_still_raises_with_the_cut_short_fact_already_set(scen
     run_id = str(uuid.uuid4())
     scene.plant(run_id)
 
-    def taint(_tree: Path, *, write_verdict: Any) -> None:
-        write_verdict({"ran": True, "reason": "walk completed"})
+    def taint(tree: Path, *, write_verdict: Any) -> None:
+        _clean_walk(tree, write_verdict)
         raise RunTainted("a planted link")
 
     got = run_job(scene, run_id, lifecycle=_lost_box_lifecycle(scrub=taint))
@@ -1126,7 +1206,9 @@ def _run_child(s: Scene, marks: Path, run_id: str, mode: str, extra_env: dict[st
                                             stdin=subprocess.DEVNULL)
         return done.extra["proc"].returncode
 
-    got = enter(s.helper, run_id, entry=entry)
+    s.activate(run_id)
+    s.kept[run_id] = s.work / f"kept-{uuid.uuid4().hex[:8]}"
+    got = enter(s.helper, run_id, entry=entry, keep=s.kept[run_id])
     assert got.helper.raised is None, got.helper.raised
     return got.extra["proc"]
 
@@ -1136,8 +1218,14 @@ def _ledger_after(scene: Scene, run_id: str) -> Any:
     the child has exited (r7.3 T1: the ledger says for itself whether it is complete)."""
     from defender.records import session_store as ss
 
-    pointer = json.loads((scene.runs / f"{run_id}.session-pointer.json").read_text(encoding="utf-8"))
-    with ss.open_store_for_read(Path(pointer["store_path"])) as store:
+    kept = scene.run_dir(run_id).parent  # #1546: the job root's `<T>/runs/` as the container left it (the root is gone)
+    pointer = json.loads((kept / f"{run_id}.session-pointer.json").read_text(encoding="utf-8"))
+    named = Path(pointer["store_path"])
+    if named.is_absolute():  # a path under the gone root's tenant folder names the same file in the kept copy
+        named = kept.parent / named.relative_to(scene.job_root_runs(run_id).parent)
+    else:  # design r9 "Session pointer": relative to the run's folder, here the kept copy's (the one resolver)
+        named = ss.run_store_path(kept / run_id, pointer["store_path"])
+    with ss.open_store_for_read(named) as store:
         return ss.read_ledger(store, run_id)
 
 
@@ -1234,7 +1322,7 @@ def test_c2_the_lifecycle_sets_scrub_verified_only_when_stop_and_scrub_returns(s
     held: dict[str, Any] = {}
 
     def scrub(tree: Path, *, write_verdict: Any) -> None:
-        write_verdict({"ran": True, "reason": "walk completed"})
+        _clean_walk(tree, write_verdict)
         held["during"] = held["facts"].scrub_verified
         if scrub_ends == "raises":
             raise RunTainted("a planted link")
@@ -1830,7 +1918,17 @@ def test_1345_o3_a_job_derives_its_facts_from_the_tenants_database_mapping(scene
 
     assert ran.raised is None, ran
     assert scene.job_end(run_id) == SETTLED, ran.message
-    assert _recorded_facts(scene.runs / run_id) == DB_FACTS
+    assert _recorded_facts(scene.run_dir(run_id)) == DB_FACTS
+
+
+def _plant_unmapped(scene: Scene, run_id: str) -> None:
+    """#1546 (design: Claim): the worker's claim of `run_id` made while the tenant had a mapping (the store takes no alert
+    for an unmapped tenant), the mapping then taken away before the job starts: what the helper reads is no mapping."""
+    from defender.tests.support.jobs._jobs1342 import seed_alert_mapping
+
+    seed_alert_mapping(scene.dsn, scene.t.tenant_id, DB_MAPPING)
+    scene.plant(run_id)
+    scene.helper.unmap()
 
 
 def test_1345_o4_a_job_whose_tenant_has_no_mapping_is_refused_at_setup_naming_the_route(unmapped_scene):
@@ -1843,14 +1941,14 @@ def test_1345_o4_a_job_whose_tenant_has_no_mapping_is_refused_at_setup_naming_th
     scene = unmapped_scene
     assert_missing_wording_names_verb_and_route(ALERT_MAPPING_MISSING)
     run_id = str(uuid.uuid4())
-    scene.plant(run_id)
+    _plant_unmapped(scene, run_id)
 
     ran = run_job(scene, run_id)
 
     assert ran.raised is None, f"a refusal was a crash: {ran.raised!r}"
     assert ran.calls["lifecycle"] == 0
     assert scene.job_end(run_id) == REFUSED
-    assert not (scene.runs / run_id).exists(), "the mapping is read before the run folder is made"
+    assert not (scene.run_dir(run_id)).exists(), "the mapping is read before the run folder is made"
     # The child's refusal text: a `SystemExit` message reaches a real child's stderr; the in-process harness keeps it in
     # `ran.message` (exit code and stderr together). (O4)
     assert ALERT_MAPPING_MISSING in " ".join(ran.message.split()), ran.message
@@ -1881,7 +1979,7 @@ def test_1345_o5_a_leftover_mapping_file_in_the_knowledge_is_inert(leftover_scen
 
     assert ran.raised is None, ran
     assert s.job_end(run_id) == SETTLED, ran.message
-    assert _recorded_facts(s.runs / run_id) == DB_FACTS
+    assert _recorded_facts(s.run_dir(run_id)) == DB_FACTS
 
 
 #: A mapping saved after a job's start: other paths for the facts the scene's `DB_MAPPING` maps.
@@ -1911,8 +2009,8 @@ def test_1345_m4_a_mapping_replaced_after_a_jobs_start_changes_that_job_not_its_
     assert first.raised is None, first
     assert retry.raised is None, retry
     assert scene.job_end(first_id) == SETTLED == scene.job_end(retry_id)
-    assert _recorded_facts(scene.runs / first_id) == DB_FACTS
-    assert _recorded_facts(scene.runs / retry_id) == EDITED_FACTS
+    assert _recorded_facts(scene.run_dir(first_id)) == DB_FACTS
+    assert _recorded_facts(scene.run_dir(retry_id)) == EDITED_FACTS
 
 
 @pytest.fixture
@@ -1934,7 +2032,7 @@ def test_1345_m2_a_saved_empty_mapping_is_a_mapping_the_job_starts_and_records_n
 
     assert ran.raised is None, ran
     assert empty_scene.job_end(run_id) == SETTLED, ran.message
-    assert _recorded_facts(empty_scene.runs / run_id) == dict.fromkeys(DB_FACTS)
+    assert _recorded_facts(empty_scene.run_dir(run_id)) == dict.fromkeys(DB_FACTS)
 
 
 def test_1345_o4_a_job_whose_tenant_has_no_mapping_is_refused_before_any_setup_work(unmapped_scene):
@@ -1958,7 +2056,7 @@ def test_1345_o4_a_job_whose_tenant_has_no_mapping_is_refused_before_any_setup_w
         return ran, calls
 
     refused_id = str(uuid.uuid4())
-    scene.plant(refused_id)
+    _plant_unmapped(scene, refused_id)
     refused, calls = watched(refused_id)
     assert scene.job_end(refused_id) == REFUSED, refused.message  # premise: it was refused for the missing mapping
     assert (refused.calls["publish"], calls["copy"], calls["preflight"], calls["materialize"]) == (0, 0, 0, 0)
@@ -2072,24 +2170,34 @@ def _job_1471(  # noqa: PLR0913 — the job's scene, its alert, its record and i
               lifecycle: Any = None, visualize: Any = None, **lifecycle_kw: Any) -> tuple[str, Ran, str, list[dict[str, Any]]]:
     """One job of `alert` the worker flagged (or not: `flagged=False`) over `lifecycle` (default
     `_reporting_lifecycle(**lifecycle_kw)`): `(run id, what ran, the screen link the worker built, the comments this job
-    posted)`. `record` overrides fields of the launch record, planted whole."""
+    posted)`. `record`: what a job-writable launch copy in the job's root says (`forging`), the claim's facts staying the
+    worker's (#1546)."""
     from defender.tests.tenancy.case_comment_1359 import _spec1359 as C1359
 
     run_id = str(uuid.uuid4())
     link = f"{ORIGIN_1471}/t/{s.t.tenant_id}/investigations/{run_id}"
     before = len(C1359.comment_calls(store))
-    s.plant(run_id, alert=alert, flagged=flagged, link=link, digest=digest or hashlib.sha256(alert).hexdigest(),
-            launch={**s.launch_doc(run_id), "digest": hashlib.sha256(alert).hexdigest(), **(record or {})})
+    facts = {**s.launch_doc(run_id), "digest": hashlib.sha256(alert).hexdigest()}
+    s.plant(run_id, alert=alert, flagged=flagged, link=link, digest=digest or facts["digest"], launch=facts)
     ran = Ran()
-    run_job(s, run_id, ran=ran, signer=signer, visualize=visualize,
-            lifecycle=lifecycle if lifecycle is not None else _reporting_lifecycle(ran, **lifecycle_kw))
+    inner = lifecycle if lifecycle is not None else _reporting_lifecycle(ran, **lifecycle_kw)
+
+    def forging(**kw: Any) -> Any:
+        """#1546 (PR4: the job may get a copy of a host fact; trusted code never reads a copy back): the job rewrites every
+        launch copy in its own root (and plants one for its id) to say `record`, before its run."""
+        runs = kw["run"].run_dir.parent
+        for copy in {*runs.glob("*.launch.json"), runs / f"{run_id}.launch.json"}:
+            copy.write_text(json.dumps({**facts, **(record or {})}), encoding="utf-8")
+        return inner(**kw)
+
+    run_job(s, run_id, ran=ran, signer=signer, visualize=visualize, lifecycle=forging if record is not None else inner)
     return run_id, ran, link, C1359.comment_calls(store)[before:]
 
 
 def _receipt_1471(s: Scene, run_id: str) -> dict[str, Any] | None:
     from defender.investigation.ticket_writer import receipt_path
 
-    path = receipt_path(s.runs / run_id)
+    path = receipt_path(s.run_dir(run_id))
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
@@ -2346,7 +2454,13 @@ class _OrderWatch1471:
         from defender.tests.tenancy.case_comment_1359 import _spec1359 as C1359
 
         return {"comments": len(C1359.comment_calls(self._store)),
-                "receipt": bool(list(self._s.runs.glob(self._receipt)))}
+                "receipt": bool(list(self._runs().glob(self._receipt)))}
+
+    def _runs(self) -> Path:
+        """The running job's `<T>/runs/`, in its root (#1546 design "The job's folders"): where its receipt is written."""
+        from defender.tests.support.jobs import _helper_evidence1546 as H
+
+        return H.job_root(self._s.helper) / self._s.t.tenant_id / "runs"
 
     def page(self, run: Any, **_kw: Any) -> None:
         """The entry's page seam: what the saved page would say about the ticket (the real line renderer)."""
@@ -2602,19 +2716,8 @@ def test_1471_p5_a_launch_record_rewritten_after_the_worker_wrote_it_steers_neit
     assert EVIL_LINK_1471 not in str(comments[0]["body"]), comments[0]  # the whole payload, author included
 
 
-def test_1471_p5_an_alert_swapped_after_the_worker_wrote_it_with_the_record_digest_rewritten_is_refused_and_posts_nothing(
-        ticket_scene, tmp_path, monkeypatch):
-    """The alert replaced by another ticket's and the launch record's digest rewritten to match: the worker's digest (in
-    the helper's argv) does not match, so setup is refused and nothing is posted on either ticket. (P-5, O6)"""
-    store = _case_store(tmp_path, monkeypatch)
-    worker_digest = hashlib.sha256(KEYED_ALERT_1471).hexdigest()
-
-    run_id, ran, _link, comments = _job_1471(
-        ticket_scene, store, alert=_H1471.OTHER_KEYED_ALERT_1471, digest=worker_digest,
-        closed=_closing_1471("benign"))
-
-    assert ran.raised is None, ran.message
-    assert ran.calls["lifecycle"] == 0, "the run went ahead on bytes the worker's digest does not name"
-    assert ticket_scene.job_end(run_id) == REFUSED
-    assert comments == [], comments
-    assert store.requests() == [], store.requests()
+# Retired (#1546 census "Worker writes alert and launch record beside the run -> claim row": no job-writable alert or launch
+# file is an input, so neither can be swapped): `test_1471_p5_an_alert_swapped_after_the_worker_wrote_it_with_the_record_
+# digest_rewritten_is_refused_and_posts_nothing`. Each claim's facts are its own alert's: jobs/test_1546_claim_launch_facts.py::
+# test_each_claim_row_carries_its_own_alerts_digest_label_reference_and_a_box_token_of_its_own; bytes that miss the digest are
+# refused: this file's test_o6_setup_refuses_..._checks[digest-mismatch-on-the-admitted-bytes].

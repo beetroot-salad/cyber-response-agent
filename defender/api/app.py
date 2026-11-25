@@ -55,6 +55,7 @@ from .models import (
     Invitation,
     ItemReleased,
     InvitationRef,
+    EvidenceRetention,
     InviteCreate,
     Investigation,
     InvestigationCreate,
@@ -1241,12 +1242,20 @@ async def list_all_tenants(deps: Deps, caller: Admin) -> Page[TenantItem]:
 
 
 @admin.post("/tenants", status_code=status.HTTP_202_ACCEPTED)
-async def create_tenant(deps: Deps, caller: Admin, request: Request, response: Response) -> TenantItem:
-    """Mint a tenant and record it `creating`; the management service does the rest. No members."""
-    record = await deps.tenants.request_create(now=deps.identity.now())
-    audit.emit("tenant.create", actor=caller.user.id, tenant_id=record.id, target=record.id)
+async def create_tenant(deps: Deps, caller: Admin, body: EvidenceRetention, request: Request,
+                        response: Response) -> TenantItem:
+    """Mint a tenant and record it `creating` with the retention it is created with (both values, 30 to 730 days, no
+    default); the management service does the rest. No members."""
+    record = await deps.tenants.request_create(
+        now=deps.identity.now(), investigation_days=body.investigation_days, learning_days=body.learning_days)
+    audit.emit("tenant.create", actor=caller.user.id, tenant_id=record.id, target=record.id,
+               detail=_retention_words(body))
     response.headers["Location"] = str(request.app.url_path_for("get_tenant", tenant_id=record.id))
     return _tenant_item(record)
+
+
+def _retention_words(retention: EvidenceRetention) -> str:
+    return f"investigation_days={retention.investigation_days} learning_days={retention.learning_days}"
 
 
 @admin.get("/tenants/{tenant_id}")
@@ -1391,6 +1400,29 @@ async def put_alert_mapping(
     return mapping
 
 
+evidence_retention = _router(prefix="/evidence-retention", tags=["evidence retention"], responses=_EVERY_ROUTE)
+
+
+@evidence_retention.get("")
+async def get_evidence_retention(deps: Deps, caller: ConfigReader) -> EvidenceRetention:
+    """How long the tenant keeps the evidence of its ended work: the values it was created with, or last changed to."""
+    kept = await deps.tenants.evidence_retention(caller.tenant_id)
+    if kept is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "this tenant has no evidence retention")
+    return EvidenceRetention(investigation_days=kept.investigation_days, learning_days=kept.learning_days)
+
+
+@evidence_retention.put("")
+async def put_evidence_retention(deps: Deps, caller: ConfigWriter, body: EvidenceRetention) -> EvidenceRetention:
+    """Replace both retention values together, each 30 to 730 days. It governs what the sweep expires from now on, from each
+    object's own acceptance; nothing changes for an object already expired."""
+    kept = await deps.tenants.set_evidence_retention(
+        caller.tenant_id, _tenancy.EvidenceRetention(body.investigation_days, body.learning_days))
+    audit.emit("evidence_retention.write", actor=caller.actor_id, tenant_id=caller.tenant_id, target=caller.tenant_id,
+               detail=_retention_words(body))
+    return EvidenceRetention(investigation_days=kept.investigation_days, learning_days=kept.learning_days)
+
+
 def create_app(deps: ApiDeps) -> FastAPI:
     """Every route and the OpenAPI document live under `/api` (B3). No interactive docs page is served: one would load
     third-party scripts onto the origin that holds the session cookie. `/api/openapi.json` is for a viewer elsewhere (B10)."""
@@ -1410,7 +1442,7 @@ def create_app(deps: ApiDeps) -> FastAPI:
     app.add_middleware(_FrontendOriginOnly, origin=deps.frontend_origin)
     in_tenant = _router(prefix="/tenants/{tenant_id}", responses=responses(404))
     for router in (alerts, investigations, learning_jobs, learning_work, lessons, adapters, systems, case_record,
-                   alert_mapping, readiness, adoptions, people, programs, repository):
+                   alert_mapping, evidence_retention, readiness, adoptions, people, programs, repository):
         in_tenant.include_router(router)
     for router in (auth, in_tenant, admin):
         app.include_router(router, prefix=API_PREFIX)

@@ -207,7 +207,14 @@ HOST_REQUEST_ROUTES = {
     ("POST", API + "/admin/tenants/{tenant_id}/systems/{system_id}/adoptions"),
     ("GET", API + "/admin/tenants/{tenant_id}/adoptions/{adoption_id}"),
 }
-PUBLIC_ROUTES = EXISTING_ROUTES | IDENTITY_ROUTES | HOST_REQUEST_ROUTES
+#: What #1546 adds (r9 "Retention setting": "a per-tenant row, both values NOT NULL, 30-730 days, written through the API
+#: (`config.write`, audited)"; the path is `test_1546_retention_route`'s pin). Its behaviour is that file's, over the real
+#: store, so it is listed here and not scripted, as the host-request routes are.
+EVIDENCE_RETENTION_ROUTES = {
+    ("GET", API + "/tenants/{tenant_id}/evidence-retention"),
+    ("PUT", API + "/tenants/{tenant_id}/evidence-retention"),
+}
+PUBLIC_ROUTES = EXISTING_ROUTES | IDENTITY_ROUTES | HOST_REQUEST_ROUTES | EVIDENCE_RETENTION_ROUTES
 
 #: One successful call per route: (route, concrete path, body, the port answers it needs).
 HAPPY: list[tuple[tuple[str, str], str, dict[str, Any] | None, dict[str, Any]]] = [

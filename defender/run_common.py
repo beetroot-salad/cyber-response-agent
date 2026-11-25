@@ -52,7 +52,7 @@ def _alert_label(alert: Path) -> str:
 
 
 def materialize_run(  # noqa: PLR0913 — the run's case, its tenant, and the knowledge it reads
-    alert: Path, *, tenant: tenancy.Tenant, run: Run | None = None, model: str | None = None,
+    alert: Path, *, tenant: tenancy.Tenant | tenancy.JobTenant, run: Run | None = None, model: str | None = None,
     world: ResumeWorld | None = None,
     mapping: AlertMapping | None = None, knowledge: KnowledgeSource | None = None,
     launch: Launched | None = None, alert_digest: str | None = None,
@@ -249,7 +249,7 @@ def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
                       "nothing downstream can prove which code it ran")
 
 
-def visualize(run: Run, *, tenant: tenancy.Tenant, mirror: bool = True) -> None:
+def visualize(run: Run, *, tenant: tenancy.Tenant | tenancy.JobTenant, mirror: bool = True) -> None:
     """The post-run page step as `run.py` takes it: load the renderer, then hand it the run
     (`visualize_run.publish_page` renders, saves the record through `run`, and makes the dev-only
     copy). Runs in the process holding the handle, after the sandbox has exited and the tree has
@@ -263,6 +263,8 @@ def visualize(run: Run, *, tenant: tenancy.Tenant, mirror: bool = True) -> None:
     except Exception as e:
         raise VisualizeFailed("the renderer could not be loaded") from e
     if mirror:
+        if not isinstance(tenant, tenancy.Tenant):
+            raise VisualizeFailed("a job's page is saved in its own folder, never published by the job")
         vr.publish_page(run, tenant=tenant)
     else:
         vr.save_page(run)
@@ -358,7 +360,7 @@ def enqueue_curation(
     run: Run,
     alert: Path | None = None,
     *,
-    tenant: tenancy.Tenant,
+    tenant: tenancy.Tenant | tenancy.JobTenant,
     truncated_by: str | None = None,
     fixtures_dir: Path = HELD_OUT_FIXTURES,
 ) -> bool:
@@ -606,7 +608,7 @@ def copy_knowledge(tenant: tenancy.Tenant, source: KnowledgeSource, run_id: str)
 
 
 def run_tenant_or_exit(
-    tenant: tenancy.Tenant, *, defender_dir: Path | None = None, dispatches_lead_zero: bool,
+    tenant: tenancy.Tenant | tenancy.JobTenant, *, defender_dir: Path | None = None, dispatches_lead_zero: bool,
     records: TenantRecords, catalog: Catalog, copy: RunCopy | None = None,
 ) -> RunTenant:
     """The accepted tenant ready to run — its grants and lead-zero dispatch from run start's

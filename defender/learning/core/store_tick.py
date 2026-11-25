@@ -258,8 +258,6 @@ def _forge_faults() -> tuple[type[BaseException], ...]:
     return (ForgeError, ForgejoAuthError, DeliveryRefused, httpx.HTTPError, _git.GitError, _git.GitTimeout, OSError)
 
 
-#: The item statuses a tick reads: what can be claimed and what is in a batch (the rest is history or a person's).
-OPEN_WORK = ("waiting", "in_batch")
 
 
 # --- the renewer and the one stop (D4) ------------------------------------------------------------------
@@ -524,6 +522,7 @@ class Tick:
 
     def _opened(self, delivery: TenantDelivery, review: list[Any], lapsed: list[Any], requested: list[Any], *,
                 claim: bool = True) -> int:
+        from defender.jobs.learning_models import OPEN_WORK
         from defender.learning.author.version_control.store_delivery import StoreRecord
 
         record = StoreRecord.of(self.store.commit_record())

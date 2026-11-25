@@ -105,6 +105,8 @@ ADMIN_TOKEN = "forge-admin-token"
 #: The deployment's two templated policies (`LifecycleConfig.token_policy` / `sign_policy` defaults).
 TOKEN_POLICY = "defender-tenant-token"
 SIGN_POLICY = "defender-tenant-sign"
+#: #1546 r9: the third, datakey/decrypt on the tenant's own `evidence-<T>` key (`LifecycleConfig.evidence_policy`, pinned).
+EVIDENCE_POLICY = "defender-tenant-evidence"
 
 
 @dataclasses.dataclass
@@ -701,6 +703,11 @@ class FakeOpenBao(_Recorder):
         self.issuer = issuer
         #: The templated policy that lets a login sign with its own tenant's key (r8.2 A24').
         self.sign_policy = sign_policy
+        #: #1546 r9: the templated policy that lets a login take a datakey of, and decrypt with, its own tenant's evidence key.
+        self.evidence_policy = EVIDENCE_POLICY
+        #: every accepted transit datakey / decrypt: (key, the login's AppRole).
+        self.datakeys: list[tuple[str, str]] = []
+        self.decrypts: list[tuple[str, str]] = []
         #: transit key name -> {"type", "deletion_allowed"} (P-b).
         self.transit_keys: dict[str, dict[str, Any]] = {}
         #: every accepted transit sign: (key, the signing login's AppRole, the base64 input).
@@ -774,6 +781,25 @@ class FakeOpenBao(_Recorder):
         self.signs.append((key, role, str(body.get("input"))))
         return httpx.Response(200, json={"data": {"signature": f"vault:v1:{key}:{body.get('input')}", "key_version": 1}})
 
+    def _evidence(self, call: Call, op: str, key: str, body: dict[str, Any]) -> httpx.Response:
+        """`transit/datakey/plaintext/<key>` and `transit/decrypt/<key>` as the evidence policy allows them: a client token of an
+        AppRole made with `evidence_policy` whose entity's `tenant_id` names the key (`evidence-<tenant>`); the management
+        token, the delivery login and the sign login are refused (403). A datakey's ciphertext carries its plaintext."""
+        client = call.headers.get("x-vault-token")
+        role = self.tokens.get(client)
+        entity = self.token_entity.get(client)
+        tenant = (self.entities.get(entity or "", {}).get("metadata") or {}).get("tenant_id")
+        if role is None or self.evidence_policy not in self.approle_policies.get(role, []) or key != f"evidence-{tenant}":
+            return httpx.Response(403, json={"errors": ["permission denied"]})
+        if key not in self.transit_keys:
+            return httpx.Response(400, json={"errors": ["encryption key not found"]})
+        if op == "datakey":
+            self.datakeys.append((key, role))
+            plain = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+            return httpx.Response(200, json={"data": {"plaintext": plain, "ciphertext": f"vault:v1:{plain}", "key_version": 1}})
+        self.decrypts.append((key, role))
+        return httpx.Response(200, json={"data": {"plaintext": str(body.get("ciphertext", "")).removeprefix("vault:v1:")}})
+
     def handle(self, request: httpx.Request) -> httpx.Response:  # noqa: C901, PLR0911, PLR0912, PLR0915 — one arm per endpoint
         call, injected = self._record(request)
         if injected is not None:
@@ -782,7 +808,8 @@ class FakeOpenBao(_Recorder):
         parts = call.path.removeprefix("/v1/").split("/")
         body = call.body or {}
         unauthenticated = parts[:2] == ["sys", "wrapping"] or parts[:3] == ["auth", "approle", "login"] \
-            or parts[:3] == ["identity", "oidc", "token"] or parts[:2] == ["transit", "sign"]
+            or parts[:3] == ["identity", "oidc", "token"] or parts[:2] == ["transit", "sign"] \
+            or parts[:3] == ["transit", "datakey", "plaintext"] or parts[:2] == ["transit", "decrypt"]
         if not unauthenticated and call.headers.get("x-vault-token") != self.management_token:
             return httpx.Response(403, json={"errors": ["permission denied"]})
         match (method, parts):
@@ -914,6 +941,10 @@ class FakeOpenBao(_Recorder):
                 return httpx.Response(204)
             case ("POST" | "PUT", ["transit", "sign", name, *_hash]):
                 return self._sign(call, name, body)
+            case ("POST" | "PUT", ["transit", "datakey", "plaintext", name]):
+                return self._evidence(call, "datakey", name, body)
+            case ("POST" | "PUT", ["transit", "decrypt", name]):
+                return self._evidence(call, "decrypt", name, body)
             case ("GET", ["sys", "auth"]):
                 return httpx.Response(200, json={"data": {"approle/": {"type": "approle", "accessor": "auth_approle_1"}}})
         return httpx.Response(404, json={"errors": [f"fake openbao: no route {method} {call.path}"]})

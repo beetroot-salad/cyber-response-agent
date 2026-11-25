@@ -225,8 +225,11 @@ def test_the_fork_candidates_of_the_old_run_are_its_one_admitted_gather(tmp_path
 
 
 def _family_child(tmp_path: Path) -> tuple[Old, dict | None, subprocess.CompletedProcess]:
-    """The real learning job entry (`_flow_entry1344.py family`: scripted questioner, oracle, verifier, judge; siblings as
-    `run.main`) over the old run planted in a tenant's runs repository. Returns the end record it left, if any."""
+    """The real learning job entry (`_flow_entry1344.py family-standin`: scripted questioner, oracle, verifier, judge; siblings as
+    `run.main`) over the old run planted in a tenant's runs repository. Returns the end record it sent, if it sent one:
+    #1546 (A-O2, PR2) the end is the one `outcome` the entry sends on its job socket (the stand-in helper keeps each in
+    `<marks>/family/outcomes.jsonl`), never a `learning-end.json` beside the runs; the source reaches the job as its bundle
+    (r9: the source bundle is the learning job's one input)."""
     from defender.tests.e2e.test_1344_learning_replay import entry_in_a_code_copy
     from defender.tests.tenancy.tenant_1108_p4 import _s_b_support as B
 
@@ -240,11 +243,14 @@ def _family_child(tmp_path: Path) -> tuple[Old, dict | None, subprocess.Complete
         job = "9f1c2d3e-0000-4000-8000-000000001344"
         marks = tmp_path / "marks"
         done = subprocess.run(
-            [sys.executable, str(entry), "family", tenant.commit, str(marks / "family"), str(tenant.remote), "--job", job, "--tenant",
+            [sys.executable, str(entry), "family-standin", tenant.commit, str(marks / "family"), str(tenant.remote), "--job", job, "--tenant",
              tenant.tenant_id, "--source", old.name, "--parent-pid", str(os.getpid())],
             env={**os.environ, "DEFENDER_DATA_ROOT": str(root), "PYTHONDONTWRITEBYTECODE": "1"}, capture_output=True, text=True, timeout=600, check=False)
-        record = runs / f"{job}.learning-end.json"
-        return old, (json.loads(record.read_text(encoding="utf-8")) if record.is_file() else None), done
+        assert not (runs / f"{job}.learning-end.json").exists(), "the entry wrote an end record to a folder (A-O2)"
+        sent = marks / "family" / "outcomes.jsonl"
+        records = sent.read_text(encoding="utf-8").splitlines() if sent.is_file() else []
+        assert len(records) <= 1, f"the entry sent more than one end record: {records}"
+        return old, (json.loads(records[0]) if records else None), done
 
 
 def test_the_job_entry_over_the_old_run_ends_failed_launch_refused_never_in_a_crash(tmp_path):
@@ -257,3 +263,5 @@ def test_the_job_entry_over_the_old_run_ends_failed_launch_refused_never_in_a_cr
     assert end is not None, f"the entry left no end record (rc={done.returncode}):\n{done.stderr[-2000:]}"
     assert (end["status"], end["reason"]) == ("failed", "launch_refused"), end
     assert end["message"], "a refusal names its cause"
+    # #1546 r10 (a): the stand-in pins the claim (its premise), so this refusal is the old history's, not a missing pin's.
+    assert "cannot be pinned" not in end["message"], end

@@ -22,6 +22,14 @@ from typing import Any
 
 import pytest
 
+from defender.tests.jobs.test_1344_learning_jobs import (
+    finish_running,
+    hand_back_learning,
+    hand_back_running,
+    stage_under_claim,
+)
+from defender.tests.support.evidence._facts1546 import STARTED, inv_progress
+from defender.tests.support.jobs._ending1546 import decide
 from defender.tests.support.jobs._jobs1342 import (
     ALERT_BYTES,
     ALERT_BYTES_DESCRIPTION,
@@ -95,23 +103,28 @@ def _plant_investigation(  # noqa: PLR0913 — the planted row's columns
     started, cost 1.25 and ended."""
     investigation_id = str(uuid.uuid4())
     lease = "now() + interval '30 seconds'" if stage == "running" else "NULL"  # #1343: a running row has a lease
-    reason, accounted = worked or ("", False)
+    reason, _ = worked or ("", False)
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, created_at, "
-                 "started_at, finished_at, failure_reason, accounting_written_at, "
-                 f"cost_usd, cost_is_lower_limit, lease_expires_at, update_ticket, disposition) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false, {lease}, %s, %s)",  # noqa: S608
+                 "started_at, finished_at, failure_reason, "
+                 f"cost_usd, cost_is_lower_limit, lease_expires_at, update_ticket, disposition, evidence_state, scrub) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false, {lease}, %s, %s, %s, %s)",  # noqa: S608
             (investigation_id, tenant, alert_id, key, attempt, stage, created_at, NOW if worked else None,
-             NOW if worked else None, reason or None, NOW if accounted else None,
+             NOW if worked else None, reason or None,
              1.25 if worked else 0, flagged,  # #1471 C-3: no server default, so the INSERT writes `update_ticket`
-             "benign" if stage == "completed" else None))  # #1581 O10: the table refuses a completed row with no disposition (conflict, updated)
+             "benign" if stage == "completed" else None,  # #1581 O10: the table refuses a completed row with no disposition
+             *(("none", "not_run") if stage in TERMINAL else (None, None))))  # #1546 A-O4: an ended row has an evidence state
     return investigation_id
 
 
 def _set_stage(dsn: str, investigation_id: str, stage: str) -> None:
     execute(dsn, "UPDATE jobs.investigations SET stage = %s, lease_expires_at = CASE WHEN %s = 'running' "
                  "THEN now() + interval '30 seconds' ELSE lease_expires_at END, "  # #1343: running ⇒ lease
-                 "disposition = CASE WHEN %s = 'completed' THEN coalesce(disposition, 'benign') ELSE disposition END "
+                 "disposition = CASE WHEN %s = 'completed' THEN coalesce(disposition, 'benign') ELSE disposition END, "
+                 "evidence_state = CASE WHEN %s IN ('completed', 'unparseable', 'failed', 'aborted') "
+                 "THEN coalesce(evidence_state, 'none') ELSE NULL END, "  # #1546 A-O4: an ended row has one, a live row none
+                 "scrub = CASE WHEN %s IN ('completed', 'unparseable', 'failed', 'aborted') "
+                 "THEN coalesce(scrub, 'not_run') ELSE NULL END "
                  "WHERE id = %s",  # #1581 O10: a completed row always has one (conflict, updated)
-            (stage, stage, stage, investigation_id))
+            (stage, stage, stage, stage, stage, investigation_id))
 
 
 def _count(dsn: str, table: str, where: str = "true") -> int:
@@ -476,22 +489,21 @@ async def test_o3_a_replay_after_the_run_ended_returns_that_investigation_not_a_
     assert _count(dsn, "investigations") == 1
 
 
-@pytest.mark.parametrize("accounting_written", [False, True], ids=["no-figure", "figure-written"])
 @pytest.mark.parametrize(("stage", "reason", "attempt"), [("aborted", "cancelled", 1), ("failed", "retry_cap", 3)],
                          ids=["cancelled", "take-over"])
-async def test_1377_r6_a_replay_answers_the_whole_record_a_read_does_mark_included(
-        dsn, stage, reason, attempt, accounting_written):
-    """`create_investigation`'s replay of a row that ended without its holder's figure equals `get_investigation`'s record, "at least" mark too; one with its figure reads unmarked. (r6, S2)"""
+async def test_1377_r6_a_replay_answers_the_whole_record_a_read_does_mark_included(dsn, stage, reason, attempt):
+    """`create_investigation`'s replay of a row that ended (cancelled, taken over) equals `get_investigation`'s record, the
+    cost's lower-limit mark too. (r6, S2; #1546 D15: the mark is stored, no longer derived, so the `figure-written` variant, a
+    row whose holder wrote its figure after the end, is gone)"""
     alert = _plant_alert(dsn)
     inv = _plant_investigation(dsn, tenant=T1, alert_id=alert, key="k1", attempt=attempt, stage=stage,
-                               worked=(reason, accounting_written))
+                               worked=(reason, False))
     async with job_store(dsn) as store:
         replayed, created = await store.create_investigation(T1, alert, "k1", actor="u-1")
         read = await store.get_investigation(T1, inv)
 
     assert created is False
     assert replayed == read
-    assert (read.cost_usd, read.cost_is_lower_limit) == (1.25, not accounting_written)
 
 
 async def test_o3_a_replayed_request_returns_its_latest_attempt(dsn):
@@ -906,7 +918,7 @@ async def test_o9_a_claim_skips_a_row_whose_cancel_is_uncommitted_and_never_clai
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
         async with await psycopg.AsyncConnection.connect(dsn) as conn:
             await conn.execute("UPDATE jobs.investigations SET stage = 'aborted', failure_reason = 'cancelled', "
-                               "finished_at = %s WHERE id = %s", (NOW, inv.investigation_id))
+                               "evidence_state = 'none', scrub = 'not_run', finished_at = %s WHERE id = %s", (NOW, inv.investigation_id))
             assert await asyncio.wait_for(store.claim(), 5) is None
             await conn.commit()
         assert await store.claim() is None
@@ -1128,7 +1140,7 @@ async def test_d_ag_every_job_audit_event_formats_with_its_tenant_when_the_calle
             await store.delete_investigation(T1, gone.investigation_id, actor="u-1")
             kept, _ = await store.create_investigation(T2, a2.alert_id, "k2", actor="u-1")
             claimed = await store.claim()
-            await store.finish(T2, kept.investigation_id, stage="completed", disposition="benign", cost_usd=1.0)
+            await finish_running(store, T2, kept.investigation_id, stage="completed", disposition="benign", cost_usd=1.0)
     finally:
         logging.getLogger(JOBS_AUDIT).removeHandler(lines)
 
@@ -1226,7 +1238,7 @@ async def _complete(store: Any, tenant: str, *, ticket: str = "T-1") -> Any:
     claimed = await store.claim()
     assert claimed is not None
     assert claimed.record.investigation_id == inv.investigation_id
-    await store.finish(tenant, inv.investigation_id, stage="completed", disposition="benign", cost_usd=1.0)
+    await finish_running(store, tenant, inv.investigation_id, stage="completed", disposition="benign", cost_usd=1.0)
     return alert, inv
 
 
@@ -1353,7 +1365,7 @@ MALFORMED_IDS = {"NUL": "a\x00b", "lone NUL": "\x00", "lone surrogate": "\ud800"
 async def test_p_id_text_that_is_no_uuid_fails_loudly_at_the_store_and_changes_nothing(dsn, bad):
     """The store does not parse ids: they are checked where outside text becomes one, and its signatures take the
     family types (#1382 r3.1). Text that gets past the types anyway is never answered as "unknown" (D-a withdrawn):
-    get, create, cancel, delete and finish raise, and the stored row is untouched."""
+    get, create, cancel, delete and the end (`apply`) raise, and the stored row is untouched."""
     ident = MALFORMED_IDS[bad]
     calls = {
         "get_alert": lambda store: store.get_alert(T1, ident),
@@ -1361,7 +1373,7 @@ async def test_p_id_text_that_is_no_uuid_fails_loudly_at_the_store_and_changes_n
         "create": lambda store: store.create_investigation(T1, ident, "k2", actor="u-1"),
         "cancel": lambda store: store.cancel_investigation(T1, ident, actor="u-1"),
         "delete": lambda store: store.delete_investigation(T1, ident, actor="u-1"),
-        "finish": lambda store: store.finish(T1, ident, stage="failed", failure_reason="worker_error"),
+        "end": lambda store: store.apply(T1, ident, decide("investigation", {}, {}, "exited_failed")),
     }
     async with job_store(dsn) as store:
         alert = await an_alert(store, T1)
@@ -1381,8 +1393,8 @@ async def test_o5_finish_ends_a_running_row_once_and_returns_it(dsn):
         alert = await an_alert(store, T1)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
         assert (await store.claim()).record.investigation_id == inv.investigation_id
-        done = await store.finish(T1, inv.investigation_id, stage="completed", disposition="benign", cost_usd=1.5)
-        again = await store.finish(T1, inv.investigation_id, stage="failed", failure_reason="no_report")
+        done = await finish_running(store, T1, inv.investigation_id, stage="completed", disposition="benign", cost_usd=1.5)
+        again = await finish_running(store, T1, inv.investigation_id, stage="failed", failure_reason="no_report")
 
     assert (done.stage, done.disposition, done.cost_usd) == ("completed", "benign", 1.5)
     assert again is None
@@ -1415,23 +1427,14 @@ async def test_o5_a_finish_that_does_not_apply_returns_none_and_changes_nothing(
         if moved_to:
             _set_stage(dsn, inv.investigation_id, moved_to)
         before = row(dsn, inv.investigation_id)
-        assert await store.finish(tenant, inv.investigation_id, **finish) is None
+        assert await finish_running(store, tenant, inv.investigation_id, **finish) is None
     assert row(dsn, inv.investigation_id) == before
     assert before["stage"] == stage_before
 
 
-@pytest.mark.parametrize("stage", ["running", "queued", "nonsense"])
-async def test_o5_finish_to_a_stage_that_is_not_terminal_is_refused_and_the_row_is_untouched(dsn, stage):
-    """`finish` with `running`, `queued` or any other non-terminal stage raises `ValueError` and changes no field of the running row. (O5)"""
-    async with job_store(dsn) as store:
-        alert = await an_alert(store, T1)
-        inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
-        await store.claim()
-        before = row(dsn, inv.investigation_id)
-        with pytest.raises(ValueError, match="terminal"):
-            await store.finish(T1, inv.investigation_id, stage=stage, failure_reason="worker_error")
-    assert row(dsn, inv.investigation_id) == before
-    assert before["stage"] == "running"
+# #1546 PR9 (retired): `finish` took a stage from its caller and refused a non-terminal one with `ValueError`; the stage is now
+# `decide`'s output over the rows (never a caller's word), and a terminal row without an evidence state is refused by the
+# schema (tests/jobs/test_ending_apply_1546.py::test_a_terminal_row_without_an_evidence_state_is_refused_by_the_schema...).
 
 
 # --- O14 (store side): what the reads carry ----------------------------------------------------------------------------
@@ -1442,7 +1445,7 @@ async def test_o14_a_read_investigation_carries_the_wire_models_fields(dsn):
         alert = await an_alert(store, T1)
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="u-1")
         execute(dsn, "UPDATE jobs.investigations SET stage = 'failed', started_at = %s, finished_at = %s, "
-                     "cost_usd = NULL, failure_reason = 'no_report', failure_message = 'exited 7' WHERE id = %s",
+                     "evidence_state = 'none', scrub = 'not_run', cost_usd = NULL, failure_reason = 'no_report', failure_message = 'exited 7' WHERE id = %s",
                 (NOW, NOW + HOUR, inv.investigation_id))
         read = await store.get_investigation(T1, inv.investigation_id)
 
@@ -1479,7 +1482,7 @@ async def test_o15_a_row_inserted_through_one_store_is_claimed_and_followed_thro
         assert await a.claim() is None  # A cannot claim what B holds
 
         execute(dsn, "UPDATE jobs.investigations SET stage = 'completed', disposition = 'benign', "
-                     "finished_at = %s, cost_usd = 1.25 WHERE id = %s", (NOW + HOUR, inv.investigation_id))
+                     "evidence_state = 'none', scrub = 'not_run', finished_at = %s, cost_usd = 1.25 WHERE id = %s", (NOW + HOUR, inv.investigation_id))
         done = await a.get_investigation(T1, inv.investigation_id)
         assert (done.stage, done.disposition, done.cost_usd, done.finished_at) == (
             "completed", "benign", 1.25, NOW + HOUR)
@@ -1496,7 +1499,7 @@ async def test_o5_no_knowledge_is_sql_null_not_a_json_null(dsn):
         queued = execute(dsn, "SELECT knowledge IS NULL FROM jobs.investigations WHERE id = %s",
                          (inv.investigation_id,))
         await store.claim()
-        await store.finish(T1, inv.investigation_id, stage="failed", failure_reason="no_report", knowledge=None)
+        await finish_running(store, T1, inv.investigation_id, stage="failed", failure_reason="no_report", knowledge=None)
 
     finished = execute(dsn, "SELECT knowledge IS NULL FROM jobs.investigations WHERE id = %s",
                        (inv.investigation_id,))
@@ -1827,16 +1830,13 @@ async def test_1345_m3_two_first_saves_for_one_tenant_both_return_and_exactly_on
 KNOWLEDGE = {"status": "current", "commit": "abc123", "stale_kind": None}
 
 
-def _plant_running(dsn: str, *, alert_id: str, key: str, attempt: int, lapsed: bool, tenant: str = T1,
-                   marked: bool = False) -> str:
-    """A `running` row (cost 1.25) with a lease by the database clock: lapsed a minute ago, or 30 s ahead;
-    optionally with the final-accounting mark already set."""
+def _plant_running(dsn: str, *, alert_id: str, key: str, attempt: int, lapsed: bool, tenant: str = T1) -> str:
+    """A `running` row (cost 1.25) with a lease by the database clock: lapsed a minute ago, or 30 s ahead."""
     investigation_id = str(uuid.uuid4())
     when = "now() - interval '1 minute'" if lapsed else "now() + interval '30 seconds'"
-    mark = "now()" if marked else "NULL"
     execute(dsn, "INSERT INTO jobs.investigations (id, tenant_id, alert_id, request_key, attempt, stage, "
-                 "created_at, started_at, cost_usd, cost_is_lower_limit, lease_expires_at, accounting_written_at, update_ticket) VALUES "
-                 f"(%s, %s, %s, %s, %s, 'running', %s, %s, 1.25, false, {when}, {mark}, false)",  # noqa: S608
+                 "created_at, started_at, cost_usd, cost_is_lower_limit, lease_expires_at, update_ticket) VALUES "
+                 f"(%s, %s, %s, %s, %s, 'running', %s, %s, 1.25, false, {when}, false)",  # noqa: S608
             (investigation_id, tenant, alert_id, key, attempt, NOW, NOW))
     return investigation_id
 
@@ -1959,17 +1959,18 @@ async def test_b1_a_renewal_after_a_take_over_omits_the_row_and_leaves_it_failed
     assert after_take_over["stage"] == "failed"
 
 
-@pytest.mark.parametrize("marked", [False, True], ids=["no mark: renewed", "mark set: not re-freshened"])
-async def test_b1_a_renewal_never_reopens_a_handed_back_lease(dsn, marked):
-    """Renewal is conditional on `running` AND the accounting mark null: a row carrying the mark keeps its lapsed lease. (B1, B11, r5 item 1)"""
-    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=True, marked=marked)
-    before = _snap(dsn, lapsed)
+async def test_b1_a_renewal_never_reopens_a_handed_back_lease(dsn):
+    """A row handed back (a `HandBack` through `apply`, #1546 PR9) keeps its lapsed lease against a renewal; a running row
+    nobody handed back, lapsed the same way, is renewed (the control). (B1, B11, r5 item 1)"""
+    handed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="H"), key="k", attempt=1, lapsed=False)
+    control = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="C"), key="k", attempt=1, lapsed=True)
     async with job_store(dsn) as store:
-        covered = set(await store.renew({lapsed}))
-    assert covered == (set() if marked else {lapsed})
-    if marked:
-        assert _snap(dsn, lapsed) == before
-        assert lease_left(dsn, lapsed) < 0
+        await hand_back_running(store, T1, handed, cost_usd=1.0)
+        before = _snap(dsn, handed)
+        covered = set(await store.renew({handed, control}))
+    assert covered == {control}
+    assert _snap(dsn, handed) == before
+    assert lease_left(dsn, handed) < 0
 
 
 async def test_b2_a_renewal_copies_the_cost_it_is_given_to_the_rows_it_covers(dsn):
@@ -1989,134 +1990,58 @@ async def test_b4_a_finish_with_an_unreadable_cost_writes_null_not_the_cost_so_f
     """Finish writes the cost it is given, null included (R2): a failed final read does not keep the copied figure. (B4, r5 R2)"""
     running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
     async with job_store(dsn) as store:
-        done = await store.finish(T1, running, stage="completed", disposition="benign", cost_usd=None)
+        done = await finish_running(store, T1, running, stage="completed", disposition="benign", cost_usd=None)
     assert done.cost_usd is None
     assert row(dsn, running)["cost_usd"] is None
     assert accounting_written(dsn, running) is not None
 
 
-@pytest.mark.parametrize("stage", TERMINAL)
-async def test_b4_a_final_accounting_writes_cost_knowledge_and_the_mark_and_nothing_else(dsn, stage):
-    """On an ended row with no mark: cost, knowledge and mark change; stage, times, disposition and failure detail do not. (B4, Writes table)"""
-    inv = _ended_with_cost(dsn, stage, "A")
-    before = _snap(dsn, inv)
-    async with job_store(dsn) as store:
-        got = await store.write_accounting(T1, inv, cost_usd=4.5, knowledge=KNOWLEDGE)
-    assert got is not None
-    assert (got.stage, got.cost_usd, got.knowledge) == (stage, 4.5, KNOWLEDGE)
-    assert _changed(before, _snap(dsn, inv)) == {"cost_usd", "knowledge", "accounting_written_at"}
-    assert accounting_written(dsn, inv) is not None
+# #1546 D15 (conflict, removed): `write_accounting` and the holder's final accounting after a cancel or take-over are gone;
+# the cost after those endings is the last staged `progress`, a lower limit (tests/jobs/test_ending_apply_1546.py).
 
 
-async def test_b4_a_final_accounting_is_written_once(dsn):
-    """A second final accounting is refused and changes nothing, whatever it carries; so is one after a finish, which set the mark. (B4)"""
-    inv = _ended_with_cost(dsn, "failed", "A")
-    finished = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="F"), key="k", attempt=1, lapsed=False)
-    async with job_store(dsn) as store:
-        assert await store.write_accounting(T1, inv, cost_usd=4.5, knowledge=KNOWLEDGE) is not None
-        first = _snap(dsn, inv)
-        assert await store.write_accounting(T1, inv, cost_usd=99.0, knowledge=None) is None
-        await store.finish(T1, finished, stage="completed", disposition="benign", cost_usd=2.0, knowledge=KNOWLEDGE)
-        after_finish = _snap(dsn, finished)
-        assert await store.write_accounting(T1, finished, cost_usd=99.0, knowledge=None) is None
-    assert _snap(dsn, inv) == first
-    assert _snap(dsn, finished) == after_finish
-
-
-@pytest.mark.parametrize("target", ["running", "queued", "other tenant", "unknown"])
-async def test_b4_a_final_accounting_is_refused_for_a_row_that_is_not_an_ended_one_of_this_tenant(dsn, target):
-    """Only a terminal row of the caller's tenant takes it: running and queued rows, another tenant's, a deleted id are unchanged. (B4, Writes table)"""
-    inv = {"running": lambda: _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False),
-           "queued": lambda: _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn), key="k", attempt=1, stage="queued"),
-           "other tenant": lambda: _ended_with_cost(dsn, "failed", "A"),
-           "unknown": lambda: str(uuid.uuid4())}[target]()
-    ended = _ended_with_cost(dsn, "failed", "Z")  # positive control: the same call accepts this one
-    before = _snap(dsn, inv) if target != "unknown" else None
-    async with job_store(dsn) as store:
-        tenant = T2 if target == "other tenant" else T1
-        assert await store.write_accounting(tenant, inv, cost_usd=4.5, knowledge=KNOWLEDGE) is None
-        assert await store.write_accounting(T1, ended, cost_usd=4.5, knowledge=KNOWLEDGE) is not None
-    if before is not None:
-        assert _snap(dsn, inv) == before
-
-
-async def test_b4_a_final_accounting_with_an_unreadable_cost_writes_null(dsn):
-    """Null cost replaces the copied figure on the ended row; the mark is still set. (B4, r5 R2)"""
-    inv = _ended_with_cost(dsn, "failed", "A")
-    async with job_store(dsn) as store:
-        await store.write_accounting(T1, inv, cost_usd=None, knowledge=None)
-    assert row(dsn, inv)["cost_usd"] is None
-    assert accounting_written(dsn, inv) is not None
-
-
-async def test_b4_a_taken_over_row_accepts_its_holders_final_accounting(dsn):
-    """Take-over writes no accounting; the cut-off holder's later write lands on the old row, leaves its `failed`/`lease_lapsed` and its retry alone. (B-P2, B6)"""
-    lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=True)
-    async with job_store(dsn) as store:
-        await store.take_over(held=frozenset())
-        assert accounting_written(dsn, lapsed) is None
-        [retry] = _retries_of(dsn, lapsed)
-        retry_before = _snap(dsn, retry)
-        got = await store.write_accounting(T1, lapsed, cost_usd=7.0, knowledge=KNOWLEDGE)
-    assert got is not None
-    stored = row(dsn, lapsed)
-    assert (stored["stage"], stored["failure_reason"], stored["cost_usd"], stored["knowledge"]) == (
-        "failed", "lease_lapsed", 7.0, KNOWLEDGE)
-    assert _snap(dsn, retry) == retry_before
-
-
-async def test_b4_a_cancelled_running_row_accepts_its_holders_final_accounting(dsn):
-    """Cancel writes no accounting either: the holder's final cost and knowledge land on the `aborted` row. (B-P2, B9)"""
-    running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
-    async with job_store(dsn) as store:
-        await store.cancel_investigation(T1, running, actor="u-1")
-        assert accounting_written(dsn, running) is None
-        await store.write_accounting(T1, running, cost_usd=2.0, knowledge=KNOWLEDGE)
-    stored = row(dsn, running)
-    assert (stored["stage"], stored["failure_reason"], stored["cost_usd"], stored["knowledge"]) == (
-        "aborted", "cancelled", 2.0, KNOWLEDGE)
-
-
-async def test_b11_a_hand_back_lapses_the_lease_keeps_the_row_running_and_copies_cost_knowledge_and_the_mark(dsn, caplog):
-    """A running row with a fresh lease: lease lapsed, final cost and knowledge written, mark set, still `running`, nothing else changed. (B11, Writes table)"""
+async def test_b11_a_hand_back_lapses_the_lease_keeps_the_row_running_and_copies_cost_and_knowledge(dsn, caplog):
+    """A running row with a fresh lease, ended by a stop that decided nothing (`HandBack`, through `apply`): lease lapsed, the
+    last staged cost and the knowledge written, still `running`, no evidence state, nothing else changed. (B11, PR9, D15)"""
     audit = JobsAudit(caplog)
     running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
     before = _snap(dsn, running)
     async with job_store(dsn) as store:
-        got = await store.hand_back(T1, running, cost_usd=3.0, knowledge=KNOWLEDGE)
+        got = await hand_back_running(store, T1, running, cost_usd=3.0, knowledge=KNOWLEDGE)
     assert got is not None
     assert (got.stage, got.cost_usd, got.knowledge) == ("running", 3.0, KNOWLEDGE)
     assert lease_left(dsn, running) < 0
     assert accounting_written(dsn, running) is not None
-    assert _changed(before, _snap(dsn, running)) == {"lease_expires_at", "cost_usd", "knowledge", "accounting_written_at"}
+    # D15 marks the figure a lower limit only after a cancel, an offboard or a take-over (design-r9 lines 67, 225, 407): a
+    # hand-back's mark is unspecified, so neither value is pinned here (a take-over's mark is pinned by
+    # test_ending_apply_1546 `test_a_taken_over_run_ends_with_the_last_progress_as_its_cost...` and `test_a_taken_over_learning_job_stores_its_last_progress_cost_marked_a_lower_limit`).
+    assert _changed(before, _snap(dsn, running)) - {"cost_is_lower_limit"} == {
+        "lease_expires_at", "cost_usd", "knowledge", "accounting_written_at"}
     assert audit.events() == []
 
 
-async def test_b11_a_hand_back_with_an_unreadable_cost_writes_null(dsn):
-    """Null cost replaces the copied figure in the hand-back too. (B11, r5 R2)"""
-    running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
-    async with job_store(dsn) as store:
-        await store.hand_back(T1, running, cost_usd=None, knowledge=None)
-    assert row(dsn, running)["cost_usd"] is None
+# #1546 D15 (retired): `hand_back` with an unreadable cost wrote NULL over the copied figure; a hand-back's cost is now the
+# last staged `progress`, and a row with none staged keeps no figure (tests/jobs/test_ending_apply_1546.py: a cut
+# investigation with no staged progress has no cost and is not marked).
 
 
 @pytest.mark.parametrize("stage", ["queued", *TERMINAL])
 async def test_b11_a_hand_back_is_conditional_on_running(dsn, stage):
-    """A queued or ended row is refused and unchanged; a running one beside it is handed back. (B11, Writes table)"""
+    """A queued or ended row is refused and unchanged; a running one beside it is handed back. (B11, PR9)"""
     other = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn, ticket="O"), key="k", attempt=1, stage=stage)
     control = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="C"), key="k", attempt=1, lapsed=False)
     before = _snap(dsn, other)
     async with job_store(dsn) as store:
-        assert await store.hand_back(T1, other, cost_usd=3.0, knowledge=None) is None
-        assert await store.hand_back(T1, control, cost_usd=3.0, knowledge=None) is not None
+        assert await hand_back_running(store, T1, other, cost_usd=3.0) is None
+        assert await hand_back_running(store, T1, control, cost_usd=3.0) is not None
     assert _snap(dsn, other) == before
 
 
 async def test_b11_a_handed_back_row_is_not_renewed_not_reclaimed_and_is_taken_over_with_its_cost(dsn):
-    """After the hand-back a renewal omits it, claim ignores it, and a take-over fails it `lease_lapsed` with a queued retry, keeping the handed-back cost and mark. (B11, B6, r4 item 2)"""
+    """After the hand-back a renewal omits it, claim ignores it, and a take-over fails it `lease_lapsed` with a queued retry, keeping the handed-back cost. (B11, B6, r4 item 2)"""
     running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
     async with job_store(dsn) as store:
-        await store.hand_back(T1, running, cost_usd=3.0, knowledge=KNOWLEDGE)
+        await hand_back_running(store, T1, running, cost_usd=3.0, knowledge=KNOWLEDGE)
         mark = accounting_written(dsn, running)
         assert set(await store.renew({running})) == set()
         assert lease_left(dsn, running) < 0
@@ -2130,14 +2055,13 @@ async def test_b11_a_handed_back_row_is_not_renewed_not_reclaimed_and_is_taken_o
     assert (row(dsn, retry)["stage"], row(dsn, retry)["attempt"]) == ("queued", 2)
 
 
-
 @pytest.mark.parametrize("attempt", [1, 3], ids=["retried", "capped"])
 async def test_b11_take_over_tells_a_handed_back_row_from_a_lost_workers_in_its_message(dsn, attempt):
     """A handed-back row's take-over message says its worker stopped and handed it back; a lapsed row beside it, whose worker was lost, says its worker stopped renewing. Reasons are unchanged. (#1343 review, B6, B11)"""
     handed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="H"), key="kh", attempt=attempt, lapsed=False)
     lost = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="L"), key="kl", attempt=attempt, lapsed=True)
     async with job_store(dsn) as store:
-        await store.hand_back(T1, handed, cost_usd=1.0, knowledge=None)
+        await hand_back_running(store, T1, handed, cost_usd=1.0, knowledge=None)
         await store.take_over(held=frozenset())
     reason = "lease_lapsed" if attempt == 1 else "retry_cap"
     got_handed, got_lost = row(dsn, handed), row(dsn, lost)
@@ -2155,47 +2079,23 @@ def _mark(dsn: str, inv: str, value: bool) -> None:
 
 
 @pytest.mark.parametrize("value", [True, False])
-@pytest.mark.parametrize("path", ["finish", "hand_back", "write_accounting"])
-async def test_s2_every_final_cost_write_sets_the_mark_to_the_value_it_is_given(dsn, path, value):
-    """The worker's final figure lands with the mark it passes, over whatever the row held, on each path that writes one; the record answers it too. (S2)"""
-    if path == "write_accounting":
-        inv = _ended_with_cost(dsn, "aborted", "A")
-    else:
-        inv = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
+async def test_s2_the_final_cost_the_end_stores_carries_the_mark_the_outcome_gave(dsn, value):
+    """A run's end stores its final figure with the mark its staged outcome carries, over whatever the row held; the record
+    answers it too. (S2; `hand_back` and `write_accounting`, which wrote a figure too, are gone: D15)"""
+    inv = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
     _mark(dsn, inv, not value)
     async with job_store(dsn) as store:
-        if path == "finish":
-            got = await store.finish(T1, inv, stage="completed", disposition="benign", cost_usd=4.5,
-                                     cost_is_lower_limit=value)
-        else:
-            got = await getattr(store, path)(T1, inv, cost_usd=4.5, knowledge=KNOWLEDGE, cost_is_lower_limit=value)
+        got = await finish_running(store, T1, inv, stage="completed", disposition="benign", cost_usd=4.5,
+                                   cost_is_lower_limit=value)
     assert (got.cost_usd, got.cost_is_lower_limit) == (4.5, value)
     assert (row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (4.5, value)
 
 
-@pytest.mark.parametrize("path", ["finish", "hand_back", "write_accounting"])
-async def test_s4_the_job_row_refuses_a_lower_limit_mark_beside_an_unknown_cost(dsn, path):
-    """The database refuses true beside a null cost, so no write path stores it; the refused write changes nothing and a null cost with no mark still lands. (S4)"""
-    from defender.jobs.store import is_refusal
-
-    if path == "write_accounting":
-        inv = _ended_with_cost(dsn, "failed", "A")
-    else:
-        inv = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
-    before = _snap(dsn, inv)
-
-    async def write(*, cost, mark):
-        async with job_store(dsn) as store:
-            if path == "finish":
-                return await store.finish(T1, inv, stage="completed", disposition="benign", cost_usd=cost,
-                                          cost_is_lower_limit=mark)
-            return await getattr(store, path)(T1, inv, cost_usd=cost, knowledge=None, cost_is_lower_limit=mark)
-
-    with pytest.raises(Exception) as refused:  # noqa: PT011 — the class is the database's, tested through is_refusal
-        await write(cost=None, mark=True)
-    assert is_refusal(refused.value), refused.value
-    assert _snap(dsn, inv) == before, "a refused write changed the row"
-    assert (await write(cost=None, mark=False)).cost_usd is None
+# #1546 PR9/D15 (retired): `test_s4_the_job_row_refuses_a_lower_limit_mark_beside_an_unknown_cost` wrote `cost None` beside
+# `cost_is_lower_limit True` through `finish`, which took both from its caller. An ending's cost and mark are now the
+# decision's, derived by the applier (the last staged `progress`, a lower limit; NULL and unmarked with none staged: tests/jobs/
+# test_ending_apply_1546.py), so no caller can ask the store for that pair; the database's own refusal of it survives in
+# the next test.
 
 
 async def test_s4_the_check_is_the_databases_own_not_only_the_stores(dsn):
@@ -2223,129 +2123,15 @@ async def test_s2_a_live_rows_cost_so_far_and_a_cancelled_queued_row_are_not_mar
     assert lower_limit(dsn, queued.investigation_id) is False
 
 
-async def test_s2_cancelling_a_running_row_reads_at_least_without_storing_the_mark_and_the_holders_final_write_then_stores_its_own(dsn):
-    """Cancel of a running row stores no mark (B1): the record reads "at least" by derivation (B2); the holder's later accounting stores its own value, either way. (S2, B1)"""
-    async with job_store(dsn) as store:
-        marked = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="A"), key="ka", attempt=1, lapsed=False)
-        cleared = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="B"), key="kb", attempt=1, lapsed=False)
-        for inv in (marked, cleared):
-            got = await store.cancel_investigation(T1, inv, actor="u-1")
-            assert (got.stage, got.cost_usd, got.cost_is_lower_limit) == ("aborted", 1.25, True)
-            assert (await store.get_investigation(T1, inv)).cost_is_lower_limit is True
-            assert (row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (1.25, False), "cancel wrote the stored mark"
-        await store.write_accounting(T1, marked, cost_usd=2.0, knowledge=None, cost_is_lower_limit=True)
-        await store.write_accounting(T1, cleared, cost_usd=2.0, knowledge=None, cost_is_lower_limit=False)
-        records = [(await store.get_investigation(T1, i)).cost_is_lower_limit for i in (marked, cleared)]
-    assert [(row(dsn, i)["cost_usd"], lower_limit(dsn, i)) for i in (marked, cleared)] == [(2.0, True), (2.0, False)]
-    assert records == [True, False], "the holder's final figure no longer reads as written"
-
-
-@pytest.mark.parametrize(("cost", "mark"), [(2.0, False), (2.0, True), (None, False)])
-async def test_s2_cancelling_a_handed_back_row_keeps_the_figure_and_mark_its_holder_wrote(dsn, cost, mark):
-    """A handed-back row still `running` already has its holder's final figure: a cancel before the take-over leaves cost and mark as written, and an unknown cost stays unmarked. (S2, S4)"""
-    inv = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
-    async with job_store(dsn) as store:
-        await store.hand_back(T1, inv, cost_usd=cost, knowledge=None, cost_is_lower_limit=mark)
-        got = await store.cancel_investigation(T1, inv, actor="u-1")
-    assert (got.stage, got.cost_usd, got.cost_is_lower_limit) == ("aborted", cost, mark)
-    assert (row(dsn, inv)["cost_usd"], lower_limit(dsn, inv)) == (cost, mark)
-
-
-@pytest.mark.parametrize("attempt", [1, 3], ids=["lease_lapsed", "retry_cap"])
-async def test_s2_a_lost_workers_row_is_taken_over_reading_at_least_without_a_stored_mark_and_a_handed_back_row_keeps_its_mark(dsn, attempt):
-    """Take-over stores no mark on a lost worker's row (B1) but its record reads "at least" (B2); a handed-back row keeps the mark its holder wrote; the retry starts unmarked at 0; the holder's later accounting stores its value. (S2, B1)"""
-    lost = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="L"), key="kl", attempt=attempt, lapsed=True)
-    handed = {mark: _plant_running(dsn, alert_id=_plant_alert(dsn, ticket=f"H{mark}"), key=f"kh{mark}", attempt=1,
-                                   lapsed=False) for mark in (True, False)}
-    async with job_store(dsn) as store:
-        for mark, inv in handed.items():
-            await store.hand_back(T1, inv, cost_usd=2.0, knowledge=None, cost_is_lower_limit=mark)
-        await store.take_over(held=frozenset())
-        record = await store.get_investigation(T1, lost)
-        handed_records = [(await store.get_investigation(T1, handed[m])).cost_is_lower_limit for m in (True, False)]
-    assert (row(dsn, lost)["failure_reason"], row(dsn, lost)["cost_usd"], lower_limit(dsn, lost)) == (
-        "lease_lapsed" if attempt == 1 else "retry_cap", 1.25, False), "take-over wrote the stored mark"
-    assert (record.cost_usd, record.cost_is_lower_limit) == (1.25, True)
-    assert [(row(dsn, handed[m])["cost_usd"], lower_limit(dsn, handed[m])) for m in (True, False)] == [(2.0, True), (2.0, False)]
-    assert handed_records == [True, False]
-    retries = _retries_of(dsn, lost)
-    if attempt == 1:
-        [retry] = retries
-        assert (row(dsn, retry)["cost_usd"], lower_limit(dsn, retry)) == (0, False)
-    else:
-        assert retries == []
-    async with job_store(dsn) as store:
-        await store.write_accounting(T1, lost, cost_usd=2.0, knowledge=None, cost_is_lower_limit=True)
-    assert (row(dsn, lost)["cost_usd"], lower_limit(dsn, lost)) == (2.0, True), "the holder's accounting did not store its mark"
-
-
-#: The class of a write that ends a running row (r4 S2, store side): the ending write; the cost the row holds (a renewal's copy,
-#: or its holder's figure); its lease (a take-over takes only a lapsed one); and whether its holder already wrote its final figure,
-#: with which mark (a hand-back does, and lapses the lease at once; the live-lease case is planted all the same).
-_ENDED_WITHOUT_FIGURE = [
-    (write, cost, lease, figure)
-    for write in ("cancel", "take_over")
-    for cost in (0.0, 1.25)
-    for lease in (("live", "lapsed") if write == "cancel" else ("lapsed",))
-    for figure in ("not written", "written marked", "written unmarked")
-]
-
-
-@pytest.mark.parametrize(("write", "cost", "lease", "figure"), _ENDED_WITHOUT_FIGURE,
-                         ids=["-".join(map(str, case)) for case in _ENDED_WITHOUT_FIGURE])
-async def test_s2_a_write_that_ends_a_running_row_marks_it_exactly_when_its_holder_never_wrote_its_figure(
-        dsn, write, cost, lease, figure):
-    """Cancel or take-over of a running row: the record reads "at least" when its holder has not written its final figure,
-    whatever the cost (0 included) or the lease, else the holder's mark; the STORED mark is only ever the holder's. (S2, B1)"""
-    written = figure != "not written"
-    inv = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=lease == "lapsed", marked=written)
-    execute(dsn, "UPDATE jobs.investigations SET cost_usd = %s, cost_is_lower_limit = %s WHERE id = %s",
-            (cost, figure == "written marked", inv))
-    async with job_store(dsn) as store:
-        if write == "cancel":
-            got = await store.cancel_investigation(T1, inv, actor="u-1")
-            assert got.stage == "aborted", got
-        else:
-            assert inv in await store.take_over(held=frozenset())
-    ended = row(dsn, inv)
-    assert ended["stage"] == ("aborted" if write == "cancel" else "failed"), ended
-    async with job_store(dsn) as store:
-        record = await store.get_investigation(T1, inv)
-    assert (ended["cost_usd"], lower_limit(dsn, inv)) == (cost, figure == "written marked"), (
-        "the stored mark is not the holder's own: cancel or take-over wrote it")
-    assert (record.cost_usd, record.cost_is_lower_limit) == (cost, figure != "written unmarked"), (
-        "the record's mark is not (no holder's figure) or the holder's own")
-
-
-#: B2: (stage, started, accounting written, cost, stored mark) -> what the record reads.
-_DERIVATION = [
-    ("failed", True, False, 1.25, False, True),
-    ("aborted", True, False, 1.25, False, True),
-    ("completed", True, False, 1.25, False, True),
-    ("aborted", True, False, 0.0, False, True),
-    ("aborted", False, False, 0.0, False, False),
-    ("failed", True, True, 2.0, False, False),
-    ("failed", True, True, 2.0, True, True),
-    ("failed", True, False, None, False, False),
-    ("running", True, False, 1.25, False, False),
-]
-
-
-@pytest.mark.parametrize(("stage", "started", "written", "cost", "stored", "reads"), _DERIVATION,
-                         ids=[f"{s}-{'started' if st else 'unstarted'}-{'written' if w else 'unwritten'}-{c}-stored{m}"
-                              for s, st, w, c, m, _ in _DERIVATION])
-async def test_b2_the_record_reads_at_least_for_a_terminal_started_row_with_a_cost_and_no_holders_figure(
-        dsn, stage, started, written, cost, stored, reads):
-    """The record derives the mark: stored OR (terminal AND started AND no accounting AND cost not null); a never-started row, a written row, a null cost and a live row do not. (B2)"""
-    inv = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn), key="k", attempt=1, stage=stage)
-    execute(dsn, "UPDATE jobs.investigations SET started_at = %s, finished_at = %s, cost_usd = %s, "
-                 "accounting_written_at = %s, cost_is_lower_limit = %s, disposition = %s, failure_reason = %s WHERE id = %s",
-            (NOW if started else None, None if stage == "running" else NOW, cost, NOW if written else None, stored,
-             "benign" if stage == "completed" else None, "no_report" if stage in ("failed", "aborted") else None, inv))
-    async with job_store(dsn) as store:
-        record = await store.get_investigation(T1, inv)
-    assert record.cost_is_lower_limit is reads, (stage, started, written, cost, stored)
-    assert lower_limit(dsn, inv) is stored, "the read changed the stored column"
+# #1546 D15 (retired): the record no longer derives its mark from a stage, a start and an accounting time, and a cancel or
+# take-over stores the mark itself (the last staged `progress` is the cost, always a lower limit). Retired with their subject:
+# test_s2_cancelling_a_running_row_reads_at_least_without_storing_the_mark_and_the_holders_final_write_then_stores_its_own,
+# test_s2_cancelling_a_handed_back_row_keeps_the_figure_and_mark_its_holder_wrote[3],
+# test_s2_a_lost_workers_row_is_taken_over_reading_at_least_without_a_stored_mark_and_a_handed_back_row_keeps_its_mark[2],
+# test_s2_a_write_that_ends_a_running_row_marks_it_exactly_when_its_holder_never_wrote_its_figure[10],
+# test_b2_the_record_reads_at_least_for_a_terminal_started_row_with_a_cost_and_no_holders_figure[9].
+# What survives is pinned by tests/jobs/test_ending_apply_1546.py (a taken-over run ends with its last progress as its cost,
+# a lower limit; a record reads exact only after an exit with a final cost; a cancel reads a lower limit).
 
 
 async def test_s2_a_claimed_row_and_a_stored_marked_row_carry_the_mark_in_their_records(dsn):
@@ -2369,7 +2155,7 @@ async def test_o6_the_store_tells_a_value_it_refuses_from_a_read_only_database_o
     running = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=False)
     async with job_store(dsn) as store:
         with pytest.raises(Exception) as refused:  # noqa: PT011 — the classification is what is under test
-            await store.finish(T1, running, stage="completed", disposition="benign", knowledge={"bad": "\u0000"})  # #1581 O10: without one the table would refuse it first (conflict, updated)
+            await finish_running(store, T1, running, stage="completed", disposition="benign", decided_knowledge={"bad": "\u0000"})  # #1581 O10: without one the table would refuse it first (conflict, updated)
     assert is_refusal(refused.value), repr(refused.value)
     assert not is_outage(refused.value), repr(refused.value)
     async with job_store(dsn) as store:
@@ -2386,19 +2172,20 @@ async def test_o6_the_store_tells_a_value_it_refuses_from_a_read_only_database_o
 # --- B6/B7/B8: take-over -------------------------------------------------------------------------------------------
 
 async def test_b6_a_lapsed_running_row_is_failed_and_retried_in_one_take_over_and_audited(dsn, caplog):
-    """Lapsed attempt 1: `failed`/`lease_lapsed`, no accounting, + queued attempt 2 (same key, created now, cost 0, no lease or mark); a fresh or held lease is left. (B6, B8, B-P3)"""
+    """Lapsed attempt 1: `failed`/`lease_lapsed`, its cost the last staged `progress` marked a lower limit (D15), + queued attempt 2 (same key, created now, cost 0, no lease or mark); a fresh or held lease is left. (B6, B8, B-P3)"""
     audit = JobsAudit(caplog)
     lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="P-1"), key="k1", attempt=1, lapsed=True)
     fresh = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="P-2"), key="k2", attempt=1, lapsed=False)
     held = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="P-3"), key="k3", attempt=1, lapsed=True)
     fresh_before, held_before = _snap(dsn, fresh), _snap(dsn, held)
     async with job_store(dsn) as store:
+        await stage_under_claim(store, lapsed, {"started": STARTED, "progress": inv_progress(1.25)}, bundle=False)
         await store.take_over(held=frozenset({held}))
 
     old = row(dsn, lapsed)
     assert (old["stage"], old["failure_reason"], old["finished_at"]) == ("failed", "lease_lapsed", NOW)
-    assert old["cost_usd"] == 1.25, "a take-over writes no accounting"
-    assert accounting_written(dsn, lapsed) is None
+    assert (old["cost_usd"], lower_limit(dsn, lapsed)) == (1.25, True), "the take-over keeps the last staged progress, as a lower limit"
+    assert accounting_written(dsn, lapsed) is None, "a take-over stamps no final-accounting mark (D15: nothing writes it)"
     retries = execute(dsn, "SELECT id, tenant_id, request_key, attempt, stage, created_at, cost_usd, started_at, "
                            "lease_expires_at, accounting_written_at, knowledge IS NULL FROM jobs.investigations "
                            "WHERE alert_id = (SELECT alert_id FROM jobs.investigations WHERE id = %s) AND id <> %s",
@@ -2460,7 +2247,7 @@ async def test_b8_only_a_running_row_with_a_lapsed_lease_is_retried(dsn, caplog)
     queued = _plant_investigation(dsn, tenant=T1, alert_id=_plant_alert(dsn, ticket="Q"), key="k", attempt=1, stage="queued")
     async with job_store(dsn) as store:
         finished = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="F"), key="k", attempt=1, lapsed=False)
-        await store.finish(T1, finished, stage="completed", disposition="benign", cost_usd=1.0)
+        await finish_running(store, T1, finished, stage="completed", disposition="benign", cost_usd=1.0)
         cancelled = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket="X"), key="k", attempt=1, lapsed=False)
         await store.cancel_investigation(T1, cancelled, actor="u-1")
         for i in (finished, cancelled):
@@ -2647,11 +2434,12 @@ async def test_b4_finish_and_take_over_of_one_lapsed_row_have_one_winner(dsn, fi
     lapsed = _plant_running(dsn, alert_id=_plant_alert(dsn), key="k", attempt=1, lapsed=True)
     async with job_store(dsn) as store:
         if first == "finish":
-            assert await store.finish(T1, lapsed, stage="completed", disposition="benign", cost_usd=2.0) is not None
+            assert await finish_running(store, T1, lapsed, stage="completed", disposition="benign", cost_usd=2.0) is not None
             await store.take_over(held=frozenset())
         else:
+            await stage_under_claim(store, lapsed, {"started": STARTED, "progress": inv_progress(1.25)}, bundle=False)
             await store.take_over(held=frozenset())
-            assert await store.finish(T1, lapsed, stage="completed", disposition="benign", cost_usd=2.0) is None
+            assert await finish_running(store, T1, lapsed, stage="completed", disposition="benign", cost_usd=2.0) is None
     stored = row(dsn, lapsed)
     if first == "finish":
         assert (stored["stage"], stored["cost_usd"], _retries_of(dsn, lapsed)) == ("completed", 2.0, [])
@@ -2698,7 +2486,7 @@ async def test_b9_cancel_racing_a_finish_has_exactly_one_winner(dsn):
             running = _plant_running(dsn, alert_id=_plant_alert(dsn, ticket=f"R-{n}"), key="k", attempt=1, lapsed=False)
             cancelled, finished = await asyncio.gather(
                 a.cancel_investigation(T1, running, actor="u-1"),
-                b.finish(T1, running, stage="completed", disposition="benign", cost_usd=2.0), return_exceptions=True)
+                finish_running(b, T1, running, stage="completed", disposition="benign", cost_usd=2.0), return_exceptions=True)
             assert not isinstance(finished, BaseException), finished
             if finished is None:
                 assert not isinstance(cancelled, BaseException), cancelled
@@ -2822,7 +2610,7 @@ async def test_b1_b11_every_store_write_dates_its_lease_by_the_database_clock_an
         assert set(await store.renew({renewed})) == {renewed}
         assert 25 < lease_left(dsn, renewed) < 31, "a renewal's lease is not 30 s from the database's now()"
 
-        assert await store.hand_back(T1, handed, cost_usd=1.0, knowledge=None) is not None
+        assert await hand_back_running(store, T1, handed, cost_usd=1.0, knowledge=None) is not None
         assert lease_left(dsn, handed) < 0, "a hand-back's lease is not already lapsed by the database's clock"
         assert accounting_written(dsn, handed) == instant
         assert row(dsn, handed)["finished_at"] is None
@@ -2836,13 +2624,11 @@ async def test_b1_b11_every_store_write_dates_its_lease_by_the_database_clock_an
         await store.cancel_investigation(T1, cancelled, actor="u-1")
         assert row(dsn, cancelled)["finished_at"] == instant
 
-        assert await store.finish(T1, finished, stage="completed", disposition="benign", cost_usd=1.0) is not None
+        assert await finish_running(store, T1, finished, stage="completed", disposition="benign", cost_usd=1.0) is not None
         assert row(dsn, finished)["finished_at"] == instant
         assert accounting_written(dsn, finished) == instant
 
-        assert await store.write_accounting(T1, accounted, cost_usd=2.0, knowledge=None) is not None
-        assert accounting_written(dsn, accounted) == instant
-        assert row(dsn, accounted)["finished_at"] == NOW, "a final accounting restamped the end"
+        assert row(dsn, accounted)["finished_at"] == NOW, "an ended row's stamp moved"  # D15: no final accounting restamps it
 
         created, _ = await store.create_investigation(T1, created_alert, "k-new", actor="u-1")
         assert _created_at(dsn, created.investigation_id) == instant
@@ -2893,7 +2679,7 @@ async def _live_jobs(dsn: str, store: Any) -> dict[str, Any]:
     handed_parent = await completed_investigation(store, ticket="L-1")
     handed = _auto_job_of(dsn, handed_parent)
     assert (await store.claim_learning_job()).record.learning_job_id == handed
-    assert await store.hand_back_learning_job(T1, handed) is not None
+    assert await hand_back_learning(store, T1, handed) is not None
     # The hand-back stamped `finished_at` with the fixed clock's NOW: move it back, so the offboard's overwrite with "now" is observable.
     execute(dsn, "UPDATE jobs.learning_jobs SET finished_at = %s WHERE id = %s", (NOW - HOUR, handed))
     running_parent = await completed_investigation(store, ticket="L-2")
@@ -2937,7 +2723,7 @@ async def test_1360_o3_the_offboard_commit_ends_every_live_job_of_the_tenant_and
         before, other_tenant = _job_rows(dsn), _tenant_json(dsn, T2)
         record = await _offboard(store, T1, actor="admin-1")
         renewed = await store.renew(held)
-        accounted = await store.write_accounting(T1, jobs["running"], cost_usd=0.5, knowledge=None)
+        late = await finish_running(store, T1, jobs["running"], stage="failed", failure_reason="no_report", cost_usd=0.5)
 
     assert (record.id, record.state, record.pending_action, record.step, record.step_actor, record.failure) == (T1, *OFFBOARDING)
     assert _tenant_json(dsn, T1)["state"] == "offboarding"
@@ -2951,7 +2737,7 @@ async def test_1360_o3_the_offboard_commit_ends_every_live_job_of_the_tenant_and
     assert {i for i in before if after[i] != before[i]} == ended, "a row that was not live changed, or a live one did not"
     assert {jobs["other_investigation"], jobs["other_learning"], *jobs["completed"]} <= set(before) - ended
     assert renewed == [], "the holder's renewal still covers a row the offboard ended"
-    assert accounted is not None, "the holder's final accounting is refused on a row the offboard ended"
+    assert late is None, "the holder's late end is accepted on a row the offboard ended (D15: no exception to the write fence)"
 
 
 async def test_1360_o3_a_creating_tenant_is_offboarded_too_and_its_jobs_end(dsn):
@@ -3102,7 +2888,7 @@ async def test_1360_o3_a_row_a_take_over_or_a_finish_inserts_while_the_offboard_
                 work = store.take_over()
             else:
                 _stall_inserts(dsn, "learning_jobs", "true")
-                work = store.finish(T1, inv.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
+                work = finish_running(store, T1, inv.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0)
             first = inv.investigation_id
         audit = JobsAudit(caplog)
         mark = len(audit.events())
@@ -3146,7 +2932,7 @@ async def test_1360_o3_an_offboard_that_locks_the_investigation_first_leaves_the
             offboard = asyncio.ensure_future(_offboard(store, T1, actor="admin-1"))
             await until_blocked(dsn, 1)
             finished = asyncio.ensure_future(
-                store.finish(T1, inv.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0))
+                finish_running(store, T1, inv.investigation_id, stage="completed", disposition="malicious", cost_usd=0.0))
             await until_blocked(dsn, 2)
         await asyncio.wait_for(offboard, 10)
         assert await asyncio.wait_for(finished, 10) is None
@@ -3170,12 +2956,12 @@ def _plant_queued(dsn: str, kind: str) -> str:
     parent = _plant_investigation(dsn, tenant=T1, alert_id=alert, key="k", attempt=1, stage="completed")
     job = str(uuid.uuid4())
     execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, "
-                 "status, created_at, sibling_cost_usd, publish_state) "
-                 "VALUES (%s, %s, %s, %s, 'k-late', 1, 'explicit', 'queued', %s, 0, 'none')", (job, T1, alert, parent, NOW))
+                 "status, created_at, sibling_cost_usd, sibling_cost_is_lower_limit, publish_state) "
+                 "VALUES (%s, %s, %s, %s, 'k-late', 1, 'explicit', 'queued', now(), 0, false, 'none')", (job, T1, alert, parent))  # D10: the database's now(), as the store stamps it
     return job
 
 
-async def _into_shape(dsn: str, store: Any, kind: str, shape: str, row_id: str) -> None:
+async def _into_shape(dsn: str, store: Any, kind: str, shape: str, row_id: str, *, offboarding: bool = False) -> Any:
     """Bring the queued row to `shape` the way the system does: the store's own claim (a worker that still reads the
     tenant `active`) and hand-back, and a lease lapsed by the database's clock (the worker died; no take-over ran yet)."""
     if shape == "queued":
@@ -3183,12 +2969,20 @@ async def _into_shape(dsn: str, store: Any, kind: str, shape: str, row_id: str) 
     if kind == "investigation":
         assert (await store.claim()).record.investigation_id == row_id, "premise: the claim took the row being shaped"
     else:
-        assert (await store.claim_learning_job()).record.learning_job_id == row_id, "premise: the claim took the row being shaped"
+        claimed = await asyncio.wait_for(store.claim_learning_job(), 20)  # bounded: a lock-order inversion would wait forever
+        assert claimed is not None, "premise: the claim took a row"
+        assert claimed.record.learning_job_id == row_id, "premise: the claim took the row being shaped"
     if shape == "lapsed":
         table = "investigations" if kind == "investigation" else "learning_jobs"
         execute(dsn, f"UPDATE jobs.{table} SET lease_expires_at = now() - interval '1 second' WHERE id = %s", (row_id,))  # noqa: S608
     elif shape == "handed_back":
-        assert await store.hand_back_learning_job(T1, row_id) is not None, "premise: the running job was handed back"
+        if offboarding:
+            # #1546 PR9: a hand-back is an `apply`, which takes the tenant share lock first, so one arriving while the offboard
+            # holds the tenant waits for it (and is then fenced); the caller awaits it after the offboard commits.
+            return asyncio.ensure_future(hand_back_learning(store, T1, row_id))
+        handed = await asyncio.wait_for(hand_back_learning(store, T1, row_id), 20)  # bounded: nothing else holds the tenant
+        assert handed is not None, "premise: the running job was handed back"
+    return None
 
 
 @pytest.mark.parametrize("arrives", ["at_start", "behind_a_held_row"])
@@ -3204,6 +2998,7 @@ async def test_1360_o3_every_live_shape_of_either_kind_ends_whether_there_at_the
     tenant to fail, retry or start. A lapsed running row is live until it ends; leaving it to the take-over queues a
     retry for a tenant being removed. (#1360 O3, O4 invariant, Flow 1 step 3 fresh read, as amended by D3)"""
     held = str(uuid.uuid4())
+    arriving = None
     _plant_running_pair(dsn, [held] if kind == "investigation" else [], [held] if kind == "learning" else [])
     table = "investigations" if kind == "investigation" else "learning_jobs"
     async with job_store(dsn) as store:
@@ -3216,11 +3011,14 @@ async def test_1360_o3_every_live_shape_of_either_kind_ends_whether_there_at_the
                 await until_blocked(dsn, 1)  # the offboard waits for the held row
                 if arrives == "behind_a_held_row":
                     late = _plant_queued(dsn, kind)
-                    await _into_shape(dsn, store, kind, shape, late)
+                    arriving = await _into_shape(dsn, store, kind, shape, late, offboarding=True)
             except BaseException:
                 offboard.cancel()
                 raise
         await asyncio.wait_for(offboard, 20)
+        if arriving is not None:
+            # the hand-back that waited behind the offboard finds its row already ended: fenced, nothing written
+            assert await asyncio.wait_for(arriving, 20) is None, "a hand-back that arrived during the offboard was written"
 
         assert _live_of(dsn, T1) == 0, f"a {shape} {kind} row of the offboarding tenant is still live"
         for ended in (late, held):
@@ -3243,10 +3041,10 @@ def _reinsert_on_end(dsn: str, kind: str, *, up_to: int) -> None:
         if kind == "investigation" else
         ("learning_jobs", "investigation_id", "('queued', 'running')", "NEW.status = 'skipped'", "status"))
     fresh = (", 'attempt', 1, 'stage', 'queued', 'started_at', NULL, 'finished_at', NULL, 'failure_reason', NULL, "
-             "'failure_message', NULL, 'lease_expires_at', NULL, 'accounting_written_at', NULL"
+             "'failure_message', NULL, 'lease_expires_at', NULL, 'evidence_state', NULL, 'scrub', NULL"
              if kind == "investigation" else
              ", 'attempt', 1, 'status', 'queued', 'started_at', NULL, 'finished_at', NULL, 'reason', NULL, "
-             "'message', NULL, 'lease_expires_at', NULL, 'publish_state', 'none'")
+             "'message', NULL, 'lease_expires_at', NULL, 'publish_state', 'none', 'evidence_state', NULL")
     execute(dsn, "CREATE FUNCTION jobs.again_1360() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "  # noqa: S608
                  f"IF (SELECT count(*) FROM jobs.{table} WHERE {family} = NEW.{family}) < {up_to} THEN "
                  f"INSERT INTO jobs.{table} SELECT * FROM jsonb_populate_record(NULL::jobs.{table}, to_jsonb(NEW) || "
@@ -3347,8 +3145,8 @@ def _plant_running_pair(dsn: str, investigation_ids: list[str], job_ids: list[st
         execute(dsn, "UPDATE jobs.investigations SET id = %s WHERE id = %s", (parent_id, parent))
         parent = parent_id
         execute(dsn, "INSERT INTO jobs.learning_jobs (id, tenant_id, alert_id, investigation_id, request_key, attempt, trigger, "
-                     "status, created_at, started_at, lease_expires_at, sibling_cost_usd, publish_state) "
-                     "VALUES (%s, %s, %s, %s, 'k', 1, 'explicit', 'running', %s, %s, now() + interval '30 seconds', 0, 'none')",
+                     "status, created_at, started_at, lease_expires_at, sibling_cost_usd, sibling_cost_is_lower_limit, publish_state) "
+                     "VALUES (%s, %s, %s, %s, 'k', 1, 'explicit', 'running', %s, %s, now() + interval '30 seconds', 0, false, 'none')",
                 (job, T1, alert, parent, NOW, NOW))
 
 
@@ -3820,6 +3618,10 @@ async def test_1083_the_store_lists_one_tenants_rows_as_its_own_record_types_wit
 
     async with job_store(dsn) as store:
         ids = await _three_each(store)
+        # #1546 (code-record owner decision D10, repair round 1): a learning job's `created_at` is the database's clock, not
+        # the store's injected one, so the auto jobs no longer tie by construction; they are made to tie here, as every
+        # other row does under the fixed clock, so the order below is decided by the id tie-break alone.
+        execute(dsn, "UPDATE jobs.learning_jobs SET created_at = %s WHERE tenant_id = %s", (NOW, T1))
         window: dict[str, Any] = {"fired_after": None, "fired_before": None, "outcome": None, "after": None, "limit": 50}
         alerts = await store.list_alerts(T1, **window)
         investigations = await store.list_investigations(T1, alert_id=None, after=None, limit=50)
@@ -4187,7 +3989,7 @@ async def _ended(store: Any, clock: Clock, alert_id: str, key: str, *, stage: st
     claimed = await store.claim()
     assert claimed is not None
     assert claimed.record.investigation_id == inv.investigation_id, "premise: it was the one queued"
-    await store.finish(T1, inv.investigation_id, stage=stage, disposition=disposition, cost_usd=0.0,
+    await finish_running(store, T1, inv.investigation_id, stage=stage, disposition=disposition, cost_usd=0.0,
                        failure_reason="no_report" if stage == "failed" else None)
     clock.at += HOUR
     return inv.investigation_id
@@ -4274,7 +4076,7 @@ async def test_alert_list_o1_investigations_created_at_one_instant_are_ordered_b
             claimed = await store.claim()
             assert claimed is not None
             assert claimed.record.investigation_id == inv_id, "premise: the one just planted"
-            await store.finish(T1, inv_id, stage=stage, disposition=disposition, cost_usd=0.0,
+            await finish_running(store, T1, inv_id, stage=stage, disposition=disposition, cost_usd=0.0,
                                failure_reason="no_report" if stage == "failed" else None)
 
         steps = [(LOW_ID, "k-low", "completed", "benign"),
@@ -4391,12 +4193,12 @@ async def test_o10_a_finish_to_completed_without_a_disposition_is_refused_and_st
         inv, _ = await store.create_investigation(T1, alert.alert_id, "k1", actor="setup")
         assert await store.claim() is not None
         with pytest.raises(Exception) as refused:  # noqa: PT011 — the classification is what is under test
-            await store.finish(T1, inv.investigation_id, stage="completed", cost_usd=0.0)
+            await finish_running(store, T1, inv.investigation_id, stage="completed", cost_usd=0.0)
         from defender.jobs import is_outage, is_refusal
 
         assert is_refusal(refused.value), repr(refused.value)
         assert not is_outage(refused.value), repr(refused.value)
         assert row(dsn, inv.investigation_id)["stage"] == "running"
         assert stored_copy(dsn, alert.alert_id) == (None, None, None)
-        assert await store.finish(T1, inv.investigation_id, stage="completed", disposition="benign", cost_usd=0.0) is not None
+        assert await finish_running(store, T1, inv.investigation_id, stage="completed", disposition="benign", cost_usd=0.0) is not None
         assert stored_copy(dsn, alert.alert_id)[:2] == ("benign", inv.investigation_id)

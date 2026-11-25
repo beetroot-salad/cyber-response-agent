@@ -832,9 +832,14 @@ def _leads(world_dir: Path, label: str) -> None:
 
 
 def copy_episode(ep: Episode, dest: Path) -> Episode:
-    """A whole-tree copy of `ep` named `dest.name`."""
+    """A whole-tree copy of `ep` named `dest.name`, with the database each arm's session pointer names at the same place
+    relative to the arm's copy (#1546 design-r9 "Session pointer": recorded relative to the run; a copy that sits where
+    the original's database is already found carries nothing)."""
+    from defender.tests.support.storage._carry_sessions1546 import carry_episode_sessions
+
     target = T.tenant_episodes(dest.parent) / dest.name
     shutil.copytree(ep.dir, target, symlinks=True)
+    carry_episode_sessions(ep.dir, target)
     return Episode(target, ep.tmp_path)
 
 

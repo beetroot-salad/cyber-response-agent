@@ -32,6 +32,12 @@ def _key(tenant: str) -> str:
     return f"request-token-{tenant}"
 
 
+def _request_keys(bao) -> set[str]:
+    """The transit keys that are request-token signing keys: #1546 adds `evidence-<tenant>` keys beside them, which these
+    cases (about the signing key) do not count."""
+    return {name for name in bao.transit_keys if not name.startswith("evidence-")}
+
+
 def _key_path(tenant: str) -> str:
     return f"/v1/transit/keys/{_key(tenant)}"
 
@@ -112,7 +118,8 @@ def test_the_provider_makes_the_sign_approle_entity_alias_and_key_each_on_its_ow
     assert bao.entities[gen.sign_entity]["metadata"]["tenant_id"] == tenant
     assert gen.sign_role_id and gen.sign_role_id != gen.role_id
     by_name = {a["name"]: a["canonical_id"] for a in bao.aliases}
-    assert by_name == {gen.role_id: bao.entities[gen.entity]["id"], gen.sign_role_id: bao.entities[gen.sign_entity]["id"]}
+    assert by_name == {gen.role_id: bao.entities[gen.entity]["id"], gen.sign_role_id: bao.entities[gen.sign_entity]["id"],
+                       gen.evidence_role_id: bao.entities[gen.evidence_entity]["id"]}  # #1546 r9: the evidence login is beside them
     assert bao.transit_keys[_key(tenant)]["type"] == "ed25519"
 
 
@@ -187,21 +194,22 @@ def test_a_provider_that_died_before_committing_is_run_again_reusing_its_entitie
     world.drive()
     assert world.item(tenant)["state"] == "active", world.item(tenant)
     gen = world.live(tenant)
-    assert {a["name"] for a in bao.aliases} == {gen.role_id, gen.sign_role_id} and len(bao.aliases) == 2
-    assert (set(bao.approles), set(bao.entities)) == ({gen.approle, gen.sign_approle}, {gen.entity, gen.sign_entity})
+    assert {a["name"] for a in bao.aliases} == {gen.role_id, gen.sign_role_id, gen.evidence_role_id} and len(bao.aliases) == 3
+    assert (set(bao.approles), set(bao.entities)) == (  # #1546 r9: the evidence login is the generation's third
+        {gen.approle, gen.sign_approle, gen.evidence_approle}, {gen.entity, gen.sign_entity, gen.evidence_entity})
 
 
 # --- wrap, install, sweep ----------------------------------------------------------------------------------
 
 def test_wrap_and_install_handle_both_secrets_and_prove_the_sign_pair_by_signing(world):
-    """A secret id is wrapped for each AppRole and unwrapped by install, which writes both files, records both accessors,
-    clears both wrapping tokens and signs one probe as the tenant's sign login (A24' wrap/install)."""
+    """A secret id is wrapped for each AppRole and unwrapped by install, which writes the files, records the accessors,
+    clears the wrapping tokens and signs one probe as the tenant's sign login (A24' wrap/install)."""
     tenant = world.active_tenant()
     gen = world.live(tenant)
     bao = world.openbao
     wrapped_for = {c.path.split("/")[5] for c in bao.calls if c.path.endswith("/secret-id") and "x-vault-wrap-ttl" in c.headers}
-    assert wrapped_for == {gen.approle, gen.sign_approle}
-    assert len(bao.made("POST", "/v1/sys/wrapping/unwrap")) == 2
+    assert wrapped_for == {gen.approle, gen.sign_approle, gen.evidence_approle}  # #1546 r9: and the evidence login's
+    assert len(bao.made("POST", "/v1/sys/wrapping/unwrap")) == 3
     assert gen.host_secret_file != gen.sign_secret_file and gen.host_secret_file.parent == gen.sign_secret_file.parent
     assert world.config.secrets_dir / tenant == gen.sign_secret_file.parent
     assert gen.sign_secret_file.read_text(encoding="utf-8") == bao.approles[gen.sign_approle][gen.sign_secret_accessor] + "\n"
@@ -262,7 +270,7 @@ def test_the_key_is_the_tenants_and_survives_rotations_while_each_generation_pro
         world.drive()
         assert world.item(tenant)["state"] == "active"
     bao = world.openbao
-    assert set(bao.transit_keys) == {_key(tenant), _key(other)}
+    assert _request_keys(bao) == {_key(tenant), _key(other)}
     assert bao.made("DELETE", _key_path(tenant)) == [] and len(_writes_to(world, _key_path(tenant))) == 1
     gens = world.generations(tenant)
     assert len(gens) == 3 and {g.status for g in gens} == {"destroyed", "live"}
@@ -287,7 +295,7 @@ def test_offboarding_makes_the_key_deletable_then_deletes_it(world):
     tenant, other = world.active_tenant(), world.active_tenant()
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
-    assert set(world.openbao.transit_keys) == {_key(other)}
+    assert _request_keys(world.openbao) == {_key(other)}
     calls = [(c.method, c.path, c.body) for c in world.openbao.calls if c.path.startswith(_key_path(tenant))]
     config = next(i for i, (m, p, b) in enumerate(calls) if p.endswith("/config") and m in ("POST", "PUT") and b["deletion_allowed"] is True)
     delete = [i for i, (m, p, _b) in enumerate(calls) if m == "DELETE" and p == _key_path(tenant)]

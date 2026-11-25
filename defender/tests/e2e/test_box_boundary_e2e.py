@@ -431,23 +431,39 @@ def test_another_runs_run_dir_is_absent(box, run_dir, sibling_run):
     assert parent["read"] is None, "the runs base itself is not mounted"
 
 
-@requires_box
-def test_bytes_written_in_box_appear_on_the_host(box, run_dir):
-    written = _probe(box, run_dir, "hostwrite", _WRITE_PATH, "/runs/current/artifact.bin")
-    assert written["wrote"] is True, written
-    assert (run_dir / "artifact.bin").read_bytes() == b"box-was-here"
+_CREATE_IN_RUN_FOLDER = '''
+import json, os
+out = {}
+for label, fn in (
+    ("file", lambda: open("/runs/current/made-in-box", "wb").write(b"x")),
+    ("mkdir", lambda: os.mkdir("/runs/current/dir-made-in-box")),
+    ("nested_file", lambda: open("/runs/current/gather_raw/made-in-box", "wb").write(b"x")),
+    ("append_existing", lambda: open("/runs/current/sentinel.txt", "ab").write(b"x")),
+    ("tmp_control", lambda: open("/tmp/made-in-box", "wb").write(b"x")),
+):
+    try:
+        fn()
+        out[label] = None
+    except OSError as e:
+        out[label] = e.errno
+print(json.dumps(out))
+'''
 
-    raw = (
-        "import json, os\n"
-        "d = '/runs/current/gather_raw/l-042'\n"
-        "os.makedirs(d, exist_ok=True)\n"
-        "fd = os.open(os.path.join(d, '1.json'), os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o644)\n"
-        "n = os.write(fd, b'{\"seq\": 1}')\n"
-        "os.close(fd)\n"
-        "print(json.dumps({'n': n}))\n"
-    )
-    assert _probe(box, run_dir, "rawwrite", raw)["n"] == 10
-    assert (run_dir / "gather_raw" / "l-042" / "1.json").read_bytes() == b'{"seq": 1}'
+
+@requires_box
+def test_a_box_cannot_create_a_file_in_its_run_folder(box, run_dir):
+    """The run folder is read-only inside the box: every create is refused with EROFS and nothing lands on the host. (D4)"""
+    (run_dir / "sentinel.txt").write_text("host-planted", encoding="utf-8")
+    before = sorted(p.relative_to(run_dir).as_posix() for p in run_dir.rglob("*"))
+    seen = _probe(box, run_dir, "createro", _CREATE_IN_RUN_FOLDER)
+    after = sorted(p.relative_to(run_dir).as_posix() for p in run_dir.rglob("*"))
+    assert seen["tmp_control"] is None, f"positive control: the box could not write its tmpfs: {seen}"
+    assert {k: v for k, v in seen.items() if k != "tmp_control"} == {
+        "file": errno_mod.EROFS, "mkdir": errno_mod.EROFS, "nested_file": errno_mod.EROFS,
+        "append_existing": errno_mod.EROFS}, seen
+    assert after == sorted({*before, "_probe_createro.py"}), "an entry appeared in the host run folder"
+    assert (run_dir / "sentinel.txt").read_text(encoding="utf-8") == "host-planted"
+    assert not (run_dir / "made-in-box").exists()
 
 
 @requires_box

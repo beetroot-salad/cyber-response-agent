@@ -884,7 +884,7 @@ def roster_arm_id(episode_dir: Path, world_id: str) -> str:
 
 def sibling_run_dir(  # noqa: PLR0913 — one keyword per stamp field a scenario varies, plus the arm id the spawn double passes
         base: Path, label: str, *, arm_id: str | None = None,
-                    scrub_ran: bool = True,
+                    scrub_ran: bool | str | None = True,
                     commit: str | None = "deadbee", dirty: bool | None = False,
                     unavailable: str | None = None,
                     model: str = "m-1", stamp: bool = True, closed: bool = True, **record: Any) -> Path:
@@ -904,9 +904,20 @@ def sibling_run_dir(  # noqa: PLR0913 — one keyword per stamp field a scenario
             json.dumps(provenance_record(commit=commit, dirty=dirty, unavailable=unavailable,
                                          model=model, **record)),
             encoding="utf-8")
-    if scrub_ran is not None:
-        (base / f"{run_dir.name}.scrub-verdict.json").write_text(
-            json.dumps({"ran": scrub_ran}), encoding="utf-8")
+    import contextlib
+
+    from defender.box import _scrub as scrub_mod
+
+    # The verdict comes from the production writers (the file's spelling is theirs): `True` a clean walk, `False` a
+    # skipped walk (`not_run`), `"tainted"` a walk over a tree holding a hard link; `None` plants none.
+    if scrub_ran is True:
+        scrub_mod.scrub(run_dir)
+    elif scrub_ran is False:
+        scrub_mod.write_did_not_run(run_dir, "the walk was skipped")
+    elif scrub_ran == "tainted":
+        os.link(run_dir / "investigation.md", run_dir / "alias.md")
+        with contextlib.suppress(scrub_mod.RunTainted):
+            scrub_mod.scrub(run_dir)
     return run_dir
 
 

@@ -37,30 +37,39 @@ def test_one_revision_after_the_host_requests_revision_drops_the_publish_status_
 
 @pytest.mark.postgres
 def test_the_table_is_there_at_the_prior_revision_and_gone_at_head_with_every_other_tenancy_table_as_it_was(empty_database):
-    """`publish_status` exists at `0027_people_requests` (control) and not at head; the other `tenancy` tables keep their columns. (D7)"""
+    """`publish_status` exists at `0027_people_requests` (control) and not after the drop revision, nor at head; across the
+    drop revision the other `tenancy` tables keep their columns. (D7; #1546 (r10 (g)): #1546's revisions follow the drop and
+    add their own `tenancy` table and columns, so "touches nothing else" is the drop revision's own step, not the way to
+    head)"""
     from defender.migrations import head
 
     dsn = empty_database
     shape = ("SELECT table_name, column_name, data_type FROM information_schema.columns "
              "WHERE table_schema = 'tenancy' AND table_name <> 'publish_status' ORDER BY 1, 2")
+    drop = revisions.by_suffix("_drop_publish_status")
+    assert revisions.down_of(drop) == PRIOR, "premise: the drop sits directly on 0027_people_requests"
     _upgrade_to(dsn, PRIOR)
     assert "publish_status" in _tables(dsn, "tenancy"), "control: the table exists before the revision"
     before = execute(dsn, shape)
-    _upgrade_to(dsn, head())
+    _upgrade_to(dsn, drop)
     assert "publish_status" not in _tables(dsn, "tenancy")
     assert execute(dsn, shape) == before
+    _upgrade_to(dsn, head())
+    assert "publish_status" not in _tables(dsn, "tenancy")
 
 
 @pytest.mark.postgres
 def test_a_tenant_with_a_recorded_publish_outcome_upgrades_with_its_tenant_row_intact(empty_database):
-    """A row in the dropped table does not stop the upgrade, and the tenant it named keeps its row (no cascade). (D7)"""
-    from defender.migrations import head
+    """A row in the dropped table does not stop the upgrade, and the tenant it named keeps its row (no cascade). (D7;
+    #1546 r9 B / r10 (g): past the drop, `*_retention_required` refuses an active tenant with no retention row, so the
+    tenant's retention row is planted on the way, as creating a tenant writes it since #1546)"""
+    from defender.tests.migrations._marked1470 import upgrade_with_retention
 
     dsn = empty_database
     _upgrade_to(dsn, PRIOR)
     _plant(dsn)
     assert execute(dsn, "SELECT count(*) FROM tenancy.publish_status") == [(1,)], "control: the outcome row is there"
-    _upgrade_to(dsn, head())
+    upgrade_with_retention(dsn)
     assert execute(dsn, "SELECT id, state FROM tenancy.tenants") == [(TENANT, "active")]
     assert "publish_status" not in _tables(dsn, "tenancy")
 

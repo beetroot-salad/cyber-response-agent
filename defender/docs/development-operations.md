@@ -23,7 +23,9 @@ python3 defender/learning/loop.py --tenant "$TENANT_ID" --author-drain     # fol
 
 ### Creating a tenant (#1214)
 
-An administrator posts `POST /api/admin/tenants` (202; `Location` is the tenant's URL). The record is
+An administrator posts `POST /api/admin/tenants` with the tenant's evidence retention as its body,
+`{"investigation_days": <30-730>, "learning_days": <30-730>}` (#1546: both whole days, both required, no default;
+without them the call is a 422), and gets 202 with the tenant's URL in `Location`. The record is
 `creating` until the lifecycle has done its steps, which `python -m defender.lifecycle serve` runs
 (dev: the management service and the host actor in one process; hosted: one process each): the
 repository `tenants/<id>` from the committed template, a bot with write access to it alone, the
@@ -304,7 +306,12 @@ credential generation has two AppRoles, each with its own entity carrying the te
 which mints the bot's forge token, and a sign-only AppRole on `defender-tenant-sign`
 (`LifecycleConfig.sign_policy`), whose one rule is `update` on
 `transit/sign/request-token-{{identity.entity.metadata.tenant_id}}`, so a tenant's sign login signs
-only with its own key. The credential proxy's policy is KV read plus `update` on
+only with its own key. A third, the evidence AppRole, is on `defender-tenant-evidence`
+(`LifecycleConfig.evidence_policy`, #1546): `update` on
+`transit/datakey/plaintext/evidence-{{identity.entity.metadata.tenant_id}}` and
+`transit/decrypt/evidence-{{identity.entity.metadata.tenant_id}}`, so a tenant's evidence login takes and opens data keys
+of its own `evidence-<T>` key only (an aes256-gcm96 key the lifecycle makes once per tenant and deletes at offboarding;
+the management login's policy needs create, read, update and delete on `transit/keys/evidence-*`). The credential proxy's policy is KV read plus `update` on
 `transit/verify/request-token-*`. Login tokens are never revoked: every AppRole login, the lifecycle's
 one-shot ones (minting the bot's token, proving the sign pair at install) and the held ones (a
 run's request signer, the forge credential), lives out its 10-minute TTL. Revoking would not

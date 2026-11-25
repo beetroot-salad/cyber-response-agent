@@ -27,9 +27,11 @@ from typing import Any
 import httpx
 
 from defender import _io
+from defender.database import async_engine, sessions
 from defender.configuration import publish_root
 from defender.configuration.issuer import TRANSIT_MOUNT
 from defender.credential_proxy import transit_key_for
+from defender.evidence import BlobStore, key_name as evidence_key_name
 from defender.lifecycle._bot import log_in, mint
 from defender.lifecycle._job import (
     HOST,
@@ -43,6 +45,7 @@ from defender.lifecycle._job import (
     only,
 )
 from defender.lifecycle._teardown import Containers, stop_containers, take_exclusive
+from defender.lifecycle._evidence import purge_tenant
 from defender.lifecycle.config import LifecycleConfig
 from defender.tenancy import REPO_SCRATCH, FenceMissed, Generation, HeldTenant, TenantRepository, host_lock
 
@@ -54,6 +57,8 @@ _REWRAP = ("wrap", SERVICE)
 _RUNS = "runs"
 #: The sign secret file's name is its accessor after this prefix, beside the delivery file.
 _SIGN_FILE = "sign-"
+#: The evidence secret file's name is its accessor after this prefix (#1546 r9).
+_EVIDENCE_FILE = "evidence-"
 #: What install signs to prove the sign pair (A24', r8.4): a fixed payload, never a request token.
 _PROBE = base64.b64encode(b"defender install sign proof").decode("ascii")
 
@@ -66,21 +71,36 @@ class HostActor(Actor):
     credential (each call presents the bot's JWT); `openbao_login` reaches only unwrap, AppRole
     login, token reads and install's one sign as the tenant's sign login; `git` is the sealed-transport git runner; `fetch` is the one fetch seam
     (`fetch(tenant_id, dest, *, data_root, commit=None) -> report line`); `containers` removes a tenant's
-    box containers (default: docker by label)."""
+    box containers (default: docker by label); `blob` is the evidence store the offboarding pass empties (default: the
+    one `config.evidence_store` names; with neither, that pass has no store to empty and `from_env` never builds such a
+    config)."""
 
     actor = HOST
+    #: Teardown holds the host lock exclusive and stops the tenant's containers; the evidence pass after it (the store,
+    #: the jobs database, repeatable) is the next pass's, so a store that is down never keeps teardown's pass waiting.
+    ends_pass = frozenset({"teardown"})
 
     def __init__(self, tenants: TenantRepository, *, forge: httpx.AsyncClient,  # noqa: PLR0913 — the pinned constructor
                  openbao_login: httpx.AsyncClient, git: Git, fetch: Fetch, config: LifecycleConfig,
-                 clock: Callable[[], _dt.datetime], containers: Containers = stop_containers) -> None:
+                 clock: Callable[[], _dt.datetime], containers: Containers = stop_containers,
+                 blob: BlobStore | None = None) -> None:
         super().__init__(tenants, clock=clock)
         self._forge, self._bao, self._git, self._fetch = forge, openbao_login, git, fetch
         self._config, self._containers = config, containers
+        self.blob: BlobStore | None = blob if blob is not None else _blob_of(config)
         self._root: Path = config.data_root
 
     def steps(self) -> Mapping[str, Step]:
         return {"install": self._install, "prepare": self._prepare, "remove_old_file": self._remove_old_file,
-                "teardown": self._teardown}
+                "teardown": self._teardown, "evidence": self._evidence}
+
+    async def work(self) -> int:
+        """The job's steps (`Actor.work`), then the evidence pass of every offboarded tenant once more, whether or not a
+        step ran: an object or a row that arrives after the offboarding is removed by the next pass (#1546 A-O5). The
+        count is the steps run."""
+        ran = await super().work()
+        await self._purge_offboarded()
+        return ran
 
     def _tenant_secrets(self, tenant: str) -> Path:
         return self._config.secrets_dir / tenant
@@ -122,27 +142,33 @@ class HostActor(Actor):
     async def _install_under_lock(self, held: HeldTenant) -> None:
         gen = only(await held.generations(), "pending")
         wiring = await held.forge_wiring()
-        if wiring is not None and gen.wrapped_secret and not gen.sign_wrapped_secret:
-            # Wrapped before the sign login existed (a job in flight across the upgrade, r8.5): back
-            # to `wrap`, which makes the sign chain and wraps both, with no failure to resume.
+        if wiring is not None and gen.wrapped_secret and not (gen.sign_wrapped_secret and gen.evidence_wrapped_secret):
+            # Wrapped before the sign or the evidence login existed (a job in flight across the upgrade, r8.5): back
+            # to `wrap`, which makes the chain it lacks and wraps every secret, with no failure to resume.
             await held.commit(step="wrap", actor=SERVICE)
             return
-        if wiring is None or not gen.wrapped_secret or not gen.sign_wrapped_secret:
+        if wiring is None or not (gen.wrapped_secret and gen.sign_wrapped_secret and gen.evidence_wrapped_secret):
             raise StepFailed("there is no wrapped secret or forge wiring to install")
         secret_id, accessor = await self._unwrap(gen.wrapped_secret, "delivery")
         sign_secret_id, sign_accessor = await self._unwrap(gen.sign_wrapped_secret, "sign")
+        evidence_secret_id, evidence_accessor = await self._unwrap(gen.evidence_wrapped_secret, "evidence")
         paths: list[Path] = []
         try:
             paths.append(await asyncio.to_thread(self._write_secret, held.tenant_id, accessor, secret_id))
             paths.append(await asyncio.to_thread(self._write_secret, held.tenant_id, sign_accessor, sign_secret_id,
                                                  prefix=_SIGN_FILE))
+            paths.append(await asyncio.to_thread(self._write_secret, held.tenant_id, evidence_accessor, evidence_secret_id,
+                                                 prefix=_EVIDENCE_FILE))
             jwt = await self._bot_jwt(gen, secret_id)
             await self._require_protected_main(wiring.repo, jwt)
             await self._prove_sign(held.tenant_id, gen, sign_secret_id)
+            await self._prove_evidence(held.tenant_id, gen, evidence_secret_id)
             step, actor = next_step(held)
             await held.commit(step=step, actor=actor, update_generations={gen.salt: {
                 "wrapped_secret": None, "secret_accessor": accessor, "host_secret_file": paths[0],
-                "sign_wrapped_secret": None, "sign_secret_accessor": sign_accessor, "sign_secret_file": paths[1]}})
+                "sign_wrapped_secret": None, "sign_secret_accessor": sign_accessor, "sign_secret_file": paths[1],
+                "evidence_wrapped_secret": None, "evidence_secret_accessor": evidence_accessor,
+                "evidence_secret_file": paths[2]}})
         except FenceMissed:  # the commit may have landed with its answer lost: the files stay (a stray one is
             raise            # dropped by prepare and remove_old_file, and teardown removes the secrets directory)
         except BaseException:
@@ -169,6 +195,18 @@ class HostActor(Actor):
         if not isinstance(signature, str) or not signature:
             raise StepFailed("the sign proof answered no signature")
 
+    async def _prove_evidence(self, tenant: str, gen: Generation, evidence_secret_id: str) -> None:
+        """The installed evidence pair works (#1546 r9): logged in as the generation's evidence login, one datakey of the
+        tenant's `evidence-<T>` key is taken and decrypted back to the same bytes."""
+        token = self.secret(await log_in(self._bao, str(gen.evidence_role_id), evidence_secret_id))
+        key, headers = evidence_key_name(tenant), {"X-Vault-Token": token}
+        made = answered(await self._bao.post(f"/v1/{TRANSIT_MOUNT}/datakey/plaintext/{key}", json={}, headers=headers))
+        plaintext, wrapped = field_of(made, "data", "plaintext"), field_of(made, "data", "ciphertext")
+        opened = answered(await self._bao.post(f"/v1/{TRANSIT_MOUNT}/decrypt/{key}", json={"ciphertext": wrapped},
+                                               headers=headers))
+        if field_of(opened, "data", "plaintext") != plaintext:
+            raise StepFailed("the evidence proof decrypted a data key to other bytes")
+
     def _write_secret(self, tenant: str, accessor: str, secret_id: str, *, prefix: str = "") -> Path:
         if not accessor or "/" in accessor or accessor.startswith("."):
             raise StepFailed("OpenBao answered an unusable secret accessor")
@@ -184,7 +222,7 @@ class HostActor(Actor):
     def _drop_unrecorded_secrets(self, tenant: str, gens: list[Generation]) -> None:
         """RC-8: every file of the tenant's secrets directory no generation still records goes."""
         keep = {Path(f) for g in gens if g.status != "destroyed"
-                for f in (g.host_secret_file, g.sign_secret_file) if f}
+                for f in (g.host_secret_file, g.sign_secret_file, g.evidence_secret_file) if f}
         folder = self._tenant_secrets(tenant)
         with contextlib.suppress(FileNotFoundError):
             for entry in folder.iterdir():
@@ -269,6 +307,40 @@ class HostActor(Actor):
         finally:
             host_lock.release_lock(fd)
 
+    async def _evidence(self, held: HeldTenant) -> None:
+        """The tenant's evidence gone from the store and the jobs database, after teardown (#1546 A-O5): see
+        `_evidence.purge_tenant`. A store or database that cannot be reached fails the step, which an operator resumes."""
+        await self._purge(held.tenant_id)
+        step, actor = next_step(held)
+        await held.commit(step=step, actor=actor)
+
+    async def _purge(self, tenant: str) -> None:
+        if self.blob is None:
+            return
+        dsn = os.environ.get("DEFENDER_DATABASE_DSN")
+        if not dsn:
+            raise StepFailed("the tenant's evidence rows cannot be purged: DEFENDER_DATABASE_DSN is not set")
+        engine = async_engine(dsn, max_connections=2)
+        try:
+            await purge_tenant(sessions(engine), self.blob, tenant)
+        finally:
+            await engine.dispose()
+
+    async def _purge_offboarded(self) -> None:
+        """Each offboarded tenant's evidence pass again; a failure is logged and the pass goes on (the next one retries)."""
+        if self.blob is None or not os.environ.get("DEFENDER_DATABASE_DSN"):
+            return
+        try:
+            offboarded = [t.id for t in await self._tenants.tenants() if t.state == "offboarded"]
+        except Exception:  # noqa: BLE001 — a failed listing never fails the pass
+            _logger.exception("evidence pass: the tenants could not be listed")
+            return
+        for tenant in offboarded:
+            try:
+                await self._purge(tenant)
+            except Exception as failed:  # noqa: BLE001 — one tenant's failed pass never stops the others
+                _logger.warning("tenant %s: the evidence pass failed, the next pass runs it again: %s", tenant, failed)
+
     async def _offboard_learning(self, tenant: str) -> None:
         """The tenant's learning rows (#1278 O6): holders told to stop, lapsed batches ended, rows purged. A live holder
         past the wait fails the step, which is retried. With no database address the step refuses: a tenant's learning rows
@@ -298,6 +370,15 @@ class HostActor(Actor):
             targets.append(root / tenant)
         for target in targets:
             _remove_tree(target, wait=self._config.teardown_wait)
+
+
+def _blob_of(config: LifecycleConfig) -> BlobStore | None:
+    """The evidence store `config` names, or None for a config that names none (a test's own)."""
+    store = config.evidence_store
+    if store is None:
+        return None
+    return BlobStore(endpoint=store.endpoint, bucket=store.bucket, access_key=store.access_key,
+                     secret_key=store.secret_key, region=store.region)
 
 
 #: Seconds between removal passes of a folder that keeps filling (#1360 O1).

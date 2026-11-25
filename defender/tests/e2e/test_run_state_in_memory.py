@@ -391,25 +391,34 @@ def _pointer(run_dir: Path) -> dict:
     return json.loads(RunPaths(run_dir).session_pointer().read_text(encoding="utf-8"))
 
 
+def _database(run_dir: Path, link: dict) -> Path:
+    """The database `run_dir`'s pointer names (#1546 design r9 "Session pointer": recorded relative to the run's folder,
+    joined back by the one resolver), as an absolute path."""
+    return session_store.run_store_path(run_dir, link["store_path"]).resolve()
+
+
 @pytest.mark.e2e
 def test_a_pointer_planted_inside_the_folder_is_not_the_case_link(tmp_path):
     run_a = _finished_run(tmp_path / "a", "o3-a")
     run_b = _finished_run(tmp_path / "b", "o3-b")
     a_link, b_link = _pointer(run_a), _pointer(run_b)
-    assert a_link["store_path"] != b_link["store_path"], "the two runs share a store"
+    a_db, b_db = _database(run_a, a_link), _database(run_b, b_link)
+    assert a_db != b_db, "the two runs share a store"
 
-    (run_a / OLD_POINTER_NAME).write_text(json.dumps(b_link), encoding="utf-8")
+    # The planted pointer names run b's database absolutely (a recorded absolute path joins to itself), so following it
+    # from inside run a's folder would open b's store.
+    (run_a / OLD_POINTER_NAME).write_text(json.dumps({**b_link, "store_path": str(b_db)}), encoding="utf-8")
 
     for open_store in (branch.open_source_store, branch.source_store_if_any):
         with open_store(run_a, source_run=_run_handle_1165(run_a)) as handle:
-            assert Path(handle.path).resolve() == Path(a_link["store_path"]).resolve(), \
+            assert Path(handle.path).resolve() == a_db, \
                 f"{open_store.__name__} followed a pointer planted inside the run folder"
-    assert session_store.resolve_store_path(_run_handle_1165(run_a)) == Path(a_link["store_path"])
+    assert session_store.resolve_store_path(_run_handle_1165(run_a)).resolve() == a_db
     assert session_store.resolve_session_id(_run_handle_1165(run_a)) == a_link.get("session_id")
 
     with branch.open_source_store(run_b, source_run=_run_handle_1165(run_b)) as control:
-        assert Path(control.path).resolve() == Path(b_link["store_path"]).resolve()
-    assert session_store.resolve_store_path(_run_handle_1165(run_b)) == Path(b_link["store_path"])
+        assert Path(control.path).resolve() == b_db
+    assert session_store.resolve_store_path(_run_handle_1165(run_b)).resolve() == b_db
 
 
 @pytest.mark.e2e

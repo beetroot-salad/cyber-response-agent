@@ -1,5 +1,8 @@
-"""#1342 O8: the worker's ending rules 1-5, one case per branch, read from the job-end record and the report a
-`ScriptedChild` leaves (setup words, cut-short facts, junk in a job-end word). Shared setup: `_worker1342`."""
+"""#1342 O8: the worker's ending rules 1-5, one case per branch, through the real worker. #1546 (A-O2, PR2, PR9): the
+worker decides from the facts the helper staged, so the `ScriptedChild` plays the helper and stages the `outcome` its
+job-end record and closing lookup stand for (`_jobs1342.facts_of_records`); the files it leaves are decoys. The worker's
+parse of a job-end record (malformed words, junk characters, out-of-vocabulary `cut_short`) retired with it: the helper
+stages such a record `refused/outcome` (`test_1546_helper_records.py`). Shared setup: `_worker1342`."""
 from __future__ import annotations
 
 import asyncio
@@ -13,6 +16,8 @@ import pytest
 
 from defender.records import job_lane, run_end
 from defender import _vocab
+from defender.tests.support.evidence._facts1546 import LAUNCH_ALERT, LAUNCH_BOX_TOKEN, LAUNCH_DIGEST, LAUNCH_LABEL
+from defender.tests.support.jobs._jobs1342 import launch_facts
 from defender.tests.support.jobs._jobs1342 import (
     CLOSING_KEY,
     NOW,
@@ -23,21 +28,17 @@ from defender.tests.support.jobs._jobs1342 import (
     is_box_token,
     job_end,
     job_store,
-    row,
 )
 from defender.tests.support.jobs._worker1342 import (
     CASES,
     MARKER,
-    _child,
+    _helper_child as _child,
     _committed,
     closing,
     _job_end_with,
     _names_code,
     _no_run_text,
-    _queued,
     _run_one,
-    _spec,
-    _worker,
 )
 from defender.tests.support.jobs import _worker1342 as _shared
 
@@ -48,28 +49,10 @@ world = _shared.world
 _no_database_address_in_the_workers_environment = _shared._no_database_address_in_the_workers_environment
 
 
-_SPELLINGS = {"trailing space": lambda w: w + " ", "trailing newline": lambda w: w + "\n",
-              "trailing tab": lambda w: w + "\t", "trailing carriage return and newline": lambda w: w + "\r\n",
-              "full-width": lambda w: w.translate({ord(c): ord(c) + 0xFEE0 for c in w if c.isascii() and c.isalpha()}),
-              "leading newline": lambda w: "\n" + w, "leading tab": lambda w: "\t" + w,
-              "leading carriage return and newline": lambda w: "\r\n" + w, "leading nul": lambda w: "\x00" + w,
-              "leading space": lambda w: " " + w, "leading zero-width space": lambda w: "\u200b" + w,
-              "leading byte-order mark": lambda w: "\ufeff" + w,
-              "zero-width space inside": lambda w: w[:2] + "\u200b" + w[2:]}
-
-
-for _key, _words in (("setup", ("refused", "crashed", "done")), ("box", ("not_started", "start_failed", "started")),
-                     ("cut_short", ("box-lost", "box-output-limit", "provider-down", "budget", "proxy-access"))):
-    for _word in _words:
-        for _how, _spell in _SPELLINGS.items():
-            CASES[f"1-job-end-{_key}-word-{_word}-{_how.replace(' ', '-')}"] = _spec(
-                files=_committed(**{"{id}.job-end.json": _job_end_with(**{_key: _spell(_word)})}), exit=0,
-                expect=("failed", "no_report", None))
-
-
 @pytest.mark.parametrize("case", list(CASES))
-async def test_o8_the_stage_comes_from_the_job_end_record_and_the_report(world, caplog, case):
-    """Rules 1-5: stage, reason and disposition from the host-held job-end record and the report read by the worker; no run text reaches the row. (O8)"""
+async def test_o8_the_stage_comes_from_the_staged_outcome_and_never_the_report(world, caplog, case):
+    """Rules 1-5: stage, reason and disposition from the staged `outcome` (#1546 PR9: `decide` over the rows), never the
+    report the child leaves; no run text reaches the row. (O8)"""
     caplog.set_level(logging.INFO, logger=WORKER_LOGGER)
     plan = CASES[case]
     stage, reason, disposition = plan["expect"]
@@ -97,9 +80,8 @@ async def test_o8_the_stage_comes_from_the_job_end_record_and_the_report(world, 
 
 
 def _job_end_cut_short(cut_short: str, *, report_committed: bool, scrub_verified: bool) -> str:
-    """The real record's own text with the fifth fact set (#1421)."""
-    return job_lane.JobEnd(setup="done", box="started", report_committed=report_committed,
-                           scrub_verified=scrub_verified, cut_short=cut_short).text()
+    """The job-end facts with the fifth set (#1421), which the stand-in helper stages as the `outcome`."""
+    return job_end(report_committed=report_committed, scrub_verified=scrub_verified, cut_short=cut_short)
 
 
 def test_p1_r7_3_a_job_end_record_is_exactly_its_five_facts_and_names_no_spend_fact():
@@ -128,16 +110,6 @@ async def test_o8_o9_a_failed_jobs_message_names_its_class_beside_the_existing_w
     assert cut_short in stored["failure_message"], stored["failure_message"]
     assert "the host committed no report" in stored["failure_message"], stored["failure_message"]
     _no_run_text(stored)
-
-
-@pytest.mark.parametrize("text", [f"box-lost {MARKER}", MARKER, "box-lost\n" + MARKER], ids=["suffixed", "bare", "multiline"])
-async def test_o8_child_text_in_the_cut_short_fact_never_reaches_the_job_message(world, text):
-    """The record is refused outside the vocabulary, so the fixed message cannot carry a child's words. (O8)"""
-    record = _job_end_with(cut_short=text)
-    _inv, stored = await _run_one(world, _child(world, exit=0, files=_committed(**{"{id}.job-end.json": record})))
-    assert (stored["stage"], stored["failure_reason"]) == ("failed", "no_report")
-    _no_run_text(stored)
-    assert "box-lost" not in stored["failure_message"], "a refused record was still read for its word"
 
 
 async def test_o8_a_committed_and_verified_report_still_completes_when_the_box_was_lost_after(world):
@@ -186,32 +158,6 @@ def test_o8_no_junk_character_leading_trailing_or_inside_a_job_end_word_makes_it
     for key, word, where in _JUNK_VARIANTS:
         text = _job_end_with(**{key: _JUNK_SPELLINGS[where](word, junk)})
         assert JobEnd.parse(text) is None, (key, word, where, text)
-
-
-@pytest.mark.parametrize("junk", _JUNK, ids=lambda c: f"U{ord(c):04X}")
-async def test_o8_a_job_end_word_with_junk_anywhere_is_a_failed_run_with_no_report(world, junk):
-    """Per junk character, one worker drain over leading, trailing and interior (the word rotating with the character): failed/no_report. The helper served each job (exit 0, #1170), so no exit code is the run's to name. (O8, M3)"""
-    base = _JUNK.index(junk)
-    variants = [(*_JOB_END_WORDS[(base + n) % len(_JOB_END_WORDS)], where) for n, where in enumerate(_JUNK_SPELLINGS)]
-    child = _child(world, exit=0, printed=MARKER)
-    order: list[tuple[str, str, str]] = []
-
-    def argv(launch):
-        key, word, where = variants[len(order)]
-        order.append((key, word, where))
-        child.files = _committed(**{"{id}.job-end.json": _job_end_with(**{key: _JUNK_SPELLINGS[where](word, junk)})})
-        return child(launch)
-
-    async with job_store(world["dsn"]) as store:
-        ids = [await _queued(store, ticket=f"T-{n}", key=f"k{n}") for n in range(len(variants))]
-        await _worker(world, store, argv, slots=1).drain()
-
-    assert len(order) == len(ids), "premise: a launch for every queued run"
-    assert len(child.seen_all()) == len(ids), "premise: every child ran"
-    for inv in ids:
-        stored = row(world["dsn"], inv)
-        assert (stored["stage"], stored["disposition"], stored["failure_reason"]) == ("failed", None, "no_report"), stored
-        _no_run_text(stored)
 
 
 # --- #1534: the disposition is the run's closing record, read through the job lane -------------------------------------
@@ -268,7 +214,8 @@ ORIGIN_1471 = "https://app.defender.test"
 KEYED_1471 = (b'{"rule": {"id": "r-1342",  "description": "sketch"},\n'
               b' "alert_id": "SEC-1471", "alert_timestamp": "2026-10-29T00:00:00Z"}\n')
 DIGEST_1471 = hashlib.sha256(KEYED_1471).hexdigest()
-LAUNCH_FIELDS = {"investigation_id", "tenant_id", "alert_id", "digest", "label", "box_token"}
+#: The launch facts every investigation claim carries (#1546: the launch record's names, now on the claim row; design: Claim).
+LAUNCH_FIELDS = {LAUNCH_ALERT, LAUNCH_DIGEST, LAUNCH_LABEL, LAUNCH_BOX_TOKEN}
 
 
 def _worker_1471(world, store, child, **kw):
@@ -330,10 +277,20 @@ async def test_1471_p5_each_helper_is_started_with_its_own_flag_digest_and_link(
         assert _values(argv, "--job") == [inv]
 
 
-async def test_1471_p5_a_flagged_rows_tenant_folder_changes_exactly_as_an_unflagged_rows_does(world):
-    """Two tenant folders that differ only in their row's flag change alike under the worker, entry for entry (added,
-    altered or removed; by kind, mode and decoded text) once each folder's own ids are masked: nothing a job can see depends
-    on the flag. (P-5; the stand-in job writes nothing)"""
+def _masked_facts(facts: dict, tenant: str, inv: str) -> str:
+    """A claim's launch facts as sorted JSON, its own row, alert, box token and tenant masked."""
+    text = json.dumps(facts, sort_keys=True)
+    for n, value in enumerate([inv, facts[LAUNCH_ALERT], facts[LAUNCH_BOX_TOKEN], tenant]):
+        text = text.replace(value, f"<v{n}>")
+    return text
+
+
+async def test_1471_p5_a_flagged_rows_tenant_folder_and_launch_facts_change_exactly_as_an_unflagged_rows_do(world):
+    """UPDATED (#1546 census: the launch record beside the run -> the claim row, whose launch facts the helper copies for
+    the job; design: Claim): two tenant folders that differ only in their row's flag change alike under the worker, entry
+    for entry (added, altered or removed; by kind, mode and decoded text) once each folder's own ids are masked, and the
+    two claims' launch facts carry the same names, each its own row's digest, and no word of the flag: nothing a job can
+    see depends on the flag, which travels on the helper's argv alone. (P-5; the stand-in job writes nothing)"""
     rows = [(T1, True, "k1"), (T2, False, "k1")]
     folders = {tenant: world["root"] / tenant for tenant, _flag, _key in rows}
 
@@ -355,13 +312,11 @@ async def test_1471_p5_a_flagged_rows_tenant_folder_changes_exactly_as_an_unflag
     assert _values(door.argvs[flagged_id], "--ticket-link") == [f"{ORIGIN_1471}/t/{T1}/investigations/{flagged_id}"], \
         "premise: the flag reached the worker"
     assert "--post-ticket" not in door.argvs[plain_id], "premise: the unflagged row carries no flag"
-
-    def launch_of(tenant, inv):
-        return json.loads((folders[tenant] / "runs" / f"{inv}.launch.json").read_text(encoding="utf-8"))
+    launch = {T1: launch_facts(world["dsn"], flagged_id), T2: launch_facts(world["dsn"], plain_id)}
+    assert all(isinstance(facts, dict) for facts in launch.values()), f"premise: both claims carry launch facts: {launch}"
 
     def masked(tenant, inv):
-        launch = launch_of(tenant, inv)
-        values = [inv, launch["alert_id"], launch["box_token"], tenant]
+        values = [inv, launch[tenant][LAUNCH_ALERT], launch[tenant][LAUNCH_BOX_TOKEN], tenant]
 
         def mask(text):
             for n, value in enumerate(values):
@@ -371,15 +326,20 @@ async def test_1471_p5_a_flagged_rows_tenant_folder_changes_exactly_as_an_unflag
         return {mask(str(path)): tuple(None if e is None else mask(e.decode("utf-8", "replace")) for e in pair)
                 for path, pair in changed[tenant].items()}
 
-    assert [is_box_token(launch_of(t, inv)["box_token"]) for t, inv in ((T1, flagged_id), (T2, plain_id))] == [True, True], \
+    assert [is_box_token(launch[t][LAUNCH_BOX_TOKEN]) for t in (T1, T2)] == [True, True], \
         "a box token is not of the decided form, which the mask would hide"
     flagged, plain = masked(T1, flagged_id), masked(T2, plain_id)
-    assert len(plain) >= 2, "premise: the worker changed the unflagged row's folder"
     assert sorted(flagged) == sorted(plain), "the flagged folder changed at other paths than the unflagged one"
     assert {n: c for n, c in flagged.items() if c != plain[n]} == {}, "an entry of the flagged folder changed otherwise"
-    for tenant, inv in ((T1, flagged_id), (T2, plain_id)):
-        assert set(launch_of(tenant, inv)) == LAUNCH_FIELDS, launch_of(tenant, inv)
-        assert launch_of(tenant, inv)["digest"] == DIGEST_1471, "premise: the record is this row's"
+    assert set(launch[T1]) == set(launch[T2]), "the flagged claim's launch facts carry other names than the unflagged one's"
+    assert _masked_facts(launch[T1], T1, flagged_id) == _masked_facts(launch[T2], T2, plain_id), \
+        "a launch fact differs with the flag"
+    assert set(launch[T1]) >= LAUNCH_FIELDS, launch[T1]
+    for tenant in (T1, T2):
+        assert launch[tenant][LAUNCH_DIGEST] == DIGEST_1471, "premise: the facts are this row's"
+        text = json.dumps(launch[tenant]).encode()
+        assert not any(w in text for w in (b"app.defender.test", b"update_ticket", b"ticket_link", b"post_ticket")), \
+            launch[tenant]
     for tenant in (T1, T2):
         for path, (_old, data) in changed[tenant].items():
             assert not any(w in (data or b"") for w in (b"app.defender.test", b"update_ticket", b"ticket_link", b"post_ticket")), path

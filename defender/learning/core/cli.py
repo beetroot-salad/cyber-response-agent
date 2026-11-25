@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from defender.learning.core.config import LoopPaths, RunAlreadyLive, RunUnprocessable
-from defender.learning.core.drains import author_drain, feedback_drain, lead_author_drain
+from defender.learning.core.drains import author_drain, feedback_drain
 from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.records.formats import TenantRefused
 
@@ -22,7 +22,8 @@ Two authoring stages, one drainer at a time each. Neither takes a run_dir: both 
 and open a PR.
 
   --author-drain       the findings queue -> the lessons corpus
-  --lead-author-drain  the queued run dirs -> the gather catalog + system skills
+  --lead-author-drain  the queued run dirs -> the gather catalog + system skills; on a host this
+                       queues a drain request (#1546 D7), which a worker runs in a job container
 
 WHERE THE FINDINGS COME FROM (#922). Until the cutover this file also carried the LEARN stage
 — `loop.py <run_dir>` and `--learn-drain` — which ran a four-role pipeline over one finished
@@ -99,6 +100,8 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
     )
     parser.add_argument("--tenant", required=True, help="tenant whose learning queues are drained")
     ns = parser.parse_args(argv[1:])
+    if ns.lead_author_drain and not ns.author_drain:
+        return _queue_drain(ns.tenant)
     # The one host acceptance (r10 A1), held for the whole drain: this process recorded under the
     # tenant's host lock, the tenant `active` with its forge wiring, its folder accepted.
     from defender import tenancy
@@ -113,6 +116,55 @@ def main(argv: list[str], *, directory: TenantDirectory | None = None) -> int:
         return _drain_admitted(ns, admitted.directory, LoopPaths.for_tenant(admitted.tenant))
 
 
+def _queue_drain(tenant_id: str) -> int:
+    """The operator's lead-author drain (#1546 D7): a `drain` host request queued for the tenant in the jobs database
+    (`DEFENDER_DATABASE_DSN`), or the one already queued or running answered; a worker runs it in a job container over
+    the runs its helper pulls. Prints `drain_request=<id>` and whether it was queued now. A tenant unknown, or being
+    removed, is exit 2."""
+    import asyncio
+    import datetime as _dt
+    import functools
+    import os
+
+    from defender import tenancy
+    from defender.jobs import Conflict, JobStore, UnknownReference
+    from defender.learning.core.store_tick import DSN_ENV
+
+    try:
+        tenant = tenancy.requested_tenant_id(tenant_id)
+    except TenantRefused as refused:
+        print(f"refused: {refused}", file=sys.stderr)
+        return 2
+    dsn = os.environ.get(DSN_ENV)
+    if not dsn:
+        print(f"refused: the drain is queued in the jobs database, and {DSN_ENV} is not set", file=sys.stderr)
+        return 2
+    from defender.migrations import DatabaseUnreachable, RevisionMismatch, check_version
+
+    try:
+        check_version(dsn)  # every entry point refuses a database not at exactly its revision
+    except (DatabaseUnreachable, RevisionMismatch) as unusable:
+        print(f"refused: the jobs database cannot be used: {unusable}", file=sys.stderr)
+        return 2
+
+    async def queue() -> tuple[str, bool]:
+        store = JobStore(dsn, clock=functools.partial(_dt.datetime.now, _dt.UTC))
+        try:
+            record, created = await store.create_drain(tenant, actor="operator")
+        finally:
+            await store.close()
+        return str(record.request_id), created
+
+    try:
+        request_id, created = asyncio.run(queue())
+    except (Conflict, UnknownReference) as refused:
+        print(f"refused: {refused}", file=sys.stderr)
+        return 2
+    print(f"drain_request={request_id}")
+    _logger.info("the lead-author drain of tenant %s is %s", tenant, "queued" if created else "already queued or running")
+    return 0
+
+
 def _drain_admitted(ns: argparse.Namespace, records: TenantDirectory, paths: LoopPaths) -> int:
     """`main` under the tenant's host acceptance: the stage, over the admitted tenant's records
     and loop paths."""
@@ -123,9 +175,6 @@ def _drain_admitted(ns: argparse.Namespace, records: TenantDirectory, paths: Loo
 
     if ns.author_drain:
         return _run_stage(lambda: author_drain(paths, directory=records))
-
-    if ns.lead_author_drain:
-        return _run_stage(lambda: lead_author_drain(paths, directory=records))
 
     if ns.feedback_drain:
         return _run_stage(lambda: feedback_drain(paths, directory=records))

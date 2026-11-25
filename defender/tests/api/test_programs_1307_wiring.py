@@ -19,7 +19,7 @@ pytest.importorskip("httpx")
 from defender.tests.support.shared._postgres1339 import empty_database  # noqa: E402,F401 — fixture
 from defender.tests.support.tenancy._active1214 import DSN_ENV  # noqa: E402
 from defender.tests.support.tenancy._host1214 import LIFECYCLE_MARK  # noqa: E402
-from defender.tests.tenancy.lifecycle_1214._support import lifecycle_config, people_settings  # noqa: E402
+from defender.tests.tenancy.lifecycle_1214._support import evidence_settings, lifecycle_config, people_settings  # noqa: E402
 
 
 
@@ -58,7 +58,9 @@ def test_the_lifecycle_builds_its_identity_service_with_a_programs_port_that_ref
                         (settings.POLL_ENV, "0.05"),
                         # #1592 r15 Settings: required, so the real `_serve` refuses without them; the sessions DSN is
                         # unreachable (the worker logs it, and the case stops at SIGTERM)
-                        *people_settings(settings)):
+                        *people_settings(settings),
+                        # #1546 A-O5: the evidence store's settings, required likewise (never reached here)
+                        *evidence_settings()):
         monkeypatch.setenv(name, value)
 
     constructors = {HostActor.__init__.__code__: "host", ManagementService.__init__.__code__: "service",

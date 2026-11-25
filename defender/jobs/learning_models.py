@@ -25,6 +25,7 @@ from sqlalchemy import (
     Table,
     Text,
     func,
+    select,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -54,6 +55,8 @@ LANES = (AUTHOR_LANE, LEAD_LANE, FEEDBACK_LANE)
 BRANCH_PREFIX = {AUTHOR_LANE: "lessons/", LEAD_LANE: "lead-author/", FEEDBACK_LANE: "feedback/"}
 REVERT_PREFIX = "lessons/revert-"
 STATUSES = ("waiting", "in_batch", "held", "published", "skipped", "dead")
+#: The item statuses a tick reads: what can be claimed and what is in a batch (the rest is history or a person's).
+OPEN_WORK = ("waiting", "in_batch")
 BATCH_KINDS = ("author", "revert", "registry")
 #: The batch kinds that hold their lane while not ended (O3, H4; A4: a registry batch is the feedback lane's writer
 #: lease). One set, so no site lists the kinds by hand.
@@ -499,3 +502,11 @@ def _sqlstate(fault: BaseException) -> str | None:
         if isinstance(code, str) and len(code) == 5:
             return code
     return None
+
+
+def curation_request_runs(tenant_id: str) -> Any:
+    """A subquery: the `source_run` of each of `tenant_id`'s open curation requests, the lead lane's only kind that names a
+    run (#1546 D7: what a drain's input set is drawn from, as the tick's own rule)."""
+    return select(WorkItemRow.source_run).where(
+        WorkItemRow.tenant_id == tenant_id, WorkItemRow.kind == "curation_request",  # lint-half-table: ok — the curation request is the lead lane's one kind that names a run, as the tick's own rule
+        WorkItemRow.status.in_(OPEN_WORK), WorkItemRow.source_run.is_not(None))

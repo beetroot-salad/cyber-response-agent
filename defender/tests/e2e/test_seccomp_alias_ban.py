@@ -266,6 +266,23 @@ def test_the_alias_probe_reruns_in_full_and_cleans_its_own_leavings_on_both_arms
     )
 
 
+def test_the_run_lane_probes_the_ban_from_tmp_with_no_host_folder_writable(tmp_path):
+    """The run lane's alias probe runs in `/tmp`, the run folder is bound read-only, and the probe leaves nothing in it. (D4)"""
+    run = run_tree(tmp_path)
+    rec = AliasProbeDocker(BAN_IN_FORCE)
+    box = _start_investigation_lane(run, rec)
+    try:
+        create = rec.create_argv
+        binds = [create[i + 1] for i, a in enumerate(create) if a == "--mount"]
+    finally:
+        box_mod.stop_box(box, docker=rec)
+
+    assert [argv[argv.index("-w") + 1] for argv in rec.probe_argvs] == ["/tmp"]
+    assert [b for b in binds if "readonly" not in b] == [], "the run lane still binds a host folder read-write"
+    assert f"type=bind,source={run},target=/runs/current,readonly" in binds
+    assert [p.name for p in run.iterdir() if p.name.startswith(".alias-probe")] == []
+
+
 # The fault that must not be swallowed
 def test_ban_not_in_force_is_not_opt_out_able(tmp_path, monkeypatch):
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")

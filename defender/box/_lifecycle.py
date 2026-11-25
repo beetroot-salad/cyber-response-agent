@@ -80,7 +80,7 @@ def _box_flags(spec: BoxSpec) -> tuple[str, ...]:
 
 def _input_dir_source(run_dir: Path) -> Path:
     """The run's input directory (the alert and its record), checked to be a real, populated
-    directory before it is bound read-only over the writable run folder. A missing, empty or
+    directory before it is bound read-only over the run folder. A missing, empty or
     non-directory source, or a link at its name, is a `BoxFault` naming the directory: a bind
     source that is not that directory would hand the box a tree the host did not set up, and
     there is no fallback to a writable bind."""
@@ -118,8 +118,11 @@ def _run_lane_mounts(
     is mounted. Reads nothing: `_create_argv` checks the input directory before it binds it."""
     data_root = "Set DEFENDER_DATA_ROOT to a path"
     mounts = [
-        _LaneMount("run dir", run_dir, data_root, MODEL_RUN, readonly=False),
-        # Over the writable run folder, a directory of its own: a file bind is undone by a host
+        # Read-only (#1546 D4): the box writes no file in its run folder, so nothing in the tree
+        # it could plant or alias is left for the scrub to find; the run's files are the host
+        # side's, written through the job socket's helper.
+        _LaneMount("run dir", run_dir, data_root, MODEL_RUN, readonly=True),
+        # Over the run folder, a directory of its own: a file bind is undone by a host
         # rename, a directory bind is not (#1222 A1).
         _LaneMount("run input directory", Path(run_dir) / RUN_LAYOUT.alert_input_dir, data_root,
                    MODEL_RUN / RUN_LAYOUT.alert_input_dir.as_posix(), readonly=True),
@@ -603,7 +606,9 @@ def _probe_started(
     )
     if staged_token is not None:
         _read_back_stage_token(staged_token, docker, name)
-    _probe_alias_ban(docker, name, Path(MODEL_RUN), spec.runtime)
+    # In `/tmp`, the lane's one writable place: the run folder is read-only, and the ban is a
+    # syscall filter, so any writable directory proves it (#1546 D4).
+    _probe_alias_ban(docker, name, Path("/tmp"), spec.runtime)
 
 
 @dataclass(frozen=True)
@@ -1310,6 +1315,12 @@ def stop_and_scrub(
             f"teardown failed under an in-flight failure: {e} — the box may "
             f"be leaked, and {tree} was NOT scrubbed (the walk needs a provably dead box).",
         )
+    except BaseException as e:
+        # Any other way the teardown ends is a skipped walk too: the tree must not keep an
+        # earlier verdict, or none, as if it had been judged.
+        write_did_not_run(tree, f"teardown ended abnormally before the reap scan could run: {e!r}",
+                          write_verdict=write_verdict)
+        raise
     if box_down:
         try:
             scrub_tree(tree)

@@ -24,8 +24,8 @@ from defender.job_socket import Refused
 from defender.records.formats import TenantId
 
 #: The job kinds the helper is started for: the worker's three job kinds, then its host requests (#1471: a readiness
-#: check and an adoption).
-KINDS = ("investigation", "learning", "post-step", "readiness", "adoption")
+#: check and an adoption; #1546 D7: a learning drain).
+KINDS = ("investigation", "learning", "post-step", "readiness", "adoption", "drain")
 #: The exit statuses of a `docker run` that never ran the job: docker's own failure (an image missing, a runtime
 #: refused, 125), a command it could not invoke (126) or find (127). Every kind's after-the-container hook reads them.
 DOCKER_DID_NOT_RUN = frozenset({125, 126, 127})
@@ -172,6 +172,8 @@ class Session:
     #: The status the helper exits with once it served the job to its end: 0, or a post-step's answer whether work still
     #: waits (`job_host.NOTHING_WAITS`, `WORK_WAITS`), which its `exited` sets.
     served_status: int = 0
+    #: Why the job ended before its container (the helper's own words, as its log says them), once it did.
+    ending_why: str | None = None
     #: Every id this helper minted for the claim (the job's own, a sibling's run, a draft): `pass` and `box.start`
     #: name only these (A6).
     minted: set[str] = field(default_factory=set)
@@ -189,7 +191,29 @@ class Session:
     #: container's tenant bind (O1) and the folder every path the helper derives is confined to (H10). None until
     #: the tenant is accepted.
     tenant_folder: Path | None = None
+    #: The claim's own folders (#1546 A-O1), made at the start for every kind but the post-step: the job's root (its
+    #: `DEFENDER_DATA_ROOT`, `<root>/.job-roots/<claim>/`, with `<T>/` inside), its inputs (bound read-only) and the
+    #: helper's upload spool (bound into nothing). None until made.
+    job_root: Path | None = None
+    job_inputs: Path | None = None
+    job_spool: Path | None = None
+    #: The helper's seams of the evidence store and the tenant's evidence keys (None: from the settings), the per-object
+    #: upload budget, the store's rows and the claim's evidence state (`_evidence.Evidence`), once set up.
+    evidence: Any = None
+    evidence_keys: Any = None
+    upload_budget: float | None = None
+    rows: Any = None
+    evidence_state: Any = None
+    #: When the helper was first told to stop (`time.monotonic()`), for the uploads' grace.
+    signalled_at: float | None = None
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    @property
+    def job_tenant_root(self) -> Path:
+        """`<job root>/<T>/`, the job's own tenant folder."""
+        if self.job_root is None:
+            raise Refused("this job has no root", "internal")
+        return self.job_root / self.tenant_id
 
     def tenant_accepted(self, tenant: Any) -> None:
         """The tenant `prepare` admitted: its folder is the one this job's container and boxes are confined to."""
@@ -205,16 +229,35 @@ class Session:
             raise Refused("the job's tenant is not accepted yet", "internal")
         return confined(self.tenant_folder, path, must_exist=must_exist)
 
+    def _claim_folder_of(self, path: Path) -> Path | None:
+        for folder in (self.job_root, self.job_inputs):
+            if folder is not None and path.is_relative_to(folder):
+                return folder
+        return None
+
+    def inside(self, path: Path, *, must_exist: bool = True) -> Path:
+        """`path` judged with no link followed: from the data root down when it lies in the claim's root or inputs
+        (the job can swap any folder of its root, that one included), else inside the accepted tenant's folder."""
+        from ._paths import confined
+
+        path = Path(path)
+        if self._claim_folder_of(path) is not None:
+            return confined(self.root_folder, path, must_exist=must_exist)
+        return self.inside_tenant(path, must_exist=must_exist)
+
     def judge_binds(self, sources: Iterable[Path | str], *, must_exist: bool = True) -> None:
         """Every bind source of a box under the accepted tenant's folder, judged from `<T>/` down with no link
-        followed at any component (`inside_tenant`, H10), so a job that swaps any folder on the way for a link is
+        followed at any component (`inside_tenant`, H10), and every one under the claim's root or inputs (#1546 A-O9)
+        from the data root down the same way (`inside`), so a job that swaps any folder on the way for a link is
         refused (`confinement`) before the box is started over it; with `must_exist` false a source not there yet
-        passes (the start makes it, or refuses it). A source outside `<T>/` (the code tree, the claim's scratch
+        passes (the start makes it, or refuses it). Any other source (the code tree, the claim's scratch
         folder) is not judged here: the claim's `shared/` folder, which holds the oracle boxes' scratch folders, is
         one the job can write (#1557 H3), so a swap there is not refused by this judgement."""
         for source in sources:
             path = Path(source)
-            if self.tenant_folder is None or path.is_relative_to(self.tenant_folder):
+            if self._claim_folder_of(path) is not None:
+                self.inside(path, must_exist=must_exist)
+            elif self.tenant_folder is None or path.is_relative_to(self.tenant_folder):
                 self.inside_tenant(path, must_exist=must_exist)
 
     def require_minted(self, ident: object) -> str:

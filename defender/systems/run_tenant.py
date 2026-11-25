@@ -22,7 +22,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from defender.tenancy import Tenant, accept_tenant
+from defender.tenancy import JobTenant, Tenant, accept_tenant
 from defender.records.formats import TenantId, TenantRefused
 from defender.tenancy import RecordsUnreachable
 from defender.systems.verb_dispositions import DispositionError, RunGrants, require_gather_query, run_grants
@@ -68,14 +68,14 @@ class RunReadiness:
 
 @dataclasses.dataclass(frozen=True)
 class RunTenant:
-    """One run's tenant: the accepted `Tenant`, its grants, item 3's dispatch identity, and what
+    """One run's tenant: the accepted `Tenant` (or, in a job container, its `JobTenant`), its grants, item 3's dispatch identity, and what
     its settings say (#1107).
 
     `correlation` is `None` for a run that dispatches no lead zero (a resumed sibling),
     otherwise the checked `CorrelationDispatch`, whose `system` is `None` when the table
     withholds the lead."""
 
-    tenant: Tenant
+    tenant: Tenant | JobTenant
     grants: RunGrants
     correlation: CorrelationDispatch | None
     #: One entry per enabled system record (#1366 O6), its stored settings held verbatim (keys
@@ -144,7 +144,7 @@ def refusals() -> tuple[type[Exception], ...]:
 
 
 def run_tenant_for(  # noqa: PLR0913 — the tenant, its records, its two roots, the staged token, the flag
-    tenant: Tenant, *, dispatches_lead_zero: bool, records: TenantRecords, catalog: Catalog,
+    tenant: Tenant | JobTenant, *, dispatches_lead_zero: bool, records: TenantRecords, catalog: Catalog,
     agent_root: Path, settings_root: Path, stage_token: Path | None = None, defender_dir: Path | None = None,
 ) -> RunTenant:
     """An accepted tenant, ready to run — or `TenantRefused` carrying run start's refusal.

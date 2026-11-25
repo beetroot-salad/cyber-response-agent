@@ -22,6 +22,8 @@ AuditAction = Literal[
     # #1471: the host requests (readiness checks and adoptions), announced by the store after commit.
     "readiness.start", "readiness.claim", "readiness.finish", "readiness.takeover",
     "adoption.start", "adoption.claim", "adoption.finish", "adoption.takeover",
+    # #1546 D7: the drain host request.
+    "drain.start", "drain.claim", "drain.finish", "drain.takeover",
 ]
 
 __all__ = ["SYSTEM", "AuditAction", "announce"]

@@ -5,6 +5,7 @@ from defender.tests.support.shared._locations_1210 import fixture_data_root, loc
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
+import contextlib
 import copy
 import json
 import os
@@ -450,9 +451,11 @@ def test_dc8_a_drain_without_an_accepted_tenant_serves_nothing_and_accepts_none(
 
 
 @pytest.mark.postgres
-def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch, capsys, migrated_database):  # noqa: F811 — the imported fixture
-    """With no data root the drain command is refused at its host acceptance, before it claims anything: its request stays
-    waiting in the store, with no attempt charged and not dead (r10 A1: the data root is judged at acceptance, step 2)."""
+def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
+    """With no data root the operator's drain command claims and decides nothing: the curation request stays waiting in the
+    store, with no attempt charged and not dead (r10 A1). #1546 D7 update: the command only queues a `drain` host request (a
+    run of the drain container, never the host's own tick), so whether it also refuses for want of a root is not pinned
+    here; what survives is that the command itself never serves a row. The drain over the restored root still serves it."""
     from defender.learning.core import cli
     from defender.tests.support.tenancy._launch_publish_p4 import directory_for_argv
 
@@ -463,13 +466,11 @@ def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypa
     root = os.environ[P.DATA_ROOT_ENV]
     monkeypatch.delenv(P.DATA_ROOT_ENV)
     argv = ["loop.py", "--lead-author-drain", "--tenant", H.T_ID]
-    with pytest.raises(SystemExit) as refused:
+    with contextlib.suppress(SystemExit):  # a refusal is allowed, the command's queueing is not pinned here
         cli.main(argv, directory=directory_for_argv(argv))
-    assert refused.value.code not in (0, None)
-    assert P.DATA_ROOT_ENV in capsys.readouterr().err, "the refusal does not name the data root"
     item = P.store_items(migrated_database, H.T_ID, "curation_request")["case-t"]
-    assert (item.status, item.attempts) == ("waiting", 0), f"the refused command claimed or decided the request: {item}"
-    # Positive control: the refusal was the missing root. With the root back, the same request is served by a drain.
+    assert (item.status, item.attempts) == ("waiting", 0), f"the command claimed or decided the request: {item}"
+    # Positive control: the request was servable. With the root back, the same request is served by a drain.
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
     P.queue_row(t_paths, "case-t", case)
     lane = P.Lane()

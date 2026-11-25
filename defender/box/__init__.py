@@ -48,12 +48,18 @@ from defender.execution.box_codec import (
     encode_response,
 )
 from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.py/tests import `box.scrub`, `box.RunTainted`
+    CLEAN,
     Finding,
+    Lister,
     RunTainted,
+    classify_entry,
     scrub,
+    state_of_verdict,
     tree_unsandboxed,
     tree_verified,
     verdict_path,
+    unreadable_finding,
+    verdict_state,
     write_did_not_run,
 )
 from ._ending import BoxEnding, BoxLost
@@ -138,7 +144,7 @@ from ._docker import (
     resolve_rootfs,
 )
 from ._check import BoxCheckFailed, require_box_check
-from ._data_folder import make_data_folder
+from ._data_folder import make_data_folder, remove_data_folder
 from ._host_env import provider_scrubbed_environ, run_env
 from ._relay import RELAY_LOST, relay_exec, relay_halt, relay_stop, relay_window
 from ._clock import clock_dir
@@ -193,7 +199,9 @@ __all__ = [
     "ClassVar",
     "DEFAULT_SPEC",
     "DockerFn",
+    "CLEAN",
     "Finding",
+    "Lister",
     "ImageInputError",
     "Mapping",
     "Mount",
@@ -207,6 +215,9 @@ __all__ = [
     "RELAY_LOST",
     "RelayTransport",
     "RunTainted",
+    "classify_entry",
+    "state_of_verdict",
+    "unreadable_finding",
     "START_TOKEN_LABEL",
     "TENANT_LABEL",
     "CLAIM_ENV",
@@ -300,6 +311,7 @@ __all__ = [
     "relay_window",
     "require_box_check",
     "make_data_folder",
+    "remove_data_folder",
     "require_image",
     "require_runtime",
     "resolve_rootfs",
@@ -316,6 +328,7 @@ __all__ = [
     "unboxed_executor",
     "uuid",
     "verdict_path",
+    "verdict_state",
     "write_did_not_run",
     "write_guarded",
 ]

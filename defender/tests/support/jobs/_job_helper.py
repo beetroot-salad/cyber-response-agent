@@ -25,6 +25,7 @@ from __future__ import annotations
 from defender.tests.support.sandbox import _box_check1469 as _check1469
 
 import contextlib
+import dataclasses
 import ctypes
 import hashlib
 import json
@@ -559,15 +560,12 @@ class HelperScene:
         (self.runs / f"{inv}.alert.json").write_bytes(ALERT_BYTES)
 
     def end(self, inv: str) -> Any:
-        """The job-end record `<runs>/<inv>.job-end.json` as `JobEnd`, or None when there is none."""
+        """The job's end facts as `JobEnd`, or None when none was staged: #1546 (A-O2, PR2) the job sends its `outcome` over
+        the socket and the helper stages it under the claim; no job-end file is written (`job_end_facts`)."""
         from defender.records.job_lane import JobEnd
 
-        path = self.runs / f"{inv}.job-end.json"
-        if not path.exists():
-            return None
-        parsed = JobEnd.parse(path.read_text(encoding="utf-8"))
-        assert parsed is not None, f"not a job-end record: {path.read_text(encoding='utf-8')!r}"
-        return parsed
+        facts = job_end_facts(self.dsn, self.claim)
+        return None if facts is None else JobEnd(**facts)
 
     def unmap(self) -> None:
         """The tenant's alert mapping taken away (a premise for the alert-mapping refusal)."""
@@ -589,6 +587,24 @@ class HelperScene:
         if kind == "investigation" and alert_digest is not None:
             out += ["--alert-digest", alert_digest]
         return [*out, "--parent-pid", str(os.getppid() if parent is None else parent)]
+
+
+#: The end facts the older tests compare, as the staged `outcome` holds them (design: `outcome`, investigation: job-end
+#: facts with `scrub`); `scrub_verified` reads `scrub == "clean"` (only `clean` verifies, A-O10).
+END_FACTS = ("setup", "box", "report_committed", "scrub_verified", "cut_short")
+
+
+def job_end_facts(dsn: str, claim: str) -> dict[str, Any] | None:
+    """The staged investigation `outcome` under `claim` as the five end facts, or None when none was staged (a
+    `refused/outcome` is no outcome). The `scrub` three states map to `scrub_verified` (`clean` only)."""
+    from defender.tests.support.shared._postgres1339 import execute
+
+    found = execute(dsn, "SELECT body FROM jobs.staged_facts WHERE token = %s AND name = 'outcome'", (claim,))
+    if not found:
+        return None
+    body = found[0][0]
+    return {"setup": body.get("setup"), "box": body.get("box"), "report_committed": body.get("report_committed"),
+            "scrub_verified": body.get("scrub") == "clean", "cut_short": body.get("cut_short")}
 
 
 @contextlib.contextmanager
@@ -638,8 +654,11 @@ def helper_scene(  # noqa: PLR0913 — one knob per way a case plants its tenant
 
 # --- pieces every helper test file shares --------------------------------------------------------------------------
 
+_REQUEST: list[Any] = []  # the running test's fixture request (`process_state`), for `drive_helper`'s store seams
+
+
 @pytest.fixture(autouse=True)
-def process_state():
+def process_state(request):
     """The helper ties itself to its parent and takes SIGTERM on the test's thread, so give both back afterwards. Until it
     installs its own handler, a SIGTERM is recorded here rather than ending the test process. Autouse in a module that
     imports it."""
@@ -647,7 +666,9 @@ def process_state():
     prior_signal = ctypes.c_int(0)
     libc.prctl(2, ctypes.byref(prior_signal))  # PR_GET_PDEATHSIG
     prior = signal.signal(signal.SIGTERM, lambda *_: None)
+    _REQUEST[:] = [request]
     yield
+    _REQUEST.clear()
     libc.prctl(1, prior_signal.value)  # PR_SET_PDEATHSIG
     signal.signal(signal.SIGTERM, prior)
 
@@ -694,7 +715,7 @@ class ComponentSwap:
 def swap_every_component(scene: HelperScene, c: Container, docker: ContainerStandIn,
                          fields: dict[str, Any]) -> tuple[list[Path], list[ComponentSwap]]:
     """H10's sweep, run by the job: `box.start(**fields)` once on the untouched folders (the control, then stopped), the
-    bind sources under `<T>/` read off that box's `docker create`, then each folder on the way from `<T>/` down to a
+    bind sources under `<T>/`, the claim's root or its inputs (#1546) read off that box's `docker create`, then each folder on the way from `<T>/` down to a
     source (the source itself included) in turn moved aside and replaced by a link to a folder of the other tenant that
     mirrors what lay below it (so the resolved path exists and is a real folder there), `box.start(**fields)` asked again,
     and the folder put back. Returns `(sources, arms)`."""
@@ -704,11 +725,17 @@ def swap_every_component(scene: HelperScene, c: Container, docker: ContainerStan
     sources_create = docker.creates()[-1]
     with contextlib.suppress(job_host.Refused):
         c.request("box.stop", handle=first["handle"])
-    tenant = scene.root / scene.tenant
+    # #1546 (design "The job's folders", helper-side bind judging covers the root and inputs): a bind source lies under the
+    # tenant folder, the claim's root or its inputs; every folder below that base down to the source is swapped.
+    bases = (scene.root / scene.tenant, scene.root / ".job-roots" / scene.claim, scene.root / ".job-inputs" / scene.claim)
+
+    def base_of(path: Path) -> Path | None:
+        return next((b for b in bases if path.is_relative_to(b) and path != b), None)
+
     sources = sorted({Path(m["source"]) for m in parse_mounts(sources_create)
-                      if m["source"] and Path(m["source"]).is_relative_to(tenant) and Path(m["source"]) != tenant})
-    components = sorted({tenant.joinpath(*s.relative_to(tenant).parts[:i + 1])
-                         for s in sources for i in range(len(s.relative_to(tenant).parts))},
+                      if m["source"] and base_of(Path(m["source"])) is not None})
+    components = sorted({base_of(s).joinpath(*s.relative_to(base_of(s)).parts[:i + 1])
+                         for s in sources for i in range(len(s.relative_to(base_of(s)).parts))},
                         key=lambda p: (len(p.parts), str(p)))
     arms = []
     for n, component in enumerate(components):
@@ -746,7 +773,7 @@ def after_the_signal(scene: HelperScene, kind: str, request: str, fields: dict) 
     tenant_folder = scene.root / scene.tenant
 
     def state():
-        return (len(signer.payloads), len(docker.creates()), listing(tenant_folder / "run-knowledge"),
+        return (len(signer.payloads), len(docker.creates()), listing(run_copies(scene)),  # #1546: copies in the inputs
                 listing(tenant_folder / "drafts"))
 
     def job(c) -> int:
@@ -767,6 +794,107 @@ def after_the_signal(scene: HelperScene, kind: str, request: str, fields: dict) 
     return got
 
 
+def job_runs(scene: HelperScene, claim: str | None = None) -> Path:
+    """#1546 (design "The job's folders"): the runs folder of the job's tenant folder in its root,
+    `<data root>/.job-roots/<claim>/<T>/runs/`, where the helper makes the run folder and writes its copies of the launch facts
+    and alert; the host's `<T>/runs/` holds none of the job's."""
+    return scene.root / ".job-roots" / (claim or scene.claim) / scene.tenant / "runs"
+
+
+def run_copies(scene: HelperScene, claim: str | None = None) -> Path:
+    """#1546: where the helper makes a run's knowledge copy, in the claim's inputs folder (read-only to the job):
+    `<data root>/.job-inputs/<claim>/run-knowledge/` (the helper's own `launch` names it `run_copy`)."""
+    return scene.root / ".job-inputs" / (claim or scene.claim) / "run-knowledge"
+
+
+def next_claim(scene: HelperScene, monkeypatch: Any) -> HelperScene:
+    """#1546 (design: "a row is claimed at most once; retries are new rows"): the scene under a claim of its own for a further
+    job in the same test (the worker hands each child its claim, `CLAIM_ENV`), so a second helper run is not served the first
+    job's claim row."""
+    from defender.box import CLAIM_ENV
+
+    claim = uuid.uuid4().hex
+    monkeypatch.setenv(CLAIM_ENV, claim)
+    return dataclasses.replace(scene, claim=claim)
+
+
+def _worker_file(path: Path) -> bytes | None:
+    """A file the older tests plant as the worker's, read as a plain regular file (None otherwise)."""
+    return path.read_bytes() if path.is_file() and not path.is_symlink() else None
+
+
+def claim_for(scene: HelperScene, argv: list[str]) -> None:
+    """#1546 (design: Claim, "inserted in the claim's own transaction for every launched child"; census: the worker's launch
+    record and alert beside the run became the claim row and the alert row): the owner row and claim the worker's claim
+    transaction leaves for the job `argv` starts, when `scene.claim` has none yet (a test that planted its own, through
+    `_helper_evidence1546.plant`, keeps it). An investigation's launch facts are the launch record the test planted as the
+    worker's (`<runs>/<inv>.launch.json`, a JSON object) and its alert the planted alert's bytes; the helper never reads either
+    file. Kinds other than investigation, learning and post-step plant their own."""
+    from defender.tests.support.jobs import _helper_evidence1546 as H
+    from defender.tests.support.shared._postgres1339 import execute
+
+    kind = (flag_values(argv, "--kind") or [""])[0]
+    job = (flag_values(argv, "--job") or [None])[0]
+    source = (flag_values(argv, "--source") or [None])[0]
+    found = execute(scene.dsn, "SELECT kind, investigation_id, learning_job_id FROM jobs.claims WHERE token = %s",
+                    (scene.claim,))
+    if found:
+        if scene.claim not in _AUTO_CLAIMED or _claims_this_job(found[0], kind, job):
+            return  # a claim the test planted itself (it keeps it, a wrong one included), or this job's own
+        # The scene's claim is the one this function planted for an earlier job of the same scene: the worker claims
+        # each job on its own ("a row is claimed at most once; retries are new rows"), so this job gets a claim of its
+        # own, in the scene and in the environment the helper reads it from (`CLAIM_ENV`), as `next_claim` gives one.
+        _fresh_claim(scene)
+    _AUTO_CLAIMED.add(scene.claim)
+    if kind == "investigation" and job is not None:
+        record = _worker_file(scene.runs / f"{job}.launch.json")
+        try:
+            launch = json.loads(record) if record is not None else None
+        except ValueError:
+            launch = None
+        try:
+            H.plant(scene, kind, owner=job, launch=launch if isinstance(launch, dict) else None,
+                    alert=_worker_file(scene.runs / f"{job}.alert.json"))
+        except Exception:  # noqa: BLE001 — a tenant the store takes no job for has no claim: the helper refuses it unclaimed
+            return
+    elif kind == "learning" and job is not None:
+        H.plant(scene, kind, owner=job, source=source if source and _is_uuid(source) else None)
+    elif kind == "post-step":
+        H.plant(scene, kind)
+
+
+#: The claim tokens `claim_for` planted itself (never a claim a test planted through `_helper_evidence1546.plant`).
+_AUTO_CLAIMED: set[str] = set()
+
+
+def _claims_this_job(row: tuple, kind: str, job: str | None) -> bool:
+    """Whether a claim row `(kind, investigation_id, learning_job_id)` is the one this job's argv names (a post-step's
+    hold claim is the tenant's, reused by every post-step helper of the scene)."""
+    claim_kind, investigation, learning = row
+    if claim_kind != kind:
+        return False
+    if kind == "investigation":
+        return str(investigation) == str(job)
+    if kind == "learning":
+        return str(learning) == str(job)
+    return True
+
+
+def _fresh_claim(scene: HelperScene) -> None:
+    from defender.box import CLAIM_ENV
+
+    scene.claim = uuid.uuid4().hex
+    os.environ[CLAIM_ENV] = scene.claim  # the test's monkeypatch restores the value it set at teardown
+
+
+def _is_uuid(text: str) -> bool:
+    try:
+        uuid.UUID(text)
+    except ValueError:
+        return False
+    return True
+
+
 @dataclass
 class HelperRan:
     rc: int | None = None
@@ -780,14 +908,42 @@ class HelperRan:
         return len(self.fetch.calls) if self.fetch is not None else 0
 
 
-def drive_helper(scene: HelperScene, argv: list[str], *, docker: ContainerStandIn, signer: Any,
+def _default_store(scene: HelperScene) -> Any:
+    """The real evidence store for `scene`'s tenant (`_helper_evidence1546.store_for`) over the running test's fixtures
+    (the root conftest holds the request and the `garage`, `openbao` and `evidence_keys` fixtures). A test with no request
+    held, or whose store fixtures cannot be found, fails here, loudly: a helper left unconfigured would be refused at
+    setup and the case would test that refusal instead of its own subject."""
+    from defender.tests.support.jobs._helper_evidence1546 import store_for
+    from defender.tests.support.shared import _running_request as running
+
+    request = running.current() or (_REQUEST[0] if _REQUEST else None)
+    if request is None:
+        pytest.fail("a helper rig ran with no test request held (the root conftest's `_running_request`): its evidence "
+                    "store cannot be configured; pass `default_store=False` for a case that leaves it unconfigured")
+    try:
+        return store_for(request, scene)
+    except pytest.FixtureLookupError as missing:
+        pytest.fail(f"the helper's evidence store cannot be configured: {missing.msg or missing!r}; pass "
+                    "`default_store=False` for a case that leaves it unconfigured")
+
+
+def drive_helper(scene: HelperScene, argv: list[str], *, docker: ContainerStandIn, signer: Any, default_store: bool = True,
                  **seams: Any) -> HelperRan:
     """`job_host.main` on this thread (it takes SIGTERM here); its knowledge comes through the one fetch seam (#1618 FORCED, see
-    `knowledge_1618._support`): the real fetch child over the scene's remote unless the case hands its own `fetch`."""
+    `knowledge_1618._support`): the real fetch child over the scene's remote unless the case hands its own `fetch`.
+    `default_store=False`: the caller's seams are exactly the store the helper gets (a #1546 case that leaves the store or
+    key login unconfigured on purpose)."""
     from defender import job_host
     from defender.tests.tenancy.knowledge_1618 import _support as K
 
     ran = HelperRan()
+    claim_for(scene, argv)
+    if default_store and "evidence" not in seams:
+        # #1546 (design Flows: "an unconfigured store or evidence-key login is refused at helper setup, terminally"): every
+        # helper run is configured with the real store and the tenant's evidence key (markers `garage`, `openbao`), found
+        # through the root conftest's fixtures for any module; `default_store=False` is the only way out.
+        for name, seam in _default_store(scene).seams.items():
+            seams.setdefault(name, seam)
     seams.setdefault("fetch", K.fetch_seam(scene.t))
     ran.fetch = seams["fetch"]
     try:
@@ -922,6 +1078,10 @@ _DRIVER = textwrap.dedent("""\
     if cfg.get("forge_token") is not None:  # the forge credential the scene's git listener accepts (#1618: a drain's pushes)
         from defender.tests.support.jobs._job_helper import ForgeCredentialRecorder
         seams["forge"] = ForgeCredentialRecorder(accepted=cfg["forge_token"])
+    if cfg.get("store"):  # #1546: the real store and the tenant's key login, as `drive_helper` hands them
+        from defender import evidence
+        seams["evidence"] = evidence.BlobStore(**cfg["store"]["blob"])
+        seams["evidence_keys"] = evidence.EvidenceKeys(**cfg["store"]["login"])
     sys.exit(job_host.main(cfg["argv"], signer=A.MarkedSigner(), fetch=K.fetch_seam(scene), **seams))
 """)
 
@@ -936,6 +1096,19 @@ _PARENT = textwrap.dedent("""\
     with open(cfg["exit"], "w") as out:
         out.write(str(status))
 """)
+
+
+def _process_store(scene: HelperScene) -> dict[str, Any] | None:
+    """#1546 (design Flows: an unconfigured store or key login is refused at helper setup): the store and key-login values a
+    helper process is configured with, as `drive_helper` configures one in-process (`_default_store`: loud when the store
+    cannot be configured)."""
+    from defender.tests.support.jobs._helper_evidence1546 import evidence_login
+
+    store = _default_store(scene)
+    g = store.garage
+    return {"blob": {"endpoint": g.endpoint, "bucket": g.bucket, "access_key": g.access_key, "secret_key": g.secret_key,
+                     "region": g.region},
+            "login": {"addr": store.openbao.addr, **evidence_login(store.openbao, scene.tenant)}}
 
 
 class ProcessHelper:
@@ -956,10 +1129,18 @@ class ProcessHelper:
         shim = bin_dir / "docker"
         shim.write_text(_SHIM.replace("PYTHON", sys.executable).replace("STATE", str(self.state)), encoding="utf-8")
         shim.chmod(0o755)
+        # #1546: the worker's claim transaction precedes the helper for every kind it launches (design: Claim, "inserted
+        # in the claim's own transaction for every launched child"), as `drive_helper` plants it; before the helper's
+        # environment is taken, since a further job of the scene is given a claim of its own there (`claim_for`).
+        claim_for(scene, argv)
         env = child_env({**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"})
+        # a kind that pushes evidence (`job_host._evidence.EVIDENCE_KINDS`) is configured with the real store, as
+        # `drive_helper` configures it in-process; an unconfigured one is refused at setup (design Flows)
+        pushes = (flag_values(argv, "--kind") or [""])[0] in ("investigation", "learning")
         cfg = json.dumps({"argv": argv, "commit": scene.t.commit, "tenant": scene.tenant, "origin": scene.t.origin,
                           "data_root": str(scene.root), "requests": str(self.state / "requests.log"),
-                          "exit": str(self.state / "helper-exit"), "forge_token": forge_token})
+                          "exit": str(self.state / "helper-exit"), "forge_token": forge_token,
+                          "store": _process_store(scene) if pushes else None})
         command = [sys.executable, "-c", _PARENT, cfg, _DRIVER] if worker else [sys.executable, "-c", _DRIVER, cfg]
         self.proc = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE)

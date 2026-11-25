@@ -59,8 +59,19 @@ _PERMITTED = (stat.S_ISREG, stat.S_ISDIR)
 _MESSAGE_CAP = 20
 
 
+def classify_entry(entry: Path) -> Finding | None:
+    """The one classifier: judge one entry, `None` when it may survive a boxed run (a lone
+    regular file or a directory), else the `Finding` the scrub raises on and the bundle packer
+    lists and leaves out (`defender.evidence.bundle`). An entry that cannot be judged is an
+    `unreadable` finding, never a pass. Returns rather than raises so a walk reports every
+    finding."""
+    try:
+        return _check_entry(entry)
+    except OSError as e:
+        return unreadable_finding(entry, e)
+
+
 def _check_entry(entry: Path) -> Finding | None:
-    """Judge one entry. Returns rather than raises so the walk reports every finding."""
     st = entry.lstat()
     if not any(pred(st.st_mode) for pred in _PERMITTED):
         target = None
@@ -82,7 +93,7 @@ def _check_entry(entry: Path) -> Finding | None:
     return None
 
 
-def _unreadable(path: Path, err: OSError) -> Finding:
+def unreadable_finding(path: Path, err: OSError) -> Finding:
     """An entry the walk could not judge is refused, never skipped.
 
     `os.walk`'s default `onerror` silently drops an unlistable directory, and a propagating
@@ -112,6 +123,17 @@ def _render_findings(run_dir: Path, findings: Sequence[Finding]) -> str:
 
 # The scan's verdict lives beside the tree it judges, keyed by the tree's name. In-tree the box
 # (root on that mount) could plant or forge it.
+#
+# Three states, one reader (`verdict_state`): `clean` (the walk completed and found nothing),
+# `tainted` (it found something, or could not judge an entry), `not_run` (no walk was made). The
+# file keeps the `ran` key readers of the earlier spelling look for, and `ran` is true only for
+# `clean`: a reader that knows nothing of the states can never take a tainted tree for verified.
+
+CLEAN = "clean"
+TAINTED = "tainted"
+NOT_RUN = "not_run"
+
+_CLEAN_DOC = {"ran": True, "reason": "walk completed"}
 
 
 def verdict_path(tree: Path) -> Path:
@@ -119,9 +141,14 @@ def verdict_path(tree: Path) -> Path:
     return RunPaths(tree).scrub_verdict()
 
 
-def _write_verdict(tree: Path, doc: dict, *, write_verdict: Callable[[dict], None] | None = None) -> None:
+def _write_verdict(tree: Path, doc: dict, *, write_verdict: Callable[[dict], None] | None = None,
+                   replaces_clean: bool = False) -> None:
     """Write the verdict sidecar, best-effort: a missing verdict already reads as unverified,
-    and a write failure must not replace the signal the caller is holding."""
+    and a write failure must not replace the signal the caller is holding.
+
+    `replaces_clean`: the verdict is not `clean`, so when the write fails an earlier `clean`
+    one must not stay standing for a tree that just failed its walk; the file is removed (on
+    the default path only: an injected writer is its caller's to keep honest)."""
     try:
         if write_verdict is not None:
             write_verdict(doc)
@@ -129,13 +156,18 @@ def _write_verdict(tree: Path, doc: dict, *, write_verdict: Callable[[dict], Non
             write_guarded(verdict_path(tree), json.dumps(doc))
     except OSError as e:
         _logger.error(f"could not write the scan verdict for {tree}: {e!r}")
+        if replaces_clean and write_verdict is None:
+            try:
+                verdict_path(tree).unlink(missing_ok=True)
+            except OSError as gone:
+                _logger.error(f"could not remove the stale scan verdict for {tree}: {gone!r}")
 
 
 def write_did_not_run(tree: Path, reason: str, *, write_verdict: Callable[[dict], None] | None = None) -> None:
     """Record that the walk was skipped (the box was not provably dead), so the tree is
     distinguishable from one never judged. Used on teardown and startup faults, per run dir or
     writable mount source. Best-effort."""
-    _write_verdict(tree, {"ran": False, "reason": reason}, write_verdict=write_verdict)
+    _write_verdict(tree, {"ran": False, "reason": reason}, write_verdict=write_verdict, replaces_clean=True)
 
 
 def mark_unsandboxed(tree: Path, *, read_verdict: Callable[[], str | None] | None = None, write_verdict: Callable[[dict], None] | None = None) -> None:
@@ -162,57 +194,87 @@ def tree_unsandboxed(tree: Path) -> bool:
     return isinstance(doc, dict) and doc.get("sandboxed") is False
 
 
-def tree_verified(tree: Path) -> bool:
-    """Whether the verdict records `ran: true`; absent or anything else reads as unverified.
+def state_of_verdict(text: str | None) -> str | None:
+    """The state a verdict file's text records: `clean`, `tainted` or `not_run`; `None` for no
+    text, text that is not a verdict, or a verdict naming no state. The one parse of the file."""
+    if text is None:
+        return None
+    try:
+        doc = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(doc, dict):
+        return None
+    named = doc.get("state")
+    if named == TAINTED:
+        return TAINTED
+    if named is not None and named not in (CLEAN, NOT_RUN):
+        return None
+    ran = doc.get("ran")
+    if ran is True:
+        return CLEAN
+    if ran is False:
+        return NOT_RUN
+    return None
 
-    This only says the walk completed (no redirection); it is not a contents-intact claim,
-    since the scan permits any regular file the box may have rewritten."""
+
+def verdict_state(tree: Path) -> str | None:
+    """The scan verdict of `tree`: `clean`, `tainted`, `not_run`, or `None` when it has none
+    (never judged, or the file is unreadable). The one reader of the verdict file."""
     p = verdict_path(tree)
     if not p.is_file():
-        return False
+        return None
     try:
-        doc = json.loads(read_text_utf8(p))
-    except (OSError, json.JSONDecodeError):
-        return False
-    return doc.get("ran") is True
+        return state_of_verdict(read_text_utf8(p))
+    except OSError:
+        return None
+
+
+def tree_verified(tree: Path) -> bool:
+    """Whether the verdict is `clean`; anything else reads as unverified.
+
+    This only says the walk completed and found nothing; it is not a contents-intact claim,
+    since the scan permits any regular file the box may have rewritten."""
+    return verdict_state(tree) == CLEAN
 
 
 Lister = Callable[..., Iterator[tuple[str, list[str], list[str]]]]
 
 
-def scrub(run_dir: Path, *, lister: Lister = os.walk, write_verdict: Callable[[dict], None] | None = None) -> None:
+def scrub(run_dir: Path, *, lister: Lister = os.walk, write_verdict: Callable[[dict], None] | None = None) -> str:
     """Walk `run_dir` and refuse anything that is not a plain regular file or directory.
 
-    `lister` is the walk seam, for producing partial walks in tests. Every walk writes a
-    verdict outside the tree before returning or raising: `ran: true` if every entry reached
-    was classified (findings may still exist), `ran: false` if any became unreadable."""
+    Returns `"clean"` when the walk completed and found nothing. Anything found, and any entry
+    the walk could not judge, writes the `tainted` verdict and raises `RunTainted`. `lister` is
+    the walk seam, for producing partial walks in tests. Every walk writes its verdict outside
+    the tree before returning or raising, replacing an earlier one."""
     findings: list[Finding] = []
 
     def refuse_unwalkable(err: OSError) -> None:
-        findings.append(_unreadable(Path(err.filename or run_dir), err))
+        findings.append(unreadable_finding(Path(err.filename or run_dir), err))
 
-    for parent, dirs, files in lister(run_dir, onerror=refuse_unwalkable):
-        for name in (*dirs, *files):
-            entry = Path(parent) / name
-            try:
-                finding = _check_entry(entry)
-            except OSError as e:
-                finding = _unreadable(entry, e)
-            if finding is not None:
-                findings.append(finding)
-
-    partial = any(f.kind == "unreadable" for f in findings)
-    if partial:
-        _write_verdict(run_dir, {
-            "ran": False,
-            "reason": "the walk could not finish reliably: an entry became unreadable",
-        }, write_verdict=write_verdict)
-    else:
-        _write_verdict(run_dir, {"ran": True, "reason": "walk completed"}, write_verdict=write_verdict)
+    try:
+        for parent, dirs, files in lister(run_dir, onerror=refuse_unwalkable):
+            for name in (*dirs, *files):
+                finding = classify_entry(Path(parent) / name)
+                if finding is not None:
+                    findings.append(finding)
+    except OSError as e:
+        findings.append(unreadable_finding(run_dir, e))
+    except BaseException as e:
+        # The walk itself failed: no verdict on the tree, and an earlier one must not stand.
+        write_did_not_run(run_dir, f"the walk failed: {e!r}", write_verdict=write_verdict)
+        raise
 
     if not findings:
-        return
+        _write_verdict(run_dir, _CLEAN_DOC, write_verdict=write_verdict)
+        return CLEAN
     # Sort for a deterministic report. By `Path`, not `str`: they disagree where a separator
     # meets a character below '/' (`a/b` vs `a-c/x`).
     findings.sort(key=lambda f: f.path)
+    unreadable = sum(f.kind == "unreadable" for f in findings)
+    reason = (f"the walk found {len(findings)} offending entr{'y' if len(findings) == 1 else 'ies'}"
+              + (f", {unreadable} it could not read" if unreadable else ""))
+    _write_verdict(run_dir, {"ran": False, "state": TAINTED, "reason": reason},
+                   write_verdict=write_verdict, replaces_clean=True)
     raise RunTainted(_render_findings(run_dir, findings), findings)

@@ -19,8 +19,10 @@ def upgrade_marking_tenants(dsn: str, *, to: str | None = None) -> None:
     `0026_host_requests`, and only when the upgrade goes on to head, every pending action is finished as the
     operator does before upgrading: `creating` becomes `active`, `offboarding` becomes `offboarded`, and the action, its
     step, actor and failure are cleared. A call that stops at `to` (the revision's own backfill test) finishes nothing,
-    so the rows it asserts stay. Only the states the callers plant are mapped; any other state stops loudly."""
-    from defender.migrations import upgrade
+    so the rows it asserts stay. Only the states the callers plant are mapped; any other state stops loudly.
+
+    #1546 r9 B: the rest of the way to head goes through `upgrade_with_retention`, so every tenant not offboarded has its
+    retention row before `*_retention_required`."""
     from defender.tests.migrations.test_1214_migrations import _upgrade_to
 
     _upgrade_to(dsn, BEFORE_DROP)
@@ -34,4 +36,23 @@ def upgrade_marking_tenants(dsn: str, *, to: str | None = None) -> None:
     assert states <= {"creating", "active"}, f"the helper finishes only creating and active tenants, found {states}"
     execute(dsn, "UPDATE tenancy.tenants SET state = CASE state WHEN 'creating' THEN 'active' ELSE state END, "
                  "pending_action = NULL, step = NULL, step_actor = NULL, failure = NULL WHERE pending_action IS NOT NULL")
+    upgrade_with_retention(dsn)
+
+
+#: The values a test of something else gives a tenant planted before #1546's retention row (any two in 30-730 days).
+PLANTED_RETENTION_DAYS = 90
+
+
+def upgrade_with_retention(dsn: str) -> None:
+    """Upgrade `dsn` to head as a database whose tenants all have their retention row (#1546 r9 B: what creating a tenant
+    writes since #1546): up to the revision before `*_retention_required`, a row for every tenant not offboarded that lacks
+    one, then on to head. That revision refuses an upgrade over such a tenant; a test of something else plants the rows."""
+    from defender.migrations import upgrade
+    from defender.tests.migrations.test_1214_migrations import _upgrade_to
+    from defender.tests.support.shared import _revisions1485 as revisions
+
+    _upgrade_to(dsn, revisions.down_of(revisions.by_suffix("_retention_required")))
+    execute(dsn, "INSERT INTO tenancy.evidence_retention (tenant_id, investigation_days, learning_days) "
+                 "SELECT id, %s, %s FROM tenancy.tenants WHERE state <> 'offboarded' ON CONFLICT DO NOTHING",
+            (PLANTED_RETENTION_DAYS, PLANTED_RETENTION_DAYS))
     upgrade(dsn)

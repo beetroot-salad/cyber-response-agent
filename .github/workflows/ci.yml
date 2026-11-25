@@ -42,8 +42,10 @@ concurrency:
 # and on 2026-11-19 PR #1575 (#1487) ran every tick test over both the in-process store and the port, which added about
 # 2,000 seconds of file cost, so two shards were cancelled at 15 with every test that reported passing and the bound went
 # to 20 with the cost table raised for those files; the two heaviest port cases then each ran 11-12 minutes on one worker,
-# and the one scheduled last was cut off at 20, so the bound went to 25),
-# and a stall that burns the gVisor step's full 5-minute bound still lands inside 25, so the
+# and the one scheduled last was cut off at 20, so the bound went to 25; and on 2026-11-24 PR #1625 (#1546) cut
+# shard 5 off at 25 with about 89% of its tests reported while two others ran 21-22 minutes of pytest, so the bound
+# went to 35 (owner-approved)),
+# and a stall that burns the gVisor step's full 5-minute bound still lands inside 35, so the
 # step's own timeout fires first and names the command. Raising the step bound without raising
 # this one inverts that and hands every stall to GitHub's generic job cancel.
 jobs:
@@ -59,7 +61,7 @@ jobs:
   test:
     name: test (shard ${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -82,6 +84,13 @@ jobs:
       - name: Build the job image
         timeout-minutes: 6
         run: docker build -f .devcontainer/Dockerfile.job -t defender-job:latest .
+
+      # #1546 done-when 1: the test-only layer over the job image (adds pytest, which the replay harness the real
+      # investigation entry runs imports). tests/e2e/test_1546_evidence_replay.py starts its job container from it and
+      # FAILS, never skips, on CI when it or the `runsc-job` runtime is missing.
+      - name: Build the test-only job replay image
+        timeout-minutes: 3
+        run: docker build -f tooling/testing/Dockerfile.job-replay -t defender-job-replay:latest .
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -157,6 +166,18 @@ jobs:
             -e 'BAO_LOCAL_CONFIG={"unsafe_allow_api_audit_creation": true}' \
             -p 127.0.0.1:8200:8200 openbao/openbao:2.4.1 server -dev
           timeout 60 sh -c 'until docker exec -e BAO_ADDR=http://127.0.0.1:8200 defender-openbao bao status >/dev/null 2>&1; do sleep 1; done'
+
+      # #1546 evidence store (`garage`-marked tests): a single-node Garage (S3-compatible) with one key and one
+      # bucket; the script exports DEFENDER_TEST_GARAGE_* to the steps after it. Started here for the same
+      # reason as PostgreSQL above.
+      - name: Start Garage for the evidence-store contract
+        run: tooling/testing/start_garage.sh
+
+      # #1546 (triage 1, Family C): a second Garage whose `s3_region` is not Garage's default, so a store client that
+      # ignores `DEFENDER_EVIDENCE_REGION` is refused (`tests/jobs/test_1546_deployment_wiring.py`); its variables are
+      # `DEFENDER_TEST_GARAGE_REGIONAL_*`.
+      - name: Start a Garage in a region of its own for the deployment wiring test
+        run: tooling/testing/start_garage.sh defender-garage-regional 3910 eu-ci-1 DEFENDER_TEST_GARAGE_REGIONAL
 
       - name: Run unit tests
         working-directory: defender

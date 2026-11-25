@@ -37,8 +37,12 @@ def write_case_pointer(
     `session_id` is needed for a resumed run: a sibling forks into the source's database, so
     the store's root session is the source run's. Omitted for a fresh run, where readers fall
     back to the root correctly.
+
+    The database is recorded relative to the run's folder (#1546 design "Session pointer"), so a run moved whole with its
+    tenant's sessions (a bundle unpacked under another root) still names its own; `run_store_path` reads it back.
     """
-    body: dict = {"case_id": case_id, "store_path": str(store_path), CLOSING_RECORD_MARKER: True}
+    recorded = os.path.relpath(os.path.abspath(store_path), os.path.abspath(run.run_dir))
+    body: dict = {"case_id": case_id, "store_path": recorded, CLOSING_RECORD_MARKER: True}
     if session_id is not None:
         body["session_id"] = session_id
     run.observability.session_pointer.write(json.dumps(body))
@@ -56,13 +60,24 @@ class PointerUnreadable(StoreError):
 
 @dataclasses.dataclass(frozen=True)
 class CasePointer:
-    """A session pointer, parsed. `store_path` is the path the writer recorded; a reader that must agree with the job
-    lane derives the database from `case_id` instead (`SessionPaths.session_db`)."""
+    """A session pointer, parsed. `recorded` is the path the writer recorded, relative to the run's folder: only
+    `database` names the file. A reader that must agree with the job lane derives the database from `case_id` instead
+    (`SessionPaths.session_db`)."""
 
     case_id: str
-    store_path: Path
+    recorded: str
     session_id: str | None
     keeps_closing_record: bool
+
+    def database(self, run_dir: Path) -> Path:
+        """The database this pointer names for the run folder `run_dir` (`run_store_path`)."""
+        return run_store_path(run_dir, self.recorded)
+
+
+def run_store_path(run_dir: Path, recorded: str) -> Path:
+    """The one resolver of a pointer's recorded database: `recorded` joined to the run's folder, lexically (no walk
+    through the box-writable run folder resolves a link in it)."""
+    return Path(os.path.normpath(os.path.join(os.path.abspath(run_dir), recorded)))
 
 
 def parse_case_pointer(text: str) -> CasePointer:
@@ -87,7 +102,7 @@ def parse_case_pointer(text: str) -> CasePointer:
     marker = data.get(CLOSING_RECORD_MARKER, False)
     if not isinstance(marker, bool):
         raise PointerUnreadable(f"has a {CLOSING_RECORD_MARKER!r} that is not true or false")
-    return CasePointer(case_id=data["case_id"], store_path=Path(store_path), session_id=session_id or None,
+    return CasePointer(case_id=data["case_id"], recorded=store_path, session_id=session_id or None,
                        keeps_closing_record=marker)
 
 
@@ -127,8 +142,12 @@ def _case_pointer(run: Run) -> Any:
 
 
 def resolve_store_path(run: Run) -> Path:
+    """The database `run`'s pointer names, through the one run-relative resolver (`run_store_path`)."""
     data = _case_pointer(run)
-    return Path(data["store_path"])
+    recorded = data.get("store_path") if isinstance(data, dict) else None
+    if not isinstance(recorded, str) or not recorded:
+        raise PointerUnreadable(f"the session pointer of run {run.run_dir.name} names no store_path")
+    return run_store_path(run.run_dir, recorded)
 
 
 

@@ -18,6 +18,7 @@ from defender.tests.support.tenancy._active1214 import offboard_on_database
 from defender.tests.support.tenancy._twin1496 import offboard_twin
 from defender.tests.support.identity._seed1496 import seed_user
 from defender.tests.support.tenancy._twin1496 import seed_tenant
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 pytestmark = pytest.mark.anyio
 
@@ -135,7 +136,7 @@ async def test_offboarding_ends_existence_for_identity_at_once(world):
 
 async def test_a_tenant_created_by_request_is_not_existing_until_active(world):
     """A tenant born of `request_create` is `creating`: identity does not see it as existing (O1, DC-6)."""
-    record = await world.tenants.request_create(now=NOW)
+    record = await world.tenants.request_create(now=NOW, **CREATE_RETENTION)
     assert await world.identity.tenant_exists(record.id) is False
 
 

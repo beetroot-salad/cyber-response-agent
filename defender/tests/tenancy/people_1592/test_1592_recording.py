@@ -24,6 +24,7 @@ import pytest
 from defender.tests.support.identity._seed1496 import seed_membership, seed_user
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared._postgres1339 import database, execute
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 from defender.tests.support.tenancy._twin1496 import offboard_twin, seed_tenant
 from defender.tests.tenancy.people_1592._spec1592 import RequestLog, requests_port, requests_sql, sql_reader
 
@@ -344,7 +345,7 @@ async def _sign_out(w: World) -> Pair:
 
 async def _request_create(w: World) -> Pair:
     await w.mark()
-    record = await w.tenants.request_create(now=NOW)
+    record = await w.tenants.request_create(now=NOW, **CREATE_RETENTION)
     return None, str(record.id)
 
 
@@ -493,7 +494,7 @@ async def _apply(w: World, model: Model, op: str, rng: random.Random, n: int) ->
         await w.session(user, f"v-{n}")
         await w.identity.sign_out(user.id, rng.choice([f"v-{n}", f"none-{n}"]))
     elif op == "create":
-        record = await w.tenants.request_create(now=NOW)
+        record = await w.tenants.request_create(now=NOW, **CREATE_RETENTION)
         model.tenants[str(record.id)] = "creating"
     elif op in ("step", "activate", "same_state") and state == "creating":
         async with w.tenants.lock(tenant) as held:
@@ -529,6 +530,7 @@ READS = frozenset({
     "TenantRepository.forge_wiring", "TenantRepository.admission",
     "TenantRepository.alert_mapping", "TenantRepository.current_records", "TenantRepository.claimable",
     "TenantRepository.open_people_requests", "TenantRepository.lock",
+    "TenantRepository.evidence_retention",  # #1546 A-O7: the tenant's retention row
     "HeldTenant.generations", "HeldTenant.forge_wiring",
 })
 
@@ -765,6 +767,14 @@ async def _request_rotate(w: World, m: Model, r: random.Random) -> None:
     await w.tenants.request_rotate(r.choice(_tenants(m)))
 
 
+async def _set_evidence_retention(w: World, m: Model, r: random.Random) -> None:
+    """#1546 A-O7: the retention row is no people change (no trigger on `tenancy.evidence_retention`)."""
+    from defender.tenancy import EvidenceRetention
+
+    kept = EvidenceRetention(investigation_days=r.randint(30, 730), learning_days=r.randint(30, 730))
+    await w.tenants.set_evidence_retention(r.choice([T1, T2]), kept)
+
+
 async def _fail(w: World, m: Model, r: random.Random) -> None:
     tenant = r.choice(_tenants(m))
     async with w.tenants.lock(tenant) as held:
@@ -818,6 +828,7 @@ GENERATED: dict[str, Callable[[World, Model, random.Random], Any]] = {
     "IdentityRepository.purge_expired_signin_attempts": _purge_expired_signin_attempts,
     "TenantRepository.request_resume": _request_resume,
     "TenantRepository.request_rotate": _request_rotate,
+    "TenantRepository.set_evidence_retention": _set_evidence_retention,  # #1546 A-O7
     "TenantRepository.edit_people_requests": _edit_people_requests,
     "TenantRepository.people_lock": _people_lock,
     "HeldTenant.fail": _fail,

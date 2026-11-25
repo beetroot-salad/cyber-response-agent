@@ -6,9 +6,9 @@ import dataclasses
 import os
 import re
 import stat
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from defender.records.formats import (
     DataRoot,
@@ -284,6 +284,130 @@ class Tenant(RecordTenant):
         return paths_type(repo_root=repo_root, tenant=self)
 
 
+# ==========================================================================================
+# The tenant a job container sees (#1546).
+# ==========================================================================================
+
+# A job's four locations print as the path they hold (`str`), unlike the host's opaque ones: a job's folders are named
+# inside its container, and a root of its own is nothing a model's text could locate on the host.
+class _JobDataRoot(DataRoot):
+    __slots__ = ()
+
+    def __str__(self) -> str:
+        return str(unwrap_data_root(self))
+
+
+class _JobTenantRoot(TenantRoot):
+    __slots__ = ()
+
+    def __str__(self) -> str:
+        return str(unwrap_tenant_root(self))
+
+
+class _JobRunsBase(RunsBase):
+    __slots__ = ()
+
+    def __str__(self) -> str:
+        return str(unwrap_runs_base(self))
+
+
+class _JobEpisodesRoot(EpisodesRoot):
+    __slots__ = ()
+
+    def __str__(self) -> str:
+        return str(unwrap_episodes_root(self))
+
+
+@dataclasses.dataclass(frozen=True)
+class JobTenant(RecordTenant):
+    """The tenant a job container sees: its own root (`data_root`, laid out as `<root>/<T>/{runs,episodes,...}`) and its
+    read-only `inputs` folder (the run knowledge copies the helper made), and no scratch, drafts or worktrees. Its reason is
+    location (#1546 r10 (b)): the copies a container reads live in the read-only inputs, where `accept_tenant` over the
+    root would place them under `<root>/<T>/run-knowledge`, which the job can write. Every container entry builds one from
+    the launch facts (`job_tenant_from_launch`), never `accept_tenant`. The helper that made the folders
+    already admitted the tenant for the claim; what a container can check for itself is the id grammar and where the two
+    folders are, and that is what the constructor judges.
+
+    A `RecordTenant`, so the record stores and `RunsRepository` work over it unchanged. Its members are `id`, `data_root`
+    (the job root), `tenant_root`, `runs`, `episodes`, `runs_repository()`, `run_knowledge` and
+    `root_names()`; `runs_legacy` and `episodes_legacy` raise; it has no `knowledge`, `settings`, `agent`, lock, scratch,
+    drafts or worktrees.
+
+    Built from an id and two absolute paths (a `str` id is parsed, a `DataRoot` taken as it is); `TenantRefused` for an id
+    that is no tenant id, a relative or unresolvable path, a folder inside the running checkout's `defender/` tree, or a
+    root and inputs where one holds the other."""
+
+    id: TenantId
+    data_root: DataRoot
+    inputs: Path
+
+    def __post_init__(self) -> None:
+        tenant_id = TenantId(self.id)
+        root = unwrap_data_root(self.data_root) if isinstance(self.data_root, DataRoot) else Path(self.data_root)
+        inputs = Path(self.inputs)
+        _TenantPaths(DataRoot(root), tenant_id)  # the id, an absolute root outside the code tree: the host's one rule
+        if not inputs.is_absolute():
+            raise TenantRefused(f"job inputs {str(inputs)!r} must be an absolute path")
+        resolved_root, resolved_inputs = _resolve_or_refuse(root), _resolve_or_refuse(inputs)
+        _refuse_inside_defender_tree(resolved_inputs, inputs)
+        if resolved_root.is_relative_to(resolved_inputs) or resolved_inputs.is_relative_to(resolved_root):
+            raise TenantRefused("a job's root and its inputs must be two separate folders")
+        object.__setattr__(self, "id", tenant_id)
+        object.__setattr__(self, "data_root", _JobDataRoot(root))
+        object.__setattr__(self, "inputs", inputs)
+
+    @property
+    def _layout(self) -> _TenantLayout:
+        return _TenantLayout(unwrap_data_root(self.data_root) / self.id)
+
+    @property
+    def tenant_root(self) -> TenantRoot:
+        return _JobTenantRoot(self._layout.tenant_root)
+
+    @property
+    def runs(self) -> RunsBase:
+        return _JobRunsBase(self._layout.runs)
+
+    @property
+    def episodes(self) -> EpisodesRoot:
+        return _JobEpisodesRoot(self._layout.episodes)
+
+    @property
+    def runs_legacy(self) -> LegacyRunsRoot:
+        raise TenantRefused("a job tenant has no legacy runs folder")
+
+    @property
+    def episodes_legacy(self) -> LegacyEpisodesRoot:
+        raise TenantRefused("a job tenant has no legacy episodes folder")
+
+    @property
+    def run_knowledge(self) -> Path:
+        """The folder of the run knowledge copies the helper made, one `<run id>/` each, in the read-only inputs."""
+        return _TenantLayout(self.inputs).run_knowledge
+
+    def root_names(self) -> dict[str, str]:
+        """How text shown to a model or an operator names this job's folders instead of locating them (as `Tenant`'s): its
+        own folder `<tenant folder>`, its root `<data root>` and its inputs `<job inputs>`."""
+        return {**_paths.root_spellings(self.inputs, "<job inputs>"),
+                **_paths.root_spellings(unwrap_data_root(self.data_root), "<data root>"),
+                **_paths.root_spellings(unwrap_tenant_root(self.tenant_root), "<tenant folder>")}
+
+    def runs_repository(self) -> RunsRepository[JobTenant]:
+        """This job's runs repository, over its root; the package is imported here, lazily (it imports tenancy)."""
+        from defender.records import RunsRepository
+
+        return RunsRepository(self)
+
+
+def job_tenant_from_launch(data_root: DataRoot, raw_id: object, launch: Mapping[str, Any]) -> JobTenant:
+    """The `JobTenant` of `raw_id` over `data_root` (the job's root) and the inputs folder the launch facts the job's host
+    helper handed over name (`inputs_dir`, an absolute path): `TenantRefused` when they name none, or the constructor's."""
+    inputs = launch.get("inputs_dir")
+    if not isinstance(inputs, str) or not inputs:
+        raise TenantRefused("the launch facts name no inputs folder (`inputs_dir`)")
+    return JobTenant(id=requested_tenant_id(raw_id), data_root=data_root, inputs=Path(inputs))
+
+
 def requested_tenant_id(raw: object) -> TenantId:
     """The tenant a request names (`--tenant`), checked against the id grammar — the ONE rule
     every entry point applies to it before accepting: absent is refused (there is no default
@@ -318,10 +442,11 @@ def box_mounted_episodes(data_root: DataRoot, raw_id: object) -> EpisodesRoot:
     return EpisodesRoot(_TenantPaths(data_root, TenantId(raw_id)).episodes)
 
 
-def job_tenant_folder(tenant: Tenant) -> Path:
+def job_tenant_folder(tenant: Tenant | JobTenant) -> Path:
     """`<data root>/<T>/` of an accepted tenant, as a plain folder: the explicit owner mount export
     for the per-job host helper (#1170), which binds it whole into its job's container at its own
-    path (O1) and judges every path it derives below it with no link followed (H10). A join:
+    path (O1) and judges every path it derives below it with no link followed (H10); of a `JobTenant`,
+    its own folder in the job's root (#1546). A join:
     nothing is read or made."""
     return unwrap_tenant_root(tenant.tenant_root)
 
@@ -584,12 +709,14 @@ ISSUER_ROLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}")
 # The data root (D2): typed selection and explicit owner comparisons/display.
 # ==========================================================================================
 
-def resolve_data_root() -> DataRoot:
+def resolve_data_root(environ: Mapping[str, str] | None = None) -> DataRoot:
     """The one path from `DEFENDER_DATA_ROOT` to an absolute, symlink-resolved root. No
     default: an unset or empty value is refused, naming the variable (settled by the user).
     Called once by an entry point; the root is handed inward from there. Learning state now
-    belongs to the selected tenant below this root; there is no ambient state-root override."""
-    raw = os.environ.get(_DATA_ROOT_ENV, "")
+    belongs to the selected tenant below this root; there is no ambient state-root override.
+    `environ`: the environment the entry was handed (a job container's, #1546: the claim's own
+    root), default this process's."""
+    raw = (os.environ if environ is None else environ).get(_DATA_ROOT_ENV, "")
     if not raw:
         raise TenantRefused(f"{_DATA_ROOT_ENV} is not set — there is no default data root")
     root = Path(raw)

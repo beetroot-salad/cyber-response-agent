@@ -308,5 +308,9 @@ def test_o4_fork_store_location(tmp_path, data_root):
     assert not (sib / "session_store_pointer.json").exists(), (
         "the fork wrote its case pointer inside the box-writable run dir")
     expected = H.sessions_dir(data_root, TID) / f"{T.SOURCE_CASE_ID}.db"
-    assert Path(pointer["store_path"]).resolve() == expected.resolve()
+    # #1546 (design r9 "Session pointer"): recorded relative to the sibling's run folder, joined back by the one resolver.
+    from defender.records import session_store
+
+    assert not Path(pointer["store_path"]).is_absolute(), pointer
+    assert session_store.run_store_path(sib, pointer["store_path"]).resolve() == expected.resolve()
     assert not (sib.parent.parent / "sessions").exists(), "the fork opened a store of its own"

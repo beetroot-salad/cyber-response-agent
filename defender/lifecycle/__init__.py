@@ -8,6 +8,7 @@ The service alone holds the forge and OpenBao admin powers; the API never loads 
 
 from __future__ import annotations
 
+from defender.lifecycle._evidence import sweep_evidence
 from defender.lifecycle._host import HostActor
 from defender.lifecycle._job import StepFailed
 from defender.lifecycle._people import PeopleWorker
@@ -27,5 +28,5 @@ from defender.lifecycle.config import ConfigRefused, LifecycleConfig
 __all__ = [
     "UID_ENTRY", "ConfigRefused", "HostActor", "InMemoryForgeSessions", "LifecycleConfig", "ManagementService",
     "PeopleWorker", "PostgresForgeSessions", "RunsFoldersRefused", "SessionRow", "StepFailed", "UnreadableSession",
-    "git_runner", "integration_runner", "make_runs_folders", "serve", "session_uid",
+    "git_runner", "integration_runner", "make_runs_folders", "serve", "session_uid", "sweep_evidence",
 ]

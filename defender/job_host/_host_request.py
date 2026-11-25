@@ -6,7 +6,8 @@ and the reason a refusal that wrote no record of its own ends with). From that, 
 - the request's id as the worker handed it (`request_id`): a `HostRequestId`, or the helper's own failure;
 - the tenant's admission through the helper's records (`admit_host_tenant`, `session.directory`: the process's own when None), and
   the tenant's state as the same records say it (`tenant_state`);
-- the one result record, create-only (`write_once`): one already there is kept, this one logged;
+- the one result, staged as the claim's `result` fact, create-once (`write_once`): one already there is kept, this one
+  logged;
 - the ending decided before the container (`end_before_container`): a stop writes none (the stopping worker ends the row, R13-5); any
   other writes the kind's failed record unless one is already there, so a helper that served its job always leaves one;
 - after the container (`after_container`): a `docker run` that never ran the entry (so wrote no record) is a start failure."""
@@ -30,11 +31,10 @@ _REFUSED = "refused"
 
 @dataclass(frozen=True)
 class ResultLane:
-    """One host-request kind's result record in the tenant's job lane."""
+    """One host-request kind's result record, staged as the claim's `result` fact (#1546 PR2): the kind, its failed
+    shape, and the reason a refusal that staged no result of its own ends with."""
 
     kind: str
-    read: Callable[[Any, str], Any]
-    write: Callable[[Any, str, Any], None]
     failed: Callable[[str], Any]
     #: The failed reason of a refusal before the container whose step wrote no record of its own.
     refused_reason: str
@@ -74,28 +74,23 @@ def tenant_state(session: Session) -> str | None:
         return None
 
 
-def written(session: Session, lane: ResultLane) -> bool:
-    """Whether the request's result record is there (a malformed one counts: it is the container's, and kept)."""
-    from defender.records import job_lane
+def written(session: Session, _lane: ResultLane) -> bool:
+    """Whether the request's result is staged (a refused one counts: it is the container's, and kept)."""
+    from . import _evidence
 
-    try:
-        with job_lane.JobLane.open(session.root, session.tenant_id) as opened:
-            return lane.read(opened, str(session.job_id)) is not None
-    except (OSError, job_lane.JobLaneRefused):
-        return False
+    ev = _evidence.state(session)
+    return ev.has("result") or ev.has("refused/result")
 
 
 def write_once(session: Session, lane: ResultLane, record: Any) -> None:
-    """The request's one result record, create-only: one already there is kept, and this one logged, not written. One
-    that cannot be written raises, so the helper exits non-zero, which the worker reads as the helper's own failure."""
-    from defender.records import job_lane
+    """The request's one result, staged create-once: one already there is kept, and this one logged, not staged."""
+    import json
 
-    try:
-        with job_lane.JobLane.open(session.root, session.tenant_id) as opened:
-            lane.write(opened, str(session.job_id), record)
-    except FileExistsError:
-        _logger.error("%s %s: a result record is already there; it is kept, and this one (%s) is not written",
-                      lane.kind, session.job_id, record.text())
+    from . import _evidence
+
+    if not _evidence.state(session).stage("result", json.loads(record.text())):
+        _logger.error("%s %s: a result is already staged (or the claim ended); this one (%s) is not", lane.kind,
+                      session.job_id, record.text())
 
 
 def end_before_container(lane: ResultLane) -> Callable[[Session, str], None]:

@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from defender.api.models import InvestigationStatus
+from defender.tests.support.jobs._ending1546 import complete_through_the_store
 from defender.tests.support.jobs._jobs1342 import ALERT_BYTES, DESCRIPTION, TITLE, JobsAudit, register_tenant
 from defender.tests.support.tenancy._mapping1345 import FIXTURE_ALERT_MAPPING
 
@@ -86,12 +87,21 @@ async def _alert(store: Any, tenant: str, ticket: str, fired: dt.datetime = AT) 
 
 async def _ended(store: Any, adapter: Any, alert_id: str, *, stage: str = "completed", tenant: str = A, key: str = "k1",
                  **figures: Any) -> str:
-    """An investigation of `alert_id` taken through the store's own claim and ended in `stage`; its id."""
+    """An investigation of `alert_id` taken through the store's own claim and ended in `stage`; its id. #1546 (design Flows
+    "Investigation end" 5: "A learning job is queued from an investigation only when its state is `complete`"): a
+    `completed` end is the worker's normal end through `decide` and `apply` over its claim's facts and an uploaded bundle
+    (`_ending1546.complete_through_the_store`), so its auto learning job is queued as before; any other stage is stated
+    (`finish`), which queues none either way."""
+
     investigation, _ = await adapter.create_investigation(_principal(tenant), alert_id, key)
     claimed = await store.claim()
     assert claimed is not None
     assert claimed.record.investigation_id == investigation.investigation_id
-    await store.finish(tenant, investigation.investigation_id, stage=stage, **figures)
+    if stage == "completed":
+        assert figures.pop("failure_reason", None) is None, "a completed end has no failure reason"
+        assert await complete_through_the_store(store, tenant, str(investigation.investigation_id), **figures)
+    else:
+        await store.finish(tenant, investigation.investigation_id, stage=stage, **figures)
     return str(investigation.investigation_id)
 
 
@@ -118,7 +128,7 @@ class RealBackend:
 
     async def learning_jobs(self, tenant: str, times: list[dt.datetime]) -> list[str]:
         """Each job's id read from its table by its own investigation, in creation order: never from the read under test."""
-        from sqlalchemy import select
+        from sqlalchemy import select, update
 
         from defender.jobs.models import LearningJobRow
 
@@ -130,6 +140,10 @@ class RealBackend:
             async with self.store._sessions() as session:
                 found = (await session.execute(select(LearningJobRow.id).where(LearningJobRow.investigation_id == investigation))).scalars().all()
             assert len(found) == 1, "one auto job per ended investigation"
+            # #1546 (code-record owner decision D10): the job's `created_at` is the database's clock, not the store's; the
+            # case's time layout (its ties included) is the one the list is judged by, so the job is stamped at `t` here.
+            async with self.store._tx() as session:
+                await session.execute(update(LearningJobRow).where(LearningJobRow.id == found[0]).values(created_at=t))
             ids.append(str(found[0]))
         self.clock.at = AT
         return ids
@@ -606,7 +620,8 @@ async def test_o10_a_learning_job_starts_replays_by_request_id_and_is_refused_un
     assert await adapter.list_learning_jobs(A, investigation_id=queued.investigation_id, after=None, limit=5) == []
 
     await store.claim()
-    await store.finish(A, queued.investigation_id, stage="completed", disposition="benign", cost_usd=1.0)
+    # #1546 design Flows 5: only an end whose evidence is `complete` is learned from (the worker's `decide` + `apply`)
+    assert await complete_through_the_store(store, A, str(queued.investigation_id), disposition="benign", cost_usd=1.0)
     job, created = await adapter.create_learning_job(who, queued.investigation_id, "c-1")
     again, created_again = await adapter.create_learning_job(who, queued.investigation_id, "c-1")
     other, created_other = await adapter.create_learning_job(who, queued.investigation_id, "c-2")
@@ -626,7 +641,16 @@ async def test_o6_a_learning_job_carries_the_stores_fields_by_name(store, adapte
     """Every wire field equals the store record's field of the same name. (O6)"""
     from defender.api.models import LearningJob
 
+    from sqlalchemy import update
+
+    from defender.jobs.models import LearningJobRow
+
     investigation_id = await _ended(store, adapter, await _alert(store, A, "T-1"), disposition="benign", cost_usd=1.0)
+    # #1546 (code-record owner decision D10): the auto job's `created_at` is the database's clock, not the store's; it is
+    # stamped at `AT` here (as `RealBackend.learning_jobs` does), so the wire's `created_at` is judged against a known value.
+    async with store._tx() as session:
+        await session.execute(update(LearningJobRow).where(LearningJobRow.investigation_id == investigation_id)
+                              .values(created_at=AT))
     [stored] = await store.list_learning_jobs(A, investigation_id=investigation_id, after=None, limit=5)  # FC-13
     wire = await adapter.get_learning_job(A, stored.learning_job_id)
     for name in LearningJob.model_fields:

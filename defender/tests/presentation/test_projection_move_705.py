@@ -192,9 +192,13 @@ def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
     tenant = ensure_d9_tenant()
     runs = current_data_root() / tenant / "runs"
     runs.mkdir(exist_ok=True)
-    # The run -> case link is a sidecar beside the run folder, so the move carries it.
+    # The run -> case link is a sidecar beside the run folder, so the move carries it, and the database it names, which
+    # it records relative to the run (#1546 design-r9 "Session pointer"), goes to the same place beside the moved run.
     from defender.records import RunPaths
+    from defender.tests.support.storage._carry_sessions1546 import carry_session_store
+
     moved = runs / run_dir.name
+    carry_session_store(run_dir, moved, move=True)
     shutil.move(RunPaths(run_dir).session_pointer(), RunPaths(moved).session_pointer())
     return tenant, Path(shutil.move(run_dir, moved))
 
@@ -272,10 +276,14 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
     if breakage == "missing-pointer":
         pointer.unlink()
     else:
+        from defender.records.session_store import run_store_path
+
         body = json.loads(pointer.read_text())
-        Path(body["store_path"]).unlink()
+        named = run_store_path(run_dir, body["store_path"])  # recorded relative to the run (#1546 design-r9)
+        assert named.is_file(), f"premise: the pointer names the run's database, {named}"
+        named.unlink()
         for suffix in ("-wal", "-shm"):
-            Path(str(body["store_path"]) + suffix).unlink(missing_ok=True)
+            Path(str(named) + suffix).unlink(missing_ok=True)
         store.connection.close()
 
     # the standalone re-render really exits non-zero: the real script, argv and broken input
@@ -301,6 +309,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
         from defender.records import closing
 
         assert closing.FAULT_WORDING["database-missing"] in str(raised.value), str(raised.value)
+        assert str(named) not in str(raised.value), str(raised.value)
         assert str(body["store_path"]) not in str(raised.value), str(raised.value)
     assert not (run_dir / "runtime.html").is_file(), (
         "a failed render must not leave a page behind that a reader would trust")

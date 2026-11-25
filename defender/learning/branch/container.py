@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -32,7 +33,14 @@ from defender.kit.faults import AdapterFault
 
 _logger = logging.getLogger(__name__)
 
-__all__ = ["JobContainer", "NotInContainer", "sigterm_on_stdin_eof"]
+__all__ = ["JobContainer", "NotInContainer", "interrupt_on_sigterm", "sigterm_on_stdin_eof"]
+
+
+def interrupt_on_sigterm(_signum: int, _frame: Any) -> None:
+    """A container entry's SIGTERM handler: the first SIGTERM is a `KeyboardInterrupt`; every later one is ignored, so
+    the unwind it starts is not itself interrupted."""
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    raise KeyboardInterrupt
 
 
 class NotInContainer(RuntimeError):

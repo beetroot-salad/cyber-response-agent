@@ -98,8 +98,9 @@ def test_g15_a_link_at_the_derived_episode_name_is_passed_over_and_left_untouche
 def test_g16_a_source_pointer_naming_another_tenants_store_is_refused_before_anything_is_spent(
         tmp_path):
     import json
+    import os
 
-    from defender.records import RunPaths
+    from defender.records import RunPaths, session_store
 
     est, src = P.launch_source(tmp_path)
     beta = P.second_tenant(location_path(P.data_root)(), H.U_ID)
@@ -107,10 +108,13 @@ def test_g16_a_source_pointer_naming_another_tenants_store_is_refused_before_any
     pointer = RunPaths(src).session_pointer()
     honest = pointer.read_text(encoding="utf-8")
     doc = json.loads(honest)
-    foreign = Path(location_path(beta.sessions)) / Path(doc["store_path"]).name
+    # #1546 (design r9 "Session pointer"): the database is recorded relative to the run's folder (`run_store_path`); the
+    # forged pointer names the other tenant's copy in that same form, as a writer would.
+    own = session_store.run_store_path(src, doc["store_path"])
+    foreign = Path(location_path(beta.sessions)) / own.name
     foreign.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(doc["store_path"], foreign)
-    pointer.write_text(json.dumps({**doc, "store_path": str(foreign)}), encoding="utf-8")
+    shutil.copy2(own, foreign)
+    pointer.write_text(json.dumps({**doc, "store_path": os.path.relpath(foreign, src)}), encoding="utf-8")
     before = _episode_names()
 
     refused = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))

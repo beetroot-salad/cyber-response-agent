@@ -26,7 +26,7 @@ from typing import Any, cast
 from defender.credential_proxy import PASS_LIFETIME_SEC
 from defender.job_socket import Refused
 
-from ._common import LaunchFacts, answer_pass, mirror_run_page, start_run_box, tenant_launch_steps
+from ._common import LaunchFacts, answer_pass, start_run_box, tenant_launch_steps
 from ._session import DOCKER_DID_NOT_RUN, KindSpec, Prepared, Registry, Session, SetupRefused, Signing, setup_step
 
 _logger = logging.getLogger(__name__)
@@ -103,27 +103,63 @@ def _materialize(session: Session, accepted: Any, run: Any, launch: Any, mapping
     return made
 
 
-def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:
-    from defender import run_common
+def _job_tenant(session: Session) -> Any:
+    """The job's own tenant over its root and inputs (`tenancy.JobTenant`): where its run is made."""
+    from defender import tenancy
+
+    if session.job_root is None or session.job_inputs is None:
+        raise SetupRefused("the claim's root and inputs were not made")
+    return tenancy.JobTenant(id=session.tenant_id, data_root=tenancy.data_root_from_path(session.job_root),
+                             inputs=session.job_inputs)
+
+
+def _launch_copies(session: Session) -> Any:
+    """The launch record and the alert, written by the helper in the job's root from the claim's launch facts and the
+    stored alert's exact bytes (#1546: nothing is read beside the tenant's runs), then checked as a launch is
+    (`JobLane.check_launch`). The alert is admitted later against the digest the worker handed this helper."""
+    from defender import tenancy
     from defender.records import job_lane
 
+    from . import _evidence
+
+    claim = _evidence.state(session).claim
+    launch = claim.launch
+    alert_id = launch.get("alert_id")
+    stored = session.rows.alert(session.tenant_id, str(alert_id)) if isinstance(alert_id, str) else None
+    if stored is None:
+        raise SetupRefused("the launch check refused the job: the claim names no alert the store holds")
+    digest, box_token = launch.get("digest"), launch.get("box_token")
+    if not isinstance(digest, str) or not isinstance(box_token, str):
+        raise SetupRefused("the launch check refused the job: the claim's launch facts name no digest or box token")
+    record = job_lane.LaunchRecord(
+        investigation_id=str(session.job_id), tenant_id=str(session.tenant_id), alert_id=str(alert_id),
+        digest=digest, label=str(launch.get("label") or stored.title or ""), box_token=box_token)
+    if session.job_root is None:
+        raise SetupRefused("the claim's root was not made")
+    try:
+        with job_lane.JobLane.open(tenancy.data_root_from_path(session.job_root), session.tenant_id) as lane:
+            lane.write_launch(record, bytes(stored.raw))
+            return lane.check_launch(str(session.job_id))
+    except (job_lane.JobLaneRefused, OSError) as refused:
+        raise SetupRefused(f"the launch check refused the job: {refused}") from None
+
+
+def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:
+    from defender import run_common
+    from ._folders import copy_tenant
+
     inv = str(session.job_id)
-    data_root = session.root
     if not session.alert_digest:
         raise SetupRefused("the worker handed this helper no --alert-digest: the alert is checked against it alone")
     if session.post_ticket and not session.ticket_link:
         raise SetupRefused("a flagged job needs the worker's --ticket-link")
-
-    def check_launch() -> Any:
-        try:
-            with job_lane.JobLane.open(data_root, session.tenant_id) as lane:
-                return lane.check_launch(inv)
-        except job_lane.JobLaneRefused as refused:
-            raise SetupRefused(f"the launch check refused the job: {refused}") from None
+    job_tenant = _job_tenant(session)
 
     # The tenant-level steps, the readiness check's too (#1471 P-1), with the launch check after the admission; then
     # the investigation's own: the run folder and the records beside it.
-    facts = tenant_launch_steps(session, hold, copy_id=inv, facts=LaunchFacts(), launch=check_launch)
+    facts = tenant_launch_steps(session, hold, copy_id=inv, facts=LaunchFacts(),
+                                launch=lambda: _launch_copies(session), job_tenant=job_tenant,
+                                copy_tenant=lambda accepted: copy_tenant(session, accepted))
     accepted, launch, source, copy, current = facts.accepted, facts.launched, facts.source, facts.copy, facts.current
     cleanup, passes, reads = facts.cleanup, facts.passes, facts.reads
     try:
@@ -140,7 +176,8 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:
     launch_facts = {
         "kind": KIND, "tenant": session.tenant_id, "job": inv, "tenant_state": "active",
         "export_commit": source.commit, "knowledge": source.host_record(), "run_dir": str(made.run_dir),
-        "run_copy": str(copy.root), "proxy_url": passes.proxy_url if passes is not None else None,
+        "run_copy": str(copy.root), "inputs_dir": str(session.job_inputs),
+        "proxy_url": passes.proxy_url if passes is not None else None,
         "grant": [[s, "r"] for s in reads], "pass_lifetime": PASS_LIFETIME_SEC,
         # The records read above (#1366 O6), which the container builds its tenant from (it reads no database).
         "records": current.as_wire(),
@@ -158,42 +195,32 @@ def prepare(session: Session, hold: contextlib.ExitStack) -> Prepared:
 
 
 def end(session: Session, cause: str) -> None:
-    """The job-end record for an ending decided before the container (A3), in the job lane's vocabulary. A record that
-    cannot be written raises: the helper then exits non-zero, which the worker reads as the helper's own failure."""
-    from defender.records import job_facts, job_lane
+    """The outcome of an ending decided before the container (A3), staged by the helper: `setup: refused` (a setup
+    refusal, the evidence store or key login unconfigured included), a start failure (`box: start_failed`), or a crash
+    (`setup: crashed`). Nothing ran, so nothing was spent and no box was scrubbed."""
+    from defender.records import job_facts
+
+    from . import _evidence
 
     setup, box = {
         "refused": (job_facts.SETUP_REFUSED, job_facts.BOX_NOT_STARTED),
         "start-failed": (job_facts.SETUP_DONE, job_facts.BOX_START_FAILED),
     }.get(cause, (job_facts.SETUP_CRASHED, job_facts.BOX_NOT_STARTED))
-    record = job_lane.JobEnd(setup=setup, box=box, report_committed=False, scrub_verified=False, cut_short=None)
-    try:
-        with job_lane.JobLane.open(session.root, session.tenant_id) as lane:
-            lane.write_job_end(session.job_id, record)
-    except FileExistsError:
-        _logger.error("job %s: a job-end record is already there; it is kept, and this one (%s) is not written",
-                      session.job_id, record.text())
+    _evidence.state(session).stage("outcome", {
+        "setup": setup, "box": box, "report_committed": False, "scrub": "not_run", "cut_short": None, "closing": None,
+        "cost_usd": 0.0, "cost_is_lower_limit": False})
 
 
 def _exited(session: Session, rc: int) -> None:
-    """After the container: a `docker run` that never ran the job (and so wrote no end record) ends the row as a start
-    failure (A3, O11); the job's page, left in its run folder, is copied to the tenant's publish area (A10)."""
-    from defender.records import job_lane
+    """After the container: a `docker run` that never ran the job (and so staged no outcome) ends it as a start failure
+    (A3, O11). The run page is the job's own push (A-O8): nothing is copied from its folder."""
+    from . import _evidence
 
-    state = session.prepared.state if session.prepared is not None else None
-    if rc in DOCKER_DID_NOT_RUN:
-        try:
-            with job_lane.JobLane.open(session.root, session.tenant_id) as lane:
-                written = lane.read_job_end(session.job_id) is not None
-        except (OSError, job_lane.JobLaneRefused):
-            written = False
-        if not written:
-            sys.stderr.write(f"[job_host] job {session.job_id}: the job container did not start (docker exit "
-                             f"{rc}); the job ran nowhere\n")
-            end(session, "start-failed")
-            return
-    if isinstance(state, _State):
-        mirror_run_page(state.run, state.tenant)
+    ev = _evidence.state(session)
+    if rc in DOCKER_DID_NOT_RUN and not (ev.has("outcome") or ev.has("refused/outcome")):
+        sys.stderr.write(f"[job_host] job {session.job_id}: the job container did not start (docker exit "
+                         f"{rc}); the job ran nowhere\n")
+        end(session, "start-failed")
 
 
 def _run_box(session: Session, ident: str) -> Any:

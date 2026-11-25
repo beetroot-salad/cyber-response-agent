@@ -43,6 +43,8 @@ from defender.tests.support.api._identity1306 import (  # noqa: E402
     tenants_of,
     user_id,
 )
+from defender.tests.support.shared._postgres1339 import execute  # noqa: E402
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 CREATE, RESUME, OFFBOARD, ROTATE = "tenant.create", "tenant.resume", "tenant.offboard", "tenant.rotate"
 ITEM_KEYS = {"tenant_id", "state", "pending_action", "step", "step_actor", "failure", "created_at"}
@@ -90,13 +92,60 @@ def _problem(response: Any, code: int) -> None:
 
 # --- create, read ----------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("body", [None, {}])
+def _tenant_count(ops: Any) -> int:
+    return len(ops.get(API + "/admin/tenants").json()["items"])
+
+
+@pytest.mark.parametrize("field", ["investigation_days", "learning_days"])
+@pytest.mark.parametrize(("days", "ok"), [(29, False), (30, True), (730, True), (731, False)])
+def test_create_takes_each_retention_value_between_30_and_730_days(field: str, days: int, ok: bool, audit: AuditLog) -> None:
+    """Either value at 30 or 730 makes the tenant (202); at 29 or 731 a 422 problem, no tenant, no audit event. (A-O7, D16)"""
+    world, ops = _admin_world()
+    mark, before = audit.mark(), _tenant_count(ops)
+    answered = ops.post(API + "/admin/tenants", json={**CREATE_RETENTION, field: days})
+    if ok:
+        assert answered.status_code == 202, answered.text
+        assert [e[0] for e in _events(audit, mark)] == [CREATE]
+        return
+    _problem(answered, 422)
+    assert _tenant_count(ops) == before
+    assert _events(audit, mark) == []
+
+
+@pytest.mark.parametrize("body", [
+    None, {}, {"investigation_days": 90}, {"learning_days": 90}, {"investigation_days": "90", "learning_days": 90},
+    {"investigation_days": 90.5, "learning_days": 90}, {"investigation_days": True, "learning_days": 90},
+    {"investigation_days": None, "learning_days": 90}, {**CREATE_RETENTION, "extra": 1}])
+def test_create_without_both_whole_number_values_is_a_422_and_makes_no_tenant(body: Any, audit: AuditLog) -> None:
+    """No body, a missing, null, string, fractional or boolean value or an extra field: 422, no tenant, no event. There is no
+    default (#1082, D16). (A-O7)"""
+    world, ops = _admin_world()
+    mark, before = audit.mark(), _tenant_count(ops)
+    answered = ops.post(API + "/admin/tenants") if body is None else ops.post(API + "/admin/tenants", json=body)
+    _problem(answered, 422)
+    assert _tenant_count(ops) == before
+    assert _events(audit, mark) == []
+
+
+def test_the_create_audit_event_carries_both_values(audit: AuditLog, caplog: pytest.LogCaptureFixture) -> None:
+    """The one `tenant.create` event names the chosen values in its words. (A-O7, D16)"""
+    world, ops = _admin_world()
+    caplog.clear()
+    assert ops.post(API + "/admin/tenants", json={"investigation_days": 111, "learning_days": 222}).status_code == 202
+    [event] = [r for r in caplog.records if getattr(r, "action", None) == CREATE]
+    words = f"{event.getMessage()} {getattr(event, 'detail', None) or ''}"
+    assert "111" in words, words
+    assert "222" in words, words
+
+
+@pytest.mark.parametrize("body", [CREATE_RETENTION, {"investigation_days": 30, "learning_days": 730}])
 def test_create_answers_202_with_the_item_and_a_location_and_makes_no_membership(
         body: Any, audit: AuditLog) -> None:
-    """No body: 202, the item of a `creating` tenant (job at `names`, service), Location, no membership (O1, O2, RC-3)."""
+    """With both retention values: 202, the item of a `creating` tenant (job at `names`, service), Location, no membership
+    (O1, O2, RC-3, A-O7)."""
     world, ops = _admin_world()
     mark = audit.mark()
-    made = ops.post(API + "/admin/tenants", json=body) if body is not None else ops.post(API + "/admin/tenants")
+    made = ops.post(API + "/admin/tenants", json=body)
     assert made.status_code == 202, made.text
     item = made.json()
     assert set(item) == ITEM_KEYS
@@ -108,7 +157,7 @@ def test_create_answers_202_with_the_item_and_a_location_and_makes_no_membership
     assert _item(ops, item["tenant_id"]) == item
     assert world.call(world.raw_repo.memberships_of_tenant, item["tenant_id"]) == []
     assert _events(audit, mark) == [(CREATE, user_id(ops), item["tenant_id"])]
-    other = ops.post(API + "/admin/tenants").json()["tenant_id"]  # control: every request mints a new one
+    other = ops.post(API + "/admin/tenants", json=CREATE_RETENTION).json()["tenant_id"]  # control: every request mints a new one
     assert other != item["tenant_id"]
 
 
@@ -116,7 +165,7 @@ def test_the_list_and_the_get_show_the_job_of_every_tenant() -> None:
     """Items carry the seven fields; a seeded active tenant shows no pending job; list and get agree (O2, DC-6)."""
     world = lab()
     ops = world.sign_in_admin()
-    created = ops.post(API + "/admin/tenants").json()
+    created = ops.post(API + "/admin/tenants", json=CREATE_RETENTION).json()
     listed = items(ops.get(API + "/admin/tenants"))
     assert sorted(i["tenant_id"] for i in listed) == sorted([LAB, created["tenant_id"]])
     assert all(set(i) == ITEM_KEYS for i in listed)
@@ -147,7 +196,7 @@ def test_an_unknown_or_malformed_tenant_is_refused_on_every_tenant_route(tenant:
 def _in(world: World, ops: Any, state: str) -> str:
     """A tenant in `state`, reached only through the API and the seeder."""
     if state == "creating":
-        return str(ops.post(API + "/admin/tenants").json()["tenant_id"])
+        return str(ops.post(API + "/admin/tenants", json=CREATE_RETENTION).json()["tenant_id"])
     tenant = str(uuid.uuid4())
     world.register(tenant)
     if state == "rotating":
@@ -226,7 +275,8 @@ def test_only_a_code_backed_administrator_session_reaches_the_tenant_routes(
             assert response.status_code == code, f"{who}: {response.status_code} {response.text}"
     assert items(ops.get(API + "/admin/tenants")) == before
     assert _events(audit, mark) == []
-    answered = ops.request(method, path.replace("{T}", LAB))  # control: the administrator is not refused
+    answered = ops.request(method, path.replace("{T}", LAB),  # control: the administrator is not refused
+                           **({"json": CREATE_RETENTION} if name == "create" else {}))
     assert answered.status_code == ok, answered.text
 
 
@@ -267,11 +317,12 @@ def test_a_request_whose_write_fails_logs_nothing_and_the_retry_logs_one(
     before = items(ops.get(API + "/admin/tenants"))
     tenants.failing.add(write)
     mark = audit.mark()
-    assert failing_browser.post(path.replace("{T}", LAB)).status_code >= 500
+    body = {"json": CREATE_RETENTION} if write == "request_create" else {}
+    assert failing_browser.post(path.replace("{T}", LAB), **body).status_code >= 500
     assert items(ops.get(API + "/admin/tenants")) == before
     assert _events(audit, mark) == []
     tenants.failing.clear()  # control: the same request, written, is logged
-    assert failing_browser.post(path.replace("{T}", LAB)).status_code == 202
+    assert failing_browser.post(path.replace("{T}", LAB), **body).status_code == 202
     assert [e[0] for e in _events(audit, mark)] == [action]
 
 
@@ -383,6 +434,9 @@ def test_1360_d6_a_refused_offboard_request_ends_no_job(tenant_state: str | None
     world.register(T2)
     if tenant_state is not None:
         world.register(T1, state=tenant_state)
+        if tenant_state == "offboarded":  # its jobs name its retention row, which an offboarded tenant keeps (r9: the FK is NOT VALID, new rows are checked)
+            execute(world.dsn, "INSERT INTO tenancy.evidence_retention (tenant_id, investigation_days, learning_days) "
+                               "VALUES (%s, 90, 90)", (T1,))
     control = _seed_jobs(world, T2, 2)
     refused = None if tenant_state is None else _seed_jobs(world, T1, 1)  # an unknown tenant holds no jobs (#1496)
 
@@ -692,4 +746,4 @@ def test_r7_2_control_the_same_admin_routes_without_the_parameter_answer() -> No
     """Control: the list answers 200 and the create 202 with no query string. (R7-2)"""
     world, ops = _admin_world()
     assert ops.get(API + "/admin/tenants").status_code == 200
-    assert ops.post(API + "/admin/tenants").status_code == 202
+    assert ops.post(API + "/admin/tenants", json=CREATE_RETENTION).status_code == 202

@@ -43,8 +43,8 @@ def test_o11_the_grant_table_can_grant_only_the_read_class():
         assert {cls for _s, _v, cls in entries} == {READ_CLASS}
 
 
-def test_o11_the_box_lane_has_no_network_and_the_run_folder_is_its_only_writable_mount(tmp_path):
-    """The create argv says `--network none` and binds read-write only the run folder. (O11)"""
+def test_o11_the_box_lane_has_no_network_and_binds_no_host_folder_writable(tmp_path):
+    """The create argv says `--network none` and binds no host folder read-write; the run folder is read-only. (O11, D4)"""
     from defender.box import BoxSpec
     from defender.box._lifecycle import _create_argv, _run_lane_mounts
     from defender.records import RUN_LAYOUT
@@ -54,13 +54,14 @@ def test_o11_the_box_lane_has_no_network_and_the_run_folder_is_its_only_writable
     (run_dir / RUN_LAYOUT.alert_input_dir / "alert.json").write_text("{}\n", encoding="utf-8")
     mounts = _run_lane_mounts(run_dir, DEFENDER, tmp_path / "agent")
     assert len(mounts) >= 2, "premise: more than the run folder is mounted"
-    assert [(m.what, m.source) for m in mounts if not m.readonly] == [("run dir", run_dir)]
+    assert [m.readonly for m in mounts if m.source == run_dir] == [True]
+    assert [(m.what, m.source) for m in mounts if not m.readonly] == []
     argv = _create_argv("defender-run-1342", run_dir, DEFENDER, BoxSpec(), (), lane=mounts).argv
     assert argv[argv.index("--network") + 1] == "none"
     binds = [a for a in argv if a.startswith("type=bind")]
     assert len(binds) == len(mounts)
-    assert [b for b in binds if not b.endswith(",readonly")] == [
-        f"type=bind,source={run_dir},target={mounts[0].target}"]
+    assert [b for b in binds if not b.endswith(",readonly")] == []
+    assert f"type=bind,source={run_dir},target={mounts[0].target},readonly" in binds
 
 
 def test_o11_the_job_entry_takes_no_ticket_writer_or_curation_seam():

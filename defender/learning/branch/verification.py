@@ -34,6 +34,7 @@ from defender.records import (
 )
 
 
+from defender.box import CLEAN, state_of_verdict
 from defender.learning.branch import outcome as outcome_mod
 from defender.records.formats import load_family
 
@@ -60,22 +61,27 @@ from defender.learning.branch.preflight import _HELD as _HELD, _family_refusal a
 # ---------------------------------------------------------------------------------------
 
 
-def _scrub_ran(run: Run) -> bool:
-    """Did the reap scan walk this sibling's tree and say so?
+def _scrub_state(run: Run) -> str | None:
+    """The state of the scan verdict for this sibling's tree: `clean`, `tainted`, `not_run`, or
+    `None` when it has none.
 
     Read at the sidecar beside the run dir: the verdict lives outside the tree it judges, where
-    the box that is root on that mount cannot forge it.
+    the box that is root on that mount cannot forge it. The one parse of the file is the box's
+    (`state_of_verdict`).
     """
     verdict = run.facts.scrub_verdict.path
     if not artifact_file(verdict):
-        return False
+        return None
     try:
-        record = json.loads(read_text_utf8(verdict))
-    except (OSError, ValueError):
-        return False
-    return isinstance(record, dict) and record.get("ran") is True
+        return state_of_verdict(read_text_utf8(verdict))
+    except OSError:
+        return None
 
 
+def _scrub_ran(run: Run) -> bool:
+    """Is this sibling's tree `clean`? Only a walk that completed and found nothing verifies an
+    arm: a `tainted` tree is left out, as is one whose walk was skipped or never recorded."""
+    return _scrub_state(run) == CLEAN
 
 
 def verify_family(
@@ -105,9 +111,9 @@ def verify_family(
                         "there is nothing to hold to the source's commit or to archive")
     if unverified:
         per_world.append(
-            f"sibling(s) {[labels[world_id] for world_id in unverified]} have no scrub verdict "
-            "recording a completed walk — an "
-            "unwalked tree is one nothing has certified as free of what the box left behind")
+            f"sibling(s) {[labels[world_id] for world_id in unverified]} have no clean scrub "
+            "verdict (none, the walk did not run, or it found the tree tainted) — a tree "
+            "nothing has certified as free of what the box left behind is left out")
     judged = _family_refusal(
         source, {f"sibling {labels[world_id]!r}": stamps[world_id] for world_id in scrub_verified},
         source_who="the source run", allow_dirty=allow_dirty)
@@ -168,8 +174,8 @@ def _archive_worlds(
         if world_id in unverified:
             outcome_mod.write_world_record(
                 episode, world_id, outcome_mod.NOT_ARCHIVED,
-                detail="no scrub verdict records a completed walk of its tree, so it was not "
-                       "archived")
+                detail="no clean scrub verdict records its tree (none, the walk did not run, or "
+                       "it found the tree tainted), so it was not archived")
             continue
         try:
             archive_mod.archive_episode(episode, {world_id: runs[world_id].run_dir})

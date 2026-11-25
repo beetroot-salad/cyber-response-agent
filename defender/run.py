@@ -507,7 +507,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
-    scrub: Callable[..., None] = box_mod.scrub,
+    scrub: Callable[..., object] = box_mod.scrub,
     #: A job-lane run (#1342): its box start never degrades to host execution (R2). On either lane a
     #: start fault leaves as `BoxStartFault` (M3, #1484), told from a teardown fault by its type.
     job_lane: bool = False,
@@ -709,11 +709,17 @@ def _early_run(ns: argparse.Namespace, accepted: tenancy.Tenant, world: Any, epi
 
     try:
         if world is not None:
-            return episode_runs.create(episode_runs.arm_id(world.world_id))
+            return _arm_run(episode_runs, world)
         return accepted.runs_repository().create()
     except (RunRefused, TenantRefused) as refused:
         where = f"--episode {ns.episode}: " if world is not None else ""
         sys.exit(f"[run.py] {where}{refused}")
+
+
+def _arm_run(episode_runs: Any, world: Any) -> Run:
+    """A sibling's arm, from its episode's roster at its world's arm id (A3: the one place an arm is made); `RunRefused` or
+    `TenantRefused` for a roster or arm folder that does not hold it."""
+    return episode_runs.create(episode_runs.arm_id(world.world_id))
 
 
 def _judge_start(tenant: RunTenant, *, roster: RosterRead, defender_dir: Path,
@@ -836,7 +842,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
 
 
 def _materialize_run(  # noqa: PLR0913 — the builder's whole call
-    alert: Path, *, tenant: tenancy.Tenant, model: str | None, run: Run | None = None,
+    alert: Path, *, tenant: tenancy.Tenant | tenancy.JobTenant, model: str | None, run: Run | None = None,
     world: Any = None, mapping: AlertMapping | None = None,
     knowledge: run_knowledge.KnowledgeSource | None = None, started_at: datetime | None = None,
 ) -> Run:
@@ -866,12 +872,23 @@ def _tenant_refusal_exits() -> Iterator[None]:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
-def _request_data_root(ns: argparse.Namespace) -> DataRoot:
+def _request_data_root(ns: argparse.Namespace, environ: Mapping[str, str] | None = None) -> DataRoot:
     """The request's tenant id checked (`--tenant` is required, there is no default), then the
-    data root resolved — once, here — or a `[run.py]` refusal before the preflight."""
+    data root resolved — once, here — or a `[run.py]` refusal before the preflight. A job
+    entry's root is its container's `DEFENDER_DATA_ROOT` (`environ`, #1546: the claim's own
+    root), held to the same rule (absolute, resolved); `None` reads this process's."""
     with _tenant_refusal_exits():
         tenancy.requested_tenant_id(ns.tenant)
-        return tenancy.resolve_data_root()
+        if environ is None:
+            return tenancy.resolve_data_root()
+        raw = environ.get("DEFENDER_DATA_ROOT", "")
+        if not raw or not Path(raw).is_absolute():
+            raise TenantRefused(f"DEFENDER_DATA_ROOT={raw!r} must name an absolute path")
+        try:
+            resolved = Path(raw).resolve(strict=True)
+        except OSError as unresolved:
+            raise TenantRefused(f"DEFENDER_DATA_ROOT={raw!r} cannot be resolved: {unresolved}") from None
+        return tenancy.data_root_from_path(resolved)
 
 
 def _sibling_box_mounted(ns: argparse.Namespace, data_root: DataRoot) -> Iterator[RunsBase]:
@@ -892,7 +909,7 @@ def _sibling_box_mounted(ns: argparse.Namespace, data_root: DataRoot) -> Iterato
     yield mounted
 
 
-def _open_episode_runs(ns: argparse.Namespace, accepted: tenancy.Tenant) -> Any:
+def _open_episode_runs(ns: argparse.Namespace, accepted: tenancy.Tenant | tenancy.JobTenant) -> Any:
     """The sibling's episode view, in its sibling form (`require_roster=True`, O4b): the episode is
     walked from the accepted tenant's own folder, no link followed at any level, and its arm
     roster must have been published — an episode that never reached RUNS, a roster that does not
@@ -962,7 +979,7 @@ class _Started:
     the world-only seams, and the run's request-token signer. Held by `_set_up` for the length
     of its block."""
 
-    accepted: tenancy.Tenant
+    accepted: tenancy.Tenant | tenancy.JobTenant
     tenant: RunTenant
     run: Run
     model: str
@@ -1165,7 +1182,7 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
     visualize: Callable[..., None],
     operator_steps: Callable[[], None] | None = None, ticket_step: Callable[[], None] | None = None,
     mirror: bool = True,
-) -> None:
+) -> str:
     """The post-steps both compositions share (#1342 M4), after the lifecycle has scrubbed the
     run folder: the readers of the scrubbed tree and the run page. `operator_steps` is the
     operator composition's own (the curation enqueue and the feedback issue), run where they
@@ -1175,12 +1192,14 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
 
     None of them runs for a run whose box ending's teardown faulted (`TEARDOWN_FAULTED`, #1421):
     they assume a dead box and a scrubbed tree, and a possibly live box's writes must not be read
-    or published. The composition still returns the run's exit status."""
+    or published. The composition still returns the run's exit status.
+
+    Answers the page's state (#1546 `page` fact): `rendered`, `render_failed`, or `none` (not tried)."""
     if summary.get(TEARDOWN_FAULTED):
         _logger.error("the box could not be proven stopped after the run ended; its folder was not "
                       "scrubbed, so nothing is read from it or published (no run page, no case "
                       "comment, no curation)")
-        return
+        return "none"
     run = started.run
     run_dir = run.run_dir
     # Everything below reads the scrubbed tree; a lifecycle failure propagates uncaught.
@@ -1211,6 +1230,8 @@ def _post_steps(  # noqa: PLR0913 — the run, its summary, and the page's input
                   **({} if mirror else {"mirror": False}))
     except _run.VisualizeFailed:
         _logger.warning("the run page was not saved", exc_info=True)
+        return "render_failed"
+    return "rendered" if (run_dir / "runtime.html").is_file() else "none"  # lint-run-records: ok — the page's own file
 
 
 
@@ -1379,17 +1400,22 @@ def _interrupt_on_sigterm() -> None:
 
 
 class _JobFacts:
-    """The job-end record's facts (#1342 O8), each set as it becomes true, and the record
-    written create-only when the block exits, however it exits (`__exit__` records and swallows
-    nothing). Before setup completes, a `SystemExit` or the preflight's refusal is `refused`,
-    anything else `crashed`. The run's two facts are set on `held`, the holder the lifecycle is
-    handed (r5 C2), so a raise after either became true does not lose it."""
+    """The job's outcome (#1342 O8; #1546 PR2), each fact set as it becomes true, and sent to the helper as the `outcome`
+    record when the block exits, however it exits (`__exit__` records and swallows nothing): setup, box, whether the
+    report was committed, the run tree's scrub, how it was cut short, its closing lookup and its cost. Before setup
+    completes, a `SystemExit` or the preflight's refusal is `refused`, anything else `crashed`. The run's facts are set
+    on `held`, the holder the lifecycle is handed (r5 C2), so a raise after one became true does not lose it. Then the
+    objects the outcome owes are pushed: the run page when it rendered (`page` first), and the run folder's bundle."""
 
-    def __init__(self, lane: job_lane.JobLane, job: str) -> None:
+    def __init__(self, lane: job_lane.JobLane, job: str, request: Callable[..., dict[str, Any]]) -> None:
         self._lane = lane
         self._job = job
+        self._request = request
         self.setup: str | None = None
         self.held = _JobEndFacts()
+        #: The run folder once setup made it, and the page's state once the post-steps tried it.
+        self.run_dir: Path | None = None
+        self.page: str = "none"
 
     def __enter__(self) -> _JobFacts:
         return self
@@ -1403,18 +1429,89 @@ class _JobFacts:
             # Raised after setup with no box started: whatever stopped it, the box did not start
             # (r7 D-ad). A run whose box started keeps `started`, however it ended.
             self.held.box = job_facts.BOX_START_FAILED
-        end = job_lane.JobEnd(setup=self.setup, box=self.held.box,
-                             report_committed=self.held.report_committed,
-                             scrub_verified=self.held.scrub_verified,
-                             cut_short=self.held.cut_short)
         try:
-            self._lane.write_job_end(self._job, end)
-        except FileExistsError:
-            _logger.error(f"job {self._job}: a job-end record is already there; it is kept, and "
-                          f"this one ({end.text()}) is not written")
-        except (OSError, job_lane.JobLaneRefused) as e:
-            _logger.error(f"job {self._job}: the job-end record could not be written: {e}")
+            outcome = self._outcome()
+        except Exception as unread:  # noqa: BLE001 — the outcome goes out whatever its parts raised
+            _logger.error(f"job {self._job}: the outcome's facts could not all be read: {unread!r}")
+            outcome = {"setup": self.setup, "box": self.held.box, "report_committed": self.held.report_committed,
+                       "scrub": "tainted" if self.held.box == job_facts.BOX_STARTED else "not_run",
+                       "cut_short": self.held.cut_short, "closing": None, "cost_usd": None,
+                       "cost_is_lower_limit": True}
+        try:
+            self._request("outcome", record=outcome)
+        except (job_socket.Refused, OSError, ValueError) as e:
+            _logger.error(f"job {self._job}: the helper did not take the outcome ({outcome}): {e}")
+        try:
+            self._push()
+        except Exception as unpushed:  # noqa: BLE001 — what was not pushed is the evidence's loss, never the run's
+            _logger.error(f"job {self._job}: its objects were not pushed: {unpushed!r}")
         return False
+
+    def _scrub(self) -> str:
+        if self.held.box != job_facts.BOX_STARTED or self.run_dir is None:
+            return "not_run"
+        # `clean` only when the teardown and scrub returned on a clean verdict (`held.scrub_verified`): a verdict file that
+        # reads `clean` under a scrub or teardown that then raised is not a verified tree (C2, O8).
+        return "clean" if self.held.scrub_verified else "tainted"
+
+    def _closing(self) -> dict[str, Any] | None:
+        from defender.records import closing
+
+        if not self.held.report_committed or self.run_dir is None:
+            return None
+        try:
+            found = self._lane.closing_disposition(self._job)
+        except Exception as fault:  # noqa: BLE001 — a lookup that faults is the lookup's own answer
+            _logger.error(f"job {self._job}: the closing lookup faulted: {fault!r}")
+            return {"found": "could_not_look"}
+        if isinstance(found, closing.Record):
+            record = found.record
+            return {"found": "record", "disposition": record.disposition, "review_outcome": record.outcome,
+                    "summary": record.summary}
+        if isinstance(found, closing.CouldNotLook):
+            wording = closing.FAULT_WORDING.get(found.kind)
+            return {"found": "could_not_look", **({"wording": wording} if isinstance(wording, str) else {})}
+        return {"found": "never_closed"}
+
+    def _cost(self) -> tuple[float | None, bool]:
+        if self.run_dir is None:
+            return 0.0, False
+        try:
+            cost = self._lane.cost(self._job)
+        except job_lane.CostUnreadable as unreadable:
+            _logger.error(f"job {self._job}: its cost cannot be read: {unreadable}")
+            return None, True
+        return float(cost.usd), not cost.complete
+
+    def _outcome(self) -> dict[str, Any]:
+        cost, lower = self._cost()
+        return {"setup": self.setup, "box": self.held.box, "report_committed": self.held.report_committed,
+                "scrub": self._scrub(), "cut_short": self.held.cut_short, "closing": self._closing(),
+                "cost_usd": cost, "cost_is_lower_limit": lower}
+
+    def _push(self) -> None:
+        """The run page (when it rendered) and the run folder's bundle, pushed to the helper (A-O8: the page's bytes are
+        the renderer's, sent here, never read back from the run folder by the helper)."""
+        from defender.evidence import bundle
+
+        run_dir = self.run_dir
+        if run_dir is None or not run_dir.is_dir():
+            return
+        try:
+            self._request("page", record={"page": self.page})
+            if self.page == "rendered":
+                job_socket.push_object(self._request, job_facts.RUN_PAGE, RunPaths(run_dir).runtime_html)
+        except (job_socket.Refused, OSError, ValueError) as e:
+            _logger.error(f"job {self._job}: the run page was not pushed: {e}")
+        # The bundle is the job's tenant folder in its root (its run folder, its session store), without the helper's
+        # copies: the launch record and alert it wrote beside the run (the run's knowledge copy is in the inputs).
+        tenant_root = run_dir.parent.parent
+        paths = RunPaths(run_dir)
+        excludes = [f"runs/{paths.launch_record().name}", f"runs/{paths.launch_alert().name}"]
+        try:
+            bundle.push(self._request, tenant_root, tenant_root.parent / f".{run_dir.name}.bundle", exclude=excludes)
+        except (bundle.BundleRefused, job_socket.Refused, OSError, ValueError) as e:
+            _logger.error(f"job {self._job}: the run's bundle was not pushed: {e}")
 
 
 class _HelperPass:
@@ -1471,20 +1568,18 @@ def _launch_tenant_active(launch: Mapping[str, Any], *, label: str) -> None:
         sys.exit(f"[run.py] {label}: this run's tenant cannot be used: it is {launch.get('tenant_state')!r}")
 
 
-def _container_tenant(ns: argparse.Namespace, data_root: DataRoot, *,
-                      defender_dir: Path | None = None) -> tenancy.Tenant:
-    """The job's tenant inside its container: the folder rules only, over its own tenant folder (the
-    one the container mounts). No host lock and no
-    admission: the job's host helper holds the one and ran the other, and their verdict is in the
-    launch facts (#1170 A6, C19). `defender_dir`: the code tree the entry reads (`DEFENDER_DIR`)."""
+def _container_tenant(ns: argparse.Namespace, data_root: DataRoot, launch: Mapping[str, Any]) -> tenancy.JobTenant:
+    """The job's tenant inside its container (#1546): a `JobTenant` over the job's own root (`data_root`, the container's
+    `DEFENDER_DATA_ROOT`) and the read-only inputs folder the launch facts name. There is no clone in the root to accept, no
+    host lock and no admission: the job's host helper holds the one and ran the other, and their verdict is in the launch
+    facts (#1170 A6, C19); what a container can judge for itself is the id grammar and where its two folders are."""
     try:
-        return tenancy.accept_tenant(data_root, ns.tenant,
-                                     defender_dir=defender_dir if defender_dir is not None else DEFENDER_DIR)
+        return tenancy.job_tenant_from_launch(data_root, ns.tenant, launch)
     except TenantRefused as refused:
         sys.exit(f"[run.py] job {ns.job}: this run's tenant cannot be used: {refused}")
 
 
-def _helper_run(ns: argparse.Namespace, accepted: tenancy.Tenant, launch: Mapping[str, Any]) -> Run:
+def _helper_run(ns: argparse.Namespace, accepted: tenancy.Tenant | tenancy.JobTenant, launch: Mapping[str, Any]) -> Run:
     """The run folder the job's host helper made at the job's id (#1170 A6): opened, never made. The
     launch facts must name the same place."""
     run = _open_run(accepted.runs_repository(), ns.job, what=f"job {ns.job}: its run folder")
@@ -1492,7 +1587,7 @@ def _helper_run(ns: argparse.Namespace, accepted: tenancy.Tenant, launch: Mappin
     return run
 
 
-def _helper_copy(ns: argparse.Namespace, accepted: tenancy.Tenant,
+def _helper_copy(ns: argparse.Namespace, accepted: tenancy.Tenant | tenancy.JobTenant,
                  launch: Mapping[str, Any]) -> run_knowledge.RunCopy:
     """The knowledge copy the job's host helper made at the job's id (#1170 A6): the launch facts
     must name it (its path only; #1471 R13-1.4)."""
@@ -1529,7 +1624,7 @@ def _staged(stage: str, call: Callable[..., Any], *args: Any, **kwargs: Any) -> 
 class _ContainerTenant:
     """What a job container's tenant-level steps settled (`_container_tenant_steps`)."""
 
-    accepted: tenancy.Tenant
+    accepted: tenancy.JobTenant
     run: Run | None
     copy: run_knowledge.RunCopy
     records: TenantRecords
@@ -1552,7 +1647,7 @@ def _container_tenant_steps(  # noqa: PLR0913 — the request, its facts and the
     over the copy and its one judgement of its systems (`systems`). Each refusal is a `_StageExit`
     naming its stage. `defender_dir` is the one code tree read (`DEFENDER_DIR`); `warn` logs the ignored
     grants (a readiness check reports them instead)."""
-    accepted = _staged("container_tenant", _container_tenant, ns, data_root, defender_dir=defender_dir)
+    accepted = _staged("container_tenant", _container_tenant, ns, data_root, launch)
     run = _staged("handover", made, ns, accepted, launch) if made is not None else None
     copy = _staged("handover", _helper_copy, ns, accepted, launch)
     current = _staged("handover", _run.handed_records, launch, label=f"job {ns.job}")
@@ -1562,7 +1657,7 @@ def _container_tenant_steps(  # noqa: PLR0913 — the request, its facts and the
 
 
 def _container_systems(  # noqa: PLR0913 — the tenant, its copy and records, the roster, the lead flag, the ids
-    accepted: tenancy.Tenant, *, copy: run_knowledge.RunCopy, records: TenantRecords, roster: Any,
+    accepted: tenancy.Tenant | tenancy.JobTenant, *, copy: run_knowledge.RunCopy, records: TenantRecords, roster: Any,
     dispatches_lead_zero: bool, known_ids: Any = (),
 ) -> tuple[RunTenant, RunSystems]:
     """A job container's tenant and its one judgement of its systems (#1170 A6, #1366): the tenant
@@ -1576,7 +1671,7 @@ def _container_systems(  # noqa: PLR0913 — the tenant, its copy and records, t
 
 
 def _container_verdict(  # noqa: PLR0913 — `_container_systems`' inputs, the code tree and the warning
-    accepted: tenancy.Tenant, *, copy: run_knowledge.RunCopy, records: TenantRecords, roster: Any,
+    accepted: tenancy.Tenant | tenancy.JobTenant, *, copy: run_knowledge.RunCopy, records: TenantRecords, roster: Any,
     dispatches_lead_zero: bool, known_ids: Any = (), defender_dir: Path | None = None, warn: bool = True,
 ) -> tuple[Any, RunSystems]:
     """`_container_systems` with the whole grants x records verdict (its ignored grants too, #1471 R4),
@@ -1696,29 +1791,30 @@ def job_main(  # noqa: PLR0913 — the job entry's inputs plus its injection sea
         print(f"[run.py] job {ns.job}: no job socket ({job_socket.SOCKET_ENV} is unset): the job entry runs "
               "only inside its job container, started by its host helper; nothing was done", file=sys.stderr)
         return 2
-    data_root = _request_data_root(ns)
+    data_root = _request_data_root(ns, environ)
     try:
         lane = job_lane.JobLane.open(data_root, ns.tenant)
     except job_lane.JobLaneRefused as refused:
         sys.exit(f"[run.py] job {ns.job}: {refused}")
     try:
-        with lane, _JobFacts(lane, ns.job) as facts:
+        with lane, _JobFacts(lane, ns.job, request) as facts:
             launch = _launch_facts(request, kind="investigation", tenant=ns.tenant, job=ns.job,
                                     label=f"job {ns.job}")
             started = _set_up_in_container(ns, data_root, launch, request, preflight=preflight, roster=roster)
             facts.setup = job_facts.SETUP_DONE
             run = started.run
+            facts.run_dir = Path(run.run_dir)
             with _log.run_context(run.run_dir.name, started.tenant.tenant_id, logger=_logger):
                 _logger.info(f"run_dir={run.run_dir} model={started.model}")
                 _announce_provenance(run.run_dir)
                 token = launch.get("box_token")
                 summary = lifecycle(**started.lifecycle_kwargs(ns), job_lane=True, job_facts=facts.held,
                                     relay=request, **({"start_token": token} if token else {}))
-                # The page is saved in the run's own folder only: the helper copies it to the shared
-                # publish folder once this container has exited (#1170 A10).
-                _post_steps(started, summary, visualize=visualize, mirror=False,
-                            ticket_step=(lambda: _job_ticket_step(started, summary, launch, request, ns.job))
-                            if launch.get("post_ticket") is True else None)
+                # The page is saved in the run's own folder only, and pushed to the helper as the job ends
+                # (#1546 A-O8): nothing reaches the shared publish folder.
+                facts.page = _post_steps(started, summary, visualize=visualize, mirror=False,
+                                         ticket_step=(lambda: _job_ticket_step(started, summary, launch, request, ns.job))
+                                         if launch.get("post_ticket") is True else None)
                 return _exit_code(summary)
     except _PreflightRefused as refused:
         return refused.rc
@@ -1752,7 +1848,7 @@ def readiness_main(argv: list[str], *, environ: Mapping[str, str] | None = None,
     """The readiness check's container entry (#1471 C5): `run.py --readiness <id> --tenant <T>`, the process its host
     helper starts, answered `launch` alone. It judges what an investigation's container judges at its start, through
     the same steps (`_container_tenant_steps`), then the case system (W8) and the census over the published copy
-    (R13-3), and writes the one readiness record, create-only, in the tenant's job lane: `refused` at the container's
+    (R13-3), and sends the one readiness result to its helper (#1546: staged, never a file): `refused` at the container's
     tenant step or the systems check, `ready` with its warnings, or `failed` (`handover`: the helper and this container
     do not agree; `census_unavailable`). `environ` is the container's environment (`None`: this process's); without a
     job socket nothing is done. `defender_dir` is the one code tree read (`DEFENDER_DIR`), its census's and, when
@@ -1764,19 +1860,19 @@ def readiness_main(argv: list[str], *, environ: Mapping[str, str] | None = None,
         print(f"[run.py] readiness {ns.job}: no job socket ({job_socket.SOCKET_ENV} is unset): the readiness entry "
               "runs only inside its job container, started by its host helper; nothing was done", file=sys.stderr)
         return 2
-    data_root = _request_data_root(ns)
+    data_root = _request_data_root(ns, environ)
+    record = _readiness_record(ns, data_root, request, roster=roster, defender_dir=tree)
+    return _send_readiness(request, ns.job, record)
+
+
+def _send_readiness(request: Callable[..., dict[str, Any]], job: str, record: job_lane.ReadinessRecord) -> int:
+    """The check's result, sent to the helper as the `result` record (#1546 PR2): 0 once it was taken. The check's
+    knowledge is the helper's own to stage (r10, U-3): the container sends none."""
     try:
-        lane = job_lane.JobLane.open(data_root, ns.tenant)
-    except job_lane.JobLaneRefused as refused:
-        sys.exit(f"[run.py] readiness {ns.job}: {refused}")
-    with lane:
-        record = _readiness_record(ns, data_root, request, roster=roster, defender_dir=tree)
-        try:
-            lane.write_readiness(ns.job, record)
-        except FileExistsError:
-            _logger.error(f"readiness {ns.job}: a result record is already there; it is kept, and this one "
-                          f"({record.text()}) is not written")
-            return 1
+        request("result", record=json.loads(record.text()))
+    except (job_socket.Refused, OSError, ValueError) as e:
+        _logger.error(f"readiness {job}: the helper did not take its result ({record.text()}): {e}")
+        return 1
     return 0
 
 
@@ -1863,12 +1959,16 @@ def serve_job(  # noqa: PLR0913 — the entries' inputs plus their injection sea
 
 # -- a learning sibling in its job container (#1170 A6, #1449) ---------------------------------------
 
-def _sibling_made(request: Callable[..., dict[str, Any]], ns: argparse.Namespace, accepted: tenancy.Tenant,
-                  episode_runs: Any, world: Any) -> tuple[Run, run_knowledge.RunCopy]:
-    """The sibling's run and knowledge copy, made by the job's host helper (`copy.make`, #1170 A6, C20):
-    its id the episode roster's for this world, its folder materialized there (input and stamp), its
-    copy owned by the helper. Opened here, never made: the id, the folder and the copy must be the ones
-    this sibling's own roster and tenant name."""
+def _sibling_made(  # noqa: PLR0913 — the request, the sibling's door and what its launch handed
+    request: Callable[..., dict[str, Any]], ns: argparse.Namespace, accepted: tenancy.JobTenant, episode_runs: Any,
+    world: Any, launch: Mapping[str, Any],
+) -> tuple[Run, run_knowledge.RunCopy]:
+    """The sibling's run and knowledge copy (#1170 A6, C20; #1546 r10, D-2): its copy made by the job's host helper
+    (`copy.make`, at the claim's pin, owned by the helper, in the inputs), its id the episode roster's for this world,
+    and its run made here, in the container, by run setup's shared half (`run_common.materialize_run`: the folder with
+    its input, the episode's copy of the source alert, and its stamp), with its knowledge record (the launch facts'
+    `knowledge_commit`) and its versions record (the launch facts' `records`). The id, the folder and the copy must be
+    the ones this sibling's own roster and tenant name."""
     from defender.records import RunRefused
 
     try:
@@ -1879,16 +1979,25 @@ def _sibling_made(request: Callable[..., dict[str, Any]], ns: argparse.Namespace
     except (OSError, ValueError) as lost:
         sys.exit(f"[run.py] --episode {ns.episode}: the job's host helper did not make the sibling's run: "
                  f"{type(lost).__name__}: {lost}")
+    pin = launch.get("knowledge_commit")
+    if not isinstance(pin, str) or not run_knowledge.OID.fullmatch(pin):
+        sys.exit(f"[run.py] --episode {ns.episode}: the launch facts pin no knowledge commit ({pin!r})")
     try:
-        arm = episode_runs.arm_id(world.world_id)
-    except RunRefused as refused:
-        sys.exit(f"[run.py] --episode {ns.episode}: the sibling's run cannot be opened: {refused}")
-    run = _open_run(episode_runs, arm, what=f"--episode {ns.episode}: the sibling's run")
-    copy = run_knowledge.RunCopy(accepted.run_knowledge / run.run_dir.name)
-    for what, ours, said in (("run id", run.run_dir.name, made.get("run")), ("run folder", run.run_dir, made.get("run_dir")),
+        early = _arm_run(episode_runs, world)
+    except (RunRefused, TenantRefused) as refused:
+        sys.exit(f"[run.py] --episode {ns.episode}: the sibling's run cannot be made: {refused}")
+    copy = run_knowledge.RunCopy(accepted.run_knowledge / early.run_dir.name)
+    for what, ours, said in (("run id", early.run_dir.name, made.get("run")),
+                             ("run folder", early.run_dir, made.get("run_dir")),
                              ("knowledge copy", copy.root, made.get("path"))):
         if str(ours) != str(said):
             sys.exit(f"[run.py] --episode {ns.episode}: the helper's {what} {said!r} is not this sibling's {ours}")
+    knowledge = run_knowledge.KnowledgeSource(kind=run_knowledge.PINNED, commit=pin)
+    current = _run.handed_records(launch, label=f"--episode {ns.episode}")
+    run = _materialize_run(_screened_source_alert(episode_runs.episode), run=early, tenant=accepted,
+                           model=driver.resolve_main_model(ns.model), world=world, knowledge=knowledge)
+    _run.write_knowledge_record(run.run_dir, knowledge)
+    _run.write_versions_record(run.run_dir, current)
     return run, copy
 
 
@@ -1900,8 +2009,8 @@ def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the siblin
     """`run.py --tenant <T> --episode <id> --world <label>` inside its learning job's container (#1170
     A6, #1449): the sibling's run half, which `main` composes. Its tenant judged by the folder rules
     (the job's helper holds the lock and ran the admission), its episode door opened, its world
-    resumed, its run (id, folder with input and stamp) and copy made by the helper at the family's
-    knowledge, its systems judged, its preflight, the run its helper made announced, a read pass
+    resumed, its copy made by the helper at the claim's pin and its run (id, folder with input and stamp,
+    knowledge and versions records) made here (#1546 r10, D-2), its systems judged, its preflight, the run its helper made announced, a read pass
     from the helper — or the refusal (`SystemExit` naming it; `_PreflightRefused`). No database,
     host lock, publish or signer. Yields the started run, holding the episode door."""
     from defender.records.formats import family_identities
@@ -1913,8 +2022,7 @@ def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the siblin
                             label=f"--episode {ns.episode}")
     data_root = _request_data_root(ns)
     try:
-        accepted = tenancy.accept_tenant(data_root, ns.tenant, defender_dir=DEFENDER_DIR,
-                                         box_mounted=_sibling_box_mounted(ns, data_root))
+        accepted = tenancy.job_tenant_from_launch(data_root, ns.tenant, launch)
     except TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
     episode_runs = _open_episode_runs(ns, accepted)
@@ -1922,7 +2030,7 @@ def _sibling_set_up(  # noqa: PLR0913 — the request, the socket and the siblin
         episode = episode_runs.episode
         world = _resume_target(ns, episode=episode, tenant=lambda: None, arm_ids=episode_runs.arm_ids)
         source = _open_world_source(accepted.runs_repository(), world)
-        run, copy = _sibling_made(request, ns, accepted, episode_runs, world)
+        run, copy = _sibling_made(request, ns, accepted, episode_runs, world, launch)
         _family_pin(ns, _knowledge_pin(ns), episode)  # a `--knowledge-commit` naming another export refuses
         current = _run.handed_records(launch, label=f"--episode {ns.episode}")
         tenant, systems = _container_systems(

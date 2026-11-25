@@ -32,6 +32,9 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — fixtures
+from defender.tests.support.jobs._job_helper import process_state  # noqa: F401 — autouse: hands helpers the store (#1546)
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
 from defender.tests.support.shared._postgres1339 import migrated_database  # noqa: F401 — fixture
 
 from defender.tests.e2e._box665 import RecordingDocker, _cp
@@ -419,12 +422,16 @@ def test_r_s5_a_live_run_in_another_process_keeps_its_copy_and_the_next_fetch_af
 # --- #1170 A6/C20: a run copy made for a job is the host helper's -----------------------------
 
 @pytest.mark.postgres
-def test_a6_a_job_run_copy_is_owned_by_its_host_helper_and_a_killed_helpers_copy_is_swept(
-        tmp_path, monkeypatch, migrated_database):  # noqa: F811 — the imported fixture
-    """The copy a job's host helper makes names the helper's pid (not the test's), outlives nothing the helper
-    left alive, and once the helper is SIGKILLed the next fetch sweeps it (the operator-run rows above are the
-    control: same record, same sweep, the process that made the copy)."""
-    from defender.tests.support.jobs._job_helper import ProcessHelper, helper_scene, pid_alive, until
+@pytest.mark.garage
+@pytest.mark.openbao
+def test_a6_a_job_run_copy_is_owned_by_its_host_helper_and_outlives_a_killed_helper(
+        tmp_path, monkeypatch, migrated_database, garage, openbao, evidence_keys):  # noqa: F811 — the imported fixtures
+    """The copy a job's host helper makes (#1546: in the claim's inputs, `.job-inputs/<claim>/run-knowledge/<inv>/`) names
+    the helper's pid (not the test's), and a SIGKILLed helper leaves it behind. Who sweeps a dead helper's per-claim
+    folders is now the worker's start-up sweep (#1546 design "The job's folders", #1557 machinery), no longer a publish:
+    that part is retired here, guard `jobs/test_1557_job_folders.py::test_1557_o5_a_killed_workers_per_claim_folders_are_
+    gone_once_the_next_worker_has_started`."""
+    from defender.tests.support.jobs._job_helper import ProcessHelper, helper_scene, pid_alive, run_copies, until
 
     with helper_scene(tmp_path, monkeypatch, migrated_database) as scene:
         inv = str(uuid.uuid4())
@@ -432,7 +439,7 @@ def test_a6_a_job_run_copy_is_owned_by_its_host_helper_and_a_killed_helpers_copy
         helper = ProcessHelper(scene, scene.root, scene.argv("investigation", inv, parent=os.getpid()))
         try:
             helper.container_pid()  # the helper got as far as its container: step 4 (the copy) is behind it
-            copies = until(lambda: list(B.run_copies(scene.t).glob("*/owner")), "the helper's run copy")
+            copies = until(lambda: list(run_copies(scene).glob("*/owner")), "the helper's run copy")
             record = owner_record(copies[0].parent)
             assert record.get("pid") == helper.proc.pid, record
             assert record.get("pid") != os.getpid()
@@ -441,5 +448,3 @@ def test_a6_a_job_run_copy_is_owned_by_its_host_helper_and_a_killed_helpers_copy
             helper.close()
         assert not pid_alive(helper.proc.pid)
         assert copy.is_dir(), "premise: the killed helper left its copy"
-        B.fetch_now(scene.t, tmp_path / "next-fetch")
-        assert not copy.exists(), "the next fetch did not sweep the dead helper's run copy"

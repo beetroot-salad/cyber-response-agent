@@ -360,13 +360,16 @@ def test_a_cleartext_address_is_refused_before_the_secret_file_is_read_and_nothi
     assert sent == []
 
 
-def test_the_forge_credential_never_reads_the_sign_secret_file(scene):
-    """With the live generation's sign secret file unreadable the credential still mints, with the delivery pair. A24'."""
+def test_the_forge_credential_never_reads_the_sign_or_evidence_secret_file(scene):
+    """With the live generation's sign and evidence secret files unreadable the credential still mints, with the delivery
+    pair. A24', #1546 r9."""
     tenant, gen = _active(scene)
     _make_a_folder(gen.sign_secret_file)
+    _make_a_folder(gen.evidence_secret_file)
     credential = scene.make(tenant)
     with opened_paths() as seen:
         token = credential.token()
     assert scene.role_of(token) == gen.oidc_role
     assert not opened(seen, gen.sign_secret_file), "the credential opened the sign secret file"
+    assert not opened(seen, gen.evidence_secret_file), "the credential opened the evidence secret file"
     assert scene.logins()[-1]["role_id"] == gen.role_id

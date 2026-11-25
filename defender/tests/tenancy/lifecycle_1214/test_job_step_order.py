@@ -52,7 +52,7 @@ def test_each_action_runs_its_steps_in_the_order_the_design_lists(world):
     log.clear()
     assert world.ops.post(f"{API}/admin/tenants/{tenant}/offboard").status_code == 202
     world.drive()
-    assert _runs(log) == ["offboard", "teardown", "finish"]
+    assert _runs(log) == ["offboard", "teardown", "evidence", "finish"]  # #1546 A-O5: the evidence pass between teardown and finish
     log.clear()
     world.clock.advance(REPO_WINDOW + _dt.timedelta(seconds=1))
     world.drive()
@@ -102,7 +102,7 @@ def test_a_transport_failure_after_the_unwrap_restarts_at_wrap_not_at_the_spent_
     tenant = world.create()
     world.drive()
     assert failing.hit, "control: the failure was never injected"
-    assert len(world.openbao.made("POST", "/v1/sys/wrapping/unwrap")) == 2, "control: both wrappers were spent (A24')"
+    assert len(world.openbao.made("POST", "/v1/sys/wrapping/unwrap")) == 3, "control: all three wrappers were spent (A24', #1546 r9)"
     item = world.item(tenant)
     assert (item["step"], item["step_actor"]) == ("wrap", "service")
     assert item["failure"] and "install" in item["failure"]

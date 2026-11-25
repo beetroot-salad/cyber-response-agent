@@ -18,6 +18,7 @@ import pytest
 from defender.tests.jobs.test_1344_learning_jobs import (
     END,
     PostStepChild,
+    ended_child,
     _stop_serving,
     job_child,
     job_row,
@@ -54,7 +55,7 @@ def _either(follow, check):
 def _end_completed(dsn: str, job: str) -> None:
     """End `job` `completed` with its findings stored (`done`): a job nothing runs for any more, its tenant's clock armed
     by its queueing."""
-    execute(dsn, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'done', "
+    execute(dsn, "UPDATE jobs.learning_jobs SET status = 'completed', publish_state = 'done', evidence_state = 'none', "
                  "finished_at = %s, lease_expires_at = NULL WHERE id = %s", (NOW, job))
 
 
@@ -144,7 +145,7 @@ async def test_a1_a_job_s_own_post_step_restarts_its_tenant_s_clock(world, monke
     follow = post_child(world)
     async with job_store(dsn) as store:
         job = await queued_job(world, store, ticket="J-1")
-        worker = learning_worker(world, store, job=job_child(world, files={END: learning_end("completed")}),
+        worker = learning_worker(world, store, job=ended_child(world, files={END: learning_end("completed")}),
                                  post=_either(follow, check), learning_check_interval=3.0, **_FAST)
         serving = asyncio.create_task(worker.serve())
         try:
@@ -167,16 +168,16 @@ async def test_a1_an_overdue_check_is_picked_before_a_queued_job(world):
     _tenant_dirs(world["root"], T2)
     t2_runs = world["root"] / T2 / "runs"
     release_a, release_check = world["tmp"] / "release-a", world["tmp"] / "release-check"
-    a_child = job_child(world, name="a", files={END: learning_end("completed")}, wait_for=release_a)
+    a_child = ended_child(world, name="a", files={END: learning_end("completed")}, wait_for=release_a)
     a_child.runs = t2_runs
-    b_child = job_child(world, name="b", files={END: learning_end("completed")})
+    b_child = ended_child(world, name="b", files={END: learning_end("completed")})
     b_child.runs = t2_runs
     follow = PostStepChild(world["tmp"] / "follow", t2_runs, dsn=dsn)
     check = CheckChild(world["tmp"] / "check", world["runs"], dsn=dsn, wait_for=release_check)
     async with job_store(dsn) as store:
         seed = await queued_job(world, store, ticket="J-0")
         execute(dsn, "UPDATE jobs.learning_jobs SET status = 'skipped', reason = 'no_fork_point', message = 'm', "
-                     "finished_at = %s WHERE id = %s", (NOW, seed))  # T1 has learning jobs, none queued
+                     "evidence_state = 'none', finished_at = %s WHERE id = %s", (NOW, seed))  # T1 has learning jobs, none queued
         a = await queued_job(world, store, ticket="J-1", tenant=T2)
 
         def jobs(launch):
@@ -241,13 +242,14 @@ async def test_a1_only_active_tenants_with_learning_jobs_are_checked(world):
     dsn = world["dsn"]
     register_tenant(dsn, T2)
     async with job_store(dsn) as store:
-        assert await store.claim_learning_check(0.01, "h0") is None, "no tenant has a learning job"
+        assert await store.claim_learning_check(0.01) is None, "no tenant has a learning job"
         await queued_job(world, store, ticket="J-1")
         await queued_job(world, store, ticket="J-2", tenant=T2)
         move_tenant(dsn, T2, state="offboarding")
         await asyncio.sleep(0.05)
-        assert await store.claim_learning_check(0.01, "h1") == T1
-        assert await store.claim_learning_check(0.01, "h2") is None, "T2 is not active, and T1 is held"
+        claim = await store.claim_learning_check(0.01)
+        assert getattr(claim, "tenant_id", None) == T1
+        assert await store.claim_learning_check(0.01) is None, "T2 is not active, and T1 is held"
 
 
 @pytest.mark.parametrize("bad", [0, -1])

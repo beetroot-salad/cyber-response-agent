@@ -4,7 +4,7 @@ from the tenancy tables. `InMemoryTenantRepository` (`tenancy/memory.py`) and
 code, so the refusals below can be caught by code that never builds a repository.
 
 Writers (P2, DC-4):
-- The API: `request_create(now=)`, `request_resume(T)`, `request_rotate(T)`. Each is one conditional update on an ordinary connection that never takes
+- The API: `request_create(now=, investigation_days=, learning_days=)`, `request_resume(T)`, `request_rotate(T)`, and the retention's `evidence_retention(T)` and `set_evidence_retention(T, retention)`. Each is one conditional update on an ordinary connection that never takes
   the tenant lock; it returns the record it left, or raises `NotFound` (no such tenant) or
   `Conflict` (the tenant's state refuses the request). The offboard request is not the
   repository's (#1360, #1496): the job store runs tenancy's `offboard` together with the ending of
@@ -54,7 +54,14 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 if TYPE_CHECKING:
     from defender.records.formats import AlertMapping, PeopleRequestId, TenantId, UserId
-    from defender.tenancy.models import ForgeWiring, Generation, PeopleRequest, TenantRecord, TenantRecords
+    from defender.tenancy.models import (
+        EvidenceRetention,
+        ForgeWiring,
+        Generation,
+        PeopleRequest,
+        TenantRecord,
+        TenantRecords,
+    )
 
 #: The first key of every tenant lock: a fixed int4 naming tenancy's advisory locks.
 LOCK_NAMESPACE = 1214
@@ -149,8 +156,16 @@ class TenantRepository(Protocol):
         ...
 
     # --- requests (the API)
-    async def request_create(self, *, now: _dt.datetime) -> TenantRecord:
-        """A new tenant with a minted UUID: `creating`, `create` pending at step `names` (service)."""
+    async def request_create(self, *, now: _dt.datetime, investigation_days: int, learning_days: int) -> TenantRecord:
+        """A new tenant with a minted UUID: `creating`, `create` pending at step `names` (service), and its evidence retention
+        row (#1546 D16) in the same write: a value outside 30..730 days leaves no tenant either (the database refuses it,
+        or `ValueError` for the in-memory repository)."""
+        ...
+    async def evidence_retention(self, tenant_id: TenantId) -> EvidenceRetention | None:
+        """The tenant's retention, or None for a tenant with no row (an offboarded one from before the setting, or no tenant)."""
+        ...
+    async def set_evidence_retention(self, tenant_id: TenantId, retention: EvidenceRetention) -> EvidenceRetention:
+        """Replace both of the tenant's retention values; `NotFound` for an unknown tenant."""
         ...
     async def request_resume(self, tenant_id: TenantId) -> TenantRecord:
         """Clear the failure, and nothing else; `Conflict` with no failure."""

@@ -26,6 +26,11 @@ INTEGRATION_ENV = "DEFENDER_LIFECYCLE_INTEGRATION_CONTAINER"
 SECRETS_DIR_ENV = "DEFENDER_LIFECYCLE_SECRETS_DIR"
 POLL_ENV = "DEFENDER_LIFECYCLE_POLL_INTERVAL"
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
+#: The evidence store's settings (#1546 A-O5): `DEFENDER_EVIDENCE_<name>`, the same variables the job host reads. The four
+#: that `from_env` requires, and the one with a default.
+EVIDENCE_ENV_PREFIX = "DEFENDER_EVIDENCE_"
+EVIDENCE_REQUIRED = ("ENDPOINT", "BUCKET", "ACCESS_KEY", "SECRET_KEY")
+EVIDENCE_REGION_DEFAULT = "garage"
 #: The people worker's two required settings (#1592): the id of Forgejo's sign-in login source, and the DSN of a
 #: login that is a member of `fs_lifecycle` on the Forgejo sessions database (it holds a password).
 KEYCLOAK_SOURCE_ID_ENV = "DEFENDER_LIFECYCLE_KEYCLOAK_SOURCE_ID"
@@ -36,6 +41,18 @@ PEOPLE_DURATIONS = ("people_poll", "people_call_timeout", "forge_session_cap", "
 
 class ConfigRefused(Exception):
     """The lifecycle cannot be configured as given; the message names what is wrong."""
+
+
+@dataclass(frozen=True, kw_only=True)
+class EvidenceStore:
+    """Where the tenants' evidence objects are kept (#1546): an S3-compatible store's address, bucket, access key pair and
+    region. The offboarding pass and the retention sweep delete in it; the keys are values here, never in a repr."""
+
+    endpoint: str
+    bucket: str
+    access_key: str = field(repr=False)
+    secret_key: str = field(repr=False)
+    region: str = EVIDENCE_REGION_DEFAULT
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -55,7 +72,9 @@ class LifecycleConfig:
     long teardown waits for the host lock after SIGTERM before SIGKILL, and how long it then keeps removing a folder
     that late writes keep filling before it fails the step (seconds each, #1360). `oidc_key` is the
     deployment's OIDC signing key; `token_policy` and `sign_policy` are its two templated policies,
-    of each generation's delivery AppRole and of its sign-only AppRole (#1163 A24').
+    of each generation's delivery AppRole and of its sign-only AppRole (#1163 A24'), and `evidence_policy` the third, of its
+    evidence AppRole (datakey and decrypt on the tenant's own `evidence-<T>` key, #1546). `evidence_store` is the store the
+    evidence objects are in.
 
     `forge_public_url` is the forge's address as a browser reaches it (since #1592 the edge's Forgejo site), required
     because `forge_url` (which the lifecycle's own calls and the clone's origin use) may be an internal service name a
@@ -82,6 +101,10 @@ class LifecycleConfig:
     oidc_key: str = "default"
     token_policy: str = "defender-tenant-token"
     sign_policy: str = "defender-tenant-sign"
+    evidence_policy: str = "defender-tenant-evidence"
+    #: The evidence store the service runs against; None only where a test hands the actors a store of their own
+    #: (`HostActor(blob=)`). `from_env` always sets it (it refuses a missing setting).
+    evidence_store: EvidenceStore | None = None
     forge_public_url: str
     keycloak_source_id: int
     forge_sessions_dsn: str = field(repr=False)
@@ -142,19 +165,32 @@ class LifecycleConfig:
             poll = float(os.environ.get(POLL_ENV) or "5")
         except ValueError:
             raise ConfigRefused(f"{POLL_ENV} is not a number of seconds") from None
+        store = _evidence_store()
         return cls(
             forge_url=os.environ[FORGE_URL_ENV],
             forge_admin_token=_secret_file(os.environ[FORGE_TOKEN_FILE_ENV], FORGE_TOKEN_FILE_ENV),
             openbao_login=_secret_file(os.environ[OPENBAO_LOGIN_FILE_ENV], OPENBAO_LOGIN_FILE_ENV),
             integration_command=os.environ[INTEGRATION_ENV], template_dir=template_dir,
             secrets_dir=Path(os.environ[SECRETS_DIR_ENV]), data_root=Path(os.environ[DATA_ROOT_ENV]),
-            poll_interval=poll, forge_public_url=os.environ[FORGE_PUBLIC_URL_ENV],
+            poll_interval=poll, evidence_store=store, forge_public_url=os.environ[FORGE_PUBLIC_URL_ENV],
             keycloak_source_id=source_id_from_env(), forge_sessions_dsn=os.environ[FORGE_SESSIONS_DSN_ENV])
 
     @property
     def forge_page_base(self) -> str:
         """Where a browser reaches the forge: `forge_public_url` without a trailing slash."""
         return self.forge_public_url.rstrip("/")
+
+
+def _evidence_store() -> EvidenceStore:
+    """The evidence store's settings from the environment; a missing required one is refused by name, so no lifecycle runs
+    an offboarding that would skip the store (A-O5)."""
+    values = {name: os.environ.get(f"{EVIDENCE_ENV_PREFIX}{name}") for name in EVIDENCE_REQUIRED}
+    if missing := [f"{EVIDENCE_ENV_PREFIX}{name}" for name, value in values.items() if not value]:
+        raise ConfigRefused(f"set {', '.join(missing)}")
+    return EvidenceStore(
+        endpoint=str(values["ENDPOINT"]), bucket=str(values["BUCKET"]), access_key=str(values["ACCESS_KEY"]),
+        secret_key=str(values["SECRET_KEY"]),
+        region=os.environ.get(f"{EVIDENCE_ENV_PREFIX}REGION") or EVIDENCE_REGION_DEFAULT)
 
 
 def _check_public_url(value: str) -> None:

@@ -17,6 +17,7 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 
+from defender.tests.support.evidence._facts1546 import EVIDENCE_ENV_PREFIX  # noqa: E402
 from defender.tests.support.shared._postgres1339 import empty_database  # noqa: E402,F401 — fixture
 from defender.tests.support.tenancy._active1214 import DSN_ENV  # noqa: E402
 from defender.tests.support.tenancy._host1214 import LIFECYCLE_MARK  # noqa: E402
@@ -80,8 +81,10 @@ def test_serve_gives_the_host_the_credentialless_clients_and_the_service_the_cre
     expected = lifecycle_config(tmp_path, data_root)
     for name, value in (("forge-token", expected.forge_admin_token), ("bao-login", expected.openbao_login)):
         (tmp_path / name).write_text(value + "\n", encoding="utf-8")
-    for name in [k for k in os.environ if k.startswith(("DEFENDER_LIFECYCLE_", "LIFECYCLE_"))]:
+    for name in [k for k in os.environ if k.startswith(("DEFENDER_LIFECYCLE_", "LIFECYCLE_", EVIDENCE_ENV_PREFIX))]:
         monkeypatch.delenv(name)
+    for name in ("ENDPOINT", "BUCKET", "ACCESS_KEY", "SECRET_KEY"):  # #1546 A-O5: a lifecycle with no store is refused
+        monkeypatch.setenv(f"{EVIDENCE_ENV_PREFIX}{name}", "http://evidence.test:3900" if name == "ENDPOINT" else "x")
     for name, value in ((DSN_ENV, empty_database), (settings.FORGE_URL_ENV, expected.forge_url),
                         (settings.FORGE_TOKEN_FILE_ENV, str(tmp_path / "forge-token")),
                         (settings.OPENBAO_LOGIN_FILE_ENV, str(tmp_path / "bao-login")),
@@ -138,6 +141,11 @@ def sessions_dsn():
         yield sessions.dsn
 
 
+#: #1546 A-O5: the evidence store's four required settings (a lifecycle with no store is refused), as the first case gives them.
+STORE_SETTINGS = [(f"{EVIDENCE_ENV_PREFIX}{name}", "http://evidence.test:3900" if name == "ENDPOINT" else "x")
+                  for name in ("ENDPOINT", "BUCKET", "ACCESS_KEY", "SECRET_KEY")]
+
+
 @pytest.mark.postgres
 def test_serve_starts_the_people_worker_beside_the_actors(  # noqa: F811
         empty_database, tmp_path, data_root, monkeypatch, sessions_dsn):  # noqa: F811
@@ -152,14 +160,14 @@ def test_serve_starts_the_people_worker_beside_the_actors(  # noqa: F811
     expected = lifecycle_config(tmp_path, data_root)
     for name, value in (("forge-token", expected.forge_admin_token), ("bao-login", expected.openbao_login)):
         (tmp_path / name).write_text(value + "\n", encoding="utf-8")
-    for name in [k for k in os.environ if k.startswith(("DEFENDER_LIFECYCLE_", "LIFECYCLE_"))]:
+    for name in [k for k in os.environ if k.startswith(("DEFENDER_LIFECYCLE_", "LIFECYCLE_", EVIDENCE_ENV_PREFIX))]:
         monkeypatch.delenv(name)
     for name, value in ((DSN_ENV, empty_database), (settings.FORGE_URL_ENV, expected.forge_url),
                         (settings.FORGE_TOKEN_FILE_ENV, str(tmp_path / "forge-token")),
                         (settings.OPENBAO_LOGIN_FILE_ENV, str(tmp_path / "bao-login")),
                         (settings.INTEGRATION_ENV, expected.integration_command),
                         (settings.SECRETS_DIR_ENV, str(expected.secrets_dir)), (settings.DATA_ROOT_ENV, str(data_root)),
-                        (settings.POLL_ENV, "0.05"), *people_settings(settings, sessions_dsn)):
+                        (settings.POLL_ENV, "0.05"), *people_settings(settings, sessions_dsn), *STORE_SETTINGS):
         monkeypatch.setenv(name, value)
 
     built: dict[str, Any] = {}
@@ -205,7 +213,11 @@ INJECTED: dict[str, Any] = {
     "teardown_wait": 7.25, "oidc_key": "census-oidc-key", "token_policy": "census-token-policy",
     "sign_policy": "census-sign-policy", "people_poll": 0.3, "people_concurrency": 3, "people_call_timeout": 2.75,
     "forge_session_cap": 4321.0, "forge_cap_every": 0.7,
+    "evidence_policy": "census-evidence-policy",  # #1546 A-O5
 }
+#: #1546 A-O5: the evidence store's settings the census gives (`DEFENDER_EVIDENCE_<name>`), and the store they make.
+CENSUS_EVIDENCE = {"ENDPOINT": "http://evidence-census.test:3900", "BUCKET": "census-bucket",
+                   "ACCESS_KEY": "census-access-key", "SECRET_KEY": "census-secret-key", "REGION": "census-region"}
 POLL_INTERVAL = 0.05  # `DEFENDER_LIFECYCLE_POLL_INTERVAL`, its default 5
 
 
@@ -274,6 +286,10 @@ READERS: dict[str, Callable[[dict[str, Any], str, Any], list[str]]] = {
     "forge_cap_every": _that(lambda s, v: len(s["caps"]) >= 2 and len(s["caps"]) < len(s["polls"])
                              and all(gap >= v * 0.9 for gap in _gaps([at for _older, at in s["caps"]])),
                              "the time between cap runs"),
+    # #1546 A-O5: the evidence AppRole's policy (the management service) and the store (the host's offboarding pass and
+    # the retention sweep, `HostActor.blob` from it)
+    "evidence_policy": _ACTORS,
+    "evidence_store": _all(_ACTORS, _that(lambda s, v: s["host"]["self"].blob is not None, "the host actor's store")),
 }
 
 
@@ -301,15 +317,21 @@ def test_every_lifecycle_setting_reaches_each_of_its_readers(  # noqa: F811, C90
                  "forge_url": "http://forge-census.test:3999", "forge_public_url": "https://forge-public-census.test/",
                  "forge_admin_token": "census-forge-token",
                  "openbao_login": "census-bao-login", "integration_command": "census-integration",
-                 "secrets_dir": tmp_path / "census-secrets"}
+                 "secrets_dir": tmp_path / "census-secrets",
+                 "evidence_store": settings.EvidenceStore(
+                     endpoint=CENSUS_EVIDENCE["ENDPOINT"], bucket=CENSUS_EVIDENCE["BUCKET"],
+                     access_key=CENSUS_EVIDENCE["ACCESS_KEY"], secret_key=CENSUS_EVIDENCE["SECRET_KEY"],
+                     region=CENSUS_EVIDENCE["REGION"])}
     defaults = {f.name: f.default for f in dataclasses.fields(LifecycleConfig) if f.default is not dataclasses.MISSING}
     assert not [n for n, v in defaults.items() if expected[n] == v], "control: a field kept its default"
     plain = [v for v in expected.values() if isinstance(v, (int, float, str))]
     assert len(plain) == len(set(plain)), "control: two fields share a value"
     for name, value in (("forge-token", expected["forge_admin_token"]), ("bao-login", expected["openbao_login"])):
         (tmp_path / name).write_text(value + "\n", encoding="utf-8")
-    for name in [k for k in os.environ if k.startswith(("DEFENDER_LIFECYCLE_", "LIFECYCLE_"))]:
+    for name in [k for k in os.environ if k.startswith(("DEFENDER_LIFECYCLE_", "LIFECYCLE_", EVIDENCE_ENV_PREFIX))]:
         monkeypatch.delenv(name)
+    for name, value in CENSUS_EVIDENCE.items():
+        monkeypatch.setenv(f"{EVIDENCE_ENV_PREFIX}{name}", value)
     for name, value in ((DSN_ENV, empty_database), (settings.FORGE_URL_ENV, expected["forge_url"]),
                         (settings.FORGE_PUBLIC_URL_ENV, expected["forge_public_url"]),
                         (settings.FORGE_TOKEN_FILE_ENV, str(tmp_path / "forge-token")),

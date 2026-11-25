@@ -793,8 +793,10 @@ def test_d11_no_product_code_has_a_misconfigured_outcome_or_a_stale_report_class
     assert pattern.search('x = "misconfigured"'), "control: the census pattern finds the word"
 
 
-#: Where the retired causes stay as words read back from storage: the vocabularies and one reason text.
-READ_ONLY_HOMES_1618 = {"records/learning_causes.py", "records/job_lane.py", "worker/_worker.py"}
+#: Where the retired causes stay as words read back from storage: the vocabularies and one reason text. #1546 (design r9
+#: "The ending", Stage: "today's rules (`worker/_worker.py:368-430`, moved)" into `jobs`): the host reasons' words
+#: (`_HOST_WORDS`) moved with the ending's rules from `worker/_worker.py` to `jobs/ending.py`.
+READ_ONLY_HOMES_1618 = {"records/learning_causes.py", "records/job_lane.py", "jobs/ending.py"}
 
 
 @pytest.mark.parametrize("word", ["foreign_commits_local", "repository_busy"])

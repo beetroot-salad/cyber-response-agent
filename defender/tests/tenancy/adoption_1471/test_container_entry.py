@@ -9,7 +9,6 @@ other writer can hold a ref lock in it (a stored `repository_busy` stays readabl
 from __future__ import annotations
 
 import base64
-import json
 import os
 import uuid
 
@@ -50,12 +49,15 @@ def _facts(repo, forge, **over):
         "rendering": {path: base64.b64encode(data).decode() for path, data in RENDERING.items()},
         "forge_origin": forge.wired,
         "forge_repo": "t-blue/knowledge",
+        # #1546 r10 (b): adoption's container builds a `JobTenant` like every container entry, from the launch facts, and
+        # keeps `inputs_dir` (the claim's inputs folder, absolute, apart from the job root).
+        "inputs_dir": over.pop("inputs_dir", "/job-inputs"),
     }
     return {**facts, **over}
 
 
-def _enter(repo, forge, tmp_path, *, facts=None, silent=False, token=None):
-    """Run the entry once against a socket handing `facts` (default: the helper's own); returns the record it wrote, or None."""
+def _enter(repo, forge, tmp_path, *, facts=None, token=None):
+    """Run the entry once against a socket handing `facts` (default: the helper's own); returns the result it sent, or None."""
     from defender import adoption
     from defender.job_socket import SOCKET_ENV
 
@@ -63,18 +65,27 @@ def _enter(repo, forge, tmp_path, *, facts=None, silent=False, token=None):
     tenant = str(repo[0].id)
     runs = location_path(repo[0].tenant_root) / "runs"
     runs.mkdir(exist_ok=True)
-    own = _facts(repo, forge, job_id=job_id)
+    inputs = tmp_path / "inputs"
+    inputs.mkdir(exist_ok=True)
+    own = _facts(repo, forge, job_id=job_id, inputs_dir=str(inputs))
     handed = own if facts is None else facts(own)
     minted = fixture_identity(tenant).token()
     answer = token if token is not None else (lambda fields: {"token": minted})
     environ = {**os.environ, "DEFENDER_DATA_ROOT": str(tmp_path / "data")}
-    with SocketStandIn(tenant, launch=handed, answers={"forge.token": answer}) as stand_in:
+    results: list = []
+
+    def result(fields):  # #1546 (A-O2, design Readiness / adoption): the typed `result` travels on the socket, not a file
+        results.append(fields.get("record"))
+        return {}
+
+    with SocketStandIn(tenant, launch=handed, answers={"forge.token": answer, "result": result}) as stand_in:
         for gone in set(own) - set(handed):  # the stand-in fills `tenant`/`tenant_state` by default: serve the removal
             stand_in.launch.pop(gone, None)
-        environ[SOCKET_ENV] = str(tmp_path / "no-such-socket") if silent else str(stand_in.path)
+        environ[SOCKET_ENV] = str(stand_in.path)
         adoption.main(["--job", job_id, "--tenant", tenant], environ=environ, client=forge.client)
-    path = runs / f"{job_id}.adoption.json"
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    assert not (runs / f"{job_id}.adoption.json").exists(), "the adoption record still went through the tenant folder"
+    assert len(results) <= 1, results
+    return results[0] if results else None
 
 
 def test_with_the_helpers_own_facts_the_entry_opens_the_offer_and_writes_opened(repo, forge, tmp_path):
@@ -125,19 +136,21 @@ def test_the_entry_fetches_pushes_and_opens_only_at_the_facts_forge_origin(repo,
     assert control["outcome"] == "opened", control
 
 
+# Retired param `silent` (#1546 A-O2): the adoption `result` reaches the store only through the helper, so a container with no
+# helper to answer stages nothing; the worker's end over a missing `result` is pinned for adoption by
+# `jobs/test_1546_host_request_rows.py::test_a_result_the_helper_refused_reads_bad_record_and_a_missing_one_no_record[adoption-...]`.
 @pytest.mark.parametrize("change", [
-    "silent", "other-kind", "other-tenant", "other-job", "no-rendering",
+    "other-kind", "other-tenant", "other-job", "no-rendering",
 ])
 def test_facts_that_are_not_this_requests_are_failed_handover_and_the_control_proceeds(repo, forge, tmp_path, change):
     """A launch that is unanswered, or facts of another kind, tenant or job or without a rendering: `{failed, handover}`; nothing sent. (R13-1.3, R13-1.4)"""
     mutate = {
-        "silent": None,
         "other-kind": lambda facts: {**facts, "kind": "readiness"},
         "other-tenant": lambda facts: {**facts, "tenant": str(uuid.UUID(int=1471))},
         "other-job": lambda facts: {**facts, "job": str(uuid.UUID(int=1472))},
         "no-rendering": lambda facts: {k: v for k, v in facts.items() if k != "rendering"},
     }[change]
-    assert _enter(repo, forge, tmp_path, facts=mutate, silent=change == "silent") == {"outcome": "failed", "reason": "handover"}
+    assert _enter(repo, forge, tmp_path, facts=mutate) == {"outcome": "failed", "reason": "handover"}
     assert forge.creates == []
 
 
@@ -149,7 +162,11 @@ def test_facts_saying_the_tenant_is_not_active_are_failed_tenant_not_active_not_
 
 
 #: The keys of the adoption launch facts (surface §4), as `_facts` hands them.
-FACT_KEYS = ("kind", "tenant", "job", "tenant_state", "system", "digest", "rendering", "forge_origin", "forge_repo")
+FACT_KEYS = ("kind", "tenant", "job", "tenant_state", "system", "digest", "rendering", "forge_origin", "forge_repo",
+             "inputs_dir")
+#: The fact the entry's tenant step reads (#1546 r10 (b), `job_tenant_from_launch`): refused there, before any forge call; the
+#: design names no reason for it, so either fixed reason of a refused setup is honest (WRITE-TESTS CHOICE).
+TENANT_STEP_KEYS = ("inputs_dir",)
 #: The facts' post-step key the adoption entry has no use for (the API base comes from `forge_origin`, surface §4).
 UNREAD_KEYS = ("forge_repo",)
 
@@ -179,6 +196,9 @@ def test_facts_missing_a_key_or_holding_a_value_of_another_type_end_in_a_record_
     assert record is not None, "the entry ended with no record"
     if key == "tenant_state":
         assert record in ({"outcome": "failed", "reason": "handover"}, {"outcome": "failed", "reason": "tenant_not_active"})
+    elif key in TENANT_STEP_KEYS:
+        assert record in ({"outcome": "failed", "reason": "handover"}, {"outcome": "failed", "reason": "delivery_failed"}), record
+        assert forge.creates == []
     elif key in UNREAD_KEYS:
         assert record in ({"outcome": "failed", "reason": "handover"}, {"outcome": "opened", "pr_number": record.get("pr_number")}), record
     else:

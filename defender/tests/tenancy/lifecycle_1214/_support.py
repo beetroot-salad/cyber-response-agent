@@ -43,6 +43,7 @@ from defender.tests.tenancy.lifecycle_1214._fakes import FORGE_URL, ISSUER_URL, 
 # Production names #1214 must supply. Kept in this one block so a missing package is one ImportError.
 from defender.lifecycle import HostActor, LifecycleConfig, ManagementService  # noqa: E402
 from defender.tenancy import InMemoryTenantRepository, TenantDirectory, template_dir  # noqa: E402,F401
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 #: Offboarding keeps the archived repo this long (Q5).
 REPO_WINDOW = _dt.timedelta(days=30)
@@ -68,6 +69,18 @@ def people_settings(settings: Any, sessions_dsn: str = FORGE_SESSIONS_DSN) -> li
             (settings.FORGE_PUBLIC_URL_ENV, FORGE_PUBLIC_URL)]
 
 
+def evidence_settings() -> list[tuple[str, str]]:
+    """The evidence store's settings #1546 makes required of the lifecycle (A-O5: `LifecycleConfig.from_env` refuses
+    without `DEFENDER_EVIDENCE_{ENDPOINT,BUCKET,ACCESS_KEY,SECRET_KEY}`), as the environment variables a process-entry case
+    sets (names from `_facts1546`). The endpoint is unreachable: a case that starts the real `_serve` and never runs an
+    offboarding pass needs no more."""
+    from defender.tests.support.evidence._facts1546 import EVIDENCE_ENV_NAMES, EVIDENCE_ENV_PREFIX
+
+    values = {"ENDPOINT": "http://evidence-unreached.test:3900", "BUCKET": "evidence-unreached",
+              "ACCESS_KEY": "unreached-access-key", "SECRET_KEY": "unreached-secret-key", "REGION": "garage"}
+    return [(f"{EVIDENCE_ENV_PREFIX}{name}", values[name]) for name in EVIDENCE_ENV_NAMES]
+
+
 def lifecycle_config(tmp_path: Path, data_root: Path, **overrides: Any) -> Any:
     """The one `LifecycleConfig` of the tests (DC-13): https issuer, forge and OpenBao addresses of the fakes,
     the real template directory, a per-test secrets directory OUTSIDE `<data root>/<T>/`, a short poll, and the two
@@ -90,7 +103,9 @@ class LifecycleWorld(World):
     """#1306's world with the tenant repository wired into the API, the identity repository sharing
     its tenant store, `ops` as administrator, and both lifecycle actors over the fakes."""
 
-    def __init__(self, tmp_path: Path, data_root: Path) -> None:
+    def __init__(self, tmp_path: Path, data_root: Path, *, blob: Any = None) -> None:
+        #: #1546: the evidence store handed to the host actors (`HostActor(blob=)`); None leaves the actor's own default.
+        self.blob = blob
         self.data_root = data_root
         self.tmp_path = tmp_path
         self.fakes = Fakes(tmp_path)
@@ -120,7 +135,8 @@ class LifecycleWorld(World):
         # over the forge fake's bare repositories (`_fetch_1618`), for every lifecycle world.
         parts: dict[str, Any] = {
             "forge": self.forge.client(None), "openbao_login": self.openbao.client(None), "git": self.git,
-            "fetch": fetch_seam_of(self), "config": self.config, "clock": self.clock, **overrides}
+            "fetch": fetch_seam_of(self), "config": self.config, "clock": self.clock,
+            **({} if self.blob is None else {"blob": self.blob}), **overrides}
         return HostActor(tenants, **parts)
 
     def close(self) -> None:
@@ -155,7 +171,7 @@ class LifecycleWorld(World):
 
     def create(self) -> str:
         """`POST /admin/tenants` as `ops`; the minted id (asserted 202)."""
-        made = self.ops.post(API + "/admin/tenants", json={})
+        made = self.ops.post(API + "/admin/tenants", json=CREATE_RETENTION)
         assert made.status_code == 202, made.text
         return made.json()["tenant_id"]
 

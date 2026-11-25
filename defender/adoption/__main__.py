@@ -2,14 +2,15 @@
 
 Inside the job container it takes no host lock, runs no admission and opens no database: the per-job host helper did, and answers
 `launch` and `forge.token` over the job socket. The entry asks `launch`, checks the facts are this request's (kind, tenant, job,
-a rendering, a digest and the forge origin the helper read), accepts the tenant's folder by the folder rules alone, opens the
-tenant's repository against the recorded forge origin with the socket's credential, runs `adopt()` (which fetches, decides and
-delivers, `learning.author.version_control.adoption`) and writes the one create-only record `<runs>/<job>.adoption.json`:
+a rendering, a digest and the forge origin the helper read), builds its `JobTenant` from them (#1546: the job's root and
+inputs; no admission, which was the helper's), opens the job's clone of the tenant's repository against the recorded forge origin with the socket's credential, runs `adopt()` (which fetches, decides and
+delivers, `learning.author.version_control.adoption`) over the helper's own clone in the job's root, and sends its one result to the
+helper as the `result` record (#1546: staged, never a file):
 
 - `{outcome, pr_number}` from `adopt()`;
 - `{failed, handover}`: the launch is unanswered or refused, or its facts are not this request's (R13-1.3, .4);
 - `{failed, tenant_not_active}`: the facts say the tenant is not `active`;
-- `{failed, delivery_failed}`: the tenant's folder or repository cannot be opened (an unprotected `main` among them), or
+- `{failed, delivery_failed}`: the job's tenant or its clone cannot be opened (an unprotected `main` among them), or
   `adopt()`'s own anything-else.
 
 With no job socket in the environment (a host shell) it does nothing and exits non-zero. `client` is the forge API's `httpx`
@@ -20,6 +21,7 @@ import argparse
 import base64
 import binascii
 import contextlib
+import json
 import logging
 import re
 import signal
@@ -30,7 +32,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from defender import job_socket, tenancy
-from defender._paths import process_defender_dir
 from defender.learning.author.version_control.adoption import DELIVERY_FAILED, adopt
 from defender.learning.author.version_control.repository import GitRepository
 from defender.learning.branch.container import JobContainer, NotInContainer
@@ -91,7 +92,9 @@ def _deliver(container: JobContainer, ns: argparse.Namespace, root: Any, client:
     assert rendering is not None  # `_is_this_requests` held
     with contextlib.ExitStack() as owned:
         try:
-            tenant = tenancy.accept_tenant(root, ns.tenant, defender_dir=process_defender_dir())
+            # The job's tenant from the launch facts (#1546 r10 (b): every container entry builds one); the host's admission
+            # was the helper's, so nothing here accepts the tenant's folder. Its repository is private, against the forge.
+            tenant = tenancy.job_tenant_from_launch(root, ns.tenant, facts)
             if client is None:
                 import httpx
 
@@ -120,9 +123,8 @@ def _outcome(ns: argparse.Namespace, environ: Mapping[str, str], root: Any, clie
 
 
 def main(argv: list[str], *, environ: Mapping[str, str] | None = None, client: httpx.Client | None = None) -> int:
-    """Run one adoption and write its record (module doc); 0 once a record is written. A host shell (no job socket) does
-    nothing and returns non-zero; a record that cannot be written raises, so the process ends non-zero and the worker reads
-    no record."""
+    """Run one adoption and send its result (module doc); 0 once it was sent. A host shell (no job socket) does nothing and
+    returns non-zero; a socket that is gone raises, so the process ends non-zero and the worker reads no result."""
     import os
 
     ns = _parse_args(argv)
@@ -138,11 +140,13 @@ def main(argv: list[str], *, environ: Mapping[str, str] | None = None, client: h
         sys.stderr.write(f"[adoption] job {ns.job}: {refused}\n")
         return 2
     record = _outcome(ns, env, root, client)
+    request = job_socket.from_environ(env)
+    if request is None:
+        raise RuntimeError("the job socket went away")
     try:
-        with job_lane.JobLane.open(root, ns.tenant) as lane:
-            lane.write_adoption(ns.job, record)
-    except FileExistsError:
-        _logger.error("adoption %s: a record is already there; it is kept", ns.job)
+        request("result", record=json.loads(record.text()))
+    except job_socket.Refused as refused:
+        _logger.error("adoption %s: the helper did not take its result (%s): %s", ns.job, refused.code, refused)
     return 0
 
 

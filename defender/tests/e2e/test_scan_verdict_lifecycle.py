@@ -30,7 +30,6 @@ from defender.tests.e2e._spec771 import (
     run_tree,
     verdict_sidecar,
     worktree_tree,
-    write_verdict,
 )
 from defender.tests.support.tenancy._host1214 import TEST_TENANT
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
@@ -73,8 +72,8 @@ def test_a_skipped_reap_scan_leaves_a_did_not_run_marker(in_flight, tmp_path):
     )
     verdict = read_verdict(tree)
     assert verdict, f"the skipped scan left no verdict at {verdict_sidecar(tree)}"
-    assert verdict.get("ran") is False, f"the verdict does not record the skip: {verdict}"
-    assert verdict.get("reason"), "the verdict names no reason, so an operator cannot act on it"
+    assert scrub_mod.verdict_state(tree) == "not_run", f"the verdict does not record the skip: {verdict}"
+    assert "teardown failed" in json.dumps(verdict), "the verdict names no reason, so an operator cannot act on it"
     new_in_tree = {str(p.relative_to(tree)) for p in tree.rglob("*")} - before_tree
     assert not new_in_tree, (
         f"recording the skipped scan created entries inside the tree it judges: "
@@ -89,8 +88,10 @@ def test_consumers_treat_an_unmarked_tree_as_unverified(tmp_path):
     )
 
     skipped = run_tree(tmp_path / "skipped")
-    write_verdict(skipped, {"ran": False, "reason": "teardown faulted"})
+    scrub_mod.write_did_not_run(skipped, "teardown faulted")
     assert not scrub_mod.tree_verified(skipped)
+    assert scrub_mod.verdict_state(skipped) == "not_run"
+    assert scrub_mod.verdict_state(never_started) is None
 
     scanned = run_tree(tmp_path / "scanned")
     scrub_mod.scrub(scanned)
@@ -122,17 +123,95 @@ def test_the_scan_verdict_lands_outside_the_tree_it_judges(tmp_path):
 def test_a_verdict_planted_inside_the_tree_is_never_read_as_one(tmp_path):
     tree = run_tree(tmp_path)
     forged = tree / FORGED_IN_TREE_VERDICT_NAME
-    forged.write_text(json.dumps({"ran": True, "reason": "clean"}), encoding="utf-8")
+    genuine = run_tree(tmp_path / "other")
+    assert scrub_mod.scrub(genuine) == "clean"
+    shutil.copy(verdict_sidecar(genuine), forged)   # a real clean verdict, planted where the box could write
 
     assert not scrub_mod.tree_verified(tree), (
         "a verdict written inside the tree was read as authoritative"
     )
 
-    write_verdict(tree, {"ran": True, "reason": "walk completed"})
+    assert scrub_mod.scrub(tree) == "clean"
     assert scrub_mod.tree_verified(tree), (
         "the real out-of-tree verdict does not make the tree read verified either"
     )
     assert forged.is_file(), "the consumer removed the planted entry — reading must not sanitize"
+
+
+def _plant(tree: Path, kind: str) -> None:
+    import socket
+    import stat
+
+    if kind == "symlink-file":
+        os.symlink("report.md", tree / "x")
+    elif kind == "symlink-dir":
+        os.symlink("gather_raw", tree / "x")
+    elif kind == "symlink-dangling":
+        os.symlink("/nonexistent/target", tree / "x")
+    elif kind == "fifo":
+        os.mkfifo(tree / "x")
+    elif kind == "socket":
+        sock = socket.socket(socket.AF_UNIX)
+        here = os.getcwd()
+        os.chdir(tree)  # bind by a relative name: the tree's absolute path can overrun a unix socket's 108 bytes
+        try:
+            sock.bind("x")
+        finally:
+            os.chdir(here)
+            sock.close()
+    elif kind == "hardlink":
+        os.link(tree / "report.md", tree / "x")
+    else:
+        try:
+            os.mknod(tree / "x", mode={"chardev": stat.S_IFCHR, "blockdev": stat.S_IFBLK}[kind] | 0o600, device=os.makedev(1, 3))
+        except PermissionError:
+            pytest.skip(f"cannot create a {kind} here")
+
+
+@pytest.mark.parametrize("kind", ["symlink-file", "symlink-dir", "symlink-dangling", "fifo", "socket", "hardlink",
+                                  "chardev", "blockdev"])
+def test_every_offending_entry_type_reads_tainted_and_never_verified(tmp_path, kind):
+    """Any entry that is not a lone regular file or a directory: `RunTainted`, verdict `tainted`, not verified. (D2, A-O10)"""
+    tree = run_tree(tmp_path)
+    (tree / "report.md").write_text("ordinary\n", encoding="utf-8")
+    assert scrub_mod.scrub(tree) == "clean"       # positive control: the same tree, before the plant
+    assert scrub_mod.verdict_state(tree) == "clean"
+    assert scrub_mod.tree_verified(tree)
+
+    _plant(tree, kind)
+    with pytest.raises(scrub_mod.RunTainted):
+        scrub_mod.scrub(tree)
+    assert scrub_mod.verdict_state(tree) == "tainted", "the stale `clean` verdict survived a walk that refused the tree"
+    assert not scrub_mod.tree_verified(tree)
+
+
+def test_an_unreadable_entry_is_tainted_not_a_skipped_walk(tmp_path):
+    """The walk meets an entry it cannot read: `RunTainted` with an `unreadable` finding and verdict `tainted`, not `not_run`. (D2, A-O10)"""
+    tree = run_tree(tmp_path)
+
+    def lister(top, onerror):
+        onerror(OSError(errno.EACCES, "Permission denied", str(Path(top) / "gather_raw")))
+        yield str(top), [], []
+
+    with pytest.raises(scrub_mod.RunTainted) as raised:
+        scrub_mod.scrub(tree, lister=lister)
+    assert [f.kind for f in raised.value.findings] == ["unreadable"]
+    assert scrub_mod.verdict_state(tree) == "tainted"
+    assert not scrub_mod.tree_verified(tree)
+
+
+def test_the_three_verdict_states_are_told_apart_by_their_one_reader(tmp_path):
+    """`clean`, `tainted`, `not_run` and no verdict at all each read as themselves; only `clean` verifies. (A-O10)"""
+    clean, tainted, skipped, absent = (run_tree(tmp_path / name) for name in ("c", "t", "s", "a"))
+    scrub_mod.scrub(clean)
+    os.link(tainted / "alert_input" / "alert.json", tainted / "alias.json")
+    with pytest.raises(scrub_mod.RunTainted):
+        scrub_mod.scrub(tainted)
+    scrub_mod.write_did_not_run(skipped, "teardown faulted")
+    seen = {name: (scrub_mod.verdict_state(tree), scrub_mod.tree_verified(tree))
+            for name, tree in (("clean", clean), ("tainted", tainted), ("not_run", skipped), ("absent", absent))}
+    assert seen == {"clean": ("clean", True), "tainted": ("tainted", False), "not_run": ("not_run", False),
+                    "absent": (None, False)}
 
 
 # A tainted tree is no longer archived for forensics, so nothing pins a preserving writer: an
@@ -150,9 +229,10 @@ def test_a_partial_reap_scan_failure_fails_closed_over_the_whole_tree(tmp_path):
         scrub_mod.scrub(tree, lister=half_walk)
 
     assert "vanished.json" in str(e.value), "the partial walk's fault does not name the entry"
-    assert read_verdict(tree).get("ran") is not True, (
-        "a partially-walked tree recorded a completed scan, so a consumer reads it as verified"
+    assert scrub_mod.verdict_state(tree) == "tainted", (
+        "a partially-walked tree did not record `tainted` (A-O10: an unreadable entry is tainted, not a skipped walk)"
     )
+    assert not scrub_mod.tree_verified(tree)
 
 
 def test_an_entry_that_changes_shape_between_listing_and_inspection_is_refused(tmp_path):
@@ -266,10 +346,9 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
         f"a box mount is no longer a bind: {specs}"
     )
     writable = [m for m in rec.mounts() if not m["readonly"]]
-    assert len(writable) == 1, f"the writable bind set moved: {writable}"
-    assert Path(writable[0]["source"]).resolve() == run.resolve(), (
-        f"the writable bind is sourced at {writable[0]['source']!r}, not at the run dir itself"
-    )
+    assert writable == [], f"the box has a writable bind (#1546 D4: the run folder is read-only): {writable}"
+    at_run = [m for m in rec.mounts() if Path(m["source"]).resolve() == run.resolve()]
+    assert len(at_run) == 1, f"the run dir itself is not bound exactly once: {rec.mounts()}"
 
 
 def test_a_planted_hard_link_still_refuses_the_guarded_write(tmp_path):
@@ -318,10 +397,10 @@ def test_a_teardown_fault_under_an_in_flight_failure_still_reports_both(tmp_path
     )
     assert "stop" in rec.events, "the teardown never ran, so nothing could have faulted"
     verdict = read_verdict(tree)
-    assert verdict.get("ran") is False, (
+    assert scrub_mod.verdict_state(tree) == "not_run", (
         f"the swallowed teardown left no did-not-run verdict on the tree: {verdict}"
     )
-    assert "teardown" in str(verdict.get("reason", "")).lower(), (
+    assert "teardown" in json.dumps(verdict).lower(), (
         f"the swallowed teardown fault left no trace of its cause: {verdict}"
     )
 
@@ -338,8 +417,8 @@ def test_a_faulted_box_create_leaves_a_verdict_on_the_tree_it_touched(tmp_path):
     assert verdict, (
         f"a faulted create left no verdict at {verdict_sidecar(run)}"
     )
-    assert verdict.get("ran") is False, f"the verdict does not record the skip: {verdict}"
-    assert verdict.get("reason"), (
+    assert scrub_mod.verdict_state(run) == "not_run", f"the verdict does not record the skip: {verdict}"
+    assert "no such image" in json.dumps(verdict) or "box start" in json.dumps(verdict), (
         "the verdict names no reason for the skipped scan"
     )
     assert not scrub_mod.tree_verified(run), (

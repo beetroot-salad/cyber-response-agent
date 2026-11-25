@@ -63,7 +63,8 @@ def test_a_tenants_newest_first_page_is_read_in_index_order_without_a_sort(migra
 @pytest.mark.postgres
 def test_an_upgrade_over_stored_work_keeps_every_row_and_adds_the_indexes(empty_database):
     """A database at the previous head holding an alert keeps it through the upgrade and gains the list indexes. (#1083 Data)"""
-    from defender.migrations import check_version, upgrade
+    from defender.migrations import check_version
+    from defender.tests.migrations._marked1470 import upgrade_with_retention
     from defender.tests.support.jobs._jobs1342 import NOW, T1
 
     _upgrade_to(empty_database, PREVIOUS)
@@ -75,7 +76,7 @@ def test_an_upgrade_over_stored_work_keeps_every_row_and_adds_the_indexes(empty_
             ("6b0d9f7e-1083-4c00-8a00-000000000001", T1, NOW, NOW, NOW, b"{}"))
     assert _list_indexes(empty_database, "alerts") == [], "control: not there before the upgrade"
 
-    upgrade(empty_database)
+    upgrade_with_retention(empty_database)  # #1546 r9 B: the tenant has its retention row, so that revision does not stop
 
     check_version(empty_database)
     assert execute(empty_database, "SELECT count(*) FROM jobs.alerts") == [(1,)]

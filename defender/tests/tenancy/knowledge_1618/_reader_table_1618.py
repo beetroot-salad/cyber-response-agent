@@ -6,8 +6,10 @@ reader's own boundary (an exit status, a typed refusal, a log line, a skipped ti
 FORCED (the one place; production spellings are the implementer's):
 - the host judge's copy path is the launcher's own `fetch=` seam (`cli.learning.branch.main(..., fetch=)`, the one the corpus and
   tenant check use); a refusal is logged by its judge pass and never raised (the launch goes on);
-- a sibling's copy is `copy.make(world=)` alone: the pin is the family's, planted in its episode (`knowledge_pin.json`, what
-  `read_pin` reads), never chosen by the container (C20).
+- a sibling's copy is `copy.make(world=)` alone: the pin is the family's, never chosen by the container (C20). #1546 (design
+  r10 (a), owner decisions H1 and D-2): the family's pin is the learning claim's launch fact `knowledge_commit`, which the
+  helper compares `copy.make(commit=)` against and copies each sibling at; the helper reads nothing from the episode (its
+  `knowledge_pin.json` is the job's own reading aid), and a sibling's world is found on the staged `arms` roster.
 """
 from __future__ import annotations
 
@@ -172,9 +174,9 @@ def _helper_seam(scene: Any, calls: list) -> Callable[..., str]:
 
 def _helper(env: Env, *, with_commit: bool, sibling: bool = False) -> contextlib.AbstractContextManager[Rig]:
     from defender import job_host
-    from defender.records._knowledge_pin import pin_text
-    from defender.tests.support.jobs._job_helper import ForgeCredentialRecorder
-    from defender.tests.support.jobs._job_helper_learning import listing, plant_siblings, run_kind
+    from defender.tests.support.jobs import _helper_evidence1546 as H
+    from defender.tests.support.jobs._job_helper import ForgeCredentialRecorder, run_copies
+    from defender.tests.support.jobs._job_helper_learning import listing, run_kind
 
     @contextlib.contextmanager
     def opened() -> Iterator[Rig]:
@@ -187,16 +189,16 @@ def _helper(env: Env, *, with_commit: bool, sibling: bool = False) -> contextlib
             fetch = _helper_seam(scene, seams)
             forge = ForgeCredentialRecorder()
             fields: dict[str, Any] = {"commit": commit} if (with_commit and commit) else {}
-            kw: dict[str, Any] = {}
-            if sibling:
-                planted = plant_siblings(scene)
-                if commit:  # the family's pin, in the family's episode (what `read_pin` reads): the host decides it, not the container
-                    (planted.dir / "knowledge_pin.json").write_text(pin_text(commit), encoding="utf-8")
-                fields["world"] = planted.worlds["b"]
-                kw = {"job_id": planted.job_id, "source": planted.source}
+            # #1546 r10 (a): the family's pin is the claim's `knowledge_commit` (the host decides it, not the container): the
+            # commit a pinned row asks is the one its claim pins (else the scene's seed, a commit the forge serves).
+            planted = H.plant(scene, "learning", pin=commit or t.commit)
+            kw: dict[str, Any] = {"job_id": planted.owner, "source": planted.source}
             got: dict[str, Any] = {}
 
             def job(c: Any) -> int:
+                if sibling:  # D-2: the world is found on the staged `arms` roster; the episode is the job's, in its root
+                    _ep, worlds, _runs = H.stage_roster(scene, c, planted)
+                    fields["world"] = worlds["b"]
                 got["mark"] = len(fetch.calls)  # the launch's own ask (`main`, r5.1-a) is before this index
                 if armed["down"]:
                     K.forge_down(t)
@@ -212,7 +214,7 @@ def _helper(env: Env, *, with_commit: bool, sibling: bool = False) -> contextlib
 
             run_kind(scene, "learning", job, forge=forge, fetch=fetch, **kw)
             left = got.get("new", []) + [p.name for p in _copy_dirs(scene)]
-            left += listing(scene.root / scene.tenant / "run-knowledge") if sibling else []
+            left += (listing(scene.root / scene.tenant / "run-knowledge") + listing(run_copies(scene))) if sibling else []
             return Result(refused="refusal" in got, text=got.get("refusal", ""), asks=_asks(fetch.calls[got["mark"]:]), left=left,
                           seen=_settings_seen(t, commit or t.commit, got.get("settings")),
                           minted=len(forge.built) + len(forge.asked))
@@ -410,13 +412,13 @@ def _tick(env: Env) -> contextlib.AbstractContextManager[Rig]:
 READERS: tuple[Reader, ...] = (
     Reader("run-start", "run.main -> run_common.materialize (fetch child)", _run_start, "exit", spends=True),
     Reader("run-start-pinned", "run.main --knowledge-commit", _run_start, "exit", pinned=True, spends=True),
-    Reader("sibling-copy", "job helper copy.make(world=), pin from the family's episode", lambda e: _helper(e, with_commit=False, sibling=True),
+    Reader("sibling-copy", "job helper copy.make(world=), pin from the claim's knowledge_commit", lambda e: _helper(e, with_commit=False, sibling=True),
            "raise", pinned=True, postgres=True),
     Reader("drain-tick-opening-fetch", "learning.core.drains.author_drain -> opened_delivery (private repository)",
            _tick, "skip", via="git", spends=True, postgres=True),
     Reader("helper-copy-make", "job helper copy.make (main)", lambda e: _helper(e, with_commit=False), "raise",
            postgres=True),
-    Reader("helper-copy-make-commit", "job helper copy.make(commit=)", lambda e: _helper(e, with_commit=True), "raise",
+    Reader("helper-copy-make-commit", "job helper copy.make(commit=<the claim's pin>)", lambda e: _helper(e, with_commit=True), "raise",
            pinned=True, postgres=True),
     Reader("judge-bodies-container", "learning.judge.grade_episode -> helper copy.make(commit=)", _judge_container, "raise",
            pinned=True, spends=True),

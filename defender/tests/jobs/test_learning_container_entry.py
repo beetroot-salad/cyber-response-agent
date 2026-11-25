@@ -7,6 +7,7 @@ SIGTERM does. The operator sibling, run from a host shell, is unchanged (positiv
 line. Slice D's counterpart for the investigation is `test_job_container_entry.py`."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import uuid
@@ -14,7 +15,9 @@ from typing import Any
 
 import pytest
 from defender.tests.support.jobs import _job_helper as J
-from defender.tests.support.jobs._container_entry1170 import ThreadCalls
+from defender.tests.support.evidence._facts1546 import VERB_ARMS
+from defender.tests.support.jobs import _helper_evidence1546 as H
+from defender.tests.support.jobs._container_entry1170 import ThreadCalls, in_container_environment
 from defender.tests.support.jobs._job_helper_learning import learning_end, listing
 from defender.tests.support.tenancy._host1214 import counting_calls
 from defender.tests.support.jobs._learning_container1170 import (
@@ -32,7 +35,10 @@ from defender.tests.support.jobs._learning_container1170 import (
 process_state = J.process_state
 scene = J.scene
 
-pytestmark = [pytest.mark.postgres, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — fixtures the helper's store seams take
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
+
+pytestmark = [pytest.mark.postgres, pytest.mark.garage, pytest.mark.openbao, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux only")]
 
 HOW = ["sigterm", "stdin-eof", "control-no-signal"]
 POST_STEPS = pytest.mark.parametrize("family_less", [False, True], ids=["post-step", "family-less"])
@@ -79,27 +85,76 @@ def _host_shell_premise() -> None:
     assert job_host.SOCKET_ENV not in os.environ, "premise: a host shell has no job socket"
 
 
+def _staged_end(scene: Any) -> dict[str, Any] | None:
+    """The learning job's end as the helper staged it (#1546 A-O2, PR2: the `outcome` fact under the claim; no learning-end
+    file), or None when none was staged."""
+    return H.facts(scene.dsn, scene.claim).get("outcome")
+
+
+def _claimed_with_its_source(request: Any, scene: Any, job_id: str, source: str, workdir: Any) -> Any:
+    """#1546 (design Learning job: "Input set: the source's `bundle`"; the job pulls it into its root): the worker's claim of
+    the learning job now; returned, what plants its source's accepted bundle (a real finished source run, packed), called on
+    the container's side once the helper set its store up, so the job's pull is answered."""
+    H.plant(scene, "learning", owner=job_id, source=source)
+    return lambda: H.store_for(request, scene).plant_source_bundle(scene, source, workdir)
+
+
+def _copy_owner(scene: Any, run_id: str, run_dir: Any, owner_record: Any) -> Any:
+    """The pid in the owner record of the sibling's run copy, wherever the helper placed it for this claim (#1546: the run
+    copy is the helper's, in the claim's inputs or root, not `<T>/run-knowledge/` of the tenant's folder), or None."""
+    from pathlib import Path
+
+    found = [p for base in (H.job_inputs(scene), H.job_root(scene))
+             for p in (Path(base).rglob(run_id) if Path(base).is_dir() else ())
+             if p.is_dir() and not p.is_symlink() and p != Path(run_dir)]
+    for copy in found:
+        record = owner_record(copy)
+        if record:
+            return record["pid"]
+    return None
+
+
+def _episode_in_the_job_root(scene: Any, c: Any, job_id: str, source: str) -> tuple[Any, str]:
+    """#1546 (design "The job's folders": the episode and arm folders are in the job's root, the container's
+    `DEFENDER_DATA_ROOT`): the learning job's episode as its pre-flight leaves it, planted in the container's root (not the
+    host's tenant folder), and the roster's id for world `b`."""
+    import dataclasses
+    from pathlib import Path
+
+    root = Path(str(c.env["DEFENDER_DATA_ROOT"]))
+    (root / scene.tenant / "runs").mkdir(parents=True, exist_ok=True)
+    (root / scene.tenant / "episodes").mkdir(parents=True, exist_ok=True)
+    ep, roster_id = plant_episode(dataclasses.replace(scene, root=root, runs=root / scene.tenant / "runs"), job_id, source)
+    # #1546 (census "Helper arm roster from job-written files -> `arms` and `arm/<id>` facts"): the launcher sends the roster
+    # over the socket before the first arm runs; the helper answers a sibling only for a run it names.
+    roster = json.loads((ep / "arms.json").read_text(encoding="utf-8"))
+    c.request(VERB_ARMS, record={"roster": [{"run_id": run, "world_id": world} for world, run in sorted(roster.items())]})
+    return ep, roster_id
+
+
 # --- the learning job entry ----------------------------------------------------------------------------------------
 
-def test_a6_the_learning_job_entry_takes_no_lock_runs_no_admission_and_opens_no_database(scene):
+def test_a6_the_learning_job_entry_takes_no_lock_runs_no_admission_and_opens_no_database(scene, request, tmp_path):
     """Run in the container with the job socket set, the entry reaches its source check and ends its job with a record, having taken no host lock, run no admission, opened no database, made no copy or publish and built no signer; the helper did. (A6, A3, P-C)"""
     from defender.learning.branch import cli, job_entry
 
     job_id, source = str(uuid.uuid4()), str(uuid.uuid4())
-    plant_episode(scene, job_id, source)
+    source_bundle = _claimed_with_its_source(request, scene, job_id, source, tmp_path / "source")
     watched = {**_watched(), "source_opened": cli._open_launch_source}
 
     def entry(c, seen):
-        return job_entry.main(["--job", job_id, "--tenant", scene.tenant, "--source", source], environ=c.env,
-                              preflight=lambda *a, **k: 0)
+        source_bundle()
+        with in_container_environment(c.env):
+            return job_entry.main(["--job", job_id, "--tenant", scene.tenant, "--source", source], environ=c.env,
+                                  preflight=lambda *a, **k: 0)
 
     with ThreadCalls(watched) as calls:
         seen = seen_in_container(scene, "learning", entry, job_id=job_id, source=source)
 
     _clean(seen)
-    end = learning_end(scene, job_id)
-    assert end is not None, "the entry left no learning end record"
-    assert end.status != "stopped", "control: a hand-back means the entry waited on a lock it should not take"
+    end = _staged_end(scene)
+    assert end is not None, "the entry staged no learning outcome"
+    assert end.get("status") != "stopped", "control: a hand-back means the entry waited on a lock it should not take"
     assert calls.container("source_opened") >= 1, "control: the entry never reached the launch steps past admission"
     assert {k: v for k, v in _container_side(calls, watched).items() if k != "source_opened"} == {
         k: 0 for k in _watched()}
@@ -137,12 +192,13 @@ def test_a5_a6_the_learning_job_entry_is_container_only_it_does_nothing_from_a_h
 
 
 @pytest.mark.parametrize("how", HOW)
-def test_a5_eof_on_stdin_is_sigterm_to_the_learning_job_entry_and_takes_its_sibling_with_it(scene, tmp_path, how):
+def test_a5_eof_on_stdin_is_sigterm_to_the_learning_job_entry_and_takes_its_sibling_with_it(scene, tmp_path, how, request):
     """The entry's real command line, in the container: EOF on stdin ends the job as SIGTERM does (its record `stopped`, its launcher's real sibling gone); with stdin open and no signal it stays up. (A5, #1344 O9)"""
     job_id, source, marks = str(uuid.uuid4()), str(uuid.uuid4()), tmp_path / "marks"
-    plant_episode(scene, job_id, source)
+    source_bundle = _claimed_with_its_source(request, scene, job_id, source, tmp_path / "source")
 
     def entry(c, seen):
+        source_bundle()
         proc = start_hold(c, LEARNING_JOB_HOLD, marks, "--job", job_id, "--tenant", scene.tenant, "--source", source)
         return hold_how(proc, marks, how, seen)
 
@@ -154,9 +210,9 @@ def test_a5_eof_on_stdin_is_sigterm_to_the_learning_job_entry_and_takes_its_sibl
         assert seen.extra["alive_without_signal"] is True, "the entry ended with its stdin still open"
     assert (marks / "unwound").exists()
     process_gone(int((marks / "child.pid").read_text(encoding="utf-8")), "the entry's sibling to be gone")
-    end = learning_end(scene, job_id)
-    assert end is not None, "no end record"
-    assert end.status == "stopped", end
+    end = _staged_end(scene)
+    assert end is not None, "no outcome staged"
+    assert end.get("status") == "stopped", end
 
 
 # --- the post-step and the family-less check -------------------------------------------------------------------------
@@ -240,26 +296,27 @@ def test_a6_a_sibling_in_the_container_takes_no_lock_runs_no_admission_and_signs
     from defender.tests.tenancy.tenant_1108_p4._drain_support import owner_record
 
     job_id, source = str(uuid.uuid4()), str(uuid.uuid4())
-    ep, roster_id = plant_episode(scene, job_id, source)
     signer, got = J.make_signer(), {}
 
     def lifecycle(**kw):
         run = kw["run"]
         got["run_dir"], got["token"] = run.run_dir, kw["access"].token() if kw.get("access") else None
-        copy = scene.root / scene.tenant / "run-knowledge" / run.run_dir.name
-        got["copy_owner"] = owner_record(copy)["pid"] if copy.is_dir() else None
+        got["copy_owner"] = _copy_owner(scene, run.run_dir.name, run.run_dir, owner_record)
         (run.run_dir / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
         return {"output": "done", "requests": 1, "truncated_by": None}
 
     def entry(c, seen):
+        got["ep"], got["roster_id"] = _episode_in_the_job_root(scene, c, job_id, source)
         got["signed_before"] = len(signer.payloads)  # the learning job's own first pass, signed at claim (O5)
-        return run_py.main(["--tenant", scene.tenant, "--episode", job_id, "--world", "b"], environ=c.env,
-                           lifecycle=lifecycle, visualize=lambda *a, **k: None, preflight=lambda *a, **k: 0)
+        with in_container_environment(c.env):
+            return run_py.main(["--tenant", scene.tenant, "--episode", job_id, "--world", "b"], environ=c.env,
+                               lifecycle=lifecycle, visualize=lambda *a, **k: None, preflight=lambda *a, **k: 0)
 
     with ThreadCalls(_watched()) as calls:
         seen = seen_in_container(scene, "learning", entry, job_id=job_id, source=source, signer=signer)
 
     _clean(seen)
+    ep, roster_id = got["ep"], got["roster_id"]
     assert got["run_dir"] == ep / "runs" / roster_id, "the sibling did not run at its world's roster id"
     assert got["copy_owner"] == os.getpid(), "the run copy was not made and owned by the helper"
     assert got["token"] is not None, "the lifecycle was handed no pass"
@@ -272,6 +329,59 @@ def test_a6_a_sibling_in_the_container_takes_no_lock_runs_no_admission_and_signs
     # two copies, the grant read's (`main`, at claim) and the sibling's (its pin), and the container none.
     assert calls.helper("copy") == 2, "control: the helper made the grant read's copy and the sibling's run copy, once each"
     _no_database_login(seen, scene)
+
+
+def test_1546_r10_a_siblings_run_and_its_start_records_are_made_in_the_container_at_the_answered_run_id(scene):
+    """D-2 (owner decision; design r10 (a) "The container materialises the run"): on `copy.make(world=)` the helper makes
+    the sibling's run copy and only the episode's `runs/` folder; the sibling, in the container, makes its run
+    (`run_common.materialize_run` at the roster's id: the folder with its alert and stamp) and writes its knowledge record
+    (naming the launch facts' `knowledge_commit`) and its versions record. The helper writes none of them, so each is
+    counted on the container's thread and never on the helper's. WRITE-TESTS CHOICE (r10 "Open for write-tests: the
+    versions record's source"): the launch facts already carry `records` (#1366 O6), so the container writes the versions
+    record from them and `copy.make(world=)`'s answer adds nothing; the oracle is the launch facts' own versions, read from
+    the wire here, not through the writer. Control: the lifecycle ran at that run (the sibling started at all)."""
+    from pathlib import Path
+
+    from defender import run as run_py
+    from defender import run_common
+    from defender.records import RunPaths
+
+    job_id, source = str(uuid.uuid4()), str(uuid.uuid4())
+    got: dict[str, Any] = {}
+
+    def lifecycle(**kw):
+        run_dir = Path(kw["run"].run_dir)
+        paths = RunPaths(run_dir)
+        got["run_dir"] = run_dir
+        got["made"] = {"alert": paths.alert.is_file(), "stamp": paths.provenance.is_file()}
+        got["knowledge"] = json.loads(paths.knowledge_source().read_text(encoding="utf-8"))
+        got["versions"] = json.loads(paths.record_versions.read_text(encoding="utf-8"))
+        return {"output": "done", "requests": 1, "truncated_by": None}
+
+    def entry(c, seen):
+        got["ep"], got["roster_id"] = _episode_in_the_job_root(scene, c, job_id, source)
+        got["launch"] = c.request("launch")
+        with in_container_environment(c.env):
+            return run_py.main(["--tenant", scene.tenant, "--episode", job_id, "--world", "b"], environ=c.env,
+                               lifecycle=lifecycle, visualize=lambda *a, **k: None, preflight=lambda *a, **k: 0)
+
+    watched = {"materialize": run_common.materialize_run, "knowledge_record": run_common.write_knowledge_record,
+               "versions_record": run_common.write_versions_record}
+    with ThreadCalls(watched) as calls:
+        seen = seen_in_container(scene, "learning", entry, job_id=job_id, source=source)
+
+    _clean(seen)
+    assert got.get("run_dir") == got["ep"] / "runs" / got["roster_id"], "control: the sibling did not run at its roster id"
+    for label in watched:
+        assert calls.helper(label) == 0, f"the helper ran `{label}` for the sibling (D-2: the container's)"
+        assert calls.container(label) == 1, f"the sibling's container did not run `{label}` once: {calls.by_thread[label]}"
+    assert got["made"] == {"alert": True, "stamp": True}, got["made"]
+    launch = got["launch"]
+    assert got["knowledge"].get("commit") == launch["knowledge_commit"], (got["knowledge"], launch["knowledge_commit"])
+    handed = launch["records"]
+    expected = {"systems": {sid: rec["version"] for sid, rec in sorted(handed["systems"].items())},
+                "case": None if handed.get("case") is None else handed["case"]["version"]}
+    assert got["versions"] == expected, f"the versions record is not the launch facts' records: {got['versions']}"
 
 
 def test_o2_a_sibling_in_the_container_has_its_oracle_box_started_by_its_helper(scene, tmp_path, monkeypatch):
@@ -291,7 +401,6 @@ def test_o2_a_sibling_in_the_container_has_its_oracle_box_started_by_its_helper(
     monkeypatch.setenv("PATH", f"{no_docker}{os.pathsep}{os.environ.get('PATH', '')}")
 
     job_id, source = str(uuid.uuid4()), str(uuid.uuid4())
-    _ep, roster_id = plant_episode(scene, job_id, source)
     got: dict[str, Any] = {}
 
     def lifecycle(**kw):
@@ -302,8 +411,10 @@ def test_o2_a_sibling_in_the_container_has_its_oracle_box_started_by_its_helper(
         return {"output": "done", "requests": 1, "truncated_by": None}
 
     def entry(c, seen):
-        return run_py.main(["--tenant", scene.tenant, "--episode", job_id, "--world", "b"], environ=c.env,
-                           lifecycle=lifecycle, visualize=lambda *a, **k: None, preflight=lambda *a, **k: 0)
+        _ep, got["roster_id"] = _episode_in_the_job_root(scene, c, job_id, source)
+        with in_container_environment(c.env):
+            return run_py.main(["--tenant", scene.tenant, "--episode", job_id, "--world", "b"], environ=c.env,
+                               lifecycle=lifecycle, visualize=lambda *a, **k: None, preflight=lambda *a, **k: 0)
 
     helper_start = helper_learning._oracle_box.__code__
 
@@ -327,7 +438,7 @@ def test_o2_a_sibling_in_the_container_has_its_oracle_box_started_by_its_helper(
     assert "failed" not in got, f"the sibling's oracle box did not start: {got.get('failed')!r}"
     assert calls.container("direct") == 0, "the sibling started its oracle box itself, from the container"
     assert calls.helper("helper") == 1, "the helper did not start the sibling's oracle box"
-    assert calls.idents == [roster_id], f"the oracle box was not started for the sibling's own run: {calls.idents}"
+    assert calls.idents == [got["roster_id"]], f"the oracle box was not started for the sibling's own run: {calls.idents}"
     assert got["box"].sandboxed, "the sibling's oracle box is not a confined (relayed) box"
     oracle_starts = [c for c in seen.kind.docker.creates() if any("defender-oracle-" in a for a in c)]
     assert len(oracle_starts) == 1, f"expected one oracle box start through the helper's docker: {oracle_starts}"
@@ -359,9 +470,9 @@ def test_a6_the_operator_sibling_from_a_host_shell_still_admits_holds_the_lock_a
 def test_a5_eof_on_stdin_ends_the_sibling_as_sigterm_does(scene, tmp_path, how):
     """The sibling's real command line (`run.py --episode --world`), in the container: EOF on stdin ends the process as SIGTERM does; with stdin open and no signal it stays up. (A5, A2)"""
     job_id, source, marks = str(uuid.uuid4()), str(uuid.uuid4()), tmp_path / "marks"
-    plant_episode(scene, job_id, source)
 
     def entry(c, seen):
+        _episode_in_the_job_root(scene, c, job_id, source)
         proc = start_hold(c, SIBLING_HOLD, marks, "--tenant", scene.tenant, "--episode", job_id, "--world", "b")
         return hold_how(proc, marks, how, seen)
 

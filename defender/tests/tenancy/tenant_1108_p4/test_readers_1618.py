@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from defender.tests.support.evidence._evidence1546 import evidence_keys, garage  # noqa: F401 — the helper rows' store seams (#1546)
 from defender.tests.support.jobs import _job_helper as JH
+from defender.tests.support.shared._openbao1163 import openbao  # noqa: F401 — fixture
 from defender.tests.support.learning.core._store1278 import (
     migrated_database,  # noqa: F401 — fixture the scenes need
     world,  # noqa: F401 — fixture

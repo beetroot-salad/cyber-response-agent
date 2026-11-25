@@ -42,6 +42,7 @@ from defender.tenancy import template_dir  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._atk1 import Echo, EchoGit  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._fakes import ADMIN_TOKEN, FORGE_URL, OPENBAO_URL  # noqa: E402
 from defender.tests.tenancy.lifecycle_1214._support import LifecycleWorld  # noqa: E402
+from defender.tests.support.tenancy._active1214 import CREATE_RETENTION
 
 
 CREATE_STEPS = [
@@ -59,7 +60,7 @@ def world(tmp_path, data_root):
 
 def test_create_answers_202_with_a_minted_id_and_a_creating_row(world):
     """POST /admin/tenants mints a UUID, records it `creating` with `create` pending at `names`, answers 202 (O1, DC-3)."""
-    made = world.ops.post(API + "/admin/tenants", json={})
+    made = world.ops.post(API + "/admin/tenants", json=CREATE_RETENTION)
     assert made.status_code == 202, made.text
     tenant = made.json()["tenant_id"]
     assert is_uuid4(tenant)
@@ -90,6 +91,7 @@ def test_the_job_leaves_an_active_tenant_with_repo_bot_credential_folder_and_no_
     assert world.openbao.oidc_roles[gen.oidc_role]["client_id"] == gen.audience
     assert world.openbao.secret_accessors(gen.approle) == {gen.secret_accessor}
     assert world.openbao.secret_accessors(gen.sign_approle) == {gen.sign_secret_accessor}
+    assert world.openbao.secret_accessors(gen.evidence_approle) == {gen.evidence_secret_accessor}
     folder = world.data_root / tenant
     assert folder.is_dir() and not folder.is_symlink()
     assert not list(folder.rglob("learning")), "prepare made a learning entry; the tenant's learning state is in the store (O10, D10)"
@@ -218,8 +220,9 @@ def test_the_jwt_is_never_in_git_argv_environment_or_a_file(world):
 
 
 def test_the_host_never_holds_the_management_token_or_the_forge_admin_token(world):
-    """The host actor's OpenBao calls carry no management token and only unwrap, approle login, token reads and the one
-    sign proof with the tenant's own sign login; its forge calls are the bot's Bearer calls (DC-12, SK-5, P5, A24')."""
+    """The host actor's OpenBao calls carry no management token and only unwrap, approle login, token reads, the one
+    sign proof with the tenant's own sign login and the one datakey and decrypt proof with its own evidence login; its forge
+    calls are the bot's Bearer calls (DC-12, SK-5, P5, A24', #1546 r9)."""
     tenant = world.create()
     calls = split_drive(world)
     assert world.item(tenant)["state"] == "active"
@@ -231,10 +234,14 @@ def test_the_host_never_holds_the_management_token_or_the_forge_admin_token(worl
     allowed = (("sys", "wrapping", "unwrap"), ("auth", "approle", "login"), ("identity", "oidc", "token"))
     gen = world.live(tenant)
     signs = [c for c in host if c.path.startswith("/v1/transit/")]
-    assert [(c.method, c.path) for c in signs] == [("POST", f"/v1/transit/sign/request-token-{tenant}")], \
-        "the host's one new power is a single sign with the tenant's own key"
-    assert {world.openbao.tokens[c.headers["x-vault-token"]] for c in signs} == {gen.sign_approle}, \
+    assert sorted((c.method, c.path) for c in signs) == sorted([
+        ("POST", f"/v1/transit/sign/request-token-{tenant}"),
+        ("POST", f"/v1/transit/datakey/plaintext/evidence-{tenant}"), ("POST", f"/v1/transit/decrypt/evidence-{tenant}")]), \
+        "the host's powers over transit are one sign with the tenant's own key and one datakey and decrypt of its evidence key"
+    assert {world.openbao.tokens[c.headers["x-vault-token"]] for c in signs if "/sign/" in c.path} == {gen.sign_approle}, \
         "the sign proof was not made as the tenant's sign login"
+    assert {world.openbao.tokens[c.headers["x-vault-token"]] for c in signs if "/sign/" not in c.path} == {gen.evidence_approle}, \
+        "the evidence proof was not made as the tenant's evidence login"
     for call in host:
         assert call in signs or tuple(call.path.removeprefix("/v1/").split("/")[:3]) in allowed, \
             f"host called {call.method} {call.path}"

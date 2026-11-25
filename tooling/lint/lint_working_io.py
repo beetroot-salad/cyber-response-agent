@@ -239,6 +239,9 @@ RESIDUE = {
     # The one rule for the product's folders under the data root (the box check's and the job sockets'); never a run record.
     ("box._data_folder", "make_data_folder", ".mkdir"): (2, "probe", ('above', 'folder')),
     ("box._data_folder", "make_data_folder", "os.rmdir"): (1, "probe", ('folder',)),
+    # #1546: a claim's folders (root, inputs, spool) removed whole once the job ends, a run's read-only input folder included.
+    ("box._data_folder", "remove_data_folder", ".unlink"): (1, "probe", ('folder',)),
+    ("box._data_folder", "remove_data_folder", "shutil.rmtree"): (1, "probe", ('folder',)),
     ("box._check", "_Listener.__init__", "os.open"): (1, "probe", ('folder',)),
     ("box._check", "_Listener.close", "os.unlink"): (1, "probe", ('SOCKET_NAME',)),
     ("box._check", "_clear_check_folder", "os.rmdir"): (1, "probe", ('folder',)),
@@ -288,9 +291,12 @@ RESIDUE = {
     ("investigation.orient", "_invlang_grammar", "read_text_soft"): (1, "nonrecord", ("defender_dir / 'skills' / 'invlang' / 'SKILL.md'",)),
     ("investigation.review", "role_prompt", "read_text_utf8"): (1, "nonrecord", ('path',)),
     ("box._scrub", "_write_verdict", "write_guarded"): (1, "non_run", ('verdict_path(tree)',)),
+    # #1546: a verdict write that fails after a non-clean walk removes the stale `clean` verdict it would leave standing.
+    ("box._scrub", "_write_verdict", ".unlink"): (1, "non_run", ('verdict_path(tree)',)),
     ("box._scrub", "mark_unsandboxed", "read_text_utf8"): (1, "non_run", ('p',)),
     ("box._scrub", "tree_unsandboxed", "read_text_utf8"): (1, "non_run", ('verdict_path(tree)',)),
-    ("box._scrub", "tree_verified", "read_text_utf8"): (1, "non_run", ('p',)),
+    # #1546: the one reader of the verdict's three states (`tree_verified` reads through it).
+    ("box._scrub", "verdict_state", "read_text_utf8"): (1, "non_run", ('p',)),
     # Extracted from session_store.py; the count, target and classification are unchanged.
     ("records.session_store._write", "open_store", "guarded_mkdir"): (1, "session_store", ('path.parent',)),
     # The SQL shim reads the model's file operands and operates only inside the box.

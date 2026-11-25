@@ -369,21 +369,25 @@ _AUTHOR_CURATORS = (
 def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim and what the curators decide, kept as one pass over the claim
     paths: LoopPaths, run_lead_author: Callable[..., None], run_pitfalls: Callable[..., int], *,
     box: Any, batch: Batch, held: Any, feedback: str | None, outcomes: dict[tuple[str, str], Any],
+    runs: Any = None, unusable: Callable[[str, str], bool] | None = None,
 ) -> None:
     """The lead-author lane's work over a claim: each curation request's run served through the drain's
     accepted tenant, then the pitfalls curation over the claim's pitfalls, each one claim of `batch`
     (the draft re-synced after it). Items kept until the batch ends (r8 Lead-author lane): an item stays in the
     batch only when its curator positively took it (`Outcome.kept()`: a request its serve finished, a pitfall the
     curation committed); an item that is not named waits again when the batch enters review (P3); a request whose
-    run is gone is dead."""
+    run is gone is dead. A drain request's tick (#1546 D7) resolves runs from its own root only (`runs`: the runs its
+    helper pulled, its claim's input set): a run absent there is dead when its owner can never be pulled (`unusable`:
+    it ended with no bundle a pull can read, PR6), and otherwise waits for the next drain (its request came after the set was fixed)."""
     from defender.learning.author.version_control import DeliveryRefused
     from defender.learning_store import Outcome
     from defender.records import RunAbsent
 
     for kind, key, payload in [item for item in held.items if item[0] == "curation_request"]:  # lint-half-table: ok — this lane serves the curation request's own run rule, not a lane decision
-        run = _run_of(payload, paths.tenant)
+        run = _run_of(payload, paths.tenant, runs)
         if isinstance(run, RunAbsent):
-            outcomes[(kind, key)] = Outcome.dead("artifact_missing", "artifact-missing")
+            dead = runs is None or _owner_unusable(payload, unusable)
+            outcomes[(kind, key)] = Outcome.dead("artifact_missing", "artifact-missing") if dead else Outcome.waiting()
             continue
         if not isinstance(run, Run):
             outcomes.setdefault((kind, key), Outcome.waiting())
@@ -419,9 +423,48 @@ def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim
             outcomes.setdefault((kind, key), Outcome.kept() if key in committed else Outcome.waiting())
 
 
-def _run_of(payload: dict, tenant: Tenant | None) -> Run | Exception:
-    """The run a curation request names (`{case_id, tenant_id, run_id}`), opened through the drain's own
-    accepted tenant and its repository, else the refusal (`RunAbsent` when the run is gone)."""
+def _owner_unusable(payload: dict, unusable: Callable[[str, str], bool] | None) -> bool:
+    """Whether the run a request names can never be pulled (#1546 PR6: its owner ended with no bundle a pull can read),
+    by `unusable(tenant_id, run_id)`, else by the owner's row (`owner_unusable`). A state that cannot be read leaves the
+    request waiting for the next drain: a dead request is never served again, a waiting one only costs a retry."""
+    try:
+        return (unusable or owner_unusable)(str(payload["tenant_id"]), str(payload["run_id"]))
+    except Exception as e:  # noqa: BLE001 — an unreadable state is not a verdict on the run
+        _logger.warning(f"request for run {payload.get('run_id')}: its owner's state could not be read ({e!r}); it "
+                        "waits for the next drain")
+        return False
+
+
+def owner_unusable(tenant_id: str, run_id: str) -> bool:
+    """Whether the investigation `run_id` of `tenant_id` can never be an input (#1546 PR6, A-O6): the job store's
+    `run_unusable` (no row, or it ended with no bundle a pull can read), over the jobs database at
+    `DEFENDER_DATABASE_DSN` (a host's tick). A job container has no database address: its drain asks its helper
+    (`unusable=`, the `owner.unusable` request)."""
+    import asyncio
+    import datetime as _dt
+    import os
+
+    from defender.jobs import JobStore
+    from defender.learning.core.store_tick import DSN_ENV
+
+    dsn = os.environ.get(DSN_ENV)
+    if not dsn:
+        raise FatalConfigError(f"a run's owner is read from {DSN_ENV}, which is not set")
+
+    async def read() -> bool:
+        store = JobStore(dsn, clock=lambda: _dt.datetime.now(_dt.UTC), max_connections=1)
+        try:
+            return await store.run_unusable(tenant_id, run_id)
+        finally:
+            await store.close()
+
+    return asyncio.run(read())
+
+
+def _run_of(payload: dict, tenant: Tenant | None, runs: Any = None) -> Run | Exception:
+    """The run a curation request names (`{case_id, tenant_id, run_id}`), opened through `runs` (a drain request's own
+    root, #1546 D7) or else the drain's own accepted tenant and its repository, else the refusal (`RunAbsent` when the
+    run is gone)."""
     from defender.records import RunAddress, RunRefused
 
     try:
@@ -432,7 +475,7 @@ def _run_of(payload: dict, tenant: Tenant | None) -> Run | Exception:
     if tenant is None or str(tenant.id) != str(address.tenant_id):
         return TenantRefused(f"tenant {address.tenant_id} is not the drain's accepted tenant")
     try:
-        return tenant.runs_repository().resolve(address)
+        return (runs if runs is not None else tenant.runs_repository()).resolve(address)
     except RunRefused as refused:
         _logger.warning(f"request for run {address.run_id}: its run cannot be opened ({refused})")
         return refused
@@ -581,13 +624,17 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
     git_timeout: float = GIT_TIMEOUT_SECONDS,
     make_model: Callable[..., Any] | None = None,
     store: TickStore | None = None,
+    runs: Any = None,
+    unusable: Callable[[str, str], bool] | None = None,
 ) -> int:
     """The lead-author lane's tick over the learning store (operator-only, A2 D9): reconcile the lane's
     batches in review, recover a lapsed one, then claim its pitfalls and curation requests and author
     them; its delivery seams as `author_drain`'s. `git_timeout` is bound into the DEFAULT work steps only
     (the lanes' own bounded reads, #1175). `store` is the tick's store (#1487 Flow 2, `learning_store.tick.TickStore`)
     bound by the caller to the tenant and the lead lane; left out, the drain binds the host's own
-    (`store_tick.opened_tick_store`) inside its stage."""
+    (`store_tick.opened_tick_store`) inside its stage. `runs` (#1546 D7: a drain request's tick) is the runs its helper
+    pulled into the drain's own root, the only place a curation request's run is resolved from, and `unusable` how an
+    absent run's owner is judged (`owner_unusable` by default); everything else comes from the tenant folder."""
     _validate_merge_mode()
     _validate_tick_settings()
     records = _drain_directory(directory)
@@ -619,7 +666,8 @@ def lead_author_drain(  # noqa: PLR0913 — the stage's seams (OD4, OD16): two s
                               credential_config=credential_config, issuer_transport=issuer_transport)
 
     return _store_tick(paths, store=store, lane=LEAD_LANE, label=LEAD_AUTHOR_DRAIN_LABEL, open_delivery=open_delivery,
-                 author_work=lambda work_paths, **kw: _store_lead_work(work_paths, lead_step, pitfalls_step, **kw),
+                 author_work=lambda work_paths, **kw: _store_lead_work(work_paths, lead_step, pitfalls_step, runs=runs,
+                                                                       unusable=unusable, **kw),
                  start_box=start_box, stop_box=stop_box, reconcile_lanes=(LEAD_LANE,),
                  before_claim=read_systems if reads_systems else None)
 

@@ -7,15 +7,21 @@ D9), the runs-folder check, the tenant over the copy, the roster, the verdict, t
 grant, the signing set-up and the first pass, signed under the check's id and thrown away), and none of the
 investigation's own (the launch check, the alert, the run folder, the versions record).
 
-What it computed it writes once, create-only, in the tenant's job lane, keyed by the check's id:
+What it decided before the container it stages under the check's claim (#1546), create-once:
 
-- when the publish gave a source, the knowledge record (`JobLane.write_request_knowledge`), before anything below;
+- the source the publish settled, as `knowledge` (served shape: `current` or `pinned`), on every path on which the
+  publish settled one, before any result and before the container starts (#1546 r10, U-3: no job sends it);
 - a step's refusal: `{refused, step, sentence}`, our own sentence (P-2: a publish refusal names only its kind), and
   no container;
 - a container that cannot be started (or its socket opened): `{failed, start_failed}`; a crash, or a refusal before
   the container that is no step's: `{failed, worker_error}` (R13-1.2; the shared ending, `_host_request`);
-- otherwise nothing: the readiness container (`run.py --readiness <id>`, `run.readiness_main`) writes the result,
-  answered `launch` alone (C4).
+- otherwise its `result`: the readiness container (`run.py --readiness <id>`, `run.readiness_main`) is answered `launch`
+  and `result` alone (C4).
+
+The tenant's evidence key is the helper's own check (#1546 A-O7, amendment r9: produced host-side): once the tenant-level
+steps passed, the key login (the seam, else the one the live generation records) is proven by a datakey/unwrap probe of
+`evidence-<T>`; a key it cannot prove adds one `evidence_key_missing` warning to the container's `ready` result as it is
+staged (`with_host_warnings`), beside the check's own warnings.
 
 The runs folder gone after the worker's pre-open, or a knowledge record that cannot be written, is the helper's own
 failure (`HelperFault`): no record, and a non-zero exit the worker reads (R13-1.1, .2)."""
@@ -39,10 +45,7 @@ def _readiness_lane() -> _host_request.ResultLane:
     from defender.records import job_lane
 
     # A refusal before the container that wrote no record is no step's refusal the check can name: the helper's error.
-    return _host_request.ResultLane(
-        kind=KIND, read=lambda lane, rid: lane.read_readiness(rid),
-        write=lambda lane, rid, rec: lane.write_readiness(rid, rec), failed=job_lane.ReadinessRecord.failed,
-        refused_reason=job_lane.WORKER_ERROR)
+    return _host_request.ResultLane(kind=KIND, failed=job_lane.ReadinessRecord.failed, refused_reason=job_lane.WORKER_ERROR)
 
 
 _LANE = _readiness_lane()
@@ -65,15 +68,15 @@ def _readiness_sentence(refused: StepRefused) -> str:
 
 
 def _write_knowledge(session: Session, source: Any) -> None:
-    """The knowledge record of the source the publish gave (R13-1.2), create-only; a fault writing it is the helper's
-    own failure."""
-    from defender.records import job_lane
+    """The knowledge of the source the publish gave (R13-1.2), staged by the helper in the served shape on every path on
+    which the publish settled a source (#1546 r10: no job sends it); a source it cannot map is the helper's own failure."""
+    from . import _evidence
+    from ._records import served_knowledge
 
-    try:
-        with job_lane.JobLane.open(session.root, session.tenant_id) as lane:
-            lane.write_request_knowledge(session.job_id, source)
-    except (OSError, job_lane.JobLaneRefused) as fault:
-        raise HelperFault(f"the check's knowledge record could not be written: {type(fault).__name__}: {fault}") from None
+    served = served_knowledge(source.host_record())
+    if served is None:
+        raise HelperFault("the check's knowledge could not be mapped to its served shape")
+    _evidence.state(session).stage("knowledge", served)
 
 
 def _readiness_refused(session: Session, facts: LaunchFacts, refused: StepRefused) -> None:
@@ -85,35 +88,86 @@ def _readiness_refused(session: Session, facts: LaunchFacts, refused: StepRefuse
         raise HelperFault(f"its {refused.step} check refused: {refused}") from None
     if facts.source is not None:
         _write_knowledge(session, facts.source)
+    else:  # the publish gave no source: the check judged no revision, and its result says so (#1625: null, not absent)
+        from . import _evidence
+
+        _evidence.state(session).stage("knowledge", None)
     _host_request.write_once(session, _LANE, job_lane.ReadinessRecord.refused(refused.step, _readiness_sentence(refused)))
+
+
+#: The one warning the helper adds (#1546 A-O7).
+KEY_WARNING = "evidence_key_missing"
+
+
+def _key_sentence(session: Session) -> str | None:
+    """Why the tenant's evidence key is not proven, or None when a datakey of `evidence-<T>` unwraps to itself under the
+    tenant's key login: the login is the jobs' own, so what it cannot do no job can."""
+    from defender import evidence
+
+    from . import _evidence
+
+    keys = session.evidence_keys if session.evidence_keys is not None else _evidence.keys_from_generation(session)
+    if keys is None:
+        return ("the tenant's evidence key login is not recorded on its live generation, so no job could key the "
+                "evidence it keeps")
+    tenant = str(session.tenant_id)
+    try:
+        made = keys.datakey(tenant)
+        proven = keys.unwrap(tenant, made.wrapped) == made.plaintext
+    except evidence.EvidenceKeyMissing:
+        return (f"the tenant's evidence key {evidence.key_name(tenant)} does not exist in OpenBao, so no job could "
+                "keep its evidence")
+    except evidence.EvidenceKeyError as fault:
+        return f"the tenant's evidence key could not be proven ({fault}), so a job may not be able to keep its evidence"
+    if not proven:
+        return "the tenant's evidence key did not unwrap the data key it made, so no job could read its evidence back"
+    return None
+
+
+def with_host_warnings(session: Session, body: dict[str, Any]) -> dict[str, Any]:
+    """The container's result `body` as staged: a `ready` one gains the helper's own warning (module doc), if any."""
+    sentence = session.prepared.state if session.prepared is not None else None
+    if not isinstance(sentence, str) or body.get("outcome") != "ready" or not isinstance(body.get("warnings"), list):
+        return body
+    return {**body, "warnings": [*body["warnings"], {"kind": KEY_WARNING, "sentence": sentence}]}
 
 
 def _prepare_readiness(session: Session, hold: contextlib.ExitStack) -> Prepared:
     """The host half (module doc): the shared steps, the knowledge record, then the container's launch facts."""
+    from defender import tenancy
+
+    from ._folders import copy_tenant
+
     rid = _host_request.request_id(session)
     facts = LaunchFacts()
+    if session.job_root is None or session.job_inputs is None:
+        raise HelperFault("the claim's root and inputs were not made")
+    job_tenant = tenancy.JobTenant(id=session.tenant_id, data_root=tenancy.data_root_from_path(session.job_root),
+                             inputs=session.job_inputs)
     try:
-        tenant_launch_steps(session, hold, copy_id=rid, facts=facts, trigger=TRIGGER)
+        tenant_launch_steps(session, hold, copy_id=rid, facts=facts, trigger=TRIGGER, job_tenant=job_tenant,
+                            copy_tenant=lambda accepted: copy_tenant(session, accepted))
     except StepRefused as refused:
         _readiness_refused(session, facts, refused)
         raise
     try:
+        # The check's knowledge is the helper's own (#1546 r10, U-3): staged now from the source the publish step
+        # settled, so a container that never starts, or ends with no result, leaves it staged all the same.
         _write_knowledge(session, facts.source)
-    except BaseException:
-        facts.cleanup.close()
-        raise
-    try:
         source, copy, current = facts.source, facts.copy, facts.current
         command = session.command or [
             "python3", str(session.defender_dir / "run.py"), "--readiness", rid, "--tenant", session.tenant_id]
         launch = {
             "kind": KIND, "tenant": session.tenant_id, "job": rid, "tenant_state": "active",
             "export_commit": source.commit, "knowledge": source.host_record(), "run_copy": str(copy.root),
+            "inputs_dir": str(session.job_inputs),
             # The records read above (#1366 O6), which the container builds its tenant from (it reads no database).
             "records": current.as_wire(),
         }
-        # The first pass was signed and is thrown away (R12-1): the container is handed no pass and answered none.
-        return Prepared(launch=launch, command=list(command), passes=None, cleanup=facts.cleanup, exited=_host_request.after_container(_LANE))
+        # The first pass was signed and is thrown away (R12-1): the container is handed no pass and answered none. The
+        # kind's state is the evidence key's warning sentence, or None (`with_host_warnings`).
+        return Prepared(launch=launch, command=list(command), passes=None, state=_key_sentence(session),
+                        cleanup=facts.cleanup, exited=_host_request.after_container(_LANE))
     except BaseException:
         facts.cleanup.close()
         raise

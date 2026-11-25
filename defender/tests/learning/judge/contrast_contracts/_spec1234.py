@@ -1009,10 +1009,15 @@ def scratch_copy(tmp_path: Path, src: Path, name: str) -> Path:
 def copy_episode(src: Path, dest_root: Path) -> Path:
     """An archived episode copied into a scene's tenant episodes folder, links kept as links.
 
-    `dest_root` is the scene's data root; the copied episode keeps its manifest-matching id.
+    `dest_root` is the scene's data root; the copied episode keeps its manifest-matching id. Each arm's database goes
+    with it, at the same place relative to the arm's copy (#1546 design-r9 "Session pointer": recorded relative to the
+    run), as a whole episode moved with its tenant's sessions keeps it.
     """
+    from defender.tests.support.storage._carry_sessions1546 import carry_episode_sessions
+
     dest = tenant_episodes(Path(dest_root)) / Path(src).name
     shutil.copytree(src, dest, symlinks=True)
+    carry_episode_sessions(Path(src), dest)
     return dest
 
 

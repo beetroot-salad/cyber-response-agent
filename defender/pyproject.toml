@@ -182,6 +182,7 @@ markers = [
     "live: requires live external infrastructure (skips without it; CI's keycloak-live job runs the Keycloak ones, where an unset DEFENDER_LIVE_KEYCLOAK_URL fails)",
     "postgres: needs a PostgreSQL server at DEFENDER_TEST_POSTGRES_DSN (skips without one, fails without one in CI); CI's test job runs a PostgreSQL service for it",
     "openbao: needs an OpenBao server at DEFENDER_TEST_OPENBAO_ADDR with a root token in DEFENDER_TEST_OPENBAO_TOKEN (skips without one, fails without one in CI); #1163's store, transit and rotation cases",
+    "garage: needs a Garage (S3) server at DEFENDER_TEST_GARAGE_ENDPOINT with DEFENDER_TEST_GARAGE_ACCESS_KEY, _SECRET_KEY and _BUCKET (skips without them, fails without them in CI); #1546's evidence-store cases",
     "e2e: hermetic FunctionModel replay of the runtime driver (no API key; needs the runtime extra)",
     "box: drives a REAL container to pin the #540 execution boundary (needs a native docker daemon + the gVisor runtime; self-skips under docker-outside-of-Docker)",
     # NOT a way to skip a check — a `gate`-marked test re-runs a repo-wide lint gate over
