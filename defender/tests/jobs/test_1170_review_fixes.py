@@ -159,6 +159,7 @@ def test_a_learning_jobs_sibling_pages_stored_are_the_bytes_it_pushed_per_arm_an
             H.send(c, "arm", run_id=run, record=sent_arm())
             H.put_object(c, H.arm_page(run), pages[run])
         H.send(c, "outcome", record=H.learning_outcome())
+        H.send(c, "page", record={"page": "rendered"})  # the fact that owes the episode page (PR8, #1625)
         H.put_object(c, H.EPISODE_PAGE, episode_page)
         return 0
 

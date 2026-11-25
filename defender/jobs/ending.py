@@ -19,7 +19,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, get_args
 
 from defender.records.job_facts import (
     BAD_RECORD,
@@ -27,6 +27,7 @@ from defender.records.job_facts import (
     EPISODE_PAGE,
     RUN_PAGE,
     arm_page,
+    owed_objects,
     BOX_START_FAILED,
     EXITED_WITHOUT_RESULT,
     EXPIRED,
@@ -130,7 +131,7 @@ class NotLaunched:
 
 
 EndedBy = Exited | Stopped | Lapsed | Cancelled | Offboarded | ExpiredInQueue | NotLaunched
-_MEMBERS = (Exited, Stopped, Lapsed, Cancelled, Offboarded, ExpiredInQueue, NotLaunched)
+_MEMBERS = get_args(EndedBy)
 #: The endings that cut a running job short: its cost is the last staged progress, a lower limit (D15).
 _CUT = (Lapsed, Cancelled, Offboarded)
 
@@ -263,10 +264,7 @@ def lesser(decision: Decision) -> Decision:
         failure_message=_REQUEST_REFUSED_WORDS if decision.kind == HOST_REQUEST else REFUSED_WORDS,
         disposition=None, cost_usd=None, cost_is_lower_limit=False, knowledge=None, publish_state="none",
         findings=None, result=None, follow_ons=FollowOns())
-    if decision.kind == HOST_REQUEST:
-        return barest
-    state = _evidence_state(barest.ended_by, barest.basis, _FAILED)
-    return dataclasses.replace(barest, evidence_state=state, promote=_promoted(state, barest.basis))
+    return barest if decision.kind == HOST_REQUEST else _with_evidence(barest)
 
 
 #: A started run's knowledge when it cannot be stored as read: `unreadable`, no commit, no stale kind (#1618 K9: the API's
@@ -320,9 +318,8 @@ def _investigation_end(facts: dict[str, Any], uploaded: frozenset[str], ended_by
     cost, marked = _investigation_cost(facts, outcome, ended_by)
     if isinstance(ended_by, Stopped) and not decided:
         return HandBack(INVESTIGATION, cost_usd=cost, cost_is_lower_limit=marked, knowledge=knowledge)
-    page = facts.get("page")
-    owed = {BUNDLE} | ({RUN_PAGE} if isinstance(page, dict) and page.get("page") == "rendered" else set())
-    basis = Basis(started="started" in facts, decided=decided, uploaded=uploaded, owed=frozenset(owed))
+    basis = Basis(started="started" in facts, decided=decided, uploaded=uploaded,
+                  owed=frozenset(owed_objects(INVESTIGATION, facts)))
     stage, reason, words, disposition = _investigation_stage(facts, outcome, decided, ended_by)
     scrub = outcome.get("scrub") if outcome is not None and outcome.get("scrub") in (_CLEAN, _TAINTED, _NOT_RUN) \
         else _NOT_RUN
@@ -422,9 +419,8 @@ def _learning(facts: dict[str, Any], uploaded: frozenset[str], ended_by: EndedBy
     progress = _learning_progress(facts, outcome, ended_by)
     if not decided and (isinstance(ended_by, Stopped) or (status == _STOPPED and isinstance(ended_by, Exited))):
         return HandBack(LEARNING, **progress)
-    owed = {BUNDLE, EPISODE_PAGE} | {arm_page(name[len('arm/'):]) for name, body in facts.items()
-                                    if name.startswith("arm/") and isinstance(body, dict) and body.get("page") == "rendered"}
-    basis = Basis(started="started" in facts, decided=decided, uploaded=uploaded, owed=frozenset(owed))
+    basis = Basis(started="started" in facts, decided=decided, uploaded=uploaded,
+                  owed=frozenset(owed_objects(LEARNING, facts)))
     stage, reason, words = _learning_stage(facts, outcome, decided, ended_by)
     publish, findings = "none", None
     if stage == _COMPLETED and outcome is not None:
@@ -492,7 +488,7 @@ def _host_request(facts: dict[str, Any], ended_by: EndedBy) -> End:
         result = facts["result"]
         if isinstance(result, dict) and result.get("outcome") == _FAILED and isinstance(result.get("reason"), str):
             return _host_request_failed(ended_by, basis, result["reason"])
-        if isinstance(result, dict) and "knowledge" in facts:
+        if isinstance(result, dict) and "knowledge" in facts:  # a readiness check's (it stages one on every path)
             result = {**result, "knowledge": facts["knowledge"]}
         return End(HOST_REQUEST, ended_by, _COMPLETED, basis, result=result)
     if isinstance(ended_by, Stopped):

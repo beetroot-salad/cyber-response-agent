@@ -37,7 +37,7 @@ from defender._io import read_text_utf8
 from defender.evidence import object_key
 from defender.job_socket import Refused
 from defender.jobs.models import ClaimView
-from defender.records.job_facts import BUNDLE, EPISODE_PAGE, RUN_PAGE
+from defender.records.job_facts import BUNDLE, EPISODE_PAGE, RUN_PAGE, arm_page_run, owed_objects
 
 from . import _records
 from ._rows import STORE_FAULT, Rows
@@ -50,7 +50,6 @@ INVESTIGATION, LEARNING, DRAIN = "investigation", "learning", "drain"
 EVIDENCE_KINDS = (INVESTIGATION, LEARNING)
 HOST_REQUEST_KINDS = ("readiness", "adoption", DRAIN)
 
-_ARM_PAGE = re.compile(r"page/runs/([0-9a-f-]{36})/runtime\.html")
 #: The largest part a put carries, and the largest object of each class.
 PART_CAP = 8 * 1024 * 1024
 _PAGE_CAP = 64 * 1024 * 1024
@@ -128,24 +127,18 @@ class Evidence:
     # --- pushes --------------------------------------------------------------------------------------------------
 
     def owed(self, obj: str) -> str | None:
-        """`obj`'s upload-row scrub when the staged facts owe it (PR8), else a `Refused`."""
-        owed_by_outcome = self.has("outcome") or self.has("refused/outcome")
-        if self.kind == INVESTIGATION and obj == BUNDLE or self.kind == LEARNING and obj in (BUNDLE, EPISODE_PAGE):
-            if not owed_by_outcome:
-                raise Refused(f"{obj!r} is owed by the job's outcome, which is not staged", "not-owed")
-            return None
-        if self.kind == INVESTIGATION and obj == RUN_PAGE:
-            page = self.fact("page")
-            if not (isinstance(page, dict) and page.get("page") == "rendered"):
-                raise Refused("the run page is owed only by a staged page fact that says rendered", "not-owed")
-            return None
-        found = _ARM_PAGE.fullmatch(obj) if self.kind == LEARNING else None
-        if found is not None:
-            fact = self.fact(f"arm/{found.group(1)}")
-            if not (isinstance(fact, dict) and fact.get("page") == "rendered"):
-                raise Refused("an arm's page is owed only by its arm fact that says rendered", "not-owed")
-            return str(fact.get("scrub"))
-        raise Refused(f"{obj!r} is no object a {self.kind} job pushes", "bad-object")
+        """`obj`'s upload-row scrub when the staged facts owe it (PR8, `job_facts.owed_objects`), else a `Refused`. The
+        bundle and the episode page are also accepted only once the outcome is staged."""
+        pushes = (BUNDLE, RUN_PAGE) if self.kind == INVESTIGATION else (BUNDLE, EPISODE_PAGE)
+        if obj not in pushes and not (self.kind == LEARNING and arm_page_run(obj) is not None):
+            raise Refused(f"{obj!r} is no object a {self.kind} job pushes", "bad-object")
+        if obj in (BUNDLE, EPISODE_PAGE) and not (self.has("outcome") or self.has("refused/outcome")):
+            raise Refused(f"{obj!r} is owed by the job's outcome, which is not staged", "not-owed")
+        with self.lock:
+            owed = owed_objects(self.kind, self.staged)
+        if obj not in owed:
+            raise Refused(f"{obj!r} is owed only by a staged fact that says its page rendered", "not-owed")
+        return owed[obj]
 
     def put(self, fields: dict[str, Any]) -> dict[str, Any]:
         obj, part, last, data = fields["object"], fields["part"], fields["last"], fields["data"]
@@ -275,13 +268,13 @@ class Evidence:
             dest = self.spool / f"pull-{self._counter}"
         try:
             key = self.keys.unwrap(self.claim.tenant_id, found.wrapped_key)
-            size = self.store.download(found.key, dest, data_key=key)
+            size, sha256 = self.store.download(found.key, dest, data_key=key)
         except (BlobStoreError, EvidenceKeyError, OSError) as fault:
             with contextlib.suppress(OSError):
                 dest.unlink()
             _logger.warning("the pull of %s of %s found no accepted bytes: %s", at[1], at[0], fault)
             raise Refused("the store did not give the accepted object", STORE_FAULT) from None
-        if size != found.size or _file_digest(dest) != found.sha256:
+        if size != found.size or sha256 != found.sha256:
             with contextlib.suppress(OSError):
                 dest.unlink()
             raise Refused("the stored object does not match its recorded digest", STORE_FAULT)
@@ -289,14 +282,6 @@ class Evidence:
         with self.lock:
             self.pulled.setdefault(at, pulled)
         return pulled
-
-
-def _file_digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        while chunk := source.read(1 << 20):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 # --- the store and the key login, at setup ------------------------------------------------------------------------------
@@ -420,7 +405,7 @@ def register_evidence(registry: Registry) -> None:
     told to stop, so a job that unwinds can record its end and push what it owes."""
     registry.add("outcome", kinds=EVIDENCE_KINDS, handler=_record_verb("outcome", _outcome_record), optional=("record",),
                  after_signal=True)
-    registry.add("page", kinds=(INVESTIGATION,), handler=_record_verb("page", lambda _ev, r: _records.page(r)),
+    registry.add("page", kinds=EVIDENCE_KINDS, handler=_record_verb("page", lambda _ev, r: _records.page(r)),
                  optional=("record",), after_signal=True)
     registry.add("arms", kinds=(LEARNING,), handler=_answer_arms, optional=("record",), after_signal=True)
     registry.add("arm", kinds=(LEARNING,), handler=_arm, required=("run_id",), optional=("record",), after_signal=True)

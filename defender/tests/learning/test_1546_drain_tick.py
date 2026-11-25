@@ -1,5 +1,5 @@
 """#1546 (design r8, D7) the drain tick over its input set, three items in ONE tick: the run in the set (pulled and unpacked by
-the drain container into the drain root's `<T>/runs/<run id>`, r10 (c) H3, seen through the `runs=` seam) is served; a run that is expired or not `clean` ends `dead("artifact-missing")`; a
+the drain container into the drain root's `<T>/runs/<run id>`, r10 (c) H3, seen through the `runs=` seam) is served; a run that ended with no bundle a pull can read (expired, not `clean`, or none accepted) ends `dead("artifact-missing")`; a
 `clean` run outside the set (its request filed after the claim fixed the set) WAITS though it is absent from the root, as the
 dead ones are. Today every absent run is dead, so only the third separates design from today. Nothing is written into a
 source run. Obligations: D7, PR6, A-O6. The pull and unpack that leave the run in the root (served by `evidence.pull`,
@@ -16,7 +16,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.tests.support.jobs._ending1546 import plant_claim, plant_complete_source, plant_uploads  # noqa: E402
 from defender.tests.support.evidence._facts1546 import BUNDLE, DRAIN_EXIT_STATUS, UP, up  # noqa: E402
-from defender.tests.support.jobs._jobs1342 import job_store  # noqa: E402
+from defender.tests.support.jobs._jobs1342 import an_alert, job_store  # noqa: E402
 from defender.tests.support.learning.core._store1278 import call, migrated_database, world  # noqa: E402, F401 — fixtures
 from defender.tests.support.sandbox._spec791 import make_run_dir  # noqa: E402
 from defender.tests.support.shared._locations_1210 import location_path  # noqa: E402
@@ -27,11 +27,11 @@ from defender.tests.tenancy.tenant_1108_p4.conftest import p4_tenant  # noqa: E4
 pytestmark = pytest.mark.postgres
 
 
-async def _owner(w, store, *, state: str, scrub: str = "clean") -> str:
-    """A finished investigation (a jobs row) of the world's tenant, its accepted bundle, and its curation request."""
+async def _owner(w, store, *, state: str, scrub: str = "clean", bundle: bool = True) -> str:
+    """A finished investigation (a jobs row) of the world's tenant and, unless `bundle` is false, its accepted bundle."""
     _alert, inv = await plant_complete_source(w.dsn, store, w.t.tenant_id)
     execute(w.dsn, "UPDATE jobs.investigations SET evidence_state = %s, scrub = %s WHERE id = %s", (state, scrub, inv))
-    if state != "expired":  # an expired run's objects are gone
+    if state != "expired" and bundle:  # an expired run's objects are gone
         token = plant_claim(w.dsn, tenant=w.t.tenant_id, kind="investigation", ref=inv)
         plant_uploads(w.dsn, token, {BUNDLE: up(UP, scrub)})
         execute(w.dsn, "UPDATE jobs.uploads SET accepted_at = now() WHERE token = %s", (token,))
@@ -83,7 +83,7 @@ def test_a_drain_tick_serves_the_run_in_its_set_kills_the_expired_and_tainted_an
 
     rid = asyncio.run(claimed())
     in_set, expired, tainted = ids["in"], ids["expired"], ids["tainted"]
-    assert _inputs(world, rid) == [(in_set, BUNDLE)], "the set is the clean, unexpired runs the open items name"
+    assert _inputs(world, rid) == [(in_set, BUNDLE)], "the set is the runs the open items name whose bundle can be pulled"
     outside = asyncio.run(filed_after())
 
     host_runs = Path(location_path(world.t.tenant.tenant_root)) / "runs"
@@ -100,7 +100,7 @@ def test_a_drain_tick_serves_the_run_in_its_set_kills_the_expired_and_tainted_an
         on_done(None)
 
     # SEAM (missing): `lead_author_drain(runs=)`, the only place `_run_of` resolves a run from; the host `world.paths` serves the rest.
-    # A run absent from `runs` is dead when its owner is expired or not clean, else it waits (owner state through the #1487 port).
+    # A run absent from `runs` is dead when its owner ended with no pullable bundle, else it waits (owner state through the #1487 port).
     rc = lead_author_drain(world.t, world.paths, runs=runs, box=BoxSpy(), run_lead_author=lead, run_pitfalls=lambda *_a, **_k: 0)
 
     assert rc == DRAIN_EXIT_STATUS
@@ -116,7 +116,7 @@ def test_a_drain_tick_serves_the_run_in_its_set_kills_the_expired_and_tainted_an
 
 #: A drain claim's input set over a tenant of mixed runs (triage 1, family D4): `(name, evidence_state, scrub, its request)`,
 #: the request `open` (waiting), `closed` (published) or `none` (no request names it). In the set: exactly the runs an open
-#: request names whose investigation is usable (`clean`, evidence not `expired`).
+#: request names whose bundle can be pulled (`clean`, evidence readable, an accepted bundle: every non-expired one here).
 MIXED_RUNS = [
     ("named-clean-complete", "complete", "clean", "open"),
     ("named-clean-partial", "partial", "clean", "open"),
@@ -132,7 +132,7 @@ IN_THE_SET = {"named-clean-complete", "named-clean-partial", "named-clean-lost"}
 
 
 def test_a_drain_claims_exactly_the_usable_runs_its_open_requests_name_over_a_tenant_of_mixed_runs(world):  # noqa: F811
-    """Over every combination of usability and naming: the claim's input set is exactly the clean, unexpired runs an open
+    """Over every combination of usability and naming: the claim's input set is exactly the pullable runs an open
     curation request names. A clean run no open request names (none, or a closed one) stays out, as does any named run
     that is not usable; the set is each in-set run's bundle once. (D7, PR6, A-O6; triage 1 family D4)"""
     tenant = world.t.tenant_id
@@ -161,3 +161,51 @@ def test_a_drain_claims_exactly_the_usable_runs_its_open_requests_name_over_a_te
     named = {run: name for name, run in runs.items()}
     assert sorted(named.get(owner, owner) for owner, _obj in got) == sorted(IN_THE_SET), got
     assert {obj for _owner_id, obj in got} == {BUNDLE}, got
+
+
+def test_a_drain_takes_only_runs_whose_bundle_can_be_pulled_kills_ended_ones_without_one_and_leaves_a_live_one_waiting(
+        world, monkeypatch):  # noqa: F811 — the imported fixture
+    """The drain's input rule is the pull's: a run is an input only when its bundle can be pulled (clean, its evidence
+    readable, an accepted bundle). An ended clean run with no accepted bundle (evidence `none`, or `lost` because the
+    bundle never arrived) can never be pulled, so its request is dead; a run still live may yet be, so its request waits.
+    (#1625 review: a set the pull refuses left such a request waiting at every drain.)"""
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1000")
+    monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1000")
+    tenant = world.t.tenant_id
+    ids: dict[str, str] = {}
+
+    async def claimed() -> str:
+        async with job_store(world.dsn) as store:
+            ids["in"] = await _owner(world, store, state="complete")
+            ids["none"] = await _owner(world, store, state="none", bundle=False)
+            ids["lost"] = await _owner(world, store, state="lost", bundle=False)
+            alert = await an_alert(store, tenant, ticket="T-live")
+            ids["live"] = str((await store.create_investigation(tenant, alert.alert_id, "k-live", actor="u-1"))[0]
+                              .investigation_id)
+            for run in ids.values():
+                _request(world, run)
+            drain = (await store.create_drain(tenant, actor="u-1"))[0]
+            assert (await store.claim_host_request()).record.request_id == drain.request_id
+            return drain.request_id
+
+    rid = asyncio.run(claimed())
+    assert _inputs(world, rid) == [(ids["in"], BUNDLE)], "the set is exactly the runs whose bundle can be pulled"
+
+    from defender.tenancy import JobTenant
+
+    root = world.scratch / "drain-root"
+    make_run_dir(root / tenant / "runs", name=ids["in"], disposition="benign")
+    inputs_dir = world.scratch / "drain-inputs"
+    inputs_dir.mkdir()
+    runs = JobTenant(id=tenant, data_root=root, inputs=inputs_dir).runs_repository()
+
+    def lead(_paths, _state, _run, *, on_done, **_kw):
+        on_done(None)
+
+    lead_author_drain(world.t, world.paths, runs=runs, box=BoxSpy(), run_lead_author=lead, run_pitfalls=lambda *_a, **_k: 0)
+
+    items = _items(world)
+    for gone in ("none", "lost"):
+        item = items[("curation_request", ids[gone])]
+        assert (item.status, item.reason) == ("dead", "artifact-missing"), (gone, item.status, item.reason)
+    assert items[("curation_request", ids["live"])].status == "waiting", "a live run's request was killed"

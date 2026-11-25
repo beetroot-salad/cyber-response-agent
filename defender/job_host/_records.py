@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from defender._text import postgres_cannot_hold
+from defender.jobs.models import SCRUB_VERDICTS
 from defender.records import job_facts, job_lane
 
 _logger = logging.getLogger(__name__)
@@ -24,7 +25,6 @@ RECORD_CAP_BYTES = 12 * 1024 * 1024
 #: The longest text in any one record field but the findings text.
 _TEXT_CAP = 64 * 1024
 
-_SCRUBS = ("clean", "tainted", "not_run")
 _PAGES = ("rendered", "render_failed", "none")
 _SETUPS = (job_facts.SETUP_REFUSED, job_facts.SETUP_CRASHED, job_facts.SETUP_DONE)
 _BOXES = (job_facts.BOX_NOT_STARTED, job_facts.BOX_START_FAILED, job_facts.BOX_STARTED)
@@ -126,7 +126,7 @@ def investigation_outcome(record: Any) -> dict[str, Any]:
     _one_of(r["setup"], _SETUPS, "setup")
     _one_of(r["box"], _BOXES, "box")
     _flag(r["report_committed"], "report_committed")
-    _one_of(r["scrub"], _SCRUBS, "scrub")
+    _one_of(r["scrub"], SCRUB_VERDICTS, "scrub")
     if r["cut_short"] is not None:
         _one_of(r["cut_short"], tuple(TRUNCATED_BY_VALUES), "cut_short")
     _closing(r["closing"])
@@ -206,7 +206,7 @@ def arms(record: Any) -> dict[str, Any]:
 
 def arm(record: Any) -> dict[str, Any]:
     r = _object(record, ("scrub", "page"), "arm")
-    _one_of(r["scrub"], _SCRUBS, "scrub")
+    _one_of(r["scrub"], SCRUB_VERDICTS, "scrub")
     _one_of(r["page"], _PAGES, "page")
     return dict(r)
 

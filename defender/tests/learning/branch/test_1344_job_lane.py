@@ -1055,8 +1055,10 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
                  directory=est.launch_directory(tenant), spawn=spawned, candidates=L.choose(T.BRANCH_MESSAGE_ID))
     # r10 (a), H1: the helper's `copy.make` answers the claim's pin and `main` only (its own answers:
     # `test_1546_helper_folders.py`); the knowledge the job reads is fetched, never placed in its inputs.
+    pages: list[dict] = []
     answers = {"copy.make": copy_make(tenant, pin=pin), "evidence.pull": pull, "evidence.put": put,
-               "outcome": outcome, "arms": arms, "arm": arm}
+               "outcome": outcome, "arms": arms, "arm": arm,
+               "page": lambda fields: pages.append(fields["record"]) or {}}  # the episode page's fact (PR8)
     # The launch facts the real helper hands a learning container (its own answers: `test_1546_job_tenant.py`): the claim's
     # inputs folder (empty at the launch: no export, r10 (a)) and the pin itself.
     inputs = tmp_path / ".job-inputs" / "c-1546"
@@ -1086,6 +1088,7 @@ def test_1546_a_learning_job_with_its_source_folder_absent_pulls_unpacks_and_pus
     assert {o for o in pushed if not o.startswith("page/runs/")} == {EPISODE_PAGE, "bundle"}, sorted(pushed)
     assert order.index("outcome") < min(order.index(f"put:{o}") for o in (EPISODE_PAGE, "bundle")), order
     assert pushed[EPISODE_PAGE].lstrip().lower().startswith(b"<!doctype html") or b"<html" in pushed[EPISODE_PAGE]
+    assert pages == [{"page": "rendered"}], "the episode page was pushed without the fact that owes it"
     runs = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant / "runs"
     assert not (runs / f"{L.JOB}.learning-end.json").exists(), "the end still went through the folder"
     inside = members(pushed["bundle"])

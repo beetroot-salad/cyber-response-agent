@@ -30,7 +30,7 @@ from collections.abc import AsyncIterator, Callable, Collection, Mapping, Sequen
 from contextlib import asynccontextmanager
 from typing import Any, TypeVar
 
-from sqlalchemy import Text, and_, case, delete, false, func, literal, select, tuple_, update
+from sqlalchemy import Text, and_, case, delete, exists, false, func, literal, or_, select, tuple_, update
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DataError, DBAPIError, IntegrityError, InterfaceError, InternalError, OperationalError
@@ -532,24 +532,24 @@ class JobStore:
         """Insert the `pending` upload row of `obj` under the live claim `token`, before its PUT (A-O3): create-once,
         `Conflict` for a second row of the object (the first stays) or a claim not live. Its age is the database's
         clock (the grace sweep's)."""
-        async with self._tx() as s:
-            await _require_live(s, token)
-            made = (await s.execute(
-                pg_insert(UploadRow).values(token=token, object=obj, size=size, sha256=sha256, wrapped_key=wrapped_key,
-                                            status="pending", scrub=scrub, created_at=func.now())
-                .on_conflict_do_nothing().returning(UploadRow.object))).first()
-            if made is None:
-                raise Conflict(f"the object {obj!r} already has an upload row under this claim")
+        await self._insert_upload(token, obj, status="pending", size=size, sha256=sha256, wrapped_key=wrapped_key,
+                                  scrub=scrub)
 
     async def refuse_upload(self, token: str, obj: str, *, scrub: str | None = None) -> None:
         """Make the upload row of `obj` `refused` at once under the live claim `token`, for an object the helper could not
         put at all (no data key could be made): nothing was computed, so it carries no size, digest or key. Create-once
         as `begin_upload`: `Conflict` for a second row of the object or a claim not live."""
+        await self._insert_upload(token, obj, status="refused", size=None, sha256=None, wrapped_key=None, scrub=scrub)
+
+    async def _insert_upload(  # noqa: PLR0913 — the upload row's values
+        self, token: str, obj: str, *, status: str, size: int | None, sha256: str | None, wrapped_key: str | None,
+        scrub: str | None,
+    ) -> None:
         async with self._tx() as s:
             await _require_live(s, token)
             made = (await s.execute(
-                pg_insert(UploadRow).values(token=token, object=obj, size=None, sha256=None, wrapped_key=None,
-                                            status="refused", scrub=scrub, created_at=func.now())
+                pg_insert(UploadRow).values(token=token, object=obj, size=size, sha256=sha256, wrapped_key=wrapped_key,
+                                            status=status, scrub=scrub, created_at=func.now())
                 .on_conflict_do_nothing().returning(UploadRow.object))).first()
             if made is None:
                 raise Conflict(f"the object {obj!r} already has an upload row under this claim")
@@ -583,15 +583,16 @@ class JobStore:
 
     async def run_unusable(self, tenant_id: str, run_id: str) -> bool:
         """Whether the investigation `run_id` of `tenant_id` can never be a drain's input (#1546 PR6, A-O6, D7): no such row
-        (an id of no investigation's form included), its evidence `expired`, or its scrub not `clean`. The complement of
-        the rule `_drain_inputs` fixes a drain's set by. Read-only."""
+        (an id of no investigation's form included), or it ended without a bundle a pull can read (`_pullable_run`, the
+        rule `_drain_inputs` fixes a drain's set by). A run still live is not unusable: it may yet end pullable. Read-only."""
         try:
             run = InvestigationId(run_id)
         except (IdRefused, ValueError):
             return True
         async with self._tx() as s:
             usable = (await s.execute(select(InvestigationRow.id).where(
-                InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == run, _usable_run()))).first()
+                InvestigationRow.tenant_id == tenant_id, InvestigationRow.id == run,
+                or_(InvestigationRow.evidence_state.is_(None), _pullable_run())))).first()
         return usable is None
 
     async def accepted_input(self, tenant_id: str, owner_id: str, obj: str) -> AcceptedObject:
@@ -600,32 +601,27 @@ class JobStore:
         now: its tenant is not active, its evidence is not readable (`none`, `expired`), it is not `clean`, or it has no
         accepted upload of `obj`. Read-only."""
         async with self._tx() as s:
-            column: Any
-            inv = (await s.execute(select(InvestigationRow.tenant_id, InvestigationRow.evidence_state,
-                                          InvestigationRow.scrub).where(InvestigationRow.id == owner_id))).first()
-            if inv is not None:
-                owner_kind, column, (tenant, state, scrub) = ending.INVESTIGATION, ClaimRow.investigation_id, inv
-            else:
-                job = (await s.execute(select(LearningJobRow.tenant_id, LearningJobRow.evidence_state)
-                                       .where(LearningJobRow.id == owner_id))).first()
-                if job is None:
-                    raise NotFound(f"no owner {owner_id!r}")
-                owner_kind, column, (tenant, state), scrub = ending.LEARNING, ClaimRow.learning_job_id, job, "clean"
+            table: Any = InvestigationRow
+            owner = (await s.execute(select(table.tenant_id, _readable_owner(table)).where(table.id == owner_id))).first()
+            owner_kind = ending.INVESTIGATION
+            if owner is None:
+                table, owner_kind = LearningJobRow, ending.LEARNING
+                owner = (await s.execute(select(table.tenant_id, _readable_owner(table))
+                                         .where(table.id == owner_id))).first()
+            if owner is None:
+                raise NotFound(f"no owner {owner_id!r}")
+            tenant, readable = owner
             if str(tenant) != str(tenant_id):
                 raise NotFound(f"no owner {owner_id!r} of this tenant")
             tenant_state = (await s.execute(select(TenantRecord.state).where(TenantRecord.id == tenant))).scalar()
-            if tenant_state != "active" or state not in READABLE_EVIDENCE or scrub != "clean":
+            if tenant_state != "active" or not readable:
                 raise Conflict(f"the owner {owner_id!r} cannot be read now")
-            found = (await s.execute(
-                select(UploadRow.token, UploadRow.size, UploadRow.sha256, UploadRow.wrapped_key)
-                .join(ClaimRow, ClaimRow.token == UploadRow.token)
-                .where(column == owner_id, UploadRow.object == obj, UploadRow.status == "uploaded",
-                       UploadRow.accepted_at.is_not(None)))).first()
-        claim, size, sha256, wrapped = (None, None, None, None) if found is None else found
-        if size is None:
+            found = (await s.execute(_accepted_upload(_OWNER_CLAIM[owner_kind], owner_id, obj,
+                                                      UploadRow.size, UploadRow.sha256, UploadRow.wrapped_key))).first()
+        if found is None:
             raise Conflict(f"the owner {owner_id!r} has no accepted {obj!r}")
-        return AcceptedObject(owner_kind=owner_kind, claim=str(claim), size=int(size), sha256=str(sha256),
-                              wrapped_key=str(wrapped))
+        return AcceptedObject(owner_kind=owner_kind, claim=str(found.token), size=int(found.size),
+                              sha256=str(found.sha256), wrapped_key=str(found.wrapped_key))
 
     # --- cancel -------------------------------------------------------------------------
 
@@ -1471,22 +1467,42 @@ async def _investigation_launch(s: AsyncSession, record: InvestigationRecord) ->
 
 async def _drain_inputs(s: AsyncSession, tenant_id: TenantId) -> list[dict[str, str]]:
     """A drain's input set, fixed in its claim's transaction (#1546 D7, amendment r9 "Drain"): the bundle of each run the
-    tenant's open curation requests name (the lead lane's only run-naming kind) whose investigation is `clean` and not
-    `expired`. A request whose run is outside the set waits for the next drain; one whose run is unusable is dead."""
+    tenant's open curation requests name (the lead lane's only run-naming kind) whose bundle a pull can read
+    (`_pullable_run`). A request whose run is outside the set waits for the next drain; one whose run is unusable is dead."""
     from .learning_models import curation_request_runs  # the learning store's tables load only for a drain's claim
 
     named = curation_request_runs(str(tenant_id))
     owners = (await s.execute(
         select(InvestigationRow.id).where(
-            InvestigationRow.tenant_id == tenant_id, sql_cast(InvestigationRow.id, Text).in_(named), _usable_run())
+            InvestigationRow.tenant_id == tenant_id, sql_cast(InvestigationRow.id, Text).in_(named), _pullable_run())
         .order_by(InvestigationRow.id))).scalars().all()
     return [{"owner": str(owner), "object": ending.BUNDLE} for owner in owners]
 
 
-def _usable_run() -> Any:
-    """An investigation a drain may take as an input (#1546 PR6): `clean` and not `expired` (`run_unusable` is its
-    complement)."""
-    return and_(InvestigationRow.scrub == "clean", InvestigationRow.evidence_state.is_distinct_from("expired"))
+#: The claim column naming each kind of evidence owner.
+_OWNER_CLAIM = {ending.INVESTIGATION: ClaimRow.investigation_id, ending.LEARNING: ClaimRow.learning_job_id}
+
+
+def _readable_owner(table: Any) -> Any:
+    """Whether an owner's accepted objects may be read (A-O6): its evidence readable and, for an investigation, its scrub
+    `clean` (a learning job's objects carry their own verdicts)."""
+    readable = table.evidence_state.in_(READABLE_EVIDENCE)
+    return and_(readable, table.scrub == "clean") if table is InvestigationRow else readable
+
+
+def _accepted_upload(column: Any, owner: Any, obj: str, *columns: Any) -> Any:
+    """The accepted upload of `obj` under any claim of the owner `owner` (the claim column `column` names it): its token
+    and `columns`."""
+    return (select(UploadRow.token, *columns).join(ClaimRow, ClaimRow.token == UploadRow.token)
+            .where(column == owner, UploadRow.object == obj, UploadRow.status == "uploaded",
+                   UploadRow.accepted_at.is_not(None)))
+
+
+def _pullable_run() -> Any:
+    """An investigation whose bundle a pull can read (#1546 PR6, A-O6): the one rule a drain's input set, `run_unusable`
+    and `accepted_input` share. Readable, and an accepted bundle."""
+    return and_(_readable_owner(InvestigationRow),
+                exists(_accepted_upload(ClaimRow.investigation_id, InvestigationRow.id, ending.BUNDLE)))
 
 
 async def _live_claim(s: AsyncSession, token: str) -> ClaimRow | None:

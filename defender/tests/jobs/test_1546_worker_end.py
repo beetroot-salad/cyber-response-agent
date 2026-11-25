@@ -42,7 +42,8 @@ from defender.tests.support.jobs._evidence_flows1546 import (
     stage_upload,
 )
 from defender.tests.support.jobs._ending1546 import plant_claim, plant_complete_source, plant_uploads, queue_learning_job
-from defender.tests.support.jobs._jobs1342 import MALICIOUS_REPORT, T1, T2, job_end, job_store, lapse_lease, row
+from defender.tests.support.jobs._jobs1342 import (
+    MALICIOUS_REPORT, T1, T2, FaultableStore, job_end, job_store, lapse_lease, row)
 from defender.tests.support.jobs._worker1342 import _child, _FAST, _queued, _until, _worker
 from defender.tests.support.jobs import _worker1342 as _shared
 from defender.tests.support.shared._postgres1339 import execute
@@ -159,6 +160,34 @@ async def test_a_takeover_by_a_serving_worker_does_not_rerun_a_tainted_run_but_r
     assert len(attempts_of(dsn, tainted)) == 1, "a tainted run was rerun"
 
 
+@pytest.mark.parametrize("fails", [1, 1000])
+async def test_a_worker_fault_after_the_child_ran_leaves_its_end_to_its_staged_rows(world, fails):
+    """Once its child has run, a fault of the worker's (no outage) is no verdict on the job: the row still ends from what
+    its helper staged and uploaded (its outcome, its cost, its evidence), at once when the staged rows can be read again,
+    else by the take-over the hand-back leaves it to. Never `worker_error` with an exact $0 and evidence `none`.
+    (#1625 review: such a fault recorded a job that ran as never launched)"""
+    dsn = world["dsn"]
+    staging = _staging(world, _child(world, files={}), outcome=inv_outcome())
+    async with job_store(dsn) as inner:
+        inv = await _queued(inner)
+        store = FaultableStore(inner)
+        store.staged_fails = fails
+        await _worker(world, store, staging).drain()
+        staging.assert_ran()
+        if fails > 1:
+            assert row(dsn, inv)["stage"] == "running", "a job that ran was ended by the worker's own fault"
+            lapse_lease(dsn, inv)
+            assert await inner.take_over() == [inv]
+    stored = row(dsn, inv)
+    assert (stored["stage"], stored["failure_reason"]) == ("completed", None), stored
+    assert owner(dsn, "investigations", inv, "evidence_state") == ("complete",)
+    if fails == 1:
+        assert stored["cost_usd"] == pytest.approx(0.42), "decided at once, from its outcome's cost"
+    else:  # the take-over's cost rule (D15: the last staged progress, none here): unknown, never an exact $0
+        assert execute(dsn, "SELECT cost_usd, cost_is_lower_limit FROM jobs.investigations WHERE id = %s",
+                       (inv,)) == [(None, False)], stored
+
+
 async def test_a_staged_outcome_wins_over_every_file_the_job_leaves(world):
     """The job leaves a contradicting job-end record, a malicious report and a knowledge record in the runs folder: the row
     follows the staged rows. (A-O2, PR4)"""
@@ -233,13 +262,16 @@ async def _queued_learning(world, store, ticket: str = "J-1") -> tuple[str, str]
     return await queue_learning_job(dsn, T1, alert.alert_id, source), source
 
 
-async def _learning(world, outcome, *, objects=None, **child):
-    """One complete source and its queued job (planted rows, as a #1546 complete end leaves them); the worker runs it."""
+async def _learning(world, outcome, *, objects=None, staged_fails=0, **child):
+    """One complete source and its queued job (planted rows, as a #1546 complete end leaves them); the worker runs it,
+    its first `staged_fails` reads of the claim's staged rows faulted."""
     dsn = world["dsn"]
-    async with job_store(dsn) as store:
-        job, source = await _queued_learning(world, store)
+    async with job_store(dsn) as inner:
+        store = FaultableStore(inner)
+        store.staged_fails = staged_fails
+        job, source = await _queued_learning(world, inner)
         staging = Staging(dsn, world["root"], "learning", lambda launch: launch.job_id, job_child(world, **child),
-                          staged={"started": STARTED, "outcome": outcome},
+                          staged={"started": STARTED, "outcome": outcome, "page": staged_page("rendered")},
                           objects={EPISODE_PAGE: PAGE, "bundle": BUNDLE} if objects is None else objects,
                           folders=True)
         await learning_worker(world, store, job=staging, post=post_child(world)).drain()
@@ -260,6 +292,15 @@ async def test_a_learning_job_ends_from_its_staged_outcome_and_its_claim_names_t
     assert accepted(world["dsn"], staging.token) == sorted([EPISODE_PAGE, "bundle"])
     for base in (ROOTS, INPUTS, SPOOL):
         assert not (world["root"] / base / staging.token).exists()
+
+
+async def test_a_worker_fault_after_a_learning_child_ran_still_ends_it_from_its_staged_outcome(world):
+    """A fault of the worker's once the child has run is no verdict on the job: it ends from its staged outcome, not
+    `worker_error` as never launched. (#1625 review)"""
+    job, _source, _staging = await _learning(world, learning_outcome(), staged_fails=1)
+    stored = job_row(world["dsn"], job)
+    assert (stored["status"], stored["publish_state"]) == ("completed", "done"), stored
+    assert owner(world["dsn"], "learning_jobs", job, "evidence_state")[0] == "complete"
 
 
 async def test_findings_the_helper_refused_read_publish_state_refused_and_the_ending_stands(world):

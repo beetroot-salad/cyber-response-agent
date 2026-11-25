@@ -21,22 +21,21 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from defender.evidence import BlobStore, BlobStoreError, object_key
+from defender.evidence import BlobStore, BlobStoreError, object_key, tenant_prefix
+from defender.jobs.models import READABLE_EVIDENCE
 from defender.lifecycle._job import StepFailed
 
 _logger = logging.getLogger(__name__)
 
 #: An unpromoted upload's grace, by the database's clock (PR7): within it the claim's helper may still be finishing.
 GRACE = "1 hour"
-#: The store prefix of a tenant (`t/<tenant>/<owner kind>/<owner id>/<claim token>/<object>`).
-_TENANT_PREFIX = "t/{tenant}/"
-#: The two kinds of owner, each with its table, the claim column naming it, its live stages and its retention column.
+#: The two kinds of owner, each with its table, the claim column naming it and its retention column.
 _OWNERS = {
-    "investigation": ("jobs.investigations", "investigation_id", "stage IN ('queued', 'running')", "investigation_days"),
-    "learning": ("jobs.learning_jobs", "learning_job_id", "status IN ('queued', 'running')", "learning_days"),
+    "investigation": ("jobs.investigations", "investigation_id", "investigation_days"),
+    "learning": ("jobs.learning_jobs", "learning_job_id", "learning_days"),
 }
 #: The states that had accepted objects and so read `expired` once the sweep removes them.
-_HELD = "('complete', 'partial', 'lost')"
+_HELD = "(" + ", ".join(f"'{state}'" for state in READABLE_EVIDENCE) + ")"
 #: Whether a claim's reference is still live: no write to it may be pending, whatever its age.
 _CLAIM_LIVE = """(
     EXISTS (SELECT 1 FROM jobs.investigations i WHERE i.id = c.investigation_id AND i.stage IN ('queued', 'running'))
@@ -61,7 +60,7 @@ async def purge_tenant(sessions: Sessions, blob: BlobStore, tenant: str) -> None
     nulled (the claims themselves stay: an owner's reference to the work is its own record). Idempotent: run again it
     removes what arrived since. A store that cannot be reached fails it with the store's words and deletes no row."""
     try:
-        await asyncio.to_thread(blob.delete_prefix, _TENANT_PREFIX.format(tenant=tenant))
+        await asyncio.to_thread(blob.delete_prefix, tenant_prefix(tenant))
     except BlobStoreError as failed:
         raise StepFailed(f"the evidence store could not be emptied: {failed}") from failed
     async with sessions() as session, session.begin():
@@ -94,7 +93,7 @@ async def _expire(sessions: Sessions, blob: BlobStore) -> None:
 async def _expired_candidates(sessions: Sessions, kind: str) -> list[str]:
     """The owners of `kind` with an object accepted longer ago than their tenant's value for the kind. A tenant with no
     retention row expires nothing (an offboarded tenant from before the setting, D16)."""
-    table, column, _live, days = _OWNERS[kind]
+    table, column, days = _OWNERS[kind]
     async with sessions() as session:
         found = await session.execute(text(
             f"SELECT o.id FROM {table} o JOIN tenancy.evidence_retention r ON r.tenant_id = o.tenant_id "  # noqa: S608
@@ -108,11 +107,11 @@ async def _expire_owner(sessions: Sessions, kind: str, owner: str) -> list[str]:
     """One owner expired, its object rows gone, in one transaction under `FOR UPDATE` on the owner: a learning job's insert
     holds `FOR SHARE` on its source, so the pass either waits for it and sees its job, or the insert waits for this and is
     refused once the source reads `expired` (A-O7). The keys of the removed objects, for the store."""
-    table, column, _live, _days = _OWNERS[kind]
+    table, column, _days = _OWNERS[kind]
     async with sessions() as session, session.begin():
         row = (await session.execute(text(f"SELECT tenant_id, evidence_state FROM {table} WHERE id = CAST(:id AS uuid) "  # noqa: S608
                                           "FOR UPDATE"), {"id": owner})).first()
-        if row is None or row.evidence_state not in ("complete", "partial", "lost"):
+        if row is None or row.evidence_state not in READABLE_EVIDENCE:
             return []
         if kind == "investigation" and (await session.execute(text(
                 "SELECT 1 FROM jobs.learning_jobs WHERE investigation_id = CAST(:id AS uuid) "
@@ -153,7 +152,7 @@ async def _drop_orphans(sessions: Sessions, blob: BlobStore) -> None:
         tenants = [str(row[0]) for row in await session.execute(text(
             "SELECT id FROM tenancy.tenants WHERE state <> 'offboarded' ORDER BY id"))]
     for tenant in tenants:
-        prefix = _TENANT_PREFIX.format(tenant=tenant)
+        prefix = tenant_prefix(tenant)
         listed = await asyncio.to_thread(blob.keys, prefix)
         if not listed:
             continue

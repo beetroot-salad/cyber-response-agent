@@ -176,22 +176,23 @@ class BlobStore:
         reply = self._send("GET", key, headers=_sse_headers(data_key))
         return self._check(reply, f"get {key}").content
 
-    def download(self, key: str, dest: Path, *, data_key: bytes) -> int:
-        """Write the object to the new file `dest` (never overwriting: `FileExistsError`); its size. A partial file is
-        removed when the transfer fails."""
+    def download(self, key: str, dest: Path, *, data_key: bytes) -> tuple[int, str]:
+        """Write the object to the new file `dest` (never overwriting: `FileExistsError`); its size and sha256, hashed
+        as it streams. A partial file is removed when the transfer fails."""
         reply = self._send("GET", key, headers=_sse_headers(data_key), stream=True)
         try:
             self._check(reply, f"get {key}")
-            size = 0
+            size, digest = 0, hashlib.sha256()
             try:
                 with dest.open("xb") as out:
                     for chunk in reply.iter_bytes(_CHUNK):
                         out.write(chunk)
+                        digest.update(chunk)
                         size += len(chunk)
             except httpx.HTTPError as down:
                 dest.unlink(missing_ok=True)
                 raise BlobStoreError(f"get {key} failed while reading: {type(down).__name__}") from down
-            return size
+            return size, digest.hexdigest()
         finally:
             reply.close()
 

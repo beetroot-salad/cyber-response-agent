@@ -88,6 +88,10 @@ def _readiness_refused(session: Session, facts: LaunchFacts, refused: StepRefuse
         raise HelperFault(f"its {refused.step} check refused: {refused}") from None
     if facts.source is not None:
         _write_knowledge(session, facts.source)
+    else:  # the publish gave no source: the check judged no revision, and its result says so (#1625: null, not absent)
+        from . import _evidence
+
+        _evidence.state(session).stage("knowledge", None)
     _host_request.write_once(session, _LANE, job_lane.ReadinessRecord.refused(refused.step, _readiness_sentence(refused)))
 
 

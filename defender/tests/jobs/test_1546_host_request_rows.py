@@ -36,7 +36,7 @@ from defender.tests.support.jobs._host_requests1471 import (
     host_worker,
     lapse,
 )
-from defender.tests.support.jobs._jobs1342 import T1, T2, job_store
+from defender.tests.support.jobs._jobs1342 import T1, T2, FaultableStore, job_store
 from defender.tests.support.shared._postgres1339 import execute
 
 pytestmark = [pytest.mark.anyio, pytest.mark.postgres]
@@ -65,12 +65,14 @@ def _worker_for(world, store, staging: Staging, kind: str):
 
 
 async def _run(world, kind: str, *, staged: dict, files: dict | None = None, exit: int = 0, folders: bool = False,  # noqa: A002
-               **kw):
+               staged_fails: int = 0, **kw):
     child = host_child(world, files=DECOYS[kind] if files is None else files, exit=exit)
     staging = Staging(world["dsn"], world["root"], kind, lambda launch: launch.request_id, child, staged=staged,
                       folders=folders, **kw)
-    async with job_store(world["dsn"]) as store:
-        rec = await _queue(store, kind)
+    async with job_store(world["dsn"]) as inner:
+        store = FaultableStore(inner)
+        store.staged_fails = staged_fails
+        rec = await _queue(inner, kind)
         await _worker_for(world, store, staging, kind).drain()
     return rec.request_id, host_row(world["dsn"], rec.request_id), staging
 
@@ -104,6 +106,27 @@ async def test_a_drain_request_finishes_from_its_staged_result_and_is_never_retr
     assert claim_row(world["dsn"], staging.token)["host_request_id"] == rid
     async with job_store(world["dsn"]) as store:
         assert await store.claim_host_request() is None
+
+
+async def test_a_readiness_refused_before_its_publish_is_stored_in_the_shape_the_api_reads(world):
+    """A check refused at or before the publish stages its refusal and a null `knowledge` (the helper's, #1625): the row
+    completes with a result the API's `ReadinessRefused` reads, its knowledge null. (R13-1.2; #1625 review: the stored
+    result had no `knowledge`, so its GET failed validation)"""
+    from defender.api.models import ReadinessRefused
+
+    refusal = {"outcome": "refused", "step": "tenant", "sentence": "this job's tenant cannot be used"}
+    _, stored, staging = await _run(world, "readiness", staged={"result": refusal, "knowledge": None})
+    staging.assert_ran()
+    assert stored["stage"] == "completed", stored
+    assert ReadinessRefused.model_validate(stored["result"]).knowledge is None, stored["result"]
+
+
+async def test_a_worker_fault_after_a_host_request_ran_still_finishes_it_from_its_staged_result(world):
+    """A fault of the worker's once the request's child has run is no verdict on it: the row completes from its staged
+    result, not `worker_error` as never launched. (#1625 review)"""
+    _, stored, staging = await _run(world, "adoption", staged={"result": RESULTS["adoption"]}, staged_fails=1)
+    staging.assert_ran()
+    assert (stored["stage"], stored["result"]) == ("completed", {"outcome": "opened", "pr_number": 7}), stored
 
 
 @pytest.mark.parametrize("kind", KINDS)

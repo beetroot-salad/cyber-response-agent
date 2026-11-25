@@ -285,7 +285,7 @@ async def test_a_handed_back_decided_learning_job_has_no_state_until_its_take_ov
     register_tenant(dsn, T1)
     async with job_store(dsn) as store:
         job, token, _ = await _running_job(store, dsn)
-        plant_facts(dsn, token, {"started": STARTED, "arms": roster(),
+        plant_facts(dsn, token, {"started": STARTED, "arms": roster(), "page": {"page": "rendered"},
                                  "outcome": learning_outcome(findings=findings_screened(F.defender_row(job, 0)))})
         plant_uploads(dsn, token, {BUNDLE: up()})
         hand = await end_row(store, dsn, kind="learning", tenant=T1, owner=job, token=token, by="stopped")

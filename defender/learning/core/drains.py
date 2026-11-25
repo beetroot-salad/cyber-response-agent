@@ -378,7 +378,7 @@ def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim
     curation committed); an item that is not named waits again when the batch enters review (P3); a request whose
     run is gone is dead. A drain request's tick (#1546 D7) resolves runs from its own root only (`runs`: the runs its
     helper pulled, its claim's input set): a run absent there is dead when its owner can never be pulled (`unusable`:
-    expired or not `clean`, PR6), and otherwise waits for the next drain (its request came after the set was fixed)."""
+    it ended with no bundle a pull can read, PR6), and otherwise waits for the next drain (its request came after the set was fixed)."""
     from defender.learning.author.version_control import DeliveryRefused
     from defender.learning_store import Outcome
     from defender.records import RunAbsent
@@ -424,7 +424,7 @@ def _store_lead_work(  # noqa: PLR0913, C901 — the lane's two steps, its claim
 
 
 def _owner_unusable(payload: dict, unusable: Callable[[str, str], bool] | None) -> bool:
-    """Whether the run a request names can never be pulled (#1546 PR6: its owner expired, or its scrub is not `clean`),
+    """Whether the run a request names can never be pulled (#1546 PR6: its owner ended with no bundle a pull can read),
     by `unusable(tenant_id, run_id)`, else by the owner's row (`owner_unusable`). A state that cannot be read leaves the
     request waiting for the next drain: a dead request is never served again, a waiting one only costs a retry."""
     try:
@@ -437,7 +437,7 @@ def _owner_unusable(payload: dict, unusable: Callable[[str, str], bool] | None) 
 
 def owner_unusable(tenant_id: str, run_id: str) -> bool:
     """Whether the investigation `run_id` of `tenant_id` can never be an input (#1546 PR6, A-O6): the job store's
-    `run_unusable` (no row, its evidence `expired`, or its scrub not `clean`), over the jobs database at
+    `run_unusable` (no row, or it ended with no bundle a pull can read), over the jobs database at
     `DEFENDER_DATABASE_DSN` (a host's tick). A job container has no database address: its drain asks its helper
     (`unusable=`, the `owner.unusable` request)."""
     import asyncio

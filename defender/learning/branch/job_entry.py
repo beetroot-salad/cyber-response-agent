@@ -471,7 +471,8 @@ def _push_episode(ask: Callable[..., dict[str, Any]], data_root: Path, ns: argpa
     tenant_root = data_root / ns.tenant
     page = tenant_root / "episodes" / ns.job / "learning.html"  # lint-run-records: ok — the episode's own page
     try:
-        if page.is_file():
+        if page.is_file():  # the page fact owes it (PR8); a page that did not render owes nothing (D14)
+            ask("page", record={"page": "rendered"})
             job_socket.push_object(ask, EPISODE_PAGE, page)
     except (job_socket.Refused, OSError, ValueError) as unsent:
         _logger.error(f"job {ns.job}: the episode page was not pushed ({unsent!r})")

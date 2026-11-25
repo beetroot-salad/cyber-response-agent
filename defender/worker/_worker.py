@@ -866,6 +866,19 @@ class Worker:
             elif isinstance(body, Mapping) and _is_cost(body.get("cost_usd")):
                 held.cost_so_far = float(body["cost_usd"])
 
+    async def _redecided(self, held: Held) -> ending.Decision | None:
+        """After a fault of the worker's once the child was launched (#1625): the fault is no verdict on the job, so the
+        end is the one its staged rows decide, when its child has exited and they can be read; else None, and a kind
+        that can be handed back is, for its take-over to decide from the same rows."""
+        proc = held.proc
+        if proc is None or proc.returncode is None:
+            return None
+        try:
+            return await self._decided(held, proc.returncode)
+        except Exception:  # noqa: BLE001 — the hand-back (or a host request's worker_error) follows
+            _logger.exception("%s: its staged rows could not be read after the fault", _what(held))
+            return None
+
     async def _decided(self, held: Held, returncode: int) -> ending.Decision:
         """The row's ending once its child is gone (#1546 PR9): decided from what the claim's helper staged and uploaded,
         and what ended the child. Nothing the job wrote is read (A-O2)."""
@@ -900,6 +913,8 @@ class Worker:
                 # decides it from its staged rows (D8, D15).
                 return ending.HandBack(ending.INVESTIGATION, cost_usd=(
                     0.0 if held.proc is None and held.cost_so_far is None else held.cost_so_far))
+            if held.proc is not None:
+                return await self._redecided(held) or ending.HandBack(ending.INVESTIGATION, cost_usd=held.cost_so_far)
             return _not_launched(INVESTIGATION, "the worker failed while running the job")
 
     async def _run_claimed(self, held: Held, tenant_state: str) -> ending.Decision:
@@ -1113,7 +1128,9 @@ class Worker:
             _logger.exception("%s: the worker failed while running it", _what(held))
             if self._stopping or held.signalled:
                 return _host_stopped()
-            return _not_launched(HOST_REQUEST, "the worker failed while running the request")
+            # A host request is never handed back (B2): when its staged rows cannot decide it, `worker_error` stands.
+            decided = await self._redecided(held) if held.proc is not None else None
+            return decided or _not_launched(HOST_REQUEST, "the worker failed while running the request")
 
     async def _run_host(self, held: Held) -> ending.Decision:
         record = held.record
@@ -1186,6 +1203,9 @@ class Worker:
             started = held.proc is not None
             if is_outage(fault) or held.signalled:  # a stop can never permanently fail or skip a job: handed back
                 return ending.HandBack(ending.LEARNING, **_progress_kw(held.progress)), started
+            if started:
+                return (await self._redecided(held) or ending.HandBack(ending.LEARNING, **_progress_kw(held.progress)),
+                        started)
             return _not_launched(LEARNING, "the worker failed while running the job"), started
 
     async def _run_family(self, held: Held, tenant_state: str) -> tuple[ending.Decision, bool]:

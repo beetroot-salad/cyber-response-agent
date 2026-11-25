@@ -6,6 +6,8 @@ compare against, not record names.
 
 from __future__ import annotations
 
+import re
+
 SETUP_REFUSED, SETUP_CRASHED, SETUP_DONE = "refused", "crashed", "done"
 BOX_NOT_STARTED, BOX_START_FAILED, BOX_STARTED = "not_started", "start_failed", "started"
 
@@ -40,3 +42,31 @@ _ARM_PAGE = "page/runs/{}/runtime.html"  # lint-run-records: ok — an arm page'
 def arm_page(run_id: str) -> str:
     """The evidence object name of the page of the arm `run_id` (PR8)."""
     return _ARM_PAGE.format(run_id)
+
+
+_ARM_PAGE_NAME = re.compile(re.escape(_ARM_PAGE).replace(r"\{\}", "([0-9a-f-]{36})"))
+
+
+def arm_page_run(name: str) -> str | None:
+    """The arm run id `name` is the page of, when it is an `arm_page` name; else None."""
+    found = _ARM_PAGE_NAME.fullmatch(name)
+    return found.group(1) if found else None
+
+
+def _rendered(fact: object) -> bool:
+    return isinstance(fact, dict) and fact.get("page") == "rendered"
+
+
+def owed_objects(kind: str, facts: dict[str, object]) -> dict[str, str | None]:
+    """The objects the staged `facts` of a `kind` job owe (PR8), each with the scrub its upload row carries (None: the
+    owner's own): the bundle; the page (`RUN_PAGE` for an investigation, `EPISODE_PAGE` for a learning job) when the
+    `page` fact says rendered; a learning job's arm page for each `arm/<id>` fact that says rendered. A render failure
+    owes no page (D14). The one rule the helper accepts pushes by and the ending judges evidence by."""
+    owed: dict[str, str | None] = {BUNDLE: None}
+    if _rendered(facts.get("page")):
+        owed[EPISODE_PAGE if kind == "learning" else RUN_PAGE] = None
+    if kind == "learning":
+        for name, body in facts.items():
+            if name.startswith("arm/") and isinstance(body, dict) and _rendered(body):
+                owed[arm_page(name[len("arm/"):])] = str(body.get("scrub"))
+    return owed

@@ -577,6 +577,31 @@ def test_an_investigation_page_is_accepted_only_with_its_page_fact_rendered(scen
         assert isinstance(got["page"], __import__("defender.job_host", fromlist=["Refused"]).Refused)
 
 
+@pytest.mark.parametrize("page_state", [None, "rendered", "render_failed", "none"])
+def test_a_learning_jobs_episode_page_is_accepted_only_with_its_page_fact_rendered(scene, evidence_store, page_state):
+    """Like the run page and an arm's: with its outcome staged, the episode page still needs a `page` fact with
+    `page = rendered`; absent, `render_failed` or `none` refuse the put and leave no row. The bundle is the control.
+    (PR8, D14; #1625: one rule for every page)"""
+    planted = plant(scene, "learning")
+    got: dict = {}
+
+    def job(c) -> int:
+        send(c, "outcome", record=learning_outcome())
+        if page_state is not None:
+            send(c, "page", record=sent_page(page_state))
+        got["page"] = send(c, "evidence.put", object=EPISODE_PAGE, part=0, last=True, data=PAGE)
+        put_object(c, "bundle", BUNDLE)
+        return 0
+
+    drive(scene, planted, job, **evidence_store.seams)
+    assert _stored(scene, "bundle") == "uploaded", "control"
+    if page_state == "rendered":
+        assert _stored(scene, EPISODE_PAGE) == "uploaded"
+    else:
+        assert _stored(scene, EPISODE_PAGE) is None
+        assert isinstance(got["page"], __import__("defender.job_host", fromlist=["Refused"]).Refused)
+
+
 @pytest.mark.parametrize("arm_state", [None, "rendered", "render_failed", "none"])
 def test_an_arm_page_is_accepted_only_with_its_arm_fact_rendered(scene, evidence_store, arm_state):
     """A learning job's arm page needs its `arm/<id>` fact with `page = rendered`; with no fact, or another page state, the put
@@ -590,6 +615,7 @@ def test_an_arm_page_is_accepted_only_with_its_arm_fact_rendered(scene, evidence
             send(c, "arm", run_id=arm, record=sent_arm("clean", arm_state))
         send(c, "evidence.put", object=arm_page(arm), part=0, last=True, data=PAGE)
         send(c, "outcome", record=learning_outcome())
+        send(c, "page", record=sent_page())
         put_object(c, EPISODE_PAGE, PAGE)
         return 0
 
@@ -604,6 +630,7 @@ def test_the_episode_page_needs_the_learning_outcome(scene, evidence_store):
     got: dict = {}
 
     def job(c) -> int:
+        send(c, "page", record=sent_page())  # #1625: the page is owed by its fact, so only the outcome is missing
         got["page"] = c.refused("evidence.put", object=EPISODE_PAGE, part=0, last=True, data=PAGE)
         got["bundle"] = c.refused("evidence.put", object="bundle", part=0, last=True, data=BUNDLE)
         return 0
@@ -656,7 +683,9 @@ def test_a_write_after_the_references_end_is_refused_and_one_before_it_was_not_l
     def job(c) -> int:
         send(c, "progress", record=early)
         send(c, "outcome", record=SMALL_OUTCOME[kind])
-        send(c, "arms", record=sent_arms((arm, world))) if kind == "learning" else send(c, "page", record=sent_page())
+        if kind == "learning":
+            send(c, "arms", record=sent_arms((arm, world)))
+        send(c, "page", record=sent_page())
         put_object(c, "bundle", BUNDLE)
         seen["before"] = facts(scene.dsn, scene.claim)
         if not ender.startswith("none"):

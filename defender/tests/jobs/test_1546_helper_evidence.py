@@ -128,6 +128,7 @@ def test_an_arm_pages_stored_bytes_are_the_ones_the_job_pushed_not_the_arm_folde
         c.request("arm", run_id=arm, record=sent_arm("tainted"))
         put_object(c, H.arm_page(arm), PAGE)
         c.request("outcome", record=learning_outcome())
+        c.request("page", record=sent_page())
         put_object(c, EPISODE_PAGE, b"episode page")
         return 0
 

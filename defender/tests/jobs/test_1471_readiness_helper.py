@@ -177,6 +177,14 @@ def test_p1_each_tenant_level_step_refuses_a_readiness_with_the_sentence_an_inve
             assert (known["status"], known["commit"]) == ("current", scene.t.commit), known  # staged served shape (#1546)
         else:
             assert ran.knowledge is None, f"no source was settled, so no knowledge record: {ran.knowledge!r}"
+        # #1625: what the ending stores from the staged rows is the shape the API reads back, its knowledge the staged
+        # record or null (a refusal at or before the publish judged no revision), never absent.
+        from defender.api.models import ReadinessRefused
+        from defender.jobs import ending
+
+        stored = ending.decide(ran.staged(), {}, ending.Exited(0), kind=ending.HOST_REQUEST).result
+        assert ReadinessRefused.model_validate(stored).knowledge is None or fault.step in AFTER_PUBLISH, stored
+        assert stored["knowledge"] == ran.knowledge, stored
         assert listed_runs(scene) == [], "the runs listing refuses the readiness records the helper wrote"
 
 

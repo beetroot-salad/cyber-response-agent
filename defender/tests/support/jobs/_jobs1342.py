@@ -842,7 +842,8 @@ class FaultyContainers(StandInContainers):
 class FaultableStore:
     """The real store, except for faults the test switches on: `renew_down` makes every renewal raise
     a connection error, `finish_fails` makes that many end writes (`apply`, #1546) raise one (counted in
-    `finish_tries`). Counts renewals that raised (`renews_failed`) and that answered (`renews_ok`).
+    `finish_tries`), `staged_fails` makes that many reads of a claim's staged rows raise a fault that is no outage (a bug
+    of the worker's, not the database's). Counts renewals that raised (`renews_failed`) and that answered (`renews_ok`).
     Notes the held ids each renewal that succeeded left out (`omitted`, and
     `omitted_event` for a thread that waits for the worker to see a fence)."""
 
@@ -853,6 +854,7 @@ class FaultableStore:
         self.renew_down = False
         self.finish_fails = 0
         self.finish_tries = 0
+        self.staged_fails = 0
         self.renews_failed = 0
         self.renews_ok = 0
         self.omitted: set[str] = set()
@@ -872,6 +874,12 @@ class FaultableStore:
             self.omitted |= left_out
             self.omitted_event.set()
         return covered
+
+    async def staged(self, *args: Any, **kw: Any) -> Any:
+        if self.staged_fails > 0:
+            self.staged_fails -= 1
+            raise RuntimeError("the staged rows could not be read")
+        return await self._store.staged(*args, **kw)
 
     async def apply(self, *args: Any, **kw: Any) -> Any:
         """#1546 PR9: `apply` is the end write (the only writer of terminal columns), so `finish_fails` faults it."""

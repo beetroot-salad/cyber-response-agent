@@ -358,6 +358,4 @@ def unpack(source: Path, into: Path, *, max_unpacked: int = MAX_UNPACKED_BYTES) 
         with tarfile.open(source, mode="r|gz") as tar:
             _extract(tar, into, budget)
     except (tarfile.TarError, EOFError, OSError, ValueError) as e:
-        if isinstance(e, BundleRefused):
-            raise
         raise BundleRefused(f"the bundle could not be read: {e}") from e

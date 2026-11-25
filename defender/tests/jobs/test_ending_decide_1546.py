@@ -150,26 +150,30 @@ LEARNING_ENDED_BY = tuple(b for b in ENDED_BY if b != "cancelled")  # a learning
 def learning_cases():
     yield from itertools.product(
             LEARNING_ENDED_BY, (True, False), LEARN_CLASSES, (UP, PENDING, None), (UP, REFUSED, None),
-            ("rendered", "render_failed", None), (UP, PENDING, None))
+            ("rendered", "render_failed", None), (UP, PENDING, None), ("rendered", "render_failed", None))
 
 
 @pytest.mark.parametrize("by", LEARNING_ENDED_BY)
-def test_the_learning_evidence_state_follows_the_rules_with_a_page_owed_per_rendered_arm(by):
-    """The learning job's must-push set is its bundle, episode page and the page of each `arm/<id>` fact that
-    rendered; the same rules and promotion apply. (PR8, PR9, A-O4)"""
+def test_the_learning_evidence_state_follows_the_rules_with_a_page_owed_per_rendered_page_fact(by):
+    """The learning job's must-push set is its bundle, its episode page when its `page` fact says rendered, and the
+    page of each `arm/<id>` fact that rendered; the same rules and promotion apply. A render failure owes no page.
+    (PR8, PR9, A-O4, D14; #1625: the episode page follows the same rule as every other page)"""
     seen = 0
-    for by_, started, oc, bundle, episode, arm_fact, arm_up in learning_cases():
+    for by_, started, oc, bundle, episode, arm_fact, arm_up, episode_fact in learning_cases():
         facts: dict[str, Any] = {"arms": {"roster": [{"run_id": ARM}]}, **LEARN_CLASSES[oc][0]}
         if started:
             facts["started"] = STARTED
+        if episode_fact:
+            facts["page"] = {"page": episode_fact}
         if arm_fact:
             facts[f"arm/{ARM}"] = {"scrub": "clean", "page": arm_fact}
         uploads = {n: up(s) for n, s in ((BUNDLE, bundle), (EPISODE_PAGE, episode), (arm_page(ARM), arm_up)) if s}
-        if by_ != by or not reachable(by, started, oc, uploads, arm_fact):
+        if by_ != by or not reachable(by, started, oc, uploads, arm_fact or episode_fact):
             continue
         if by in BEFORE_THE_RUN:
             facts = {}
-        owed = [BUNDLE, EPISODE_PAGE] + ([arm_page(ARM)] if arm_fact == "rendered" else [])
+        owed = [BUNDLE] + ([EPISODE_PAGE] if episode_fact == "rendered" else []) + (
+            [arm_page(ARM)] if arm_fact == "rendered" else [])
         _, decided, completed = LEARN_CLASSES[oc]
         got = decide("learning", facts, uploads, by)
         _check_end(got, by, started, decided, completed, uploads, owed,
